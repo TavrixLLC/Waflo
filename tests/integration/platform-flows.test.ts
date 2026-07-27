@@ -66,6 +66,9 @@ function latestToken(kind: string, to: string): string {
   if (!message?.actionUrl) throw new Error(`No ${kind} action URL captured for ${to}.`);
   const url = new URL(message.actionUrl);
   const token =
+    (url.hash.startsWith("#token=")
+      ? decodeURIComponent(url.hash.slice("#token=".length))
+      : null) ??
     url.searchParams.get("token") ??
     decodeURIComponent(url.pathname.split("/").filter(Boolean).at(-1) ?? "");
   if (!token) throw new Error(`No token found in ${kind} action URL.`);

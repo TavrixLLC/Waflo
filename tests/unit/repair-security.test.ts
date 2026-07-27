@@ -89,8 +89,19 @@ describe("repair-round security boundaries", () => {
     expect(html).toContain("&lt;img");
     expect(html).not.toContain("javascript:");
     expect(safeNotificationActionUrl("https://attacker.example/steal", [origin])).toBeNull();
+    // Fragment-based token URL must be accepted.
     expect(
-      safeNotificationActionUrl("https://app.waflo.app/en/invite?token=safe", [origin]),
+      safeNotificationActionUrl(`https://app.waflo.app/en/invite#token=safe-token`, [origin]),
+    ).toContain("https://app.waflo.app/");
+    // Off-origin URL must be rejected regardless of token position.
+    expect(safeNotificationActionUrl("https://attacker.example/steal", [origin])).toBeNull();
+    expect(
+      safeNotificationActionUrl("https://attacker.example/invite#token=stolen", [origin]),
+    ).toBeNull();
+    // Same-origin URL with legacy query-token is still accepted by the URL validator
+    // (origin check only) — the production code never emits ?token= links.
+    expect(
+      safeNotificationActionUrl("https://app.waflo.app/en/verify-email?token=safe", [origin]),
     ).toContain("https://app.waflo.app/");
   });
 

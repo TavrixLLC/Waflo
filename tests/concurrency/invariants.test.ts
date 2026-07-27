@@ -153,7 +153,11 @@ describe.sequential("Waflo W1 database concurrency invariants", () => {
     const invitationUrl = messages
       .filter((message) => message.kind === "team_invitation" && message.to === invitee.email)
       .at(-1)?.actionUrl;
-    const token = invitationUrl ? new URL(invitationUrl).searchParams.get("token") : null;
+    const token = invitationUrl
+      ? new URL(invitationUrl).hash.startsWith("#token=")
+        ? decodeURIComponent(new URL(invitationUrl).hash.slice("#token=".length))
+        : new URL(invitationUrl).searchParams.get("token")
+      : null;
     expect(token).toBeTruthy();
     const results = await Promise.allSettled([
       team.accept(inviteeId, token ?? "", request),

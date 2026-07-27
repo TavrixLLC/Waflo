@@ -123,7 +123,7 @@ export class AuthService {
         });
       },
     );
-    const url = `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/verify-email?token=${encodeURIComponent(rawToken)}`;
+    const url = `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/verify-email#token=${encodeURIComponent(rawToken)}`;
     await this.notifications.send({
       to: email,
       locale,
@@ -326,7 +326,7 @@ export class AuthService {
         to: user.email,
         locale: localeFromDb(user.preferredLocale),
         kind: "password_reset",
-        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password?token=${encodeURIComponent(rawToken)}`,
+        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
       });
       await this.audit.record(
         {

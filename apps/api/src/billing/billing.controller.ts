@@ -30,9 +30,10 @@ export class BillingController {
   checkout(
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: WafloRequest,
   ) {
-    return this.billing.checkout(user.id, parseUuid(organizationId), request);
+    return this.billing.checkout(user.id, parseUuid(organizationId), request, idempotencyKey ?? "");
   }
 
   @Post("portal")

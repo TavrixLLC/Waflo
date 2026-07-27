@@ -20,18 +20,36 @@ export function InviteClient({ locale }: { locale: Locale }) {
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const capturedToken = url.searchParams.get("token") ?? "";
-    url.searchParams.delete("token");
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-    setToken(capturedToken);
-    if (!capturedToken) {
+    // Tokens travel in the URL fragment (#token=...) so the browser never
+    // sends the raw value to the Next.js server. Reject legacy ?token= links.
+    if (typeof window === "undefined") return;
+
+    // Reject legacy query-token links.
+    const legacyUrl = new URL(window.location.href);
+    if (legacyUrl.searchParams.get("token")) {
+      legacyUrl.searchParams.delete("token");
+      window.history.replaceState(null, "", `${legacyUrl.pathname}${legacyUrl.search}`);
+      setError(
+        ar ? "رابط الدعوة غير صالح أو منتهي." : "Invitation link is invalid or has expired.",
+      );
+      return;
+    }
+
+    const hash = window.location.hash;
+    // Remove the fragment immediately before any async work.
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+
+    const fragmentToken = hash.startsWith("#token=")
+      ? decodeURIComponent(hash.slice("#token=".length))
+      : "";
+    setToken(fragmentToken);
+    if (!fragmentToken) {
       setError(ar ? "الدعوة غير متاحة." : "Invitation unavailable.");
       return;
     }
     void apiFetch<InvitationView>("/v1/invitations/inspect", {
       method: "POST",
-      body: JSON.stringify({ token: capturedToken }),
+      body: JSON.stringify({ token: fragmentToken }),
     })
       .then(setInvitation)
       .catch((caught: unknown) =>

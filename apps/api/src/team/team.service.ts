@@ -220,7 +220,7 @@ export class TeamService {
       locale,
       kind: "team_invitation",
       organizationName: invitation.organization.name,
-      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite?token=${encodeURIComponent(rawToken)}`,
+      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite#token=${encodeURIComponent(rawToken)}`,
     });
     await this.audit.record(
       {
@@ -334,7 +334,7 @@ export class TeamService {
       locale,
       kind: "team_invitation",
       organizationName: invitation.organization.name,
-      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite?token=${encodeURIComponent(rawToken)}`,
+      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite#token=${encodeURIComponent(rawToken)}`,
     });
     await this.audit.record(
       {

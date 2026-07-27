@@ -15,6 +15,10 @@ import { PrismaService } from "../database/prisma.service.js";
 import { NotificationService } from "../notifications/notification.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 
+// ---------------------------------------------------------------------------
+// Types / utilities
+// ---------------------------------------------------------------------------
+
 const planToDb = (plan: PlanCode) => plan.toUpperCase() as "STARTER" | "GROWTH" | "SCALE";
 const dbToPlan = (plan: "STARTER" | "GROWTH" | "SCALE") =>
   plan.toLocaleLowerCase("en-US") as PlanCode;
@@ -52,9 +56,31 @@ function statusToDb(status: BillingStatus) {
     | "CANCELED";
 }
 
+// ---------------------------------------------------------------------------
+// Stripe provider adapter interface
+// ---------------------------------------------------------------------------
+
+/** Typed adapter so Stripe SDK calls can be mocked deterministically in tests. */
+export interface StripeSubscriptionProvider {
+  /** Retrieve the current canonical subscription object from the provider. */
+  retrieveSubscription(subscriptionId: string): Promise<Stripe.Subscription>;
+}
+
+// ---------------------------------------------------------------------------
+// BillingService
+// ---------------------------------------------------------------------------
+
 @Injectable()
 export class BillingService {
   private readonly stripe: Stripe | null;
+  /**
+   * Overridable subscription provider.
+   * In production this calls stripe.subscriptions.retrieve().
+   * Tests replace this with a deterministic mock after construction:
+   *   const svc = new BillingService(...deps);
+   *   svc.subscriptionProvider = mockProvider;
+   */
+  subscriptionProvider: StripeSubscriptionProvider;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -68,6 +94,16 @@ export class BillingService {
           appInfo: { name: "Waflo", version: "1.0.0", url: "https://waflo.app" },
         })
       : null;
+
+    // Default live provider — replaced by tests via property assignment.
+    this.subscriptionProvider = {
+      retrieveSubscription: async (subscriptionId: string) => {
+        const stripe = this.requireStripe();
+        return stripe.subscriptions.retrieve(subscriptionId, {
+          expand: ["items.data.price"],
+        });
+      },
+    };
   }
 
   async get(userId: string, organizationId: string) {
@@ -180,9 +216,30 @@ export class BillingService {
     return { selectedPlan, subscriptionActivated: false, trialStarted: false };
   }
 
-  async checkout(userId: string, organizationId: string, request: WafloRequest) {
+  // ---------------------------------------------------------------------------
+  // Checkout – with customer idempotency and command-ID based session idempotency
+  // ---------------------------------------------------------------------------
+
+  async checkout(
+    userId: string,
+    organizationId: string,
+    request: WafloRequest,
+    /**
+     * Caller-provided opaque command ID (UUID or equivalent).
+     * Required. Reusing the same key returns the same effective result.
+     * Reusing with a different plan yields a conflict error.
+     */
+    idempotencyKey: string = "",
+  ) {
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
     const stripe = this.requireStripe();
+    if (!idempotencyKey || idempotencyKey.trim().length < 8) {
+      throw new AppError(
+        "CHECKOUT_IDEMPOTENCY_KEY_REQUIRED",
+        "A valid idempotency key is required to create a checkout session.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
     const organization = await this.prisma.client.organization.findUniqueOrThrow({
       where: { id: organizationId },
       include: {
@@ -198,34 +255,99 @@ export class BillingService {
     if (!owner) {
       throw new AppError("BILLING_ACCESS_DENIED", "Billing access denied.", HttpStatus.FORBIDDEN);
     }
+
+    const plan = organization.selectedPlan.toLocaleLowerCase("en-US") as PlanCode;
+    const planKey = plan.toUpperCase();
+
+    // Check for an existing idempotency key record for this organization.
+    const existing = await this.prisma.client.checkoutIdempotencyKey.findUnique({
+      where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
+    });
+    if (existing) {
+      // Same key + same plan = replay the previous result.
+      if (existing.planCode !== planKey) {
+        throw new AppError(
+          "CHECKOUT_IDEMPOTENCY_KEY_CONFLICT",
+          "This idempotency key was already used with a different plan.",
+          HttpStatus.CONFLICT,
+          { existingPlan: existing.planCode, requestedPlan: planKey },
+        );
+      }
+      return { url: existing.stripeSessionUrl, sessionId: existing.stripeSessionId };
+    }
+
+    // Ensure there is exactly one Stripe customer per organization using a
+    // stable idempotency key derived from the organization identity.
+    const customerIdempotencyKey = `waflo:organization:${organizationId}:create-customer:v1`;
     let customerId = organization.billingProfile?.stripeCustomerId;
     if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: owner.email,
-        name: organization.name,
-        metadata: { organizationId },
-      });
+      // Concurrent creation resolves to one customer: Stripe deduplicates by
+      // the idempotency key and we update the profile inside an invariant lock.
+      const customer = await stripe.customers.create(
+        {
+          email: owner.email,
+          name: organization.name,
+          metadata: { organizationId },
+        },
+        { idempotencyKey: customerIdempotencyKey },
+      );
       customerId = customer.id;
-      await this.prisma.client.organizationBillingProfile.update({
-        where: { organizationId },
-        data: { stripeCustomerId: customer.id },
-      });
+      // Use an invariant lock so concurrent calls cannot create two profile rows.
+      await withOrganizationInvariantLock(
+        this.prisma.client,
+        organizationId,
+        async (transaction) => {
+          const current = await transaction.organizationBillingProfile.findUnique({
+            where: { organizationId },
+          });
+          if (!current?.stripeCustomerId) {
+            await transaction.organizationBillingProfile.update({
+              where: { organizationId },
+              // customerId was assigned from customer.id (a string) just above the lock.
+              // The `as string` assertion is required because TypeScript cannot narrow
+              // across the closure boundary with exactOptionalPropertyTypes.
+              data: { stripeCustomerId: customerId as string },
+            });
+          } else {
+            // A concurrent call already persisted a customer ID; use that one.
+            customerId = current.stripeCustomerId;
+          }
+        },
+      );
     }
-    const plan = organization.selectedPlan.toLocaleLowerCase("en-US") as PlanCode;
+
     const priceId = this.priceId(plan);
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      client_reference_id: organizationId,
-      success_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing?checkout=returned`,
-      cancel_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing?checkout=canceled`,
-      allow_promotion_codes: true,
-      metadata: { organizationId, plan },
-      subscription_data: {
+
+    // Stripe deduplicates the session creation using its own idempotency key.
+    const stripeIdempotencyKey = `waflo:org:${organizationId}:checkout:${idempotencyKey}`;
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        client_reference_id: organizationId,
+        success_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing?checkout=returned`,
+        cancel_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing?checkout=canceled`,
+        allow_promotion_codes: true,
         metadata: { organizationId, plan },
+        subscription_data: {
+          metadata: { organizationId, plan },
+        },
+      },
+      { idempotencyKey: stripeIdempotencyKey },
+    );
+
+    // Persist the key so repeated calls with the same key replay this result.
+    await this.prisma.client.checkoutIdempotencyKey.create({
+      data: {
+        organizationId,
+        idempotencyKey,
+        planCode: planKey,
+        stripeSessionId: session.id,
+        stripeSessionUrl: session.url,
       },
     });
+
     await this.audit.record(
       {
         organizationId,
@@ -273,6 +395,10 @@ export class BillingService {
     return { url: portal.url };
   }
 
+  // ---------------------------------------------------------------------------
+  // Webhook processing – event ordering with current-state retrieval
+  // ---------------------------------------------------------------------------
+
   async processWebhook(
     payload: Buffer,
     signature: string | undefined,
@@ -307,6 +433,7 @@ export class BillingService {
     }
     const claim = await this.claimWebhook(event);
     if (!claim) return { received: true, duplicate: true };
+
     try {
       const applied = await withInvariantLock(
         this.prisma.client,
@@ -326,6 +453,7 @@ export class BillingService {
             );
           }
           const result = await this.applyStripeEvent(event, transaction, request);
+          const statusValue = result.staleness === "ignored_stale" ? "IGNORED_STALE" : "PROCESSED";
           const completed = await transaction.processedWebhookEvent.updateMany({
             where: {
               id: claim.id,
@@ -334,7 +462,7 @@ export class BillingService {
             },
             data: {
               organizationId: result.organizationId,
-              status: "PROCESSED",
+              status: statusValue,
               processedAt: new Date(),
               leaseExpiresAt: null,
               failureMetadata: Prisma.DbNull,
@@ -439,6 +567,7 @@ export class BillingService {
     });
     if (
       existing.status === "PROCESSED" ||
+      existing.status === "IGNORED_STALE" ||
       (existing.status === "PROCESSING" &&
         existing.leaseExpiresAt !== null &&
         existing.leaseExpiresAt > now)
@@ -466,12 +595,17 @@ export class BillingService {
     return claimed.count === 1 ? { id: existing.id, leaseExpiresAt } : null;
   }
 
+  // ---------------------------------------------------------------------------
+  // applyStripeEvent – event ordering via current-state retrieval
+  // ---------------------------------------------------------------------------
+
   private async applyStripeEvent(
     event: Stripe.Event,
     transaction: Prisma.TransactionClient,
     request: WafloRequest,
   ): Promise<{
     organizationId: string | null;
+    staleness: "applied" | "ignored_stale";
     notification: {
       organizationName: string;
       recipients: Array<{ email: string; locale: "en" | "ar" }>;
@@ -492,12 +626,36 @@ export class BillingService {
           userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
         },
       });
-      return { organizationId: null, notification: null };
+      return { organizationId: null, staleness: "applied", notification: null };
     }
-    const subscription = event.data.object as Stripe.Subscription;
+
+    // Step 1: Extract subscription ID from the event to fetch the CURRENT object.
+    const eventSubscription = event.data.object as Stripe.Subscription;
+    const subscriptionId = eventSubscription.id;
+
+    // Step 2: Retrieve the CURRENT subscription from Stripe (authoritative state).
+    // If retrieval fails, mark the event retryable rather than applying stale data.
+    let currentSubscription: Stripe.Subscription;
+    try {
+      currentSubscription = await this.subscriptionProvider.retrieveSubscription(subscriptionId);
+    } catch (providerError) {
+      throw new AppError(
+        "STRIPE_PROVIDER_RETRIEVAL_FAILED",
+        "Failed to retrieve current subscription state from Stripe. Will retry.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+        {
+          subscriptionId,
+          originalError: providerError instanceof Error ? providerError.message : "unknown",
+        },
+      );
+    }
+
+    // Step 3: Resolve organization / customer / price from CURRENT object.
     const customerId =
-      typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
-    const metadataOrganizationId = subscription.metadata.organizationId;
+      typeof currentSubscription.customer === "string"
+        ? currentSubscription.customer
+        : currentSubscription.customer.id;
+    const metadataOrganizationId = currentSubscription.metadata.organizationId;
     const [customerProfile, metadataProfile] = await Promise.all([
       transaction.organizationBillingProfile.findUnique({
         where: { stripeCustomerId: customerId },
@@ -536,7 +694,8 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
-    const item = subscription.items.data[0];
+
+    const item = currentSubscription.items.data[0];
     const priceId = item?.price.id;
     if (!priceId) {
       throw new AppError(
@@ -546,7 +705,7 @@ export class BillingService {
       );
     }
     const plan = this.planForPrice(priceId);
-    const metadataPlan = subscription.metadata.plan;
+    const metadataPlan = currentSubscription.metadata.plan;
     if (
       metadataPlan !== undefined &&
       metadataPlan !== "starter" &&
@@ -566,13 +725,57 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
-    const localStatus = billingStatusFromStripe(subscription.status);
+
+    // Step 4: Check freshness using the invariant lock scoped to the subscription.
+    // The event.created timestamp is compared against the last applied event's
+    // creation timestamp to prevent an older event from overwriting newer state.
+    const eventCreatedAt = new Date(event.created * 1000);
+
+    const existingSubscription = await transaction.subscription.findUnique({
+      where: { stripeSubscriptionId: subscriptionId },
+    });
+
+    if (
+      existingSubscription?.lastAppliedStripeEventAt &&
+      eventCreatedAt <= existingSubscription.lastAppliedStripeEventAt
+    ) {
+      // This event is older than (or exactly equal to) the last applied event.
+      // Audit but do NOT apply.
+      await transaction.auditLog.create({
+        data: {
+          organizationId: profile.organizationId,
+          action: "stripe.subscription_stale_ignored",
+          targetType: "stripe_event",
+          targetId: event.id,
+          requestId: request.requestId,
+          metadata: {
+            eventId: event.id,
+            eventType: event.type,
+            eventCreatedAt: eventCreatedAt.toISOString(),
+            lastAppliedStripeEventAt: existingSubscription.lastAppliedStripeEventAt.toISOString(),
+            lastAppliedStripeEventId: existingSubscription.lastAppliedStripeEventId,
+            subscriptionId,
+          },
+          userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
+        },
+      });
+      return {
+        organizationId: profile.organizationId,
+        staleness: "ignored_stale",
+        notification: null,
+      };
+    }
+
+    // Step 5: Apply state from the CURRENT Stripe object.
+    const localStatus = billingStatusFromStripe(currentSubscription.status);
     const currentPeriodStart = item.current_period_start
       ? new Date(item.current_period_start * 1000)
       : null;
     const currentPeriodEnd = item.current_period_end
       ? new Date(item.current_period_end * 1000)
       : null;
+    const nowTs = new Date();
+
     const organization = await transaction.organization.findUniqueOrThrow({
       where: { id: profile.organizationId },
       include: {
@@ -584,29 +787,41 @@ export class BillingService {
     });
     const previousPlan = organization.selectedPlan;
     const previousStatus = profile.subscriptionStatus;
+
     await transaction.subscription.upsert({
-      where: { stripeSubscriptionId: subscription.id },
+      where: { stripeSubscriptionId: subscriptionId },
       update: {
         stripePriceId: priceId,
         planCode: planToDb(plan),
         status: statusToDb(localStatus),
         currentPeriodStart,
         currentPeriodEnd,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end,
-        canceledAt: subscription.canceled_at ? new Date(subscription.canceled_at * 1000) : null,
+        cancelAtPeriodEnd: currentSubscription.cancel_at_period_end,
+        canceledAt: currentSubscription.canceled_at
+          ? new Date(currentSubscription.canceled_at * 1000)
+          : null,
+        lastAppliedStripeEventAt: eventCreatedAt,
+        lastAppliedStripeEventId: event.id,
+        lastProviderSyncAt: nowTs,
       },
       create: {
         organizationId: profile.organizationId,
-        stripeSubscriptionId: subscription.id,
+        stripeSubscriptionId: subscriptionId,
         stripePriceId: priceId,
         planCode: planToDb(plan),
         status: statusToDb(localStatus),
         currentPeriodStart,
         currentPeriodEnd,
-        cancelAtPeriodEnd: subscription.cancel_at_period_end,
-        canceledAt: subscription.canceled_at ? new Date(subscription.canceled_at * 1000) : null,
+        cancelAtPeriodEnd: currentSubscription.cancel_at_period_end,
+        canceledAt: currentSubscription.canceled_at
+          ? new Date(currentSubscription.canceled_at * 1000)
+          : null,
+        lastAppliedStripeEventAt: eventCreatedAt,
+        lastAppliedStripeEventId: event.id,
+        lastProviderSyncAt: nowTs,
       },
     });
+
     await transaction.organizationBillingProfile.update({
       where: { organizationId: profile.organizationId },
       data: {
@@ -619,7 +834,7 @@ export class BillingService {
       where: { id: profile.organizationId },
       data: { selectedPlan: planToDb(plan) },
     });
-    const now = new Date();
+
     const [locationUsage, activeSeatUsage, pendingSeatUsage] = await Promise.all([
       transaction.location.count({
         where: { organizationId: profile.organizationId, status: "ACTIVE" },
@@ -635,7 +850,7 @@ export class BillingService {
         where: {
           organizationId: profile.organizationId,
           status: "PENDING",
-          expiresAt: { gt: now },
+          expiresAt: { gt: nowTs },
           intendedRole: { in: ["MANAGER", "STAFF"] },
         },
       }),
@@ -652,12 +867,13 @@ export class BillingService {
     const overLimit =
       (locationLimit !== null && locationUsage > locationLimit) ||
       (teamSeatLimit !== null && teamSeatUsage > teamSeatLimit);
+
     await transaction.auditLog.create({
       data: {
         organizationId: profile.organizationId,
         action: "stripe.subscription_applied",
         targetType: "subscription",
-        targetId: subscription.id,
+        targetId: subscriptionId,
         requestId: request.requestId,
         metadata: {
           eventId: event.id,
@@ -678,15 +894,21 @@ export class BillingService {
         userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
       },
     });
+
+    // Only notify if effective local status actually changed.
+    const statusChanged = previousStatus !== statusToDb(localStatus);
     return {
       organizationId: profile.organizationId,
-      notification: {
-        organizationName: organization.name,
-        recipients: organization.members.map(({ user }) => ({
-          email: user.email,
-          locale: user.preferredLocale === "AR" ? "ar" : "en",
-        })),
-      },
+      staleness: "applied",
+      notification: statusChanged
+        ? {
+            organizationName: organization.name,
+            recipients: organization.members.map(({ user }) => ({
+              email: user.email,
+              locale: user.preferredLocale === "AR" ? "ar" : "en",
+            })),
+          }
+        : null,
     };
   }
 

@@ -268,15 +268,34 @@ export function VerificationForm({ locale }: { locale: Locale }) {
     typeof window === "undefined" ? "" : (sessionStorage.getItem("waflo:verification-email") ?? "");
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const token = url.searchParams.get("token");
-    url.searchParams.delete("token");
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-    if (!token) return;
+    // Tokens travel in the URL fragment (#token=...) so the browser never
+    // sends the raw value to the Next.js server. Any legacy ?token= link is
+    // rejected immediately to avoid misleading the user.
+    if (typeof window === "undefined") return;
+
+    // Reject legacy query-token links: clear and show invalid state.
+    const legacyUrl = new URL(window.location.href);
+    if (legacyUrl.searchParams.get("token")) {
+      legacyUrl.searchParams.delete("token");
+      window.history.replaceState(null, "", `${legacyUrl.pathname}${legacyUrl.search}`);
+      setMessage(ar ? "رابط غير صالح أو منتهي." : "This link is invalid or has expired.");
+      setState("error");
+      return;
+    }
+
+    const hash = window.location.hash;
+    // Remove the fragment immediately before any async work.
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+
+    const fragmentToken = hash.startsWith("#token=")
+      ? decodeURIComponent(hash.slice("#token=".length))
+      : null;
+    if (!fragmentToken) return;
+
     setState("verifying");
     void apiFetch("/v1/auth/verify-email", {
       method: "POST",
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token: fragmentToken }),
     })
       .then(() => setState("verified"))
       .catch((caught: unknown) => {
@@ -417,12 +436,28 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
   const [complete, setComplete] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const capturedToken = url.searchParams.get("token") ?? "";
-    url.searchParams.delete("token");
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-    setToken(capturedToken);
-  }, []);
+    // Tokens travel in the URL fragment (#token=...) so the browser never
+    // sends the raw value to the Next.js server. Reject legacy ?token= links.
+    if (typeof window === "undefined") return;
+
+    // Reject legacy query-token links.
+    const legacyUrl = new URL(window.location.href);
+    if (legacyUrl.searchParams.get("token")) {
+      legacyUrl.searchParams.delete("token");
+      window.history.replaceState(null, "", `${legacyUrl.pathname}${legacyUrl.search}`);
+      setError(ar ? "رابط غير صالح أو منتهي." : "This link is invalid or has expired.");
+      return;
+    }
+
+    const hash = window.location.hash;
+    // Remove the fragment immediately before any async work.
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+
+    const fragmentToken = hash.startsWith("#token=")
+      ? decodeURIComponent(hash.slice("#token=".length))
+      : "";
+    setToken(fragmentToken);
+  }, [ar]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token) {
