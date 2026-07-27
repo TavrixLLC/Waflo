@@ -1,0 +1,111 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "brand": {
+    "color": {
+      "brick": {
+        "value": "#AE3115",
+        "type": "color"
+      },
+      "coral": {
+        "value": "#FF6B4A",
+        "type": "color"
+      },
+      "ember": {
+        "value": "#7D2311",
+        "type": "color"
+      },
+      "ink": {
+        "value": "#241916",
+        "type": "color"
+      },
+      "soft": {
+        "value": "#FFF0EC",
+        "type": "color"
+      },
+      "cloud": {
+        "value": "#F7F9FF",
+        "type": "color"
+      },
+      "white": {
+        "value": "#FFFFFF",
+        "type": "color"
+      }
+    },
+    "radius": {
+      "sm": {
+        "value": "8px",
+        "type": "dimension"
+      },
+      "md": {
+        "value": "14px",
+        "type": "dimension"
+      },
+      "lg": {
+        "value": "22px",
+        "type": "dimension"
+      },
+      "xl": {
+        "value": "32px",
+        "type": "dimension"
+      },
+      "pill": {
+        "value": "999px",
+        "type": "dimension"
+      }
+    },
+    "shadow": {
+      "card": {
+        "value": "0 12px 32px rgba(36, 25, 22, 0.10)",
+        "type": "shadow"
+      }
+    }
+  },
+  "semantic": {
+    "background": {
+      "value": "#F7F9FF",
+      "type": "color"
+    },
+    "surface": {
+      "value": "#FFFFFF",
+      "type": "color"
+    },
+    "text": {
+      "value": "#241916",
+      "type": "color"
+    },
+    "muted": {
+      "value": "#76645F",
+      "type": "color"
+    },
+    "primary": {
+      "value": "#AE3115",
+      "type": "color"
+    },
+    "primaryAccent": {
+      "value": "#FF6B4A",
+      "type": "color"
+    },
+    "success": {
+      "value": "#1F8F6A",
+      "type": "color"
+    },
+    "warning": {
+      "value": "#E6A23C",
+      "type": "color"
+    },
+    "danger": {
+      "value": "#C93C2B",
+      "type": "color"
+    }
+  },
+  "typography": {
+    "latin": {
+      "value": "Manrope, system-ui, sans-serif",
+      "type": "fontFamily"
+    },
+    "arabic": {
+      "value": "Noto Sans Arabic, system-ui, sans-serif",
+      "type": "fontFamily"
+    }
+  }
+}

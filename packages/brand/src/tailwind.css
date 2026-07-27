@@ -1,0 +1,17 @@
+@theme {
+  --color-waflo-brick: #ae3115;
+  --color-waflo-coral: #ff6b4a;
+  --color-waflo-ember: #7d2311;
+  --color-waflo-ink: #241916;
+  --color-waflo-soft: #fff0ec;
+  --color-waflo-cloud: #f7f9ff;
+  --color-waflo-muted: #76645f;
+  --color-waflo-success: #1f8f6a;
+  --color-waflo-warning: #e6a23c;
+  --color-waflo-danger: #c93c2b;
+  --font-sans: "Manrope", system-ui, sans-serif;
+  --font-arabic: "Noto Sans Arabic", system-ui, sans-serif;
+  --radius-waflo: 22px;
+  --shadow-waflo: 0 12px 32px rgba(36, 25, 22, 0.1);
+  --ease-waflo: cubic-bezier(0.2, 0.8, 0.2, 1);
+}

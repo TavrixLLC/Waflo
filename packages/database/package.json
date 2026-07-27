@@ -1,0 +1,40 @@
+{
+  "name": "@waflo/database",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "default": "./dist/src/client.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm generate && tsc -p tsconfig.json",
+    "typecheck": "pnpm generate && tsc -p tsconfig.json --noEmit",
+    "generate": "prisma generate",
+    "validate": "prisma validate",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:status": "prisma migrate status",
+    "seed": "prisma db seed"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.9.0",
+    "@prisma/client": "7.9.0",
+    "@waflo/auth": "workspace:*",
+    "dotenv": "17.4.2",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/pg": "8.20.0",
+    "prisma": "7.9.0",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  }
+}

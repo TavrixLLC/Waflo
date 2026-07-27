@@ -1,0 +1,60 @@
+import { Module } from "@nestjs/common";
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { AuditController } from "./audit/audit.controller.js";
+import { AuditService } from "./audit/audit.service.js";
+import { AuthController } from "./auth/auth.controller.js";
+import { AuthService } from "./auth/auth.service.js";
+import { BillingController, WebhooksController } from "./billing/billing.controller.js";
+import { BillingService } from "./billing/billing.service.js";
+import { EnvelopeInterceptor } from "./common/request-context.js";
+import { ErrorEnvelopeFilter } from "./common/error.filter.js";
+import { EnvironmentService } from "./config/environment.service.js";
+import { PrismaService } from "./database/prisma.service.js";
+import { HealthController } from "./health/health.controller.js";
+import { LocationsController } from "./locations/locations.controller.js";
+import { LocationsService } from "./locations/locations.service.js";
+import { NotificationService } from "./notifications/notification.service.js";
+import { OrganizationsController } from "./organizations/organizations.controller.js";
+import { OrganizationsService } from "./organizations/organizations.service.js";
+import { PublicController } from "./public/public.controller.js";
+import { HostResolutionService } from "./public/host-resolution.service.js";
+import { ApiRateLimitGuard, CsrfGuard, SessionGuard } from "./security/guards.js";
+import { RateLimitService } from "./security/rate-limit.service.js";
+import { InvitationsController, TeamController } from "./team/team.controller.js";
+import { TeamService } from "./team/team.service.js";
+import { TenantService } from "./tenancy/tenant.service.js";
+
+@Module({
+  controllers: [
+    AuthController,
+    OrganizationsController,
+    LocationsController,
+    TeamController,
+    InvitationsController,
+    BillingController,
+    WebhooksController,
+    AuditController,
+    PublicController,
+    HealthController,
+  ],
+  providers: [
+    EnvironmentService,
+    PrismaService,
+    AuditService,
+    NotificationService,
+    RateLimitService,
+    TenantService,
+    AuthService,
+    OrganizationsService,
+    LocationsService,
+    TeamService,
+    BillingService,
+    HostResolutionService,
+    { provide: APP_GUARD, useClass: ApiRateLimitGuard },
+    { provide: APP_GUARD, useClass: SessionGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
+    { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
+    { provide: APP_FILTER, useClass: ErrorEnvelopeFilter },
+  ],
+})
+export class AppModule {}

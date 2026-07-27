@@ -1,0 +1,20 @@
+{
+  "name": "@waflo/auth",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "argon2": "0.45.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "typescript": "5.9.3"
+  }
+}

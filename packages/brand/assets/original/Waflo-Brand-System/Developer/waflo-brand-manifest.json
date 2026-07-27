@@ -1,0 +1,14 @@
+{
+  "brand": "Waflo",
+  "version": "1.0.0",
+  "date": "2026-07-23",
+  "tagline": "Loyalty that flows.",
+  "logo": {
+    "primary": "Logo/SVG/waflo-logo-primary-horizontal.svg",
+    "darkSurface": "Logo/SVG/waflo-logo-white-horizontal.svg",
+    "mark": "Logo/SVG/waflo-mark-primary.svg"
+  },
+  "appIcon": "App/waflo-app-icon-1024.png",
+  "favicon": "Web/favicon.svg",
+  "tokens": "Developer/waflo-design-tokens.json"
+}

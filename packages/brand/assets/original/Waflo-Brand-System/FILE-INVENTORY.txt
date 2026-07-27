@@ -1,0 +1,90 @@
+WAFLO BRAND SYSTEM - FILE INVENTORY
+===================================
+
+APP
+---
+- App/waflo-android-adaptive-foreground-432.png
+- App/waflo-android-monochrome-432.png
+- App/waflo-app-icon-1024.png
+- App/waflo-app-icon-512.png
+- App/waflo-app-icon-safe-zone.png
+- App/waflo-apple-app-store-icon-1024.png
+- App/waflo-google-play-icon-512.png
+
+APPLICATIONS
+------------
+- Applications/waflo-counter-sign-concept-1200.png
+- Applications/waflo-loyalty-card-concept-1200x750.png
+- Applications/waflo-mobile-splash-1170x2532.png
+
+BRAND
+-----
+- Brand/waflo-brand-board-1920x1080.png
+- Brand/waflo-color-system-1600x900.png
+
+DEVELOPER
+---------
+- Developer/README.md
+- Developer/tailwind-waflo-preset.ts
+- Developer/waflo-brand-manifest.json
+- Developer/waflo-design-tokens.json
+- Developer/waflo-tokens.css
+
+GUIDELINES
+----------
+- Guidelines/Waflo-Brand-Guidelines.pdf
+
+LOGO
+----
+- Logo/PNG/waflo-logo-primary-dark-1600.png
+- Logo/PNG/waflo-logo-primary-horizontal-1600.png
+- Logo/PNG/waflo-logo-primary-light-1600.png
+- Logo/PNG/waflo-logo-primary-stacked-1000.png
+- Logo/PNG/waflo-logo-white-horizontal-1600.png
+- Logo/PNG/waflo-logo-with-tagline-1600.png
+- Logo/PNG/waflo-mark-dark-1024.png
+- Logo/PNG/waflo-mark-primary-1024.png
+- Logo/PNG/waflo-mark-primary-256.png
+- Logo/PNG/waflo-mark-primary-512.png
+- Logo/PNG/waflo-mark-white-1024.png
+- Logo/SVG/waflo-logo-dark-horizontal.svg
+- Logo/SVG/waflo-logo-on-dark.svg
+- Logo/SVG/waflo-logo-primary-horizontal.svg
+- Logo/SVG/waflo-logo-primary-with-tagline.svg
+- Logo/SVG/waflo-logo-white-horizontal.svg
+- Logo/SVG/waflo-mark-dark.svg
+- Logo/SVG/waflo-mark-primary.svg
+- Logo/SVG/waflo-mark-white.svg
+
+ROOT
+----
+- LICENSE-NOTES.txt
+- README-AR.txt
+
+SOCIAL
+------
+- Social/waflo-facebook-cover-1640x624.png
+- Social/waflo-instagram-post-1080.png
+- Social/waflo-instagram-story-1080x1920.png
+- Social/waflo-linkedin-cover-1128x191.png
+- Social/waflo-open-graph-1200x630.png
+- Social/waflo-social-cover-1920x1080.png
+- Social/waflo-social-profile-1080.png
+- Social/waflo-x-header-1500x500.png
+
+SOURCE
+------
+- Source/waflo-master-logo-outlined.svg
+
+WEB
+---
+- Web/android-chrome-192.png
+- Web/android-chrome-512.png
+- Web/apple-touch-icon-180.png
+- Web/favicon-16.png
+- Web/favicon-32.png
+- Web/favicon-48.png
+- Web/favicon-64.png
+- Web/favicon.ico
+- Web/favicon.svg
+- Web/site.webmanifest

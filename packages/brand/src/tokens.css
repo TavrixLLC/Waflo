@@ -1,0 +1,50 @@
+:root {
+  --waflo-brick: #ae3115;
+  --waflo-coral: #ff6b4a;
+  --waflo-ember: #7d2311;
+  --waflo-ink: #241916;
+  --waflo-soft: #fff0ec;
+  --waflo-cloud: #f7f9ff;
+  --waflo-white: #ffffff;
+  --waflo-muted: #76645f;
+  --waflo-success: #1f8f6a;
+  --waflo-warning: #e6a23c;
+  --waflo-danger: #c93c2b;
+  --waflo-border: #eadfdc;
+  --waflo-focus: #ff6b4a;
+  --waflo-font-latin: "Manrope", system-ui, sans-serif;
+  --waflo-font-arabic: "Noto Sans Arabic", system-ui, sans-serif;
+  --waflo-radius-sm: 8px;
+  --waflo-radius-md: 14px;
+  --waflo-radius-lg: 22px;
+  --waflo-radius-xl: 32px;
+  --waflo-radius-pill: 999px;
+  --waflo-shadow-card: 0 12px 32px rgba(36, 25, 22, 0.1);
+  --waflo-shadow-raised: 0 18px 48px rgba(36, 25, 22, 0.14);
+  --waflo-motion-quick: 160ms;
+  --waflo-motion-standard: 200ms;
+  --waflo-motion-reassuring: 240ms;
+  --waflo-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html {
+  color: var(--waflo-ink);
+  background: var(--waflo-cloud);
+  font-family: var(--waflo-font-latin);
+}
+
+[dir="rtl"],
+:lang(ar) {
+  font-family: var(--waflo-font-arabic);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

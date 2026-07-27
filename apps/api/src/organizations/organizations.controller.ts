@@ -1,0 +1,87 @@
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { organizationSchema, organizationUpdateSchema, slugChangeSchema } from "@waflo/contracts";
+import { CurrentUser, RateLimit } from "../common/decorators.js";
+import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
+import { parseInput } from "../common/validation.js";
+import { OrganizationsService } from "./organizations.service.js";
+
+@Controller("v1/organizations")
+export class OrganizationsController {
+  constructor(private readonly organizations: OrganizationsService) {}
+
+  @Get()
+  list(@CurrentUser() user: AuthenticatedUser) {
+    return this.organizations.list(user.id);
+  }
+
+  @Post()
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.organizations.create(user.id, parseInput(organizationSchema, body), request);
+  }
+
+  @Get(":organizationId")
+  get(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
+    return this.organizations.get(user.id, organizationId);
+  }
+
+  @Patch(":organizationId")
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.organizations.update(
+      user.id,
+      organizationId,
+      parseInput(organizationUpdateSchema, body),
+      request,
+    );
+  }
+
+  @Post(":organizationId/select")
+  select(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
+    return this.organizations.select(user.id, organizationId);
+  }
+
+  @Get(":organizationId/slug-availability")
+  @RateLimit(20)
+  async availability(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Query("slug") slug = "",
+  ) {
+    await this.organizations.get(user.id, organizationId);
+    return this.organizations.slugAvailability(slug, organizationId);
+  }
+
+  @Patch(":organizationId/slug")
+  changeSlug(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    const input = parseInput(slugChangeSchema, body);
+    return this.organizations.changeSlug(
+      user.id,
+      organizationId,
+      input.slug,
+      input.password,
+      request,
+    );
+  }
+
+  @Post(":organizationId/complete-onboarding")
+  complete(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Req() request: WafloRequest,
+  ) {
+    return this.organizations.completeOnboarding(user.id, organizationId, request);
+  }
+}

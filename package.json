@@ -1,0 +1,53 @@
+{
+  "name": "waflo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Waflo wallet-first loyalty SaaS platform foundation",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "dev:api": "pnpm --filter @waflo/api dev",
+    "dev:marketing": "pnpm --filter @waflo/marketing-web dev",
+    "dev:dashboard": "pnpm --filter @waflo/merchant-dashboard dev",
+    "dev:customer": "pnpm --filter @waflo/customer-web dev",
+    "env:validate:test": "tsx -e \"import { parseEnvironment } from './packages/config/src/index.ts'; parseEnvironment(process.env); console.log('test environment valid')\"",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts --project unit",
+    "test:integration": "vitest run --config vitest.config.ts --project integration",
+    "test:e2e": "playwright test --project=chromium",
+    "test:a11y": "playwright test --project=accessibility",
+    "db:generate": "pnpm --filter @waflo/database generate",
+    "db:validate": "pnpm --filter @waflo/database validate",
+    "db:migrate": "pnpm --filter @waflo/database migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @waflo/database migrate:deploy",
+    "db:seed": "pnpm --filter @waflo/database seed",
+    "infra:up": "docker compose up -d postgres redis mailpit",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@biomejs/biome": "2.5.5",
+    "@playwright/test": "1.62.0",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/supertest": "7.2.1",
+    "dotenv": "17.4.2",
+    "supertest": "7.2.2",
+    "tsx": "4.23.1",
+    "turbo": "2.10.7",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

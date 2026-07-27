@@ -1,0 +1,44 @@
+{
+  "name": "@waflo/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nest build",
+    "predev": "pnpm --filter @waflo/database build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@fastify/helmet": "13.1.0",
+    "@fastify/static": "9.3.0",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-fastify": "11.1.28",
+    "@nestjs/swagger": "11.4.6",
+    "@waflo/auth": "workspace:*",
+    "@waflo/billing": "workspace:*",
+    "@waflo/config": "workspace:*",
+    "@waflo/contracts": "workspace:*",
+    "@waflo/database": "workspace:*",
+    "@waflo/permissions": "workspace:*",
+    "@waflo/security": "workspace:*",
+    "fastify": "5.10.0",
+    "ioredis": "5.11.1",
+    "nodemailer": "9.0.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "stripe": "22.3.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "11.0.16",
+    "@types/node": "26.1.1",
+    "@types/nodemailer": "8.0.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

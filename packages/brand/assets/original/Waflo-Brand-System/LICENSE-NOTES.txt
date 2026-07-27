@@ -1,0 +1,12 @@
+FONT & USAGE NOTES
+==================
+
+Recommended typefaces:
+- Manrope: SIL Open Font License 1.1
+- Noto Sans Arabic: SIL Open Font License 1.1
+
+Font binaries are not bundled. Download the latest official versions from Google Fonts.
+The outlined Waflo wordmark is a logo asset and does not depend on an installed font.
+
+The Waflo logo and included templates are prepared for the Waflo project.
+Before trademark registration, run a professional trademark similarity search in intended markets.

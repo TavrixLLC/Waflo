@@ -1,0 +1,62 @@
+import type { MemberRole } from "@waflo/contracts";
+
+export const permissions = [
+  "organization.view",
+  "organization.manage",
+  "organization.slug.change",
+  "organization.audit.view",
+  "billing.view",
+  "billing.manage",
+  "locations.view",
+  "locations.create",
+  "locations.manage",
+  "locations.archive",
+  "team.view",
+  "team.invite",
+  "team.manage_staff",
+  "team.manage_managers",
+  "team.remove",
+  "security.sessions.view",
+  "security.sessions.revoke",
+] as const;
+
+export type Permission = (typeof permissions)[number];
+
+const rolePermissions: Readonly<Record<MemberRole, ReadonlySet<Permission>>> = {
+  OWNER: new Set(permissions),
+  MANAGER: new Set([
+    "organization.view",
+    "locations.view",
+    "locations.create",
+    "locations.manage",
+    "locations.archive",
+    "team.view",
+    "team.invite",
+    "team.manage_staff",
+    "team.remove",
+    "security.sessions.view",
+    "security.sessions.revoke",
+  ]),
+  STAFF: new Set(["organization.view"]),
+};
+
+export function hasPermission(role: MemberRole, permission: Permission): boolean {
+  return rolePermissions[role].has(permission);
+}
+
+export function allowedInvitationRoles(role: MemberRole): readonly MemberRole[] {
+  if (role === "OWNER") return ["MANAGER", "STAFF"];
+  if (role === "MANAGER") return ["STAFF"];
+  return [];
+}
+
+export function canManageMember(actorRole: MemberRole, targetRole: MemberRole): boolean {
+  if (actorRole === "OWNER") return true;
+  return actorRole === "MANAGER" && targetRole === "STAFF";
+}
+
+export function assertRoleAssignment(actorRole: MemberRole, requestedRole: MemberRole): boolean {
+  if (requestedRole === "OWNER") return false;
+  if (actorRole === "OWNER") return requestedRole === "MANAGER" || requestedRole === "STAFF";
+  return actorRole === "MANAGER" && requestedRole === "STAFF";
+}

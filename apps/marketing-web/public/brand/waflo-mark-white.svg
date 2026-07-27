@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-label="Waflo logo">
+  
+  
+  <g id="waflo-mark">
+    <rect x="24.00" y="58.51" width="272.00" height="202.99" rx="40.60" fill="#FFFFFF"/>
+    <polyline points="72.96,139.70 116.48,212.78 160.00,157.97 200.80,212.78 247.04,123.46" fill="none" stroke="#241916" stroke-width="21.31" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="247.04" cy="123.46" r="12.36" fill="#241916"/>
+    <circle cx="247.04" cy="123.46" r="5.75" fill="#FF6B4A"/>
+  </g>
+  
+</svg>

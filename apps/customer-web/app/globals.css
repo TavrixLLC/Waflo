@@ -1,0 +1,182 @@
+@import "@waflo/brand/tokens.css";
+@import "@waflo/ui/styles.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--waflo-cloud);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--waflo-ink);
+  background:
+    radial-gradient(circle at 15% 10%, rgb(255 107 74 / 15%), transparent 26rem),
+    radial-gradient(circle at 85% 85%, rgb(174 49 21 / 10%), transparent 28rem), var(--waflo-cloud);
+  font-family: Manrope, "Noto Sans Arabic", system-ui, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.customer-page {
+  width: min(100% - 2rem, 70rem);
+  min-height: 100vh;
+  margin-inline: auto;
+  padding: 1.25rem 0 2rem;
+}
+
+.customer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.customer-logo {
+  width: 9rem;
+  height: auto;
+}
+
+.customer-language {
+  padding: 0.55rem 0.85rem;
+  color: var(--waflo-brick);
+  border: 1px solid rgb(174 49 21 / 24%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 75%);
+  font-weight: 700;
+}
+
+.customer-hero {
+  display: grid;
+  justify-items: center;
+  max-width: 48rem;
+  margin: 6rem auto 3rem;
+  text-align: center;
+}
+
+.customer-merchant-mark {
+  display: grid;
+  width: 5.5rem;
+  height: 5.5rem;
+  margin: 2rem 0 1.25rem;
+  place-items: center;
+  color: white;
+  border-radius: 1.75rem;
+  background: linear-gradient(145deg, var(--waflo-coral), var(--waflo-brick));
+  box-shadow: 0 1rem 2.5rem rgb(174 49 21 / 22%);
+  font-size: 2.25rem;
+  font-weight: 800;
+}
+
+.customer-kicker {
+  margin: 0;
+  color: var(--waflo-brick);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.customer-hero h1,
+.customer-state-card h1 {
+  max-width: 45rem;
+  margin: 0.65rem 0 1rem;
+  font-size: clamp(2rem, 6vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+[dir="rtl"] .customer-hero h1,
+[dir="rtl"] .customer-state-card h1 {
+  letter-spacing: 0;
+}
+
+.customer-lead,
+.customer-state-card > p {
+  max-width: 40rem;
+  margin: 0 0 1.5rem;
+  color: var(--waflo-muted);
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.75;
+}
+
+.customer-hero .wf-alert {
+  max-width: 36rem;
+  text-align: start;
+}
+
+.customer-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.customer-facts .wf-card {
+  min-height: 12rem;
+  padding: 1.4rem;
+}
+
+.customer-facts svg {
+  color: var(--waflo-coral);
+}
+
+.customer-facts h2 {
+  margin: 1.5rem 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.customer-facts p {
+  margin: 0;
+  color: var(--waflo-muted);
+  line-height: 1.55;
+}
+
+.customer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding-top: 3rem;
+  color: var(--waflo-muted);
+  font-size: 0.9rem;
+}
+
+.customer-state-card {
+  display: grid;
+  justify-items: start;
+  max-width: 42rem;
+  margin: 12vh auto 0;
+  padding: clamp(1.5rem, 5vw, 4rem);
+  border: 1px solid var(--waflo-border);
+  border-radius: 2rem;
+  background: white;
+  box-shadow: 0 1.5rem 4rem rgb(36 25 22 / 9%);
+}
+
+.customer-state-card .customer-kicker {
+  margin-top: 3rem;
+}
+
+@media (max-width: 680px) {
+  .customer-page {
+    width: min(100% - 1.25rem, 70rem);
+  }
+
+  .customer-hero {
+    margin-top: 4rem;
+  }
+
+  .customer-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-facts .wf-card {
+    min-height: auto;
+  }
+}

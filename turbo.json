@@ -1,0 +1,58 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_SECURE",
+    "EMAIL_FROM",
+    "MARKETING_WEB_URL",
+    "MERCHANT_DASHBOARD_URL",
+    "CUSTOMER_WEB_URL",
+    "API_PUBLIC_URL",
+    "ALLOWED_ORIGINS",
+    "COOKIE_SECURE",
+    "COOKIE_NAME",
+    "SESSION_TTL_DAYS",
+    "EMAIL_VERIFICATION_TTL_MINUTES",
+    "PASSWORD_RESET_TTL_MINUTES",
+    "INVITATION_TTL_DAYS",
+    "MERCHANT_BASE_DOMAIN",
+    "SCALE_LOCATION_LIMIT",
+    "SCALE_TEAM_LIMIT",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "STRIPE_STARTER_MONTHLY_PRICE_ID",
+    "STRIPE_GROWTH_MONTHLY_PRICE_ID",
+    "STRIPE_SCALE_MONTHLY_PRICE_ID",
+    "STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID",
+    "SENTRY_DSN",
+    "LOG_LEVEL",
+    "LEGAL_TERMS_VERSION",
+    "LEGAL_PRIVACY_VERSION",
+    "LEGAL_EFFECTIVE_DATE"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "dist/**", "!**/.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "generate": {
+      "cache": false
+    }
+  }
+}
