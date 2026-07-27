@@ -157,7 +157,6 @@ export class OrganizationsService {
       businessCategory?: string | null | undefined;
       defaultLocale?: "en" | "ar" | undefined;
       timezone?: string | undefined;
-      selectedPlan?: "starter" | "growth" | "scale" | undefined;
     },
     request: WafloRequest,
   ) {
@@ -178,15 +177,8 @@ export class OrganizationsService {
               : {}),
             ...(input.defaultLocale ? { defaultLocale: localeToDb(input.defaultLocale) } : {}),
             ...(input.timezone ? { timezone: input.timezone } : {}),
-            ...(input.selectedPlan ? { selectedPlan: planToDb(input.selectedPlan) } : {}),
           },
         });
-        if (input.selectedPlan) {
-          await transaction.organizationBillingProfile.update({
-            where: { organizationId },
-            data: { selectedPlan: planToDb(input.selectedPlan) },
-          });
-        }
         return updated;
       },
     );
@@ -194,7 +186,7 @@ export class OrganizationsService {
       {
         organizationId,
         actorUserId: userId,
-        action: input.selectedPlan ? "billing.selected_plan_changed" : "organization.updated",
+        action: "organization.updated",
         targetType: "organization",
         targetId: organizationId,
         metadata: { fields: Object.keys(input) },

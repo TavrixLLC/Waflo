@@ -3,6 +3,12 @@ import { CurrentUser } from "../common/decorators.js";
 import type { AuthenticatedUser } from "../common/request-context.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import {
+  parseOptionalAction,
+  parseOptionalCursor,
+  parseOptionalPaginationLimit,
+  parseUuid,
+} from "../common/validation.js";
 
 @Controller("v1")
 export class AuditController {
@@ -17,12 +23,17 @@ export class AuditController {
     @Param("organizationId") organizationId: string,
     @Query("cursor") cursor?: string,
     @Query("action") action?: string,
+    @Query("limit") limitInput?: string,
   ) {
-    await this.tenant.requireMembership(user.id, organizationId, "organization.audit.view");
+    const parsedOrganizationId = parseUuid(organizationId);
+    const parsedCursor = parseOptionalCursor(cursor);
+    const parsedAction = parseOptionalAction(action);
+    const limit = parseOptionalPaginationLimit(limitInput) ?? 50;
+    await this.tenant.requireMembership(user.id, parsedOrganizationId, "organization.audit.view");
     const events = await this.prisma.client.auditLog.findMany({
       where: {
-        organizationId,
-        ...(action ? { action: { startsWith: action } } : {}),
+        organizationId: parsedOrganizationId,
+        ...(parsedAction ? { action: { startsWith: parsedAction } } : {}),
       },
       select: {
         id: true,
@@ -34,11 +45,11 @@ export class AuditController {
         metadata: true,
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 51,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+      ...(parsedCursor ? { cursor: { id: parsedCursor }, skip: 1 } : {}),
     });
-    const hasMore = events.length > 50;
-    const items = hasMore ? events.slice(0, 50) : events;
+    const hasMore = events.length > limit;
+    const items = hasMore ? events.slice(0, limit) : events;
     return {
       items,
       nextCursor: hasMore ? (items.at(-1)?.id ?? null) : null,
@@ -46,7 +57,13 @@ export class AuditController {
   }
 
   @Get("security/events")
-  async security(@CurrentUser() user: AuthenticatedUser, @Query("cursor") cursor?: string) {
+  async security(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limitInput?: string,
+  ) {
+    const parsedCursor = parseOptionalCursor(cursor);
+    const limit = parseOptionalPaginationLimit(limitInput) ?? 20;
     const events = await this.prisma.client.securityEvent.findMany({
       where: { userId: user.id },
       select: {
@@ -57,11 +74,11 @@ export class AuditController {
         reviewedAt: true,
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 21,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+      ...(parsedCursor ? { cursor: { id: parsedCursor }, skip: 1 } : {}),
     });
-    const hasMore = events.length > 20;
-    const items = hasMore ? events.slice(0, 20) : events;
+    const hasMore = events.length > limit;
+    const items = hasMore ? events.slice(0, limit) : events;
     return {
       items,
       nextCursor: hasMore ? (items.at(-1)?.id ?? null) : null,

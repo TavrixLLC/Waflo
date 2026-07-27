@@ -1,0 +1,12 @@
+
+Running 7 tests using 1 worker
+
+  ok 1 [chromium] › tests\e2e\platform.spec.ts:103:9 › Waflo W1 browser flows › marketing pages render in English and Arabic with real RTL (1.6s)
+  ok 2 [chromium] › tests\e2e\platform.spec.ts:121:9 › Waflo W1 browser flows › registers, opens the Mailpit verification action, and completes onboarding (6.9s)
+  ok 3 [chromium] › tests\e2e\platform.spec.ts:187:9 › Waflo W1 browser flows › edits settings, reaches the location limit, upgrades setup plan, and creates a location (2.9s)
+  ok 4 [chromium] › tests\e2e\platform.spec.ts:223:9 › Waflo W1 browser flows › invites a Staff user who registers, verifies, and accepts the invitation (5.8s)
+  ok 5 [chromium] › tests\e2e\platform.spec.ts:267:9 › Waflo W1 browser flows › shows audit history, manages sessions, changes slug and password, and resolves the new host (6.7s)
+  ok 6 [chromium] › tests\e2e\platform.spec.ts:352:9 › Waflo W1 browser flows › enforces Manager billing restrictions and supports organization/language switching (2.4s)
+  ok 7 [chromium] › tests\e2e\platform.spec.ts:384:9 › Waflo W1 browser flows › blocks unauthenticated dashboard access (1.1s)
+
+  7 passed (28.7s)

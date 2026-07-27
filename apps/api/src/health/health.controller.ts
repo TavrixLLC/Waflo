@@ -1,10 +1,14 @@
 import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
 import { Public } from "../common/decorators.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { RateLimitService } from "../security/rate-limit.service.js";
 
 @Controller()
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rateLimits: RateLimitService,
+  ) {}
 
   @Get("health")
   @Public()
@@ -21,10 +25,10 @@ export class HealthController {
   async ready() {
     try {
       // A model count is intentionally used instead of raw SQL for readiness.
-      await this.prisma.client.organization.count();
+      await Promise.all([this.prisma.client.organization.count(), this.rateLimits.assertReady()]);
       return {
         status: "ready",
-        dependencies: { database: "ready" },
+        dependencies: { database: "ready", rateLimitStorage: "ready" },
         timestamp: new Date().toISOString(),
       };
     } catch {

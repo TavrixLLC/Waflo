@@ -19,6 +19,22 @@ export default defineConfig({
           testTimeout: 60_000,
         },
       },
+      {
+        test: {
+          name: "concurrency",
+          include: ["tests/concurrency/**/*.test.ts"],
+          hookTimeout: 120_000,
+          testTimeout: 120_000,
+        },
+      },
+      {
+        test: {
+          name: "http",
+          include: ["tests/http/**/*.test.ts"],
+          hookTimeout: 120_000,
+          testTimeout: 120_000,
+        },
+      },
     ],
   },
 });

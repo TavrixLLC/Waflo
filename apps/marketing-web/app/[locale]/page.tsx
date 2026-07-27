@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Building2, CreditCard, Smartphone, Sparkles } from "lucide-react";
+import Image from "next/image";
 import { messages, isLocale } from "@waflo/i18n";
 import { Button, Card } from "@waflo/ui";
 import { MarketingShell } from "../../components/marketing-shell";
@@ -93,7 +94,13 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
         >
           <div className="marketing-flow">
             <div className="marketing-flow__top">
-              <img className="marketing-flow__mark" src="/brand/waflo-mark-white.svg" alt="" />
+              <Image
+                className="marketing-flow__mark"
+                src="/brand/waflo-mark-white.svg"
+                alt=""
+                width={48}
+                height={48}
+              />
               <span className="marketing-flow__status">
                 {ar ? "تجربة ولاء ذكية" : "SMART LOYALTY"}
               </span>

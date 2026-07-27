@@ -20,4 +20,10 @@ export class EnvironmentService {
         this.values.STRIPE_SCALE_MONTHLY_PRICE_ID,
     );
   }
+
+  get trustedProxies(): readonly string[] {
+    return this.values.TRUSTED_PROXIES.split(",")
+      .map((proxy) => proxy.trim())
+      .filter(Boolean);
+  }
 }

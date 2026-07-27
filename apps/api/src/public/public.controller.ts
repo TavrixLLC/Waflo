@@ -2,6 +2,7 @@ import { Controller, Get, Query } from "@nestjs/common";
 import { Public, RateLimit } from "../common/decorators.js";
 import { OrganizationsService } from "../organizations/organizations.service.js";
 import { HostResolutionService } from "./host-resolution.service.js";
+import { parseHost } from "../common/validation.js";
 
 @Controller("v1/public")
 export class PublicController {
@@ -14,7 +15,7 @@ export class PublicController {
   @Public()
   @RateLimit(60)
   resolve(@Query("host") host = "", @Query("tenant") tenant?: string) {
-    return this.hosts.resolve(host, tenant);
+    return this.hosts.resolve(parseHost(host), tenant);
   }
 
   @Get("merchant-slug/availability")

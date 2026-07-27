@@ -60,6 +60,13 @@ enum MemberStatus {
   REMOVED
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  CANCELED
+  EXPIRED
+}
+
 enum LocationStatus {
   ACTIVE
   ARCHIVED
@@ -231,6 +238,7 @@ model OrganizationInvitation {
   email           String       @db.VarChar(254)
   normalizedEmail String       @map("normalized_email") @db.VarChar(254)
   intendedRole    MemberRole   @map("intended_role")
+  status          InvitationStatus @default(PENDING)
   tokenHash       String       @unique @map("token_hash") @db.Char(64)
   invitedByUserId String       @map("invited_by_user_id") @db.Uuid
   expiresAt       DateTime     @map("expires_at") @db.Timestamptz(6)
@@ -240,7 +248,7 @@ model OrganizationInvitation {
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   invitedBy       User         @relation("InvitedBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)
 
-  @@index([organizationId, normalizedEmail])
+  @@index([organizationId, normalizedEmail, status])
   @@index([organizationId, expiresAt])
   @@map("organization_invitations")
 }
@@ -333,9 +341,11 @@ model ProcessedWebhookEvent {
   eventType      String                  @map("event_type") @db.VarChar(160)
   status         WebhookProcessingStatus @default(PROCESSING)
   attemptCount   Int                     @default(1) @map("attempt_count")
+  leaseExpiresAt DateTime?                @map("lease_expires_at") @db.Timestamptz(6)
   processedAt    DateTime?               @map("processed_at") @db.Timestamptz(6)
   failureMetadata Json?                  @map("failure_metadata") @db.JsonB
   createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization   Organization?           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@unique([provider, externalEventId])

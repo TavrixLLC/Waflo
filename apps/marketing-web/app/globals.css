@@ -219,6 +219,7 @@ body {
   margin-top: 1rem;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: This isolated flow widget is unrelated to the earlier hero selector. */
 .marketing-flow__steps span {
   width: 36px;
   height: 36px;

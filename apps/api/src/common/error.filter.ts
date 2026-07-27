@@ -1,18 +1,23 @@
 import {
   ArgumentsHost,
   Catch,
+  Inject,
   type ExceptionFilter,
   HttpException,
   HttpStatus,
 } from "@nestjs/common";
 import { createErrorEnvelope } from "@waflo/contracts";
+import { sanitizeErrorForReporting } from "@waflo/security";
 import type { FastifyReply } from "fastify";
 import { ZodError } from "zod";
 import { AppError } from "./app-error.js";
+import { ERROR_REPORTER, type ErrorReporter } from "./error-reporter.js";
 import type { WafloRequest } from "./request-context.js";
 
 @Catch()
 export class ErrorEnvelopeFilter implements ExceptionFilter {
+  constructor(@Inject(ERROR_REPORTER) private readonly reporter: ErrorReporter) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<WafloRequest>();
@@ -56,7 +61,17 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
       return;
     }
 
-    request.log.error({ err: exception, requestId }, "Unhandled API error");
+    request.log.error(
+      { err: sanitizeErrorForReporting(exception), requestId },
+      "Unhandled API error",
+    );
+    void Promise.resolve(
+      this.reporter.captureException(exception, {
+        requestId,
+        component: "api",
+        operation: `${request.method} ${request.routeOptions?.url ?? "unknown"}`,
+      }),
+    ).catch(() => undefined);
     reply
       .status(HttpStatus.INTERNAL_SERVER_ERROR)
       .send(createErrorEnvelope("INTERNAL_ERROR", "Something went wrong.", requestId));

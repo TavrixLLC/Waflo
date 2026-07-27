@@ -31,8 +31,18 @@ test("public, authentication, and form-error screens have no serious accessibili
   for (const url of [
     "http://localhost:3000/en",
     "http://localhost:3000/en/pricing",
+    "http://localhost:3000/en/contact",
+    "http://localhost:3000/en/privacy",
+    "http://localhost:3000/en/terms",
     "http://localhost:3001/en/signup",
     "http://localhost:3001/en/login",
+    "http://localhost:3001/en/forgot-password",
+    "http://localhost:3001/en/reset-password",
+    "http://localhost:3001/en/verify-email",
+    "http://localhost:3001/en/invite",
+    "http://localhost:3001/en/logged-out",
+    "http://localhost:3001/en/session-expired",
+    "http://localhost:3002/?tenant=today",
   ]) {
     await page.goto(url);
     await expectNoCriticalViolations(page);
@@ -57,7 +67,7 @@ test("authenticated English and Arabic dashboard screens and dialogs are accessi
   await page.goto("http://localhost:3001/en/onboarding/business");
   await expect(page.getByRole("heading", { name: "Tell us about your business" })).toBeVisible();
   await expectNoCriticalViolations(page);
-  for (const route of ["", "/locations", "/team", "/billing"]) {
+  for (const route of ["", "/locations", "/team", "/billing", "/security", "/audit", "/settings"]) {
     await page.goto(`http://localhost:3001/en/dashboard${route}`);
     await expect(page.locator(".dashboard-main")).toBeVisible();
     await expectNoCriticalViolations(page);

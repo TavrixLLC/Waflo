@@ -1,5 +1,6 @@
 import { Alert, Badge, Button, Card } from "@waflo/ui";
 import { Clock3, MapPin, ShieldCheck, Sparkles } from "lucide-react";
+import Image from "next/image";
 import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +9,6 @@ type Resolution =
   | {
       status: "active";
       merchant: {
-        id: string;
         name: string;
         slug: string;
         defaultLocale: "en" | "ar";
@@ -55,10 +55,12 @@ export default async function MerchantPage({
     return (
       <main className="customer-page" dir={ar ? "rtl" : "ltr"} lang={locale}>
         <section className="customer-state-card">
-          <img
+          <Image
             className="customer-logo"
             src="/brand/waflo-logo-primary-horizontal.svg"
             alt="Waflo"
+            width={280}
+            height={80}
           />
           <span className="customer-kicker">{suspended ? "503" : "404"}</span>
           <h1>
@@ -91,7 +93,13 @@ export default async function MerchantPage({
   return (
     <main className="customer-page" dir={ar ? "rtl" : "ltr"} lang={locale}>
       <header className="customer-header">
-        <img className="customer-logo" src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" />
+        <Image
+          className="customer-logo"
+          src="/brand/waflo-logo-primary-horizontal.svg"
+          alt="Waflo"
+          width={280}
+          height={80}
+        />
         <a
           className="customer-language"
           href={`/?lang=${ar ? "en" : "ar"}${query.tenant ? `&tenant=${query.tenant}` : ""}`}

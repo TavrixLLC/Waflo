@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { createErrorReporter } from "@waflo/security";
 import { AuditController } from "./audit/audit.controller.js";
 import { AuditService } from "./audit/audit.service.js";
 import { AuthController } from "./auth/auth.controller.js";
@@ -8,6 +9,7 @@ import { BillingController, WebhooksController } from "./billing/billing.control
 import { BillingService } from "./billing/billing.service.js";
 import { EnvelopeInterceptor } from "./common/request-context.js";
 import { ErrorEnvelopeFilter } from "./common/error.filter.js";
+import { ERROR_REPORTER } from "./common/error-reporter.js";
 import { EnvironmentService } from "./config/environment.service.js";
 import { PrismaService } from "./database/prisma.service.js";
 import { HealthController } from "./health/health.controller.js";
@@ -50,6 +52,12 @@ import { TenantService } from "./tenancy/tenant.service.js";
     TeamService,
     BillingService,
     HostResolutionService,
+    {
+      provide: ERROR_REPORTER,
+      inject: [EnvironmentService],
+      useFactory: (environment: EnvironmentService) =>
+        createErrorReporter(environment.values.SENTRY_DSN || undefined),
+    },
     { provide: APP_GUARD, useClass: ApiRateLimitGuard },
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },

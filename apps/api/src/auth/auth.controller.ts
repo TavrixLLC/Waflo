@@ -12,7 +12,7 @@ import { createOpaqueToken } from "@waflo/auth";
 import type { FastifyReply } from "fastify";
 import { CurrentSession, CurrentUser, Public, RateLimit } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseInput } from "../common/validation.js";
+import { parseInput, parseUuid } from "../common/validation.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { AuthService } from "./auth.service.js";
 
@@ -145,7 +145,12 @@ export class AuthController {
     @Req() request: WafloRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
-    const result = await this.auth.revokeSession(user.id, sessionId, currentSessionId, request);
+    const result = await this.auth.revokeSession(
+      user.id,
+      parseUuid(sessionId),
+      currentSessionId,
+      request,
+    );
     if (result.currentSessionRevoked) this.clearSessionCookie(reply);
     return result;
   }

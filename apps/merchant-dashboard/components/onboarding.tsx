@@ -1,6 +1,7 @@
 "use client";
 
 import type { Locale, PlanCode } from "@waflo/contracts";
+import Image from "next/image";
 import {
   Alert,
   Button,
@@ -32,7 +33,7 @@ function OnboardingShell({
   return (
     <main className="onboarding-shell">
       <header className="onboarding-header">
-        <img src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" />
+        <Image src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" width={280} height={80} />
         <LanguageSwitcher
           locale={locale}
           href={`/${locale === "ar" ? "en" : "ar"}/onboarding/business`}

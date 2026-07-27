@@ -12,6 +12,7 @@ export const environmentSchema = z
       .default("postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public"),
     REDIS_URL: optionalUrl,
     RATE_LIMIT_NAMESPACE: z.string().min(1).default("waflo"),
+    TRUSTED_PROXIES: z.string().default(""),
     SMTP_HOST: z.string().default("127.0.0.1"),
     SMTP_PORT: z.coerce.number().int().positive().default(1025),
     SMTP_SECURE: z.stringbool().default(false),
@@ -75,6 +76,13 @@ export const environmentSchema = z
         code: "custom",
         path: ["REDIS_URL"],
         message: "Production requires Redis for distributed rate limiting.",
+      });
+    }
+    if (!value.TRUSTED_PROXIES.trim()) {
+      context.addIssue({
+        code: "custom",
+        path: ["TRUSTED_PROXIES"],
+        message: "Production requires an explicit trusted proxy allowlist.",
       });
     }
     if (value.SMTP_HOST === "localhost" || value.SMTP_HOST === "127.0.0.1") {

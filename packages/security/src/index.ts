@@ -8,6 +8,177 @@ const sensitiveKeys = [
   "card",
 ] as const;
 
+const sensitiveQueryKeys = new Set(["token", "code", "password", "secret", "signature", "key"]);
+
+export function sanitizeRequestUrl(input: string | undefined): string {
+  if (!input) return "";
+  const [path, query] = input.split("?", 2);
+  if (!query) return path ?? "";
+  const parameters = new URLSearchParams(query);
+  for (const key of [...parameters.keys()]) {
+    if (sensitiveQueryKeys.has(key.toLocaleLowerCase("en-US"))) {
+      parameters.set(key, "[REDACTED]");
+    }
+  }
+  const safeQuery = parameters.toString();
+  return safeQuery ? `${path ?? ""}?${safeQuery}` : (path ?? "");
+}
+
+export interface ErrorReportContext {
+  requestId?: string;
+  component?: string;
+  operation?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ErrorReporter {
+  captureException(error: unknown, context?: ErrorReportContext): void | Promise<void>;
+  captureMessage(message: string, context?: ErrorReportContext): void | Promise<void>;
+  setUserContext(userId: string | null): void | Promise<void>;
+  setOrganizationContext(organizationId: string | null): void | Promise<void>;
+  clearContext(): void | Promise<void>;
+  flush(timeoutMs?: number): Promise<boolean>;
+}
+
+export function sanitizeErrorForReporting(error: unknown): Error {
+  const source = error instanceof Error ? error : new Error("Non-error exception");
+  const safeMessage = sanitizeRequestUrl(source.message)
+    .replace(
+      /\b(token|password|secret|authorization|cookie|signature)\s*[:=]\s*[^\s,;]+/gi,
+      "$1=[REDACTED]",
+    )
+    .slice(0, 1_000);
+  const sanitized = new Error(safeMessage || "Application error");
+  sanitized.name = source.name.slice(0, 120);
+  return sanitized;
+}
+
+export class NoopErrorReporter implements ErrorReporter {
+  captureException(): void {}
+  captureMessage(): void {}
+  setUserContext(): void {}
+  setOrganizationContext(): void {}
+  clearContext(): void {}
+  async flush(): Promise<boolean> {
+    return true;
+  }
+}
+
+export class DynamicSentryErrorReporter implements ErrorReporter {
+  private readonly sentry: Promise<{
+    captureException(error: unknown, options?: unknown): string;
+    captureMessage(message: string, options?: unknown): string;
+    setUser(user: { id: string } | null): void;
+    setContext(name: string, context: { id: string } | null): void;
+    flush(timeout?: number): Promise<boolean>;
+  } | null>;
+
+  constructor(dsn: string) {
+    const packageName = "@sentry/node";
+    this.sentry = import(packageName)
+      .then((module: Record<string, unknown>) => {
+        const init = module.init;
+        const captureException = module.captureException;
+        const captureMessage = module.captureMessage;
+        const setUser = module.setUser;
+        const setContext = module.setContext;
+        const flush = module.flush;
+        if (
+          typeof init !== "function" ||
+          typeof captureException !== "function" ||
+          typeof captureMessage !== "function" ||
+          typeof setUser !== "function" ||
+          typeof setContext !== "function" ||
+          typeof flush !== "function"
+        ) {
+          return null;
+        }
+        init({ dsn, sendDefaultPii: false });
+        return {
+          captureException: captureException as (error: unknown, options?: unknown) => string,
+          captureMessage: captureMessage as (message: string, options?: unknown) => string,
+          setUser: setUser as (user: { id: string } | null) => void,
+          setContext: setContext as (name: string, context: { id: string } | null) => void,
+          flush: flush as (timeout?: number) => Promise<boolean>,
+        };
+      })
+      .catch(() => null);
+  }
+
+  async captureException(error: unknown, context?: ErrorReportContext): Promise<void> {
+    const sentry = await this.sentry;
+    if (!sentry) return;
+    try {
+      sentry.captureException(sanitizeErrorForReporting(error), {
+        tags: {
+          component: context?.component,
+          operation: context?.operation,
+        },
+        extra: {
+          requestId: context?.requestId,
+          metadata: redactMetadata(context?.metadata),
+        },
+      });
+    } catch {}
+  }
+
+  async captureMessage(message: string, context?: ErrorReportContext): Promise<void> {
+    const sentry = await this.sentry;
+    if (!sentry) return;
+    try {
+      sentry.captureMessage(sanitizeErrorForReporting(new Error(message)).message, {
+        level: "warning",
+        tags: {
+          component: context?.component,
+          operation: context?.operation,
+        },
+        extra: {
+          requestId: context?.requestId,
+          metadata: redactMetadata(context?.metadata),
+        },
+      });
+    } catch {}
+  }
+
+  async setUserContext(userId: string | null): Promise<void> {
+    const sentry = await this.sentry;
+    try {
+      sentry?.setUser(userId ? { id: userId.slice(0, 128) } : null);
+    } catch {}
+  }
+
+  async setOrganizationContext(organizationId: string | null): Promise<void> {
+    const sentry = await this.sentry;
+    try {
+      sentry?.setContext(
+        "organization",
+        organizationId ? { id: organizationId.slice(0, 128) } : null,
+      );
+    } catch {}
+  }
+
+  async clearContext(): Promise<void> {
+    const sentry = await this.sentry;
+    try {
+      sentry?.setUser(null);
+      sentry?.setContext("organization", null);
+    } catch {}
+  }
+
+  async flush(timeoutMs = 2_000): Promise<boolean> {
+    const sentry = await this.sentry;
+    try {
+      return sentry ? await sentry.flush(timeoutMs) : true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export function createErrorReporter(dsn: string | undefined): ErrorReporter {
+  return dsn ? new DynamicSentryErrorReporter(dsn) : new NoopErrorReporter();
+}
+
 export function redactMetadata(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactMetadata);
   if (value === null || typeof value !== "object") return value;

@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, ApiClientError, resetCsrf } from "../lib/api-client";
@@ -184,7 +185,12 @@ export function DashboardApplication({
         {error ? (
           <Alert tone="danger" title={error} />
         ) : (
-          <img src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" />
+          <Image
+            src="/brand/waflo-logo-primary-horizontal.svg"
+            alt="Waflo"
+            width={280}
+            height={80}
+          />
         )}
       </div>
     );
@@ -224,7 +230,9 @@ export function DashboardApplication({
   return (
     <div className="dashboard-layout">
       <Sidebar
-        logo={<img src="/brand/waflo-logo-white-horizontal.svg" alt="Waflo" />}
+        logo={
+          <Image src="/brand/waflo-logo-white-horizontal.svg" alt="Waflo" width={280} height={80} />
+        }
         organization={
           <OrganizationSwitcher
             label={locale === "ar" ? "تبديل المؤسسة" : "Switch organization"}

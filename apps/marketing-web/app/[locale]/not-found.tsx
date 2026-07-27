@@ -1,9 +1,10 @@
 import { Button } from "@waflo/ui";
+import Image from "next/image";
 
 export default function NotFound() {
   return (
     <main className="marketing-container marketing-content">
-      <img src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" style={{ width: 140 }} />
+      <Image src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" width={140} height={40} />
       <p className="marketing-kicker" style={{ marginTop: "4rem" }}>
         404
       </p>

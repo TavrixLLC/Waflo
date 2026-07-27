@@ -1,0 +1,55 @@
+pnpm.exe : $ turbo run typecheck
+At C:\Users\Alhamza Nazhan\AppData\Local\pnpm\bin\pnpm.ps1:14 char:3
++   & "$basedir/../global/v11/4508-19eae16b90e/node_modules/@pnpm/exe/p ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ turbo run typecheck:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/api, @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-web, @waflo/database, @waflo/i18n, @waflo/marketing-web, @waflo/merchant-dashboard, @waflo/permissions, @waflo/security, @waflo/ui
+   • Running typecheck in 14 packages
+   • Remote caching disabled
+
+@waflo/security:typecheck: cache hit, replaying logs ebe751d989b73273
+@waflo/security:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/config:typecheck: cache hit, replaying logs a8ed1690deba8a85
+@waflo/config:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/contracts:typecheck: cache hit, replaying logs a7b280883684b334
+@waflo/contracts:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/brand:typecheck: cache hit, replaying logs 2c39790ed808900d
+@waflo/brand:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/auth:typecheck: cache hit, replaying logs 83d7c681c9398b7f
+@waflo/auth:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/i18n:typecheck: cache hit, replaying logs c107a8dcc9a0d5aa
+@waflo/i18n:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/permissions:typecheck: cache hit, replaying logs ebc94d5f60cf5198
+@waflo/permissions:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/billing:typecheck: cache hit, replaying logs c9598a64c03d1393
+@waflo/billing:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/database:typecheck: cache hit, replaying logs 9321e4f333d5da9a
+@waflo/database:typecheck: $ pnpm generate && tsc -p tsconfig.json --noEmit
+@waflo/database:typecheck: $ prisma generate
+@waflo/database:typecheck: ◇ injected env (33) from ..\..\.env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+@waflo/database:typecheck: Loaded Prisma config from prisma.config.ts.
+@waflo/database:typecheck:
+@waflo/database:typecheck: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:typecheck:
+@waflo/database:typecheck: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 232ms
+@waflo/database:typecheck:
+@waflo/ui:typecheck: cache hit, replaying logs 381c407f4416cf08
+@waflo/ui:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/api:typecheck: cache hit, replaying logs 8f67fd34274b5982
+@waflo/api:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/merchant-dashboard:typecheck: cache hit, replaying logs 8dda1fbbeeb885f6
+@waflo/merchant-dashboard:typecheck: $ tsc --noEmit
+@waflo/marketing-web:typecheck: cache hit, replaying logs 882bd25554fa7fd1
+@waflo/marketing-web:typecheck: $ tsc --noEmit
+@waflo/customer-web:typecheck: cache hit, replaying logs 8b480481e8e73e79
+@waflo/customer-web:typecheck: $ tsc --noEmit
+
+ Tasks:    14 successful, 14 total
+Cached:    14 cached, 14 total
+  Time:    46ms >>> FULL TURBO
+
+exit_code=0

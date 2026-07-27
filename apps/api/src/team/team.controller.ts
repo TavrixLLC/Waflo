@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/
 import { invitationSchema, memberUpdateSchema, tokenSchema } from "@waflo/contracts";
 import { CurrentUser, Public, RateLimit } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseInput } from "../common/validation.js";
+import { parseInput, parseUuid } from "../common/validation.js";
 import { TeamService } from "./team.service.js";
 
 @Controller("v1/organizations/:organizationId")
@@ -11,7 +11,7 @@ export class TeamController {
 
   @Get("members")
   list(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
-    return this.team.list(user.id, organizationId);
+    return this.team.list(user.id, parseUuid(organizationId));
   }
 
   @Patch("members/:memberId")
@@ -24,8 +24,8 @@ export class TeamController {
   ) {
     return this.team.updateMember(
       user.id,
-      organizationId,
-      memberId,
+      parseUuid(organizationId),
+      parseUuid(memberId),
       parseInput(memberUpdateSchema, body),
       request,
     );
@@ -38,7 +38,7 @@ export class TeamController {
     @Param("memberId") memberId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.team.removeMember(user.id, organizationId, memberId, request);
+    return this.team.removeMember(user.id, parseUuid(organizationId), parseUuid(memberId), request);
   }
 
   @Get("invitations")
@@ -46,7 +46,7 @@ export class TeamController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
   ) {
-    return this.team.list(user.id, organizationId).then((result) => result.invitations);
+    return this.team.list(user.id, parseUuid(organizationId)).then((result) => result.invitations);
   }
 
   @Post("invitations")
@@ -58,7 +58,7 @@ export class TeamController {
     @Req() request: WafloRequest,
   ) {
     const input = parseInput(invitationSchema, body);
-    return this.team.invite(user.id, organizationId, input.email, input.role, request);
+    return this.team.invite(user.id, parseUuid(organizationId), input.email, input.role, request);
   }
 
   @Post("invitations/:invitationId/resend")
@@ -69,7 +69,7 @@ export class TeamController {
     @Param("invitationId") invitationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.team.resend(user.id, organizationId, invitationId, request);
+    return this.team.resend(user.id, parseUuid(organizationId), parseUuid(invitationId), request);
   }
 
   @Delete("invitations/:invitationId")
@@ -79,7 +79,7 @@ export class TeamController {
     @Param("invitationId") invitationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.team.cancel(user.id, organizationId, invitationId, request);
+    return this.team.cancel(user.id, parseUuid(organizationId), parseUuid(invitationId), request);
   }
 }
 
@@ -87,21 +87,22 @@ export class TeamController {
 export class InvitationsController {
   constructor(private readonly team: TeamService) {}
 
-  @Get(":token")
+  @Post("inspect")
   @Public()
   @RateLimit(20, 300)
-  inspect(@Param("token") token: string) {
-    return this.team.inspect(token);
+  inspect(@Body() body: unknown) {
+    const input = parseInput(tokenSchema, body);
+    return this.team.inspect(input.token);
   }
 
-  @Post(":token/accept")
+  @Post("accept")
   @RateLimit(10, 300)
   accept(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("token") token: string,
+    @Body() body: unknown,
     @Req() request: WafloRequest,
   ) {
-    parseInput(tokenSchema, { token });
-    return this.team.accept(user.id, token, request);
+    const input = parseInput(tokenSchema, body);
+    return this.team.accept(user.id, input.token, request);
   }
 }

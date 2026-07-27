@@ -45,6 +45,7 @@ let team: TeamService;
 let billing: BillingService;
 let hosts: HostResolutionService;
 let notifications: CapturedNotification[];
+let notificationProvider: NotificationService;
 
 let ownerId = "";
 let intruderId = "";
@@ -95,7 +96,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     audit = new AuditService(prisma);
     tenant = new TenantService(prisma, audit);
     notifications = [];
-    const notificationProvider = {
+    notificationProvider = {
       send: vi.fn(async (message: CapturedNotification) => {
         notifications.push(message);
       }),
@@ -104,7 +105,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     organizations = new OrganizationsService(prisma, tenant, environment, audit);
     locations = new LocationsService(prisma, tenant, environment, audit);
     team = new TeamService(prisma, tenant, environment, notificationProvider, audit);
-    billing = new BillingService(prisma, environment, tenant, audit);
+    billing = new BillingService(prisma, environment, tenant, audit, notificationProvider);
     hosts = new HostResolutionService(prisma, environment);
     await prisma.client.$queryRaw`SELECT 1`;
   });
@@ -337,6 +338,43 @@ describe.sequential("Waflo W1 service and database integration", () => {
       code: "LOCATION_LIMIT_REACHED",
       details: { recommendedPlan: "growth" },
     });
+  });
+
+  it("blocks a billing downgrade when current usage exceeds the requested plan", async () => {
+    const downgradeOrganization = await organizations.create(
+      ownerId,
+      {
+        name: `Downgrade Guard ${runId}`,
+        merchantSlug: `downgrade-${runId}`,
+        defaultLocale: "en",
+        timezone: "Asia/Baghdad",
+        selectedPlan: "growth",
+      },
+      request,
+    );
+    await locations.create(
+      ownerId,
+      downgradeOrganization.id,
+      { name: "Downgrade Location A" },
+      request,
+    );
+    await locations.create(
+      ownerId,
+      downgradeOrganization.id,
+      { name: "Downgrade Location B" },
+      request,
+    );
+    await expect(
+      billing.selectPlan(ownerId, downgradeOrganization.id, "starter", request),
+    ).rejects.toMatchObject({
+      code: "PLAN_DOWNGRADE_BLOCKED",
+      details: { requestedPlan: "starter", locationUsage: 2, locationLimit: 1 },
+    });
+    expect(
+      await prisma.client.organization.findUniqueOrThrow({
+        where: { id: downgradeOrganization.id },
+      }),
+    ).toMatchObject({ selectedPlan: "GROWTH" });
   });
 
   it("rejects cross-tenant organization, location, member, and billing access", async () => {
@@ -620,7 +658,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     const activeSlug = (await organizations.get(ownerId, organizationAId)).merchantSlug;
     await expect(hosts.resolve(`${activeSlug}.waflo.app`)).resolves.toMatchObject({
       status: "active",
-      merchant: { id: organizationAId, slug: activeSlug },
+      merchant: { slug: activeSlug },
     });
     await expect(hosts.resolve(`unknown-${runId}.waflo.app`)).resolves.toEqual({
       status: "unknown",
@@ -687,7 +725,13 @@ describe.sequential("Waflo W1 service and database integration", () => {
     process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
     process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
     const stripeEnvironment = new EnvironmentService();
-    const stripeBilling = new BillingService(prisma, stripeEnvironment, tenant, audit);
+    const stripeBilling = new BillingService(
+      prisma,
+      stripeEnvironment,
+      tenant,
+      audit,
+      notificationProvider,
+    );
     const eventId = `evt_${runId}`;
     const payload = JSON.stringify({
       id: eventId,
@@ -729,7 +773,13 @@ describe.sequential("Waflo W1 service and database integration", () => {
     process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
     process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
     process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
-    const stripeBilling = new BillingService(prisma, new EnvironmentService(), tenant, audit);
+    const stripeBilling = new BillingService(
+      prisma,
+      new EnvironmentService(),
+      tenant,
+      audit,
+      notificationProvider,
+    );
     await expect(
       stripeBilling.processWebhook(
         Buffer.from('{"id":"evt_invalid","object":"event"}'),

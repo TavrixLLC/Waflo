@@ -120,7 +120,6 @@ export const organizationUpdateSchema = z
     businessCategory: z.string().trim().max(80).nullable().optional(),
     defaultLocale: localeSchema.optional(),
     timezone: timezoneSchema.optional(),
-    selectedPlan: planCodeSchema.optional(),
   })
   .strict();
 

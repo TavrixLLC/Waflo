@@ -6,6 +6,7 @@ import type { Prisma } from "@waflo/database";
 import { allowedInvitationRoles, assertRoleAssignment, canManageMember } from "@waflo/permissions";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
+import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -44,8 +45,7 @@ export class TeamService {
       this.prisma.client.organizationInvitation.findMany({
         where: {
           organizationId,
-          acceptedAt: null,
-          canceledAt: null,
+          status: "PENDING",
           expiresAt: { gt: now },
         },
         select: {
@@ -67,8 +67,7 @@ export class TeamService {
       this.prisma.client.organizationInvitation.count({
         where: {
           organizationId,
-          acceptedAt: null,
-          canceledAt: null,
+          status: "PENDING",
           expiresAt: { gt: now },
           intendedRole: { in: ["MANAGER", "STAFF"] },
         },
@@ -83,21 +82,23 @@ export class TeamService {
     return { members, invitations, usage };
   }
 
-  private async currentSeatUsage(organizationId: string): Promise<number> {
+  private async currentSeatUsage(
+    transaction: Prisma.TransactionClient,
+    organizationId: string,
+  ): Promise<number> {
     const now = new Date();
     const [active, pending] = await Promise.all([
-      this.prisma.client.organizationMember.count({
+      transaction.organizationMember.count({
         where: {
           organizationId,
           status: "ACTIVE",
           role: { in: ["MANAGER", "STAFF"] },
         },
       }),
-      this.prisma.client.organizationInvitation.count({
+      transaction.organizationInvitation.count({
         where: {
           organizationId,
-          acceptedAt: null,
-          canceledAt: null,
+          status: "PENDING",
           expiresAt: { gt: now },
           intendedRole: { in: ["MANAGER", "STAFF"] },
         },
@@ -113,8 +114,12 @@ export class TeamService {
     role: "MANAGER" | "STAFF",
     request: WafloRequest,
   ) {
-    const membership = await this.tenant.requireMembership(userId, organizationId, "team.invite");
-    if (!allowedInvitationRoles(membership.role as MemberRole).includes(role)) {
+    const initialMembership = await this.tenant.requireMembership(
+      userId,
+      organizationId,
+      "team.invite",
+    );
+    if (!allowedInvitationRoles(initialMembership.role as MemberRole).includes(role)) {
       throw new AppError(
         "INVITATION_ROLE_FORBIDDEN",
         "Your role cannot invite this team role.",
@@ -122,78 +127,100 @@ export class TeamService {
       );
     }
     const normalizedEmail = normalizeEmail(emailInput);
-    const activeMember = await this.prisma.client.organizationMember.findFirst({
-      where: {
-        organizationId,
-        user: { normalizedEmail },
-        status: { not: "REMOVED" },
-      },
-    });
-    if (activeMember) {
-      throw new AppError(
-        "ALREADY_A_MEMBER",
-        "This person already belongs to the organization.",
-        HttpStatus.CONFLICT,
-      );
-    }
-    const duplicate = await this.prisma.client.organizationInvitation.findFirst({
-      where: {
-        organizationId,
-        normalizedEmail,
-        acceptedAt: null,
-        canceledAt: null,
-        expiresAt: { gt: new Date() },
-      },
-    });
-    if (duplicate) {
-      throw new AppError(
-        "ACTIVE_INVITATION_EXISTS",
-        "An active invitation already exists for this email.",
-        HttpStatus.CONFLICT,
-      );
-    }
-    const plan = toPlanCode(membership.organization.selectedPlan);
-    const usage = await this.currentSeatUsage(organizationId);
-    const decision = canInviteTeamMember(
-      plan,
-      usage,
-      plan === "scale" ? this.environment.values.SCALE_TEAM_LIMIT : undefined,
-    );
-    if (!decision.allowed) {
-      throw new AppError(
-        "TEAM_LIMIT_REACHED",
-        "Your current plan has reached its team seat limit.",
-        HttpStatus.CONFLICT,
-        {
-          limit: decision.limit,
-          currentUsage: decision.currentUsage,
-          recommendedPlan: decision.recommendedPlan,
-        },
-      );
-    }
     const rawToken = createOpaqueToken();
     const expiresAt = new Date(
       Date.now() + this.environment.values.INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000,
     );
-    const invitation = await this.prisma.client.organizationInvitation.create({
-      data: {
-        organizationId,
-        email: emailInput,
-        normalizedEmail,
-        intendedRole: role,
-        tokenHash: hashOpaqueToken(rawToken),
-        invitedByUserId: userId,
-        expiresAt,
+    const invitation = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const now = new Date();
+        const actor = await transaction.organizationMember.findUnique({
+          where: { organizationId_userId: { organizationId, userId } },
+        });
+        if (
+          actor?.status !== "ACTIVE" ||
+          !allowedInvitationRoles(actor.role as MemberRole).includes(role)
+        ) {
+          throw new AppError(
+            "INVITATION_ROLE_FORBIDDEN",
+            "Your role cannot invite this team role.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        await transaction.organizationInvitation.updateMany({
+          where: { organizationId, status: "PENDING", expiresAt: { lte: now } },
+          data: { status: "EXPIRED" },
+        });
+        const existingMember = await transaction.organizationMember.findFirst({
+          where: {
+            organizationId,
+            user: { normalizedEmail },
+            status: { not: "REMOVED" },
+          },
+        });
+        if (existingMember) {
+          throw new AppError(
+            "ALREADY_A_MEMBER",
+            "This person already belongs to the organization.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const duplicate = await transaction.organizationInvitation.findFirst({
+          where: { organizationId, normalizedEmail, status: "PENDING" },
+        });
+        if (duplicate) {
+          throw new AppError(
+            "ACTIVE_INVITATION_EXISTS",
+            "An active invitation already exists for this email.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const organization = await transaction.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+        });
+        const plan = toPlanCode(organization.selectedPlan);
+        const usage = await this.currentSeatUsage(transaction, organizationId);
+        const decision = canInviteTeamMember(
+          plan,
+          usage,
+          plan === "scale" ? this.environment.values.SCALE_TEAM_LIMIT : undefined,
+        );
+        if (!decision.allowed) {
+          throw new AppError(
+            "TEAM_LIMIT_REACHED",
+            "Your current plan has reached its team seat limit.",
+            HttpStatus.CONFLICT,
+            {
+              limit: decision.limit,
+              currentUsage: decision.currentUsage,
+              recommendedPlan: decision.recommendedPlan,
+            },
+          );
+        }
+        return transaction.organizationInvitation.create({
+          data: {
+            organizationId,
+            email: emailInput,
+            normalizedEmail,
+            intendedRole: role,
+            tokenHash: hashOpaqueToken(rawToken),
+            invitedByUserId: userId,
+            expiresAt,
+            status: "PENDING",
+          },
+          include: { organization: true },
+        });
       },
-      include: { organization: true },
-    });
+    );
     const locale = invitation.organization.defaultLocale === "AR" ? "ar" : "en";
     await this.notifications.send({
       to: invitation.email,
       locale,
       kind: "team_invitation",
       organizationName: invitation.organization.name,
-      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite/${encodeURIComponent(rawToken)}`,
+      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite?token=${encodeURIComponent(rawToken)}`,
     });
     await this.audit.record(
       {
@@ -221,32 +248,93 @@ export class TeamService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "team.invite");
-    const invitation = await this.prisma.client.organizationInvitation.findFirst({
-      where: { id: invitationId, organizationId, acceptedAt: null, canceledAt: null },
-      include: { organization: true },
-    });
-    if (!invitation) {
-      throw new AppError(
-        "INVITATION_NOT_FOUND",
-        "This invitation is no longer available.",
-        HttpStatus.NOT_FOUND,
-      );
-    }
     const rawToken = createOpaqueToken();
     const expiresAt = new Date(
       Date.now() + this.environment.values.INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000,
     );
-    await this.prisma.client.organizationInvitation.update({
-      where: { id: invitation.id },
-      data: { tokenHash: hashOpaqueToken(rawToken), expiresAt },
-    });
+    const invitation = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const now = new Date();
+        await transaction.organizationInvitation.updateMany({
+          where: { organizationId, status: "PENDING", expiresAt: { lte: now } },
+          data: { status: "EXPIRED" },
+        });
+        const [actor, current] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.organizationInvitation.findFirst({
+            where: { id: invitationId, organizationId },
+            include: { organization: true },
+          }),
+        ]);
+        if (
+          actor?.status !== "ACTIVE" ||
+          !current ||
+          current.status === "ACCEPTED" ||
+          current.status === "CANCELED"
+        ) {
+          throw new AppError(
+            "INVITATION_NOT_FOUND",
+            "This invitation is no longer available.",
+            HttpStatus.NOT_FOUND,
+          );
+        }
+        if (
+          !allowedInvitationRoles(actor.role as MemberRole).includes(
+            current.intendedRole as MemberRole,
+          )
+        ) {
+          throw new AppError(
+            "INVITATION_MANAGEMENT_FORBIDDEN",
+            "Your role cannot manage this invitation.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (current.status === "EXPIRED") {
+          const organization = current.organization;
+          const plan = toPlanCode(organization.selectedPlan);
+          const usage = await this.currentSeatUsage(transaction, organizationId);
+          const decision = canInviteTeamMember(
+            plan,
+            usage,
+            plan === "scale" ? this.environment.values.SCALE_TEAM_LIMIT : undefined,
+          );
+          if (!decision.allowed) {
+            throw new AppError(
+              "TEAM_LIMIT_REACHED",
+              "Your current plan has reached its team seat limit.",
+              HttpStatus.CONFLICT,
+              {
+                limit: decision.limit,
+                currentUsage: decision.currentUsage,
+                recommendedPlan: decision.recommendedPlan,
+              },
+            );
+          }
+        }
+        return transaction.organizationInvitation.update({
+          where: { id: current.id },
+          data: {
+            tokenHash: hashOpaqueToken(rawToken),
+            expiresAt,
+            status: "PENDING",
+            acceptedAt: null,
+            canceledAt: null,
+          },
+          include: { organization: true },
+        });
+      },
+    );
     const locale = invitation.organization.defaultLocale === "AR" ? "ar" : "en";
     await this.notifications.send({
       to: invitation.email,
       locale,
       kind: "team_invitation",
       organizationName: invitation.organization.name,
-      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite/${encodeURIComponent(rawToken)}`,
+      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite?token=${encodeURIComponent(rawToken)}`,
     });
     await this.audit.record(
       {
@@ -268,17 +356,50 @@ export class TeamService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "team.invite");
-    const result = await this.prisma.client.organizationInvitation.updateMany({
-      where: { id: invitationId, organizationId, acceptedAt: null, canceledAt: null },
-      data: { canceledAt: new Date() },
+    await withOrganizationInvariantLock(this.prisma.client, organizationId, async (transaction) => {
+      const now = new Date();
+      await transaction.organizationInvitation.updateMany({
+        where: { organizationId, status: "PENDING", expiresAt: { lte: now } },
+        data: { status: "EXPIRED" },
+      });
+      const [actor, invitation] = await Promise.all([
+        transaction.organizationMember.findUnique({
+          where: { organizationId_userId: { organizationId, userId } },
+        }),
+        transaction.organizationInvitation.findFirst({
+          where: { id: invitationId, organizationId, status: "PENDING" },
+        }),
+      ]);
+      if (!invitation || actor?.status !== "ACTIVE") {
+        throw new AppError(
+          "INVITATION_NOT_FOUND",
+          "This invitation is no longer available.",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      if (
+        !allowedInvitationRoles(actor.role as MemberRole).includes(
+          invitation.intendedRole as MemberRole,
+        )
+      ) {
+        throw new AppError(
+          "INVITATION_MANAGEMENT_FORBIDDEN",
+          "Your role cannot manage this invitation.",
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      const result = await transaction.organizationInvitation.updateMany({
+        where: { id: invitation.id, status: "PENDING" },
+        data: { status: "CANCELED", canceledAt: now },
+      });
+      if (result.count !== 1) {
+        throw new AppError(
+          "INVITATION_NOT_FOUND",
+          "This invitation is no longer available.",
+          HttpStatus.NOT_FOUND,
+        );
+      }
     });
-    if (result.count === 0) {
-      throw new AppError(
-        "INVITATION_NOT_FOUND",
-        "This invitation is no longer available.",
-        HttpStatus.NOT_FOUND,
-      );
-    }
     await this.audit.record(
       {
         organizationId,
@@ -297,21 +418,27 @@ export class TeamService {
       where: { tokenHash: hashOpaqueToken(rawToken) },
       include: { organization: { select: { name: true, defaultLocale: true } } },
     });
-    if (!invitation || invitation.canceledAt) {
+    if (!invitation || invitation.status === "CANCELED") {
       throw new AppError(
         "INVITATION_UNAVAILABLE",
         "This invitation is unavailable.",
         HttpStatus.GONE,
       );
     }
-    if (invitation.acceptedAt) {
+    if (invitation.status === "ACCEPTED") {
       throw new AppError(
         "INVITATION_ALREADY_ACCEPTED",
         "This invitation has already been accepted.",
         HttpStatus.GONE,
       );
     }
-    if (invitation.expiresAt <= new Date()) {
+    if (invitation.status === "EXPIRED" || invitation.expiresAt <= new Date()) {
+      if (invitation.status === "PENDING") {
+        await this.prisma.client.organizationInvitation.updateMany({
+          where: { id: invitation.id, status: "PENDING", expiresAt: { lte: new Date() } },
+          data: { status: "EXPIRED" },
+        });
+      }
       throw new AppError("INVITATION_EXPIRED", "This invitation has expired.", HttpStatus.GONE);
     }
     return {
@@ -324,23 +451,13 @@ export class TeamService {
   }
 
   async accept(userId: string, rawToken: string, request: WafloRequest) {
-    const invitation = await this.prisma.client.organizationInvitation.findUnique({
+    const invitationReference = await this.prisma.client.organizationInvitation.findUnique({
       where: { tokenHash: hashOpaqueToken(rawToken) },
-      include: { organization: true, invitedBy: true },
+      select: { organizationId: true },
     });
     const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!invitation || invitation.canceledAt) {
+    if (!invitationReference) {
       throw new AppError("INVITATION_CANCELED", "This invitation is unavailable.", HttpStatus.GONE);
-    }
-    if (invitation.acceptedAt) {
-      throw new AppError(
-        "INVITATION_ALREADY_ACCEPTED",
-        "This invitation has already been accepted.",
-        HttpStatus.GONE,
-      );
-    }
-    if (invitation.expiresAt <= new Date()) {
-      throw new AppError("INVITATION_EXPIRED", "This invitation has expired.", HttpStatus.GONE);
     }
     if (!user.emailVerifiedAt) {
       throw new AppError(
@@ -349,38 +466,85 @@ export class TeamService {
         HttpStatus.FORBIDDEN,
       );
     }
-    if (user.normalizedEmail !== invitation.normalizedEmail) {
+    const outcome = await withOrganizationInvariantLock(
+      this.prisma.client,
+      invitationReference.organizationId,
+      async (transaction) => {
+        const invitation = await transaction.organizationInvitation.findUnique({
+          where: { tokenHash: hashOpaqueToken(rawToken) },
+          include: { organization: true, invitedBy: true },
+        });
+        if (!invitation || invitation.status === "CANCELED") {
+          return { kind: "canceled" as const };
+        }
+        if (invitation.status === "ACCEPTED") {
+          return { kind: "accepted" as const };
+        }
+        const now = new Date();
+        if (invitation.status === "EXPIRED" || invitation.expiresAt <= now) {
+          await transaction.organizationInvitation.updateMany({
+            where: { id: invitation.id, status: "PENDING", expiresAt: { lte: now } },
+            data: { status: "EXPIRED" },
+          });
+          return { kind: "expired" as const };
+        }
+        if (user.normalizedEmail !== invitation.normalizedEmail) {
+          return { kind: "email_mismatch" as const };
+        }
+        const claim = await transaction.organizationInvitation.updateMany({
+          where: {
+            id: invitation.id,
+            status: "PENDING",
+            acceptedAt: null,
+            canceledAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { status: "ACCEPTED", acceptedAt: now },
+        });
+        if (claim.count !== 1) return { kind: "accepted" as const };
+        await transaction.organizationMember.upsert({
+          where: {
+            organizationId_userId: { organizationId: invitation.organizationId, userId },
+          },
+          update: {
+            role: invitation.intendedRole,
+            status: "ACTIVE",
+            joinedAt: now,
+          },
+          create: {
+            organizationId: invitation.organizationId,
+            userId,
+            role: invitation.intendedRole,
+          },
+        });
+        await transaction.user.update({
+          where: { id: userId },
+          data: { lastSelectedOrganizationId: invitation.organizationId },
+        });
+        return { kind: "success" as const, invitation };
+      },
+    );
+    if (outcome.kind === "canceled") {
+      throw new AppError("INVITATION_CANCELED", "This invitation is unavailable.", HttpStatus.GONE);
+    }
+    if (outcome.kind === "accepted") {
+      throw new AppError(
+        "INVITATION_ALREADY_ACCEPTED",
+        "This invitation has already been accepted.",
+        HttpStatus.GONE,
+      );
+    }
+    if (outcome.kind === "expired") {
+      throw new AppError("INVITATION_EXPIRED", "This invitation has expired.", HttpStatus.GONE);
+    }
+    if (outcome.kind === "email_mismatch") {
       throw new AppError(
         "INVITATION_EMAIL_MISMATCH",
         "Sign in with the email address that received this invitation.",
         HttpStatus.FORBIDDEN,
       );
     }
-    await this.prisma.client.$transaction(async (transaction: Prisma.TransactionClient) => {
-      await transaction.organizationMember.upsert({
-        where: {
-          organizationId_userId: { organizationId: invitation.organizationId, userId },
-        },
-        update: {
-          role: invitation.intendedRole,
-          status: "ACTIVE",
-          joinedAt: new Date(),
-        },
-        create: {
-          organizationId: invitation.organizationId,
-          userId,
-          role: invitation.intendedRole,
-        },
-      });
-      await transaction.organizationInvitation.update({
-        where: { id: invitation.id },
-        data: { acceptedAt: new Date() },
-      });
-      await transaction.user.update({
-        where: { id: userId },
-        data: { lastSelectedOrganizationId: invitation.organizationId },
-      });
-    });
+    const invitation = outcome.invitation;
     await this.audit.record(
       {
         organizationId: invitation.organizationId,
@@ -410,46 +574,90 @@ export class TeamService {
     },
     request: WafloRequest,
   ) {
-    const actor = await this.tenant.requireMembership(userId, organizationId, "team.view");
-    const target = await this.prisma.client.organizationMember.findFirst({
-      where: { id: memberId, organizationId, status: { not: "REMOVED" } },
-    });
-    if (!target) {
-      throw new AppError("MEMBER_NOT_FOUND", "Team member not found.", HttpStatus.NOT_FOUND);
-    }
-    if (!canManageMember(actor.role as MemberRole, target.role as MemberRole)) {
-      throw new AppError(
-        "MEMBER_MANAGEMENT_FORBIDDEN",
-        "Your role cannot manage this team member.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
-    if (input.role) {
-      if (!assertRoleAssignment(actor.role as MemberRole, input.role)) {
-        throw new AppError(
-          "ROLE_ASSIGNMENT_FORBIDDEN",
-          "This role assignment is not allowed.",
-          HttpStatus.FORBIDDEN,
-        );
-      }
-      if (target.role === "OWNER") {
-        await this.ensureNotFinalOwner(organizationId, target.id);
-      }
-    }
-    const updated = await this.prisma.client.organizationMember.update({
-      where: { id: target.id },
-      data: {
-        ...(input.role ? { role: input.role } : {}),
-        ...(input.status ? { status: input.status } : {}),
+    await this.tenant.requireMembership(userId, organizationId, "team.view");
+    const updated = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const [actor, target, organization] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.organizationMember.findFirst({
+            where: { id: memberId, organizationId, status: { not: "REMOVED" } },
+          }),
+          transaction.organization.findUniqueOrThrow({ where: { id: organizationId } }),
+        ]);
+        if (!target) {
+          throw new AppError("MEMBER_NOT_FOUND", "Team member not found.", HttpStatus.NOT_FOUND);
+        }
+        if (
+          actor?.status !== "ACTIVE" ||
+          !canManageMember(actor.role as MemberRole, target.role as MemberRole)
+        ) {
+          throw new AppError(
+            "MEMBER_MANAGEMENT_FORBIDDEN",
+            "Your role cannot manage this team member.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (input.role && !assertRoleAssignment(actor.role as MemberRole, input.role)) {
+          throw new AppError(
+            "ROLE_ASSIGNMENT_FORBIDDEN",
+            "This role assignment is not allowed.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        const removesActiveOwner =
+          target.role === "OWNER" &&
+          target.status === "ACTIVE" &&
+          ((input.role !== undefined && input.role !== "OWNER") ||
+            (input.status !== undefined && input.status !== "ACTIVE"));
+        if (removesActiveOwner) {
+          await this.ensureNotFinalOwner(transaction, organizationId, target.id);
+        }
+        const effectiveRole = input.role ?? (target.role as MemberRole);
+        const reactivatesSeat =
+          target.status !== "ACTIVE" &&
+          input.status === "ACTIVE" &&
+          (effectiveRole === "MANAGER" || effectiveRole === "STAFF");
+        if (reactivatesSeat) {
+          const plan = toPlanCode(organization.selectedPlan);
+          const usage = await this.currentSeatUsage(transaction, organizationId);
+          const decision = canInviteTeamMember(
+            plan,
+            usage,
+            plan === "scale" ? this.environment.values.SCALE_TEAM_LIMIT : undefined,
+          );
+          if (!decision.allowed) {
+            throw new AppError(
+              "TEAM_LIMIT_REACHED",
+              "Your current plan has reached its team seat limit.",
+              HttpStatus.CONFLICT,
+              {
+                limit: decision.limit,
+                currentUsage: decision.currentUsage,
+                recommendedPlan: decision.recommendedPlan,
+              },
+            );
+          }
+        }
+        return transaction.organizationMember.update({
+          where: { id: target.id },
+          data: {
+            ...(input.role ? { role: input.role } : {}),
+            ...(input.status ? { status: input.status } : {}),
+          },
+        });
       },
-    });
+    );
     await this.audit.record(
       {
         organizationId,
         actorUserId: userId,
         action: input.role ? "member.role_changed" : "member.status_changed",
         targetType: "organization_member",
-        targetId: target.id,
+        targetId: updated.id,
         metadata: { role: input.role, status: input.status },
       },
       request,
@@ -463,25 +671,42 @@ export class TeamService {
     memberId: string,
     request: WafloRequest,
   ) {
-    const actor = await this.tenant.requireMembership(userId, organizationId, "team.remove");
-    const target = await this.prisma.client.organizationMember.findFirst({
-      where: { id: memberId, organizationId, status: { not: "REMOVED" } },
-    });
-    if (!target) {
-      throw new AppError("MEMBER_NOT_FOUND", "Team member not found.", HttpStatus.NOT_FOUND);
-    }
-    if (!canManageMember(actor.role as MemberRole, target.role as MemberRole)) {
-      throw new AppError(
-        "MEMBER_REMOVAL_FORBIDDEN",
-        "Your role cannot remove this team member.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
-    if (target.role === "OWNER") await this.ensureNotFinalOwner(organizationId, target.id);
-    await this.prisma.client.organizationMember.update({
-      where: { id: target.id },
-      data: { status: "REMOVED" },
-    });
+    await this.tenant.requireMembership(userId, organizationId, "team.remove");
+    const target = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const [actor, current] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.organizationMember.findFirst({
+            where: { id: memberId, organizationId, status: { not: "REMOVED" } },
+          }),
+        ]);
+        if (!current) {
+          throw new AppError("MEMBER_NOT_FOUND", "Team member not found.", HttpStatus.NOT_FOUND);
+        }
+        if (
+          actor?.status !== "ACTIVE" ||
+          !canManageMember(actor.role as MemberRole, current.role as MemberRole)
+        ) {
+          throw new AppError(
+            "MEMBER_REMOVAL_FORBIDDEN",
+            "Your role cannot remove this team member.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (current.role === "OWNER" && current.status === "ACTIVE") {
+          await this.ensureNotFinalOwner(transaction, organizationId, current.id);
+        }
+        await transaction.organizationMember.update({
+          where: { id: current.id },
+          data: { status: "REMOVED" },
+        });
+        return current;
+      },
+    );
     await this.audit.record(
       {
         organizationId,
@@ -495,8 +720,12 @@ export class TeamService {
     return { status: "removed" };
   }
 
-  private async ensureNotFinalOwner(organizationId: string, memberId: string): Promise<void> {
-    const activeOwners = await this.prisma.client.organizationMember.count({
+  private async ensureNotFinalOwner(
+    transaction: Prisma.TransactionClient,
+    organizationId: string,
+    memberId: string,
+  ): Promise<void> {
+    const activeOwners = await transaction.organizationMember.count({
       where: { organizationId, role: "OWNER", status: "ACTIVE", id: { not: memberId } },
     });
     if (activeOwners < 1) {

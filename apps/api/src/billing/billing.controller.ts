@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from "@nestjs
 import { selectedPlanSchema } from "@waflo/contracts";
 import { CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseInput } from "../common/validation.js";
+import { parseInput, parseUuid } from "../common/validation.js";
 import { BillingService } from "./billing.service.js";
 
 @Controller("v1/organizations/:organizationId/billing")
@@ -11,7 +11,7 @@ export class BillingController {
 
   @Get()
   get(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
-    return this.billing.get(user.id, organizationId);
+    return this.billing.get(user.id, parseUuid(organizationId));
   }
 
   @Patch("selected-plan")
@@ -22,7 +22,7 @@ export class BillingController {
     @Req() request: WafloRequest,
   ) {
     const input = parseInput(selectedPlanSchema, body);
-    return this.billing.selectPlan(user.id, organizationId, input.plan, request);
+    return this.billing.selectPlan(user.id, parseUuid(organizationId), input.plan, request);
   }
 
   @Post("checkout")
@@ -32,7 +32,7 @@ export class BillingController {
     @Param("organizationId") organizationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.billing.checkout(user.id, organizationId, request);
+    return this.billing.checkout(user.id, parseUuid(organizationId), request);
   }
 
   @Post("portal")
@@ -42,7 +42,7 @@ export class BillingController {
     @Param("organizationId") organizationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.billing.portal(user.id, organizationId, request);
+    return this.billing.portal(user.id, parseUuid(organizationId), request);
   }
 }
 

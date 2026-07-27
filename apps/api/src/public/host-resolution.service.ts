@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable } from "@nestjs/common";
+import { AppError } from "../common/app-error.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { reservedSlugs } from "../tenancy/slug.js";
@@ -38,6 +39,13 @@ export class HostResolutionService {
   ) {}
 
   async resolve(host: string, developmentOverride?: string) {
+    if (developmentOverride && this.environment.values.NODE_ENV === "production") {
+      throw new AppError(
+        "TENANT_OVERRIDE_FORBIDDEN",
+        "Tenant overrides are disabled in production.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const effectiveHost =
       developmentOverride && this.environment.values.NODE_ENV !== "production"
         ? `${developmentOverride}.localhost`
@@ -55,7 +63,6 @@ export class HostResolutionService {
     const organization = await this.prisma.client.organization.findUnique({
       where: { merchantSlug: parsed.slug ?? "" },
       select: {
-        id: true,
         name: true,
         merchantSlug: true,
         defaultLocale: true,
@@ -71,7 +78,6 @@ export class HostResolutionService {
     return {
       status: "active" as HostResolutionStatus,
       merchant: {
-        id: organization.id,
         name: organization.name,
         slug: organization.merchantSlug,
         defaultLocale: organization.defaultLocale === "AR" ? "ar" : "en",

@@ -259,18 +259,21 @@ export function LoginForm({ locale }: { locale: Locale }) {
   );
 }
 
-export function VerificationForm({ locale, token }: { locale: Locale; token?: string }) {
+export function VerificationForm({ locale }: { locale: Locale }) {
   const ar = locale === "ar";
-  const [state, setState] = useState<"pending" | "verifying" | "verified" | "error">(
-    token ? "verifying" : "pending",
-  );
+  const [state, setState] = useState<"pending" | "verifying" | "verified" | "error">("pending");
   const [message, setMessage] = useState("");
   const [resending, setResending] = useState(false);
   const email =
     typeof window === "undefined" ? "" : (sessionStorage.getItem("waflo:verification-email") ?? "");
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get("token");
+    url.searchParams.delete("token");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     if (!token) return;
+    setState("verifying");
     void apiFetch("/v1/auth/verify-email", {
       method: "POST",
       body: JSON.stringify({ token }),
@@ -285,7 +288,7 @@ export function VerificationForm({ locale, token }: { locale: Locale; token?: st
         );
         setState("error");
       });
-  }, [token, ar]);
+  }, [ar]);
 
   async function resend() {
     if (!email) return;
@@ -341,7 +344,7 @@ export function VerificationForm({ locale, token }: { locale: Locale; token?: st
       </p>
       {state === "error" ? <Alert tone="danger" title={message} /> : null}
       {message && state !== "error" ? <Alert tone="success" title={message} /> : null}
-      {!token ? (
+      {state === "pending" ? (
         <Button variant="secondary" onClick={resend} loading={resending} disabled={!email}>
           {ar ? "إعادة إرسال الرسالة" : "Resend verification email"}
         </Button>
@@ -407,11 +410,19 @@ export function ForgotPasswordForm({ locale }: { locale: Locale }) {
   );
 }
 
-export function ResetPasswordForm({ locale, token }: { locale: Locale; token?: string }) {
+export function ResetPasswordForm({ locale }: { locale: Locale }) {
   const ar = locale === "ar";
+  const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [complete, setComplete] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const capturedToken = url.searchParams.get("token") ?? "";
+    url.searchParams.delete("token");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    setToken(capturedToken);
+  }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token) {

@@ -1,9 +1,9 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { canCreateLocation } from "@waflo/billing";
 import type { LocationInput } from "@waflo/contracts";
-import type { Prisma } from "@waflo/database";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
+import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -69,14 +69,25 @@ export class LocationsService {
     input: LocationInput,
     request: WafloRequest,
   ) {
-    const membership = await this.tenant.requireMembership(
-      userId,
+    await this.tenant.requireMembership(userId, organizationId, "locations.create");
+    const location = await withOrganizationInvariantLock(
+      this.prisma.client,
       organizationId,
-      "locations.create",
-    );
-    const plan = toPlanCode(membership.organization.selectedPlan);
-    const location = await this.prisma.client.$transaction(
-      async (transaction: Prisma.TransactionClient) => {
+      async (transaction) => {
+        const [actor, organization] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.organization.findUniqueOrThrow({ where: { id: organizationId } }),
+        ]);
+        if (actor?.status !== "ACTIVE" || (actor.role !== "OWNER" && actor.role !== "MANAGER")) {
+          throw new AppError(
+            "PERMISSION_DENIED",
+            "Your role does not allow this action.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        const plan = toPlanCode(organization.selectedPlan);
         const activeCount = await transaction.location.count({
           where: { organizationId, status: "ACTIVE" },
         });
@@ -109,11 +120,10 @@ export class LocationsService {
             postalCode: input.postalCode ?? null,
             countryCode: input.countryCode ?? null,
             phone: input.phone ?? null,
-            timezone: input.timezone ?? membership.organization.timezone,
+            timezone: input.timezone ?? organization.timezone,
           },
         });
       },
-      { isolationLevel: "Serializable" },
     );
     await this.audit.record(
       {
@@ -179,22 +189,43 @@ export class LocationsService {
 
   async archive(userId: string, organizationId: string, locationId: string, request: WafloRequest) {
     await this.tenant.requireMembership(userId, organizationId, "locations.archive");
-    const location = await this.get(userId, organizationId, locationId);
-    if (location.status === "ARCHIVED") return location;
-    const activeCount = await this.prisma.client.location.count({
-      where: { organizationId, status: "ACTIVE" },
-    });
-    if (activeCount <= 1) {
-      throw new AppError(
-        "FINAL_LOCATION_REQUIRED",
-        "Your organization must keep at least one active location.",
-        HttpStatus.CONFLICT,
-      );
-    }
-    const updated = await this.prisma.client.location.update({
-      where: { id: locationId },
-      data: { status: "ARCHIVED", archivedAt: new Date() },
-    });
+    const updated = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const [actor, location] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.location.findFirst({ where: { id: locationId, organizationId } }),
+        ]);
+        if (actor?.status !== "ACTIVE" || (actor.role !== "OWNER" && actor.role !== "MANAGER")) {
+          throw new AppError(
+            "PERMISSION_DENIED",
+            "Your role does not allow this action.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (!location) {
+          throw new AppError("LOCATION_NOT_FOUND", "Location not found.", HttpStatus.NOT_FOUND);
+        }
+        if (location.status === "ARCHIVED") return location;
+        const activeCount = await transaction.location.count({
+          where: { organizationId, status: "ACTIVE" },
+        });
+        if (activeCount <= 1) {
+          throw new AppError(
+            "FINAL_LOCATION_REQUIRED",
+            "Your organization must keep at least one active location.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        return transaction.location.update({
+          where: { id: locationId },
+          data: { status: "ARCHIVED", archivedAt: new Date() },
+        });
+      },
+    );
     await this.audit.record(
       {
         organizationId,
@@ -210,38 +241,56 @@ export class LocationsService {
   }
 
   async restore(userId: string, organizationId: string, locationId: string, request: WafloRequest) {
-    const membership = await this.tenant.requireMembership(
-      userId,
+    await this.tenant.requireMembership(userId, organizationId, "locations.manage");
+    const updated = await withOrganizationInvariantLock(
+      this.prisma.client,
       organizationId,
-      "locations.manage",
+      async (transaction) => {
+        const [actor, organization, location] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.organization.findUniqueOrThrow({ where: { id: organizationId } }),
+          transaction.location.findFirst({ where: { id: locationId, organizationId } }),
+        ]);
+        if (actor?.status !== "ACTIVE" || (actor.role !== "OWNER" && actor.role !== "MANAGER")) {
+          throw new AppError(
+            "PERMISSION_DENIED",
+            "Your role does not allow this action.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (!location) {
+          throw new AppError("LOCATION_NOT_FOUND", "Location not found.", HttpStatus.NOT_FOUND);
+        }
+        if (location.status === "ACTIVE") return location;
+        const activeCount = await transaction.location.count({
+          where: { organizationId, status: "ACTIVE" },
+        });
+        const plan = toPlanCode(organization.selectedPlan);
+        const decision = canCreateLocation(
+          plan,
+          activeCount,
+          plan === "scale" ? this.environment.values.SCALE_LOCATION_LIMIT : undefined,
+        );
+        if (!decision.allowed) {
+          throw new AppError(
+            "LOCATION_LIMIT_REACHED",
+            "This location cannot be restored until capacity is available.",
+            HttpStatus.CONFLICT,
+            {
+              limit: decision.limit,
+              currentUsage: decision.currentUsage,
+              recommendedPlan: decision.recommendedPlan,
+            },
+          );
+        }
+        return transaction.location.update({
+          where: { id: locationId },
+          data: { status: "ACTIVE", archivedAt: null },
+        });
+      },
     );
-    const location = await this.get(userId, organizationId, locationId);
-    if (location.status === "ACTIVE") return location;
-    const activeCount = await this.prisma.client.location.count({
-      where: { organizationId, status: "ACTIVE" },
-    });
-    const plan = toPlanCode(membership.organization.selectedPlan);
-    const decision = canCreateLocation(
-      plan,
-      activeCount,
-      plan === "scale" ? this.environment.values.SCALE_LOCATION_LIMIT : undefined,
-    );
-    if (!decision.allowed) {
-      throw new AppError(
-        "LOCATION_LIMIT_REACHED",
-        "This location cannot be restored until capacity is available.",
-        HttpStatus.CONFLICT,
-        {
-          limit: decision.limit,
-          currentUsage: decision.currentUsage,
-          recommendedPlan: decision.recommendedPlan,
-        },
-      );
-    }
-    const updated = await this.prisma.client.location.update({
-      where: { id: locationId },
-      data: { status: "ACTIVE", archivedAt: null },
-    });
     await this.audit.record(
       {
         organizationId,

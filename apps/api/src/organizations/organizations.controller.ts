@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/c
 import { organizationSchema, organizationUpdateSchema, slugChangeSchema } from "@waflo/contracts";
 import { CurrentUser, RateLimit } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseInput } from "../common/validation.js";
+import { parseInput, parseUuid } from "../common/validation.js";
 import { OrganizationsService } from "./organizations.service.js";
 
 @Controller("v1/organizations")
@@ -25,7 +25,7 @@ export class OrganizationsController {
 
   @Get(":organizationId")
   get(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
-    return this.organizations.get(user.id, organizationId);
+    return this.organizations.get(user.id, parseUuid(organizationId));
   }
 
   @Patch(":organizationId")
@@ -37,7 +37,7 @@ export class OrganizationsController {
   ) {
     return this.organizations.update(
       user.id,
-      organizationId,
+      parseUuid(organizationId),
       parseInput(organizationUpdateSchema, body),
       request,
     );
@@ -45,7 +45,7 @@ export class OrganizationsController {
 
   @Post(":organizationId/select")
   select(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
-    return this.organizations.select(user.id, organizationId);
+    return this.organizations.select(user.id, parseUuid(organizationId));
   }
 
   @Get(":organizationId/slug-availability")
@@ -55,8 +55,9 @@ export class OrganizationsController {
     @Param("organizationId") organizationId: string,
     @Query("slug") slug = "",
   ) {
-    await this.organizations.get(user.id, organizationId);
-    return this.organizations.slugAvailability(slug, organizationId);
+    const parsedOrganizationId = parseUuid(organizationId);
+    await this.organizations.get(user.id, parsedOrganizationId);
+    return this.organizations.slugAvailability(slug, parsedOrganizationId);
   }
 
   @Patch(":organizationId/slug")
@@ -69,7 +70,7 @@ export class OrganizationsController {
     const input = parseInput(slugChangeSchema, body);
     return this.organizations.changeSlug(
       user.id,
-      organizationId,
+      parseUuid(organizationId),
       input.slug,
       input.password,
       request,
@@ -82,6 +83,6 @@ export class OrganizationsController {
     @Param("organizationId") organizationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.organizations.completeOnboarding(user.id, organizationId, request);
+    return this.organizations.completeOnboarding(user.id, parseUuid(organizationId), request);
   }
 }

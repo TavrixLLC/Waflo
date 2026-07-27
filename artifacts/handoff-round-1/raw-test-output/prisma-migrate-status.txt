@@ -1,0 +1,17 @@
+pnpm.exe : $ prisma migrate status
+At C:\Users\Alhamza Nazhan\AppData\Local\pnpm\bin\pnpm.ps1:14 char:3
++   & "$basedir/../global/v11/4508-19eae16b90e/node_modules/@pnpm/exe/p ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ prisma migrate status:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+◇ injected env (33) from ..\..\.env // tip: ⌘ suppress logs { quiet: true }
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma\schema.prisma.
+Datasource "db": PostgreSQL database "waflo", schema "public" at "localhost:5432"
+
+3 migrations found in prisma/migrations
+
+Database schema is up to date!
+exit_code=0

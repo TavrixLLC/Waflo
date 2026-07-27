@@ -12,23 +12,39 @@ interface InvitationView {
   expiresAt: string;
 }
 
-export function InviteClient({ locale, token }: { locale: Locale; token: string }) {
+export function InviteClient({ locale }: { locale: Locale }) {
   const ar = locale === "ar";
+  const [token, setToken] = useState("");
   const [invitation, setInvitation] = useState<InvitationView | null>(null);
   const [error, setError] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
-    void apiFetch<InvitationView>(`/v1/invitations/${encodeURIComponent(token)}`)
+    const url = new URL(window.location.href);
+    const capturedToken = url.searchParams.get("token") ?? "";
+    url.searchParams.delete("token");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    setToken(capturedToken);
+    if (!capturedToken) {
+      setError(ar ? "الدعوة غير متاحة." : "Invitation unavailable.");
+      return;
+    }
+    void apiFetch<InvitationView>("/v1/invitations/inspect", {
+      method: "POST",
+      body: JSON.stringify({ token: capturedToken }),
+    })
       .then(setInvitation)
       .catch((caught: unknown) =>
         setError(caught instanceof ApiClientError ? caught.message : "Invitation unavailable."),
       );
-  }, [token]);
+  }, [ar]);
   async function accept() {
     setLoading(true);
     try {
-      await apiFetch(`/v1/invitations/${encodeURIComponent(token)}/accept`, { method: "POST" });
+      await apiFetch("/v1/invitations/accept", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
       setAccepted(true);
     } catch (caught) {
       if (caught instanceof ApiClientError && caught.code === "AUTH_REQUIRED") {

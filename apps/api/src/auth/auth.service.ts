@@ -11,6 +11,7 @@ import type { Locale, RegisterInput } from "@waflo/contracts";
 import type { FastifyRequest } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
+import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -108,15 +109,20 @@ export class AuthService {
     const expiresAt = new Date(
       Date.now() + this.environment.values.EMAIL_VERIFICATION_TTL_MINUTES * 60 * 1000,
     );
-    await this.prisma.client.$transaction([
-      this.prisma.client.emailVerificationToken.updateMany({
-        where: { userId, consumedAt: null },
-        data: { consumedAt: new Date() },
-      }),
-      this.prisma.client.emailVerificationToken.create({
-        data: { userId, tokenHash: hashOpaqueToken(rawToken), expiresAt },
-      }),
-    ]);
+    await withInvariantLock(
+      this.prisma.client,
+      `verification-token:${userId}`,
+      async (transaction) => {
+        const now = new Date();
+        await transaction.emailVerificationToken.updateMany({
+          where: { userId, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        await transaction.emailVerificationToken.create({
+          data: { userId, tokenHash: hashOpaqueToken(rawToken), expiresAt },
+        });
+      },
+    );
     const url = `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/verify-email?token=${encodeURIComponent(rawToken)}`;
     await this.notifications.send({
       to: email,
@@ -136,15 +142,29 @@ export class AuthService {
   }
 
   async verifyEmail(rawToken: string, request: WafloRequest) {
-    const token = await this.prisma.client.emailVerificationToken.findUnique({
-      where: { tokenHash: hashOpaqueToken(rawToken) },
-      include: { user: true },
+    const now = new Date();
+    const result = await this.prisma.client.$transaction(async (transaction) => {
+      const token = await transaction.emailVerificationToken.findUnique({
+        where: { tokenHash: hashOpaqueToken(rawToken) },
+        include: { user: true },
+      });
+      if (!token) return { claimed: false as const, token: null };
+      const claim = await transaction.emailVerificationToken.updateMany({
+        where: { id: token.id, consumedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      });
+      if (claim.count !== 1) return { claimed: false as const, token };
+      await transaction.user.update({
+        where: { id: token.userId },
+        data: { emailVerifiedAt: token.user.emailVerifiedAt ?? now },
+      });
+      return { claimed: true as const, token };
     });
-    if (!token || token.consumedAt || token.expiresAt <= new Date()) {
-      if (token) {
+    if (!result.claimed) {
+      if (result.token) {
         await this.audit.security(
           {
-            userId: token.userId,
+            userId: result.token.userId,
             eventType: "email_verification.invalid_or_reused",
             severity: "MEDIUM",
           },
@@ -157,22 +177,12 @@ export class AuthService {
         HttpStatus.GONE,
       );
     }
-    await this.prisma.client.$transaction([
-      this.prisma.client.emailVerificationToken.update({
-        where: { id: token.id },
-        data: { consumedAt: new Date() },
-      }),
-      this.prisma.client.user.update({
-        where: { id: token.userId },
-        data: { emailVerifiedAt: token.user.emailVerifiedAt ?? new Date() },
-      }),
-    ]);
     await this.audit.record(
       {
-        actorUserId: token.userId,
+        actorUserId: result.token.userId,
         action: "email.verified",
         targetType: "user",
-        targetId: token.userId,
+        targetId: result.token.userId,
       },
       request,
     );
@@ -298,15 +308,20 @@ export class AuthService {
       const expiresAt = new Date(
         Date.now() + this.environment.values.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
       );
-      await this.prisma.client.$transaction([
-        this.prisma.client.passwordResetToken.updateMany({
-          where: { userId: user.id, consumedAt: null },
-          data: { consumedAt: new Date() },
-        }),
-        this.prisma.client.passwordResetToken.create({
-          data: { userId: user.id, tokenHash: hashOpaqueToken(rawToken), expiresAt },
-        }),
-      ]);
+      await withInvariantLock(
+        this.prisma.client,
+        `password-reset-token:${user.id}`,
+        async (transaction) => {
+          const now = new Date();
+          await transaction.passwordResetToken.updateMany({
+            where: { userId: user.id, consumedAt: null },
+            data: { consumedAt: now },
+          });
+          await transaction.passwordResetToken.create({
+            data: { userId: user.id, tokenHash: hashOpaqueToken(rawToken), expiresAt },
+          });
+        },
+      );
       await this.notifications.send({
         to: user.email,
         locale: localeFromDb(user.preferredLocale),
@@ -330,15 +345,38 @@ export class AuthService {
   }
 
   async resetPassword(rawToken: string, password: string, request: WafloRequest) {
-    const token = await this.prisma.client.passwordResetToken.findUnique({
-      where: { tokenHash: hashOpaqueToken(rawToken) },
-      include: { user: true },
+    const passwordHash = await hashPassword(password);
+    const changedAt = new Date();
+    const result = await this.prisma.client.$transaction(async (transaction) => {
+      const token = await transaction.passwordResetToken.findUnique({
+        where: { tokenHash: hashOpaqueToken(rawToken) },
+        include: { user: true },
+      });
+      if (!token) return { claimed: false as const, token: null };
+      const claim = await transaction.passwordResetToken.updateMany({
+        where: { id: token.id, consumedAt: null, expiresAt: { gt: changedAt } },
+        data: { consumedAt: changedAt },
+      });
+      if (claim.count !== 1) return { claimed: false as const, token };
+      await transaction.user.update({
+        where: { id: token.userId },
+        data: { passwordHash },
+      });
+      await transaction.passwordResetToken.updateMany({
+        where: { userId: token.userId, consumedAt: null },
+        data: { consumedAt: changedAt },
+      });
+      await transaction.session.updateMany({
+        where: { userId: token.userId, revokedAt: null },
+        data: { revokedAt: changedAt, revocationReason: "password_reset" },
+      });
+      return { claimed: true as const, token };
     });
-    if (!token || token.consumedAt || token.expiresAt <= new Date()) {
-      if (token) {
+    if (!result.claimed) {
+      if (result.token) {
         await this.audit.security(
           {
-            userId: token.userId,
+            userId: result.token.userId,
             eventType: "password_reset.invalid_or_reused",
             severity: "HIGH",
           },
@@ -351,42 +389,26 @@ export class AuthService {
         HttpStatus.GONE,
       );
     }
-    const passwordHash = await hashPassword(password);
-    const changedAt = new Date();
-    await this.prisma.client.$transaction([
-      this.prisma.client.user.update({
-        where: { id: token.userId },
-        data: { passwordHash },
-      }),
-      this.prisma.client.passwordResetToken.updateMany({
-        where: { userId: token.userId, consumedAt: null },
-        data: { consumedAt: changedAt },
-      }),
-      this.prisma.client.session.updateMany({
-        where: { userId: token.userId, revokedAt: null },
-        data: { revokedAt: changedAt, revocationReason: "password_reset" },
-      }),
-    ]);
     await this.audit.record(
       {
-        actorUserId: token.userId,
+        actorUserId: result.token.userId,
         action: "password_reset.completed",
         targetType: "user",
-        targetId: token.userId,
+        targetId: result.token.userId,
       },
       request,
     );
     await this.audit.security(
       {
-        userId: token.userId,
+        userId: result.token.userId,
         eventType: "password_reset.completed",
         severity: "MEDIUM",
       },
       request,
     );
     await this.notifications.send({
-      to: token.user.email,
-      locale: localeFromDb(token.user.preferredLocale),
+      to: result.token.user.email,
+      locale: localeFromDb(result.token.user.preferredLocale),
       kind: "password_changed",
     });
     return { status: "password_reset" };

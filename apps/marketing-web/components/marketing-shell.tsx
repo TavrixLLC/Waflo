@@ -1,6 +1,7 @@
 import type { Locale } from "@waflo/contracts";
 import { messages } from "@waflo/i18n";
 import { Button, LanguageSwitcher } from "@waflo/ui";
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? "http://localhost:3001";
@@ -13,7 +14,12 @@ export function MarketingShell({ locale, children }: { locale: Locale; children:
       <header className="marketing-container marketing-header">
         <a href={`/${locale}`} className="marketing-logo" aria-label="Waflo home">
           {/* The approved official outlined logo is preserved as an external asset. */}
-          <img src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" />
+          <Image
+            src="/brand/waflo-logo-primary-horizontal.svg"
+            alt="Waflo"
+            width={280}
+            height={80}
+          />
         </a>
         <nav className="marketing-nav" aria-label={locale === "ar" ? "التنقل الرئيسي" : "Main"}>
           <a href={`/${locale}`}>{copy.navigation.home}</a>
@@ -34,7 +40,12 @@ export function MarketingShell({ locale, children }: { locale: Locale; children:
       <footer className="marketing-container marketing-footer">
         <div className="marketing-footer__top">
           <div>
-            <img src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" />
+            <Image
+              src="/brand/waflo-logo-primary-horizontal.svg"
+              alt="Waflo"
+              width={280}
+              height={80}
+            />
             <p>{copy.brandTagline}</p>
           </div>
           <div className="marketing-footer__links">

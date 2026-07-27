@@ -1,8 +1,15 @@
-import { type CanActivate, type ExecutionContext, HttpStatus, Injectable } from "@nestjs/common";
+import {
+  type CanActivate,
+  type ExecutionContext,
+  HttpStatus,
+  Inject,
+  Injectable,
+} from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { hashOpaqueToken, isSessionActive, safeTokenEquals } from "@waflo/auth";
 import { AppError } from "../common/app-error.js";
 import { IS_PUBLIC, RATE_LIMIT, SKIP_CSRF } from "../common/decorators.js";
+import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -15,6 +22,7 @@ export class SessionGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly environment: EnvironmentService,
     private readonly prisma: PrismaService,
+    @Inject(ERROR_REPORTER) private readonly reporter: ErrorReporter,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -51,10 +59,19 @@ export class SessionGuard implements CanActivate {
     request.currentSessionToken = token;
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     if (session.lastActiveAt < fiveMinutesAgo) {
-      void this.prisma.client.session.update({
-        where: { id: session.id },
-        data: { lastActiveAt: new Date() },
-      });
+      void this.prisma.client.session
+        .update({
+          where: { id: session.id },
+          data: { lastActiveAt: new Date() },
+        })
+        .catch((error: unknown) =>
+          this.reporter.captureException(error, {
+            requestId: request.requestId || request.id,
+            component: "api",
+            operation: "session.activity_update",
+          }),
+        )
+        .catch(() => undefined);
     }
     return true;
   }
@@ -121,9 +138,30 @@ export class ApiRateLimitGuard implements CanActivate {
     ) ?? { limit: 120, windowSeconds: 60 };
     const ip = request.ip || "unknown";
     const route = request.routeOptions?.url ?? request.url.split("?")[0] ?? "unknown";
-    const key = `waflo:rate:${ip}:${route}`;
-    const allowed = await this.limiter.consume(key, config.limit, config.windowSeconds);
-    if (!allowed) {
+    const body = request.body;
+    const email =
+      body && typeof body === "object" && "email" in body && typeof body.email === "string"
+        ? hashOpaqueToken(body.email.trim().toLocaleLowerCase("en-US"))
+        : null;
+    const organizationId =
+      request.params &&
+      typeof request.params === "object" &&
+      "organizationId" in request.params &&
+      typeof request.params.organizationId === "string"
+        ? request.params.organizationId
+        : null;
+    const signals = [
+      `ip:${ip}`,
+      ...(email ? [`email:${email}`] : []),
+      ...(organizationId ? [`organization:${organizationId}`] : []),
+      ...(request.currentUser ? [`account:${request.currentUser.id}`] : []),
+    ];
+    const decisions = await Promise.all(
+      signals.map((signal) =>
+        this.limiter.consume(`waflo:rate:${signal}:${route}`, config.limit, config.windowSeconds),
+      ),
+    );
+    if (decisions.includes(false)) {
       throw new AppError(
         "RATE_LIMITED",
         "Too many requests. Please wait and try again.",

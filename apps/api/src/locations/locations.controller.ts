@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/c
 import { locationSchema, locationUpdateSchema } from "@waflo/contracts";
 import { CurrentUser } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseInput } from "../common/validation.js";
+import { parseInput, parseOptionalCursor, parseUuid } from "../common/validation.js";
 import { LocationsService } from "./locations.service.js";
 
 @Controller("v1/organizations/:organizationId/locations")
@@ -15,7 +15,7 @@ export class LocationsController {
     @Param("organizationId") organizationId: string,
     @Query("cursor") cursor?: string,
   ) {
-    return this.locations.list(user.id, organizationId, cursor);
+    return this.locations.list(user.id, parseUuid(organizationId), parseOptionalCursor(cursor));
   }
 
   @Post()
@@ -27,7 +27,7 @@ export class LocationsController {
   ) {
     return this.locations.create(
       user.id,
-      organizationId,
+      parseUuid(organizationId),
       parseInput(locationSchema, body),
       request,
     );
@@ -39,7 +39,7 @@ export class LocationsController {
     @Param("organizationId") organizationId: string,
     @Param("locationId") locationId: string,
   ) {
-    return this.locations.get(user.id, organizationId, locationId);
+    return this.locations.get(user.id, parseUuid(organizationId), parseUuid(locationId));
   }
 
   @Patch(":locationId")
@@ -52,8 +52,8 @@ export class LocationsController {
   ) {
     return this.locations.update(
       user.id,
-      organizationId,
-      locationId,
+      parseUuid(organizationId),
+      parseUuid(locationId),
       parseInput(locationUpdateSchema, body),
       request,
     );
@@ -66,7 +66,12 @@ export class LocationsController {
     @Param("locationId") locationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.locations.archive(user.id, organizationId, locationId, request);
+    return this.locations.archive(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(locationId),
+      request,
+    );
   }
 
   @Post(":locationId/restore")
@@ -76,6 +81,11 @@ export class LocationsController {
     @Param("locationId") locationId: string,
     @Req() request: WafloRequest,
   ) {
-    return this.locations.restore(user.id, organizationId, locationId, request);
+    return this.locations.restore(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(locationId),
+      request,
+    );
   }
 }

@@ -101,10 +101,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit and integration tests
+      - name: Unit, integration, HTTP, and concurrency tests
         run: |
           pnpm test:unit
           pnpm test:integration
+          pnpm test:http
+          pnpm test:concurrency
 
       - name: Production build
         run: pnpm build
@@ -126,6 +128,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
           path: |
-            artifacts/screenshots/
+            artifacts/handoff-round-1/screenshots/
+            artifacts/handoff-round-1/raw-test-output/
             playwright-report/
             test-results/
