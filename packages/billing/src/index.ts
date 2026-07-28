@@ -83,7 +83,7 @@ export interface EntitlementDecision {
 
 export function usageDecision(
   plan: PlanCode,
-  kind: "locations" | "teamSeats",
+  kind: "locations" | "teamSeats" | "programs",
   currentUsage: number,
   configuredScaleLimit?: number,
 ): EntitlementDecision {
@@ -121,6 +121,38 @@ export function canInviteTeamMember(
   configuredScaleLimit?: number,
 ): EntitlementDecision {
   return usageDecision(plan, "teamSeats", currentUsage, configuredScaleLimit);
+}
+
+export type ProgramEntitlement =
+  | "canCreateProgram"
+  | "canRestoreProgram"
+  | "canPublishProgram"
+  | "canUseProMode"
+  | "canUseAdvancedLayouts"
+  | "canUseCustomStampUploads"
+  | "canUseMilestoneRewards"
+  | "canUseMultipleRewards"
+  | "canUseAdvancedWalletPreviewControls";
+
+export function programEntitlement(plan: PlanCode, entitlement: ProgramEntitlement): boolean {
+  if (
+    entitlement === "canUseProMode" ||
+    entitlement === "canUseAdvancedLayouts" ||
+    entitlement === "canUseMultipleRewards" ||
+    entitlement === "canUseMilestoneRewards" ||
+    entitlement === "canUseAdvancedWalletPreviewControls"
+  )
+    return plan !== "starter";
+  if (entitlement === "canUseCustomStampUploads") return true;
+  return true;
+}
+
+export function canCreateProgram(plan: PlanCode, currentUsage: number): EntitlementDecision {
+  return usageDecision(plan, "programs", currentUsage);
+}
+
+export function canRestoreProgram(plan: PlanCode, currentUsage: number): EntitlementDecision {
+  return canCreateProgram(plan, currentUsage);
 }
 
 export function formatPlanPrice(plan: PlanCode): string {

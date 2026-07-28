@@ -4,6 +4,12 @@ Waflo is a wallet-first loyalty SaaS platform owned and operated by Tavrix LLC. 
 
 Phase W1 deliberately does **not** implement loyalty-program creation, customer enrollment, wallet passes, stamp/points activity, rewards, campaigns, analytics, or employee scanning. Those product capabilities begin after this foundation.
 
+## Phase W2: Loyalty Studio
+
+W2 adds the merchant Programs surface for stamp-based loyalty programs: Quick Mode, Pro Mode entitlements, eight built-in templates, English/Arabic content, deterministic stamp previews, safe local image uploads, validation, synthetic Test Mode, immutable versioned publication, program state transitions, and atomic first-publication trial activation.
+
+W2 intentionally does not add real customers, memberships, Wallet issuance, QR enrollment, staff scanning, POS integrations, or Flutter. See [docs/w2/overview.md](docs/w2/overview.md) and the W2 handoff under `artifacts/handoff-w2/`.
+
 ## Repository
 
 ```text
@@ -22,6 +28,7 @@ packages/
   i18n/                 Locale/direction/formatting helpers
   permissions/          Central role and permission policy
   security/             Redaction and security utilities
+  stamp-engine/         Deterministic Waflo stamp layout and SVG renderer
   ui/                   Accessible shared React design system
 docs/                   Architecture, security, operations, and ADRs
 tests/                  Unit, integration, Playwright, and accessibility suites

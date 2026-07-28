@@ -26,6 +26,7 @@
     "@waflo/database": "workspace:*",
     "@waflo/permissions": "workspace:*",
     "@waflo/security": "workspace:*",
+    "@waflo/stamp-engine": "workspace:*",
     "fastify": "5.10.0",
     "ioredis": "5.11.1",
     "nodemailer": "9.0.3",

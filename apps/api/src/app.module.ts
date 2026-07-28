@@ -25,6 +25,10 @@ import { RateLimitService } from "./security/rate-limit.service.js";
 import { InvitationsController, TeamController } from "./team/team.controller.js";
 import { TeamService } from "./team/team.service.js";
 import { TenantService } from "./tenancy/tenant.service.js";
+import { ProgramsController } from "./programs/programs.controller.js";
+import { ProgramsService } from "./programs/programs.service.js";
+import { AssetsController } from "./programs/assets.controller.js";
+import { AssetsService } from "./programs/assets.service.js";
 
 @Module({
   controllers: [
@@ -38,6 +42,8 @@ import { TenantService } from "./tenancy/tenant.service.js";
     AuditController,
     PublicController,
     HealthController,
+    ProgramsController,
+    AssetsController,
   ],
   providers: [
     EnvironmentService,
@@ -50,6 +56,8 @@ import { TenantService } from "./tenancy/tenant.service.js";
     OrganizationsService,
     LocationsService,
     TeamService,
+    ProgramsService,
+    AssetsService,
     BillingService,
     HostResolutionService,
     {

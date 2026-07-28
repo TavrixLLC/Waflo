@@ -161,6 +161,151 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type OrganizationInput = z.infer<typeof organizationSchema>;
 export type LocationInput = z.infer<typeof locationSchema>;
 
+export const programEditingModeSchema = z.enum(["quick", "pro"]);
+export const programStatusSchema = z.enum([
+  "DRAFT",
+  "VALIDATED",
+  "TEST",
+  "SCHEDULED",
+  "PUBLISHED",
+  "PAUSED",
+  "ARCHIVED",
+  "SUSPENDED",
+]);
+export const stampLayoutSchema = z.enum(["ROW", "GRID", "PATH", "RING"]);
+export const rewardTypeSchema = z.enum([
+  "TEXT_REWARD",
+  "FREE_ITEM",
+  "DISCOUNT_DESCRIPTION",
+  "CUSTOM",
+]);
+
+const translationInputSchema = z.object({
+  programName: z.string().trim().min(1).max(120),
+  shortDescription: z.string().trim().min(1).max(240),
+  fullDescription: z.string().trim().max(4000).optional(),
+  rewardSummary: z.string().trim().min(1).max(240),
+  joinInstructions: z.string().trim().max(4000).optional(),
+  termsAndConditions: z.string().trim().min(1).max(8000),
+  completionMessage: z.string().trim().min(1).max(240),
+  rewardUnlockedMessage: z.string().trim().min(1).max(240),
+  pausedMessage: z.string().trim().max(240).optional(),
+});
+
+const rewardInputSchema = z.object({
+  thresholdStampCount: z.number().int().min(2).max(30),
+  rewardType: rewardTypeSchema,
+  internalName: z.string().trim().min(1).max(120),
+  sortOrder: z.number().int().min(0).max(100).default(0),
+  validityDurationDays: z.number().int().min(1).max(3650).nullable().optional(),
+  requiresManagerApproval: z.boolean().default(false),
+  maximumRedemptionsPerEarned: z.number().int().min(1).max(1).default(1),
+  translations: z.object({
+    en: z.object({
+      name: z.string().trim().min(1).max(120),
+      description: z.string().trim().min(1).max(240),
+      redemptionInstructions: z.string().trim().max(4000).optional(),
+    }),
+    ar: z.object({
+      name: z.string().trim().min(1).max(120),
+      description: z.string().trim().min(1).max(240),
+      redemptionInstructions: z.string().trim().max(4000).optional(),
+    }),
+  }),
+});
+
+const visualThemeInputSchema = z.object({
+  backgroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  foregroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  secondaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  mutedColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  filledStampAssetId: z.uuid().optional(),
+  emptyStampAssetId: z.uuid().optional(),
+  logoAssetId: z.uuid().nullable().optional(),
+  heroAssetId: z.uuid().nullable().optional(),
+  backgroundAssetId: z.uuid().nullable().optional(),
+  defaultMilestoneAssetId: z.uuid().nullable().optional(),
+  layoutType: stampLayoutSchema,
+  layoutConfiguration: z.record(z.string(), z.unknown()).default({}),
+  stampSize: z.number().int().min(24).max(96).default(48),
+  stampSpacing: z.number().int().min(0).max(32).default(8),
+  borderRadius: z.number().int().min(0).max(40).default(18),
+  progressLabelVisible: z.boolean().default(true),
+  rewardLabelVisible: z.boolean().default(true),
+  customerWebVariant: z.enum(["CARD", "MINIMAL", "HERO"]).default("CARD"),
+  applePreviewConfig: z.record(z.string(), z.unknown()).default({}),
+  googlePreviewConfig: z.record(z.string(), z.unknown()).default({}),
+});
+
+export const programCreateSchema = z
+  .object({
+    internalName: z.string().trim().min(2).max(120),
+    editingMode: programEditingModeSchema.default("quick"),
+    templateCode: z.string().trim().max(80).optional(),
+    requiredStampCount: z.number().int().min(2).max(30).default(8),
+    translations: z.object({ en: translationInputSchema, ar: translationInputSchema }),
+    earningDescription: z
+      .string()
+      .trim()
+      .min(1)
+      .max(240)
+      .default("One stamp per qualifying visit."),
+    rewards: z.array(rewardInputSchema).min(1).max(10),
+    locationIds: z.array(z.uuid()).min(1).max(100),
+    visualTheme: visualThemeInputSchema,
+  })
+  .strict();
+
+export const programUpdateSchema = programCreateSchema
+  .partial()
+  .extend({
+    revision: z.number().int().min(1),
+    changeSummary: z.string().trim().max(240).optional(),
+  })
+  .strict();
+
+export const programTestStampSchema = z
+  .object({
+    amount: z.number().int().min(1).max(5).default(1),
+    idempotencyKey: z.uuid(),
+  })
+  .strict();
+
+export const programPublishSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
+  })
+  .strict();
+
+export const programTestResetSchema = z
+  .object({
+    idempotencyKey: z.uuid().optional(),
+  })
+  .strict();
+
+export type ProgramCreateInput = z.infer<typeof programCreateSchema>;
+export type ProgramUpdateInput = z.infer<typeof programUpdateSchema>;
+
+export const merchantAssetUploadSchema = z
+  .object({
+    category: z.enum([
+      "LOGO",
+      "HERO",
+      "BACKGROUND",
+      "STAMP_FILLED",
+      "STAMP_EMPTY",
+      "STAMP_MILESTONE",
+      "GENERAL",
+    ]),
+    filename: z.string().trim().min(1).max(255),
+    mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+    contentBase64: z.string().min(16).max(3_000_000),
+  })
+  .strict();
+
+export type MerchantAssetUploadInput = z.infer<typeof merchantAssetUploadSchema>;
+
 export function createErrorEnvelope(
   code: string,
   message: string,

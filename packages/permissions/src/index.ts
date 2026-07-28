@@ -18,6 +18,13 @@ export const permissions = [
   "team.remove",
   "security.sessions.view",
   "security.sessions.revoke",
+  "programs.view",
+  "programs.create",
+  "programs.edit",
+  "programs.validate",
+  "programs.test",
+  "programs.publish",
+  "programs.manage_state",
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -36,6 +43,13 @@ const rolePermissions: Readonly<Record<MemberRole, ReadonlySet<Permission>>> = {
     "team.remove",
     "security.sessions.view",
     "security.sessions.revoke",
+    "programs.view",
+    "programs.create",
+    "programs.edit",
+    "programs.validate",
+    "programs.test",
+    "programs.publish",
+    "programs.manage_state",
   ]),
   STAFF: new Set(["organization.view"]),
 };

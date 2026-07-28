@@ -92,6 +92,9 @@ importers:
       '@waflo/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@waflo/stamp-engine':
+        specifier: workspace:*
+        version: link:../../packages/stamp-engine
       fastify:
         specifier: 5.10.0
         version: 5.10.0
@@ -379,6 +382,12 @@ importers:
       '@sentry/node':
         specifier: 10.68.0
         version: 10.68.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))
+    devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/stamp-engine:
     devDependencies:
       typescript:
         specifier: 5.9.3

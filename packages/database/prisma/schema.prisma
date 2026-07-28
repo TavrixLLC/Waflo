@@ -97,6 +97,106 @@ enum SecuritySeverity {
   CRITICAL
 }
 
+enum LoyaltyProgramType {
+  STAMP
+}
+
+enum LoyaltyProgramStatus {
+  DRAFT
+  VALIDATED
+  TEST
+  SCHEDULED
+  PUBLISHED
+  PAUSED
+  ARCHIVED
+  SUSPENDED
+}
+
+enum LoyaltyProgramVersionStatus {
+  DRAFT
+  VALIDATED
+  TEST_READY
+  PUBLISHED
+  SUPERSEDED
+  ABANDONED
+}
+
+enum ProgramEditingMode {
+  QUICK
+  PRO
+}
+
+enum RewardType {
+  TEXT_REWARD
+  FREE_ITEM
+  DISCOUNT_DESCRIPTION
+  CUSTOM
+}
+
+enum StampLayoutType {
+  ROW
+  GRID
+  PATH
+  RING
+}
+
+enum MerchantAssetCategory {
+  LOGO
+  HERO
+  BACKGROUND
+  STAMP_FILLED
+  STAMP_EMPTY
+  STAMP_MILESTONE
+  GENERAL
+}
+
+enum MerchantAssetSource {
+  WAFLO_LIBRARY
+  MERCHANT_UPLOAD
+  GENERATED_PREVIEW
+}
+
+enum MerchantAssetProcessingStatus {
+  PENDING
+  READY
+  REJECTED
+  ARCHIVED
+}
+
+enum ProgramPreviewType {
+  STAMP_PROGRESS_WEB
+  CUSTOMER_WEB_CARD
+  APPLE_WALLET_PREVIEW
+  GOOGLE_WALLET_PREVIEW
+  THUMBNAIL
+}
+
+enum ProgramValidationStatus {
+  PASSED
+  VALID_WITH_WARNINGS
+  FAILED
+}
+
+enum ProgramTestSessionStatus {
+  ACTIVE
+  RESET
+  COMPLETED
+}
+
+enum ProgramTestEventType {
+  TEST_STAMP_EARNED
+  TEST_STAMP_REVERSED
+  TEST_REWARD_UNLOCKED
+  TEST_REWARD_REDEEMED
+  TEST_SESSION_RESET
+}
+
+enum ProgramPublishCommandStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id                         String                   @id @default(uuid()) @db.Uuid
   displayName                String                   @db.VarChar(100)
@@ -121,6 +221,11 @@ model User {
   auditEvents                AuditLog[]                @relation("AuditActor")
   securityEvents             SecurityEvent[]
   triggeredTrials            OrganizationBillingProfile[] @relation("TrialTriggeredBy")
+  createdLoyaltyPrograms     LoyaltyProgram[]           @relation("ProgramCreator")
+  createdProgramVersions     LoyaltyProgramVersion[]    @relation("VersionCreator")
+  createdMerchantAssets      MerchantAsset[]           @relation("AssetCreator")
+  createdValidationRuns      ProgramValidationRun[]     @relation("ValidationCreator")
+  createdTestSessions        ProgramTestSession[]       @relation("TestSessionCreator")
 
   @@map("users")
 }
@@ -197,6 +302,13 @@ model Organization {
   auditLogs             AuditLog[]
   securityEvents        SecurityEvent[]
   checkoutIdempotencyKeys CheckoutIdempotencyKey[]
+  loyaltyPrograms        LoyaltyProgram[]
+  loyaltyProgramVersions LoyaltyProgramVersion[]
+  merchantAssets         MerchantAsset[]
+  generatedPreviews      GeneratedProgramPreview[]
+  validationRuns         ProgramValidationRun[]
+  testSessions           ProgramTestSession[]
+  publishCommands        ProgramPublishCommand[]
 
   @@index([status])
   @@map("organizations")
@@ -273,6 +385,7 @@ model Location {
   archivedAt     DateTime?      @map("archived_at") @db.Timestamptz(6)
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   auditLogs      AuditLog[]
+  programLocations ProgramLocation[]
 
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
@@ -417,4 +530,367 @@ model CheckoutIdempotencyKey {
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, createdAt])
   @@map("checkout_idempotency_keys")
+}
+
+model LoyaltyProgram {
+  id                    String              @id @default(uuid()) @db.Uuid
+  organizationId        String              @map("organization_id") @db.Uuid
+  internalName          String              @map("internal_name") @db.VarChar(120)
+  programType           LoyaltyProgramType  @default(STAMP) @map("program_type")
+  status                LoyaltyProgramStatus @default(DRAFT)
+  currentDraftVersionId String?             @unique @map("current_draft_version_id") @db.Uuid
+  currentPublishedVersionId String?         @unique @map("current_published_version_id") @db.Uuid
+  latestVersionNumber   Int                 @default(1) @map("latest_version_number")
+  createdByUserId       String              @map("created_by_user_id") @db.Uuid
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  publishedAt           DateTime?           @map("published_at") @db.Timestamptz(6)
+  pausedAt              DateTime?           @map("paused_at") @db.Timestamptz(6)
+  archivedAt            DateTime?           @map("archived_at") @db.Timestamptz(6)
+  suspendedAt           DateTime?           @map("suspended_at") @db.Timestamptz(6)
+  suspensionReasonCode  String?             @map("suspension_reason_code") @db.VarChar(120)
+  revision              Int                 @default(1)
+  organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy             User                @relation("ProgramCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions              LoyaltyProgramVersion[] @relation("ProgramVersions")
+  currentDraftVersion   LoyaltyProgramVersion? @relation("CurrentDraftVersion", fields: [currentDraftVersionId], references: [id], onDelete: Restrict)
+  currentPublishedVersion LoyaltyProgramVersion? @relation("CurrentPublishedVersion", fields: [currentPublishedVersionId], references: [id], onDelete: Restrict)
+  publishCommands       ProgramPublishCommand[]
+
+  @@index([organizationId, status, updatedAt(sort: Desc)])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("loyalty_programs")
+}
+
+model LoyaltyProgramVersion {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  programId           String                    @map("program_id") @db.Uuid
+  organizationId      String                    @map("organization_id") @db.Uuid
+  versionNumber       Int                       @map("version_number")
+  status              LoyaltyProgramVersionStatus @default(DRAFT)
+  editingMode         ProgramEditingMode       @default(QUICK) @map("editing_mode")
+  baseTemplateCode    String?                   @map("base_template_code") @db.VarChar(80)
+  configurationSchemaVersion Int                @default(1) @map("configuration_schema_version")
+  revision            Int                       @default(1)
+  createdByUserId     String                    @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  validatedAt         DateTime?                 @map("validated_at") @db.Timestamptz(6)
+  testReadyAt         DateTime?                 @map("test_ready_at") @db.Timestamptz(6)
+  publishedAt         DateTime?                 @map("published_at") @db.Timestamptz(6)
+  supersededAt        DateTime?                 @map("superseded_at") @db.Timestamptz(6)
+  abandonedAt         DateTime?                 @map("abandoned_at") @db.Timestamptz(6)
+  changeSummary       String?                   @map("change_summary") @db.VarChar(240)
+  validationFingerprint String?                 @map("validation_fingerprint") @db.Char(64)
+  renderFingerprint   String?                   @map("render_fingerprint") @db.Char(64)
+  program             LoyaltyProgram            @relation("ProgramVersions", fields: [programId], references: [id], onDelete: Restrict)
+  organization        Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy           User                      @relation("VersionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  currentDraftFor     LoyaltyProgram?           @relation("CurrentDraftVersion")
+  currentPublishedFor LoyaltyProgram?           @relation("CurrentPublishedVersion")
+  translations        ProgramTranslation[]
+  stampRule           StampRule?
+  rewards             RewardDefinition[]
+  locations           ProgramLocation[]
+  visualTheme         ProgramVisualTheme?
+  previews            GeneratedProgramPreview[]
+  validationRuns      ProgramValidationRun[]
+  testSessions        ProgramTestSession[]
+  publishCommands     ProgramPublishCommand[]
+
+  @@unique([programId, versionNumber])
+  @@index([organizationId, programId, status])
+  @@index([organizationId, updatedAt(sort: Desc)])
+  @@map("loyalty_program_versions")
+}
+
+model ProgramTranslation {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  versionId             String                 @map("version_id") @db.Uuid
+  locale                Locale
+  programName           String                 @map("program_name") @db.VarChar(120)
+  shortDescription      String                 @map("short_description") @db.VarChar(240)
+  fullDescription       String?                @map("full_description") @db.Text
+  rewardSummary         String                 @map("reward_summary") @db.VarChar(240)
+  joinInstructions      String?                @map("join_instructions") @db.Text
+  termsAndConditions    String                 @map("terms_and_conditions") @db.Text
+  completionMessage     String                 @map("completion_message") @db.VarChar(240)
+  rewardUnlockedMessage String                 @map("reward_unlocked_message") @db.VarChar(240)
+  pausedMessage         String?                @map("paused_message") @db.VarChar(240)
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version               LoyaltyProgramVersion  @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@unique([versionId, locale])
+  @@map("program_translations")
+}
+
+model StampRule {
+  id                         String                @id @default(uuid()) @db.Uuid
+  versionId                  String                @unique @map("version_id") @db.Uuid
+  requiredStampCount        Int                   @map("required_stamp_count")
+  defaultStampsPerAction     Int                   @default(1) @map("default_stamps_per_action")
+  maximumStampsPerOperation  Int                   @default(5) @map("maximum_stamps_per_operation")
+  maximumStampsPerCustomerPerDay Int?              @map("maximum_stamps_per_customer_per_day")
+  minimumPurchaseAmountMinor Int?                 @map("minimum_purchase_amount_minor")
+  minimumPurchaseCurrency    String?               @map("minimum_purchase_currency") @db.Char(3)
+  earningDescription         String                @map("earning_description") @db.VarChar(240)
+  resetBehaviorAfterReward   String                @default("RESET") @map("reset_behavior_after_reward") @db.VarChar(20)
+  createdAt                  DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version                    LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@map("stamp_rules")
+}
+
+model RewardDefinition {
+  id                         String                @id @default(uuid()) @db.Uuid
+  versionId                  String                @map("version_id") @db.Uuid
+  thresholdStampCount       Int                   @map("threshold_stamp_count")
+  rewardType                RewardType            @map("reward_type")
+  internalName              String                @map("internal_name") @db.VarChar(120)
+  sortOrder                 Int                   @default(0) @map("sort_order")
+  validityDurationDays      Int?                  @map("validity_duration_days")
+  requiresManagerApproval   Boolean               @default(false) @map("requires_manager_approval")
+  maximumRedemptionsPerEarned Int                 @default(1) @map("maximum_redemptions_per_earned")
+  createdAt                 DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version                   LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  translations              RewardTranslation[]
+  visualOverride           RewardVisualOverride?
+  testEvents                ProgramTestEvent[]
+
+  @@unique([versionId, thresholdStampCount])
+  @@index([versionId, sortOrder])
+  @@map("reward_definitions")
+}
+
+model RewardTranslation {
+  id                   String          @id @default(uuid()) @db.Uuid
+  rewardId             String          @map("reward_id") @db.Uuid
+  locale               Locale
+  name                 String          @db.VarChar(120)
+  description          String          @db.VarChar(240)
+  redemptionInstructions String?       @map("redemption_instructions") @db.Text
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reward               RewardDefinition @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+
+  @@unique([rewardId, locale])
+  @@map("reward_translations")
+}
+
+model ProgramLocation {
+  versionId       String                @map("version_id") @db.Uuid
+  locationId      String                @map("location_id") @db.Uuid
+  earningEnabled  Boolean               @default(true) @map("earning_enabled")
+  redemptionEnabled Boolean             @default(true) @map("redemption_enabled")
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  version         LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  location        Location              @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@id([versionId, locationId])
+  @@index([locationId, versionId])
+  @@map("program_locations")
+}
+
+model ProgramVisualTheme {
+  id                    String                @id @default(uuid()) @db.Uuid
+  versionId             String                @unique @map("version_id") @db.Uuid
+  backgroundColor       String                @default("#F7F4EE") @map("background_color") @db.VarChar(7)
+  foregroundColor       String                @default("#222222") @map("foreground_color") @db.VarChar(7)
+  accentColor           String                @default("#E4572E") @map("accent_color") @db.VarChar(7)
+  secondaryColor        String                @default("#F3A712") @map("secondary_color") @db.VarChar(7)
+  mutedColor            String                @default("#6B7280") @map("muted_color") @db.VarChar(7)
+  logoAssetId           String?               @map("logo_asset_id") @db.Uuid
+  heroAssetId           String?               @map("hero_asset_id") @db.Uuid
+  backgroundAssetId     String?               @map("background_asset_id") @db.Uuid
+  filledStampAssetId    String                @map("filled_stamp_asset_id") @db.Uuid
+  emptyStampAssetId     String                @map("empty_stamp_asset_id") @db.Uuid
+  defaultMilestoneAssetId String?             @map("default_milestone_asset_id") @db.Uuid
+  layoutType            StampLayoutType       @default(GRID) @map("layout_type")
+  layoutConfiguration   Json                  @map("layout_configuration") @db.JsonB
+  stampSize             Int                   @default(48) @map("stamp_size")
+  stampSpacing          Int                   @default(8) @map("stamp_spacing")
+  borderRadius          Int                   @default(18) @map("border_radius")
+  progressLabelVisible  Boolean               @default(true) @map("progress_label_visible")
+  rewardLabelVisible    Boolean               @default(true) @map("reward_label_visible")
+  customerWebVariant    String                @default("CARD") @map("customer_web_variant") @db.VarChar(30)
+  applePreviewConfig    Json                  @default("{}") @map("apple_preview_config") @db.JsonB
+  googlePreviewConfig   Json                  @default("{}") @map("google_preview_config") @db.JsonB
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version               LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  logoAsset             MerchantAsset?       @relation("ThemeLogo", fields: [logoAssetId], references: [id], onDelete: Restrict)
+  heroAsset             MerchantAsset?       @relation("ThemeHero", fields: [heroAssetId], references: [id], onDelete: Restrict)
+  backgroundAsset       MerchantAsset?       @relation("ThemeBackground", fields: [backgroundAssetId], references: [id], onDelete: Restrict)
+  filledStampAsset      MerchantAsset        @relation("ThemeFilledStamp", fields: [filledStampAssetId], references: [id], onDelete: Restrict)
+  emptyStampAsset       MerchantAsset        @relation("ThemeEmptyStamp", fields: [emptyStampAssetId], references: [id], onDelete: Restrict)
+  defaultMilestoneAsset MerchantAsset?       @relation("ThemeMilestone", fields: [defaultMilestoneAssetId], references: [id], onDelete: Restrict)
+
+  @@map("program_visual_themes")
+}
+
+model RewardVisualOverride {
+  id              String           @id @default(uuid()) @db.Uuid
+  rewardId        String           @unique @map("reward_id") @db.Uuid
+  stampAssetId    String?          @map("stamp_asset_id") @db.Uuid
+  accentOverride  String?          @map("accent_override") @db.VarChar(7)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  reward          RewardDefinition @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  stampAsset      MerchantAsset?   @relation("RewardStampAsset", fields: [stampAssetId], references: [id], onDelete: Restrict)
+
+  @@map("reward_visual_overrides")
+}
+
+model MerchantAsset {
+  id              String                    @id @default(uuid()) @db.Uuid
+  organizationId  String                    @map("organization_id") @db.Uuid
+  category        MerchantAssetCategory
+  source          MerchantAssetSource
+  originalObjectKey String                  @map("original_object_key") @db.VarChar(500)
+  originalFilename String                   @map("original_filename") @db.VarChar(255)
+  mimeType        String                    @map("mime_type") @db.VarChar(100)
+  fileSize        Int                       @map("file_size")
+  width           Int?
+  height          Int?
+  sha256Digest    String                    @map("sha256_digest") @db.Char(64)
+  processingStatus MerchantAssetProcessingStatus @default(PENDING) @map("processing_status")
+  safeMetadata    Json?                     @map("safe_metadata") @db.JsonB
+  createdByUserId String                    @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt      DateTime?                 @map("archived_at") @db.Timestamptz(6)
+  organization    Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy       User                      @relation("AssetCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  variants        MerchantAssetVariant[]
+  logoThemes      ProgramVisualTheme[]      @relation("ThemeLogo")
+  heroThemes      ProgramVisualTheme[]      @relation("ThemeHero")
+  backgroundThemes ProgramVisualTheme[]     @relation("ThemeBackground")
+  filledThemes    ProgramVisualTheme[]      @relation("ThemeFilledStamp")
+  emptyThemes     ProgramVisualTheme[]      @relation("ThemeEmptyStamp")
+  milestoneThemes ProgramVisualTheme[]      @relation("ThemeMilestone")
+  rewardOverrides RewardVisualOverride[]    @relation("RewardStampAsset")
+
+  @@unique([organizationId, sha256Digest])
+  @@index([organizationId, category, processingStatus])
+  @@map("merchant_assets")
+}
+
+model MerchantAssetVariant {
+  id          String        @id @default(uuid()) @db.Uuid
+  assetId     String        @map("asset_id") @db.Uuid
+  variantCode String        @map("variant_code") @db.VarChar(40)
+  objectKey   String        @map("object_key") @db.VarChar(500)
+  mimeType    String        @map("mime_type") @db.VarChar(100)
+  width       Int?
+  height      Int?
+  fileSize    Int           @map("file_size")
+  digest      String        @db.Char(64)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  asset       MerchantAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([assetId, variantCode])
+  @@index([digest])
+  @@map("merchant_asset_variants")
+}
+
+model GeneratedProgramPreview {
+  id              String                @id @default(uuid()) @db.Uuid
+  organizationId  String                @map("organization_id") @db.Uuid
+  versionId       String                @map("version_id") @db.Uuid
+  previewType     ProgramPreviewType    @map("preview_type")
+  progressState   Int?                 @map("progress_state")
+  configurationHash String              @map("configuration_hash") @db.Char(64)
+  objectKey       String                @map("object_key") @db.VarChar(500)
+  mimeType        String                @map("mime_type") @db.VarChar(100)
+  width           Int
+  height          Int
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastAccessedAt  DateTime?             @map("last_accessed_at") @db.Timestamptz(6)
+  organization    Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  version         LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@unique([versionId, previewType, progressState, configurationHash])
+  @@index([organizationId, versionId, createdAt(sort: Desc)])
+  @@map("generated_program_previews")
+}
+
+model ProgramValidationRun {
+  id                  String                @id @default(uuid()) @db.Uuid
+  organizationId      String                @map("organization_id") @db.Uuid
+  versionId           String                @map("version_id") @db.Uuid
+  status              ProgramValidationStatus
+  configurationFingerprint String            @map("configuration_fingerprint") @db.Char(64)
+  errors              Json                  @db.JsonB
+  warnings            Json                  @db.JsonB
+  createdByUserId     String                @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  version             LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  createdBy           User                  @relation("ValidationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, versionId, createdAt(sort: Desc)])
+  @@map("program_validation_runs")
+}
+
+model ProgramTestSession {
+  id                String                  @id @default(uuid()) @db.Uuid
+  organizationId    String                  @map("organization_id") @db.Uuid
+  versionId         String                  @map("version_id") @db.Uuid
+  createdByUserId   String                  @map("created_by_user_id") @db.Uuid
+  syntheticDisplayName String               @map("synthetic_display_name") @db.VarChar(120)
+  currentStampCount Int                     @default(0) @map("current_stamp_count")
+  cycleCount        Int                     @default(0) @map("cycle_count")
+  status            ProgramTestSessionStatus @default(ACTIVE)
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  resetAt           DateTime?               @map("reset_at") @db.Timestamptz(6)
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  version           LoyaltyProgramVersion   @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  createdBy         User                    @relation("TestSessionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  events            ProgramTestEvent[]
+
+  @@index([organizationId, versionId, updatedAt(sort: Desc)])
+  @@map("program_test_sessions")
+}
+
+model ProgramTestEvent {
+  id              String               @id @default(uuid()) @db.Uuid
+  sessionId       String               @map("session_id") @db.Uuid
+  eventType       ProgramTestEventType @map("event_type")
+  amount          Int?
+  rewardDefinitionId String?           @map("reward_definition_id") @db.Uuid
+  idempotencyKey  String               @map("idempotency_key") @db.VarChar(255)
+  safeMetadata    Json?                @map("safe_metadata") @db.JsonB
+  createdByUserId String               @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  session         ProgramTestSession   @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  rewardDefinition RewardDefinition?   @relation(fields: [rewardDefinitionId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, idempotencyKey])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@map("program_test_events")
+}
+
+model ProgramPublishCommand {
+  id                String                    @id @default(uuid()) @db.Uuid
+  organizationId    String                    @map("organization_id") @db.Uuid
+  programId         String                    @map("program_id") @db.Uuid
+  versionId         String                    @map("version_id") @db.Uuid
+  idempotencyKey    String                    @map("idempotency_key") @db.VarChar(255)
+  status            ProgramPublishCommandStatus @default(PROCESSING)
+  publishedVersionId String?                  @map("published_version_id") @db.Uuid
+  trialStarted      Boolean                   @default(false) @map("trial_started")
+  trialStart        DateTime?                 @map("trial_start") @db.Timestamptz(6)
+  trialEnd          DateTime?                 @map("trial_end") @db.Timestamptz(6)
+  safeFailureCode   String?                   @map("safe_failure_code") @db.VarChar(120)
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt       DateTime?                 @map("completed_at") @db.Timestamptz(6)
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program           LoyaltyProgram            @relation(fields: [programId], references: [id], onDelete: Restrict)
+  version           LoyaltyProgramVersion     @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, programId, createdAt(sort: Desc)])
+  @@map("program_publish_commands")
 }

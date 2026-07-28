@@ -396,6 +396,110 @@ body {
   gap: 1rem;
 }
 
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.template-card {
+  display: grid;
+  gap: 0.35rem;
+  text-align: start;
+  padding: 0.85rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 16px;
+  background: var(--waflo-surface);
+  color: inherit;
+  cursor: pointer;
+}
+.template-card--selected {
+  border-color: var(--waflo-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--waflo-primary) 18%, transparent);
+}
+.template-card small,
+.preview-profile-row small {
+  color: var(--waflo-muted);
+  line-height: 1.4;
+}
+.template-art {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 12px;
+  font-size: 2rem;
+}
+.stamp-preview-mini {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 1.25rem;
+}
+.stamp {
+  display: inline-grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 2px dashed var(--waflo-border);
+  border-radius: 50%;
+  color: var(--waflo-muted);
+  font-size: 0.8rem;
+}
+.stamp--filled {
+  border-style: solid;
+  background: var(--waflo-primary);
+  color: white;
+}
+.pro-mode-panel {
+  display: grid;
+  justify-items: start;
+  gap: 0.65rem;
+  padding: 1.5rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--waflo-primary) 12%, white), white);
+}
+.wf-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(20 22 26 / 55%);
+}
+.wf-modal {
+  width: min(100%, 760px);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+}
+.preview-profile-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+  margin-top: 1.5rem;
+}
+.preview-profile-row > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 14px;
+}
+.studio-actions {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+@media (max-width: 760px) {
+  .template-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .preview-profile-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .dashboard-section-grid--plans {
   align-items: stretch;
 }

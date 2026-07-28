@@ -37,6 +37,7 @@ import {
   SettingsScreen,
   TeamScreen,
 } from "./dashboard-screens";
+import { ProgramsScreen } from "./programs-screen";
 
 export interface MembershipView {
   id: string;
@@ -200,7 +201,7 @@ export function DashboardApplication({
   const accessibleSections =
     membership.role === "STAFF"
       ? allSections.filter((item) =>
-          ["overview", "programs", "customers", "analytics", "security"].includes(item),
+          ["overview", "customers", "analytics", "security"].includes(item),
         )
       : membership.role === "MANAGER"
         ? allSections.filter((item) => !["billing", "audit", "settings"].includes(item))
@@ -299,6 +300,20 @@ function DashboardScreen({
   onOrganizationChanged: () => Promise<void>;
 }) {
   if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
+  if (section === "programs") {
+    return membership.role === "STAFF" ? (
+      <Alert
+        title={
+          locale === "ar"
+            ? "لا يسمح لدورك بفتح استوديو الولاء."
+            : "Your role does not allow access to Loyalty Studio."
+        }
+        tone="danger"
+      />
+    ) : (
+      <ProgramsScreen locale={locale} membership={membership} />
+    );
+  }
   if (section === "locations") return <LocationsScreen locale={locale} membership={membership} />;
   if (section === "team") return <TeamScreen locale={locale} membership={membership} />;
   if (section === "billing") return <BillingScreen locale={locale} membership={membership} />;

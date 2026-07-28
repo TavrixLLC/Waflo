@@ -192,6 +192,25 @@ test.describe
       await screenshot(page, "11-dashboard-en");
     });
 
+    test("creates a Loyalty Studio draft and shows the server-backed preview", async ({ page }) => {
+      await login(page, ownerEmail, initialPassword);
+      await page.goto("/en/dashboard/programs");
+      await expect(page.getByRole("main").getByRole("heading", { name: "Programs" })).toBeVisible();
+      await page.getByRole("button", { name: "Create program" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByPlaceholder("Weekend rewards").fill("Browser Studio Rewards");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
+      await page.getByRole("button", { name: "Save draft" }).click();
+      await expect(page.getByText("Browser Studio Rewards", { exact: true })).toBeVisible();
+      await page.getByText("Browser Studio Rewards", { exact: true }).click();
+      await expect(page.getByText("Live progress preview", { exact: true })).toBeVisible();
+      await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
+      await screenshot(page, "23-loyalty-studio-preview");
+    });
+
     test("completes password reset from a #token fragment and clears it before submission", async ({
       page,
     }) => {
