@@ -91,7 +91,7 @@ export async function createApiApplication(
     origin: [...environment.allowedOrigins],
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["content-type", "x-csrf-token", "x-request-id"],
+    allowedHeaders: ["content-type", "x-csrf-token", "x-request-id", "x-idempotency-key"],
     exposedHeaders: ["x-request-id"],
   });
 

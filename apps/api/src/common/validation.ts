@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { HttpStatus } from "@nestjs/common";
+import { AppError } from "./app-error.js";
 
 const uuidSchema = z.uuid();
 const optionalCursorSchema = z.uuid().optional();
@@ -37,4 +39,23 @@ export function parseOptionalAction(value: unknown): string | undefined {
 
 export function parseOptionalPaginationLimit(value: unknown): number | undefined {
   return paginationLimitSchema.parse(value);
+}
+
+/** Checkout command IDs are UUIDs at the HTTP boundary and stay within Stripe's key limit. */
+export function parseCheckoutIdempotencyKey(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new AppError(
+      "CHECKOUT_IDEMPOTENCY_KEY_REQUIRED",
+      "A checkout command ID is required.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  if (value !== value.trim() || value.length > 255 || !uuidSchema.safeParse(value).success) {
+    throw new AppError(
+      "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
+      "The checkout command ID must be a UUID without whitespace.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  return value;
 }

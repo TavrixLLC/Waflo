@@ -28,7 +28,7 @@ Copy `.env.example` to `.env`. Validation happens at API startup. Empty Stripe/S
 | `STRIPE_SECRET_KEY` | Stripe | Stripe server key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe | Endpoint signing secret |
 | `STRIPE_*_MONTHLY_PRICE_ID` | Stripe | Starter/Growth/Scale recurring Price IDs |
-| `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID` | Optional | Fixed Portal configuration |
+| `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID` | Required with Stripe | Fixed Portal configuration with subscription price switching disabled for W1 |
 | `SENTRY_DSN` | Optional | Future error-monitoring adapter |
 | `LOG_LEVEL` | Yes | Structured API log level |
 | `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION` | Yes | Accepted legal document versions |

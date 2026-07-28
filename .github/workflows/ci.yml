@@ -128,7 +128,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
           path: |
-            artifacts/handoff-round-1/screenshots/
-            artifacts/handoff-round-1/raw-test-output/
+            artifacts/handoff-round-3/screenshots/
+            artifacts/handoff-round-3/raw-test-output/
             playwright-report/
             test-results/

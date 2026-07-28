@@ -1,0 +1,127 @@
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +15ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/v1/auth}:[39m[38;5;3m +92ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/csrf, GET} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/register, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/verify-email, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/resend-verification, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/login, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/logout, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/forgot-password, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/reset-password, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/change-password, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/me, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/me, PATCH} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/sessions, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/sessions/:sessionId, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/sessions/revoke-others, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/auth/sessions/revoke-all, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mOrganizationsController {/v1/organizations}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId, PATCH} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/select, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/slug-availability, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/slug, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/complete-onboarding, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mLocationsController {/v1/organizations/:organizationId/locations}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/locations, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/locations, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/locations/:locationId, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/locations/:locationId, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/locations/:locationId/archive, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/locations/:locationId/restore, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mTeamController {/v1/organizations/:organizationId}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/members, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/members/:memberId, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/members/:memberId, DELETE} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/invitations, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/invitations, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/invitations/:invitationId/resend, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/invitations/:invitationId, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mInvitationsController {/v1/invitations}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/invitations/inspect, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/invitations/accept, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mBillingController {/v1/organizations/:organizationId/billing}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/billing, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/billing/selected-plan, PATCH} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/billing/checkout, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/billing/portal, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mWebhooksController {/v1/webhooks}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/webhooks/stripe, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuditController {/v1}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/organizations/:organizationId/audit, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/security/events, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mPublicController {/v1/public}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/public/merchant-host/resolve, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/v1/public/merchant-slug/availability, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mHealthController {/}:[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/ready, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 24352  - [39m07/28/2026, 12:04:20 PM [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +1ms[39m
+{"level":30,"time":1785229460677,"pid":24352,"hostname":"DESKTOP-M4G4F0M","msg":"Server listening at http://127.0.0.1:4000"}
+{"level":30,"time":1785229460678,"pid":24352,"hostname":"DESKTOP-M4G4F0M","msg":"Server listening at http://192.168.1.6:4000"}
+{"level":30,"time":1785229460678,"pid":24352,"hostname":"DESKTOP-M4G4F0M","msg":"Server listening at http://172.19.192.1:4000"}
+{"level":30,"time":1785229460745,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-1","req":{"method":"GET","url":"/ready","hostname":"127.0.0.1","remoteAddress":"127.0.0.1","remotePort":50464},"msg":"incoming request"}
+{"level":30,"time":1785229460841,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-1","res":{"statusCode":200},"responseTime":95.65110000000004,"msg":"request completed"}
+{"level":30,"time":1785229463066,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-2","req":{"method":"GET","url":"/v1/public/merchant-host/resolve?host=127.0.0.1%3A3002&tenant=today","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":50477},"msg":"incoming request"}
+{"level":30,"time":1785229463083,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-2","res":{"statusCode":200},"responseTime":16.565999999999804,"msg":"request completed"}
+{"level":30,"time":1785229470443,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-3","req":{"method":"GET","url":"/v1/public/merchant-host/resolve?host=localhost%3A3002&tenant=today","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":50477},"msg":"incoming request"}
+{"level":30,"time":1785229470446,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-3","res":{"statusCode":200},"responseTime":3.208199999999124,"msg":"request completed"}
+{"level":30,"time":1785229472207,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-4","req":{"method":"GET","url":"/v1/auth/csrf","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229472209,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-4","res":{"statusCode":200},"responseTime":1.6093999999993684,"msg":"request completed"}
+{"level":30,"time":1785229472518,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-5","req":{"method":"OPTIONS","url":"/v1/auth/login","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":53624},"msg":"incoming request"}
+{"level":30,"time":1785229472518,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-5","res":{"statusCode":204},"responseTime":0.6111999999993714,"msg":"request completed"}
+{"level":30,"time":1785229472519,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-6","req":{"method":"POST","url":"/v1/auth/login","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229472682,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-6","res":{"statusCode":201},"responseTime":162.88730000000032,"msg":"request completed"}
+{"level":30,"time":1785229472684,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-7","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229472704,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-7","res":{"statusCode":200},"responseTime":19.434900000000198,"msg":"request completed"}
+{"level":30,"time":1785229472738,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-8","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229472747,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-8","res":{"statusCode":200},"responseTime":8.77520000000004,"msg":"request completed"}
+{"level":30,"time":1785229472762,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-9","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229472763,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-a","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/audit","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229472804,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-a","res":{"statusCode":200},"responseTime":40.98070000000007,"msg":"request completed"}
+{"level":30,"time":1785229472805,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-9","res":{"statusCode":200},"responseTime":43.12719999999899,"msg":"request completed"}
+{"level":30,"time":1785229473879,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-b","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229473891,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-b","res":{"statusCode":200},"responseTime":12.30450000000019,"msg":"request completed"}
+{"level":30,"time":1785229473905,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-c","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229473906,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-d","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/audit","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229473919,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-d","res":{"statusCode":200},"responseTime":13.58929999999964,"msg":"request completed"}
+{"level":30,"time":1785229473920,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-c","res":{"statusCode":200},"responseTime":15.659999999999854,"msg":"request completed"}
+{"level":30,"time":1785229474432,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-e","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229474440,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-e","res":{"statusCode":200},"responseTime":7.588200000000143,"msg":"request completed"}
+{"level":30,"time":1785229474456,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-f","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/locations","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229474469,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-f","res":{"statusCode":200},"responseTime":13.730599999998958,"msg":"request completed"}
+{"level":30,"time":1785229474958,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-g","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229474973,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-g","res":{"statusCode":200},"responseTime":15.574099999999817,"msg":"request completed"}
+{"level":30,"time":1785229474989,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-h","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/members","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229475006,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-h","res":{"statusCode":200},"responseTime":16.355600000000777,"msg":"request completed"}
+{"level":30,"time":1785229475483,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-i","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229475492,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-i","res":{"statusCode":200},"responseTime":8.876200000002427,"msg":"request completed"}
+{"level":30,"time":1785229475508,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-j","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/billing","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229475520,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-j","res":{"statusCode":200},"responseTime":12.186699999998382,"msg":"request completed"}
+{"level":30,"time":1785229476121,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-k","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229476130,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-k","res":{"statusCode":200},"responseTime":8.288400000001275,"msg":"request completed"}
+{"level":30,"time":1785229476147,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-l","req":{"method":"GET","url":"/v1/auth/sessions","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229476148,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-m","req":{"method":"GET","url":"/v1/security/events","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229476156,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-l","res":{"statusCode":200},"responseTime":8.426499999997759,"msg":"request completed"}
+{"level":30,"time":1785229476157,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-m","res":{"statusCode":200},"responseTime":8.844700000001467,"msg":"request completed"}
+{"level":30,"time":1785229476987,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-n","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229476997,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-n","res":{"statusCode":200},"responseTime":10.543400000002293,"msg":"request completed"}
+{"level":30,"time":1785229477013,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-o","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/audit","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229477025,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-o","res":{"statusCode":200},"responseTime":12.58889999999883,"msg":"request completed"}
+{"level":30,"time":1785229477531,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-p","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229477539,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-p","res":{"statusCode":200},"responseTime":7.62329999999929,"msg":"request completed"}
+{"level":30,"time":1785229477553,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-q","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229477566,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-q","res":{"statusCode":200},"responseTime":12.810900000000402,"msg":"request completed"}
+{"level":30,"time":1785229478099,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-r","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229478110,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-r","res":{"statusCode":200},"responseTime":11.086100000000442,"msg":"request completed"}
+{"level":30,"time":1785229478135,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-s","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/members","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229478150,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-s","res":{"statusCode":200},"responseTime":14.740200000000186,"msg":"request completed"}
+{"level":30,"time":1785229478700,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-t","req":{"method":"GET","url":"/v1/auth/me","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229478710,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-t","res":{"statusCode":200},"responseTime":9.135599999997794,"msg":"request completed"}
+{"level":30,"time":1785229478721,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-u","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":52221},"msg":"incoming request"}
+{"level":30,"time":1785229478723,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-v","req":{"method":"GET","url":"/v1/organizations/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/audit","hostname":"localhost","remoteAddress":"127.0.0.1","remotePort":51836},"msg":"incoming request"}
+{"level":30,"time":1785229478735,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-v","res":{"statusCode":200},"responseTime":12.015800000001036,"msg":"request completed"}
+{"level":30,"time":1785229478735,"pid":24352,"hostname":"DESKTOP-M4G4F0M","reqId":"req-u","res":{"statusCode":200},"responseTime":13.837100000000646,"msg":"request completed"}

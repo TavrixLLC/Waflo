@@ -13,7 +13,7 @@ if (project !== "chromium" && project !== "accessibility") {
   throw new Error(`Unsupported Playwright project: ${project}`);
 }
 
-const logDirectory = path.join(root, "artifacts", "handoff-round-1", "raw-test-output");
+const logDirectory = path.join(root, "artifacts", "handoff-round-3", "raw-test-output");
 await mkdir(logDirectory, { recursive: true });
 
 const commands = [

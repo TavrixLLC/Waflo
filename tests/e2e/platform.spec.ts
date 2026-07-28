@@ -2,12 +2,14 @@ import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { expect, type Page, type APIRequestContext, test } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-round-1/screenshots";
+const screenshots = "artifacts/handoff-round-3/screenshots";
 const runId = randomUUID().slice(0, 8);
 const ownerEmail = `browser-owner-${runId}@waflo.local`;
 const staffEmail = `browser-staff-${runId}@waflo.local`;
+const resetEmail = `browser-reset-${runId}@waflo.local`;
 const initialPassword = "Browser Waflo 2026!";
 const changedPassword = "Browser Waflo Changed 2026!";
+const resetPassword = "Browser Waflo Reset 2026!";
 const initialSlug = `browser-${runId}`;
 const changedSlug = `flow-${runId}`;
 
@@ -86,8 +88,14 @@ async function signup(page: Page, email: string, password: string): Promise<void
 
 async function verifyLatestEmail(page: Page, email: string): Promise<void> {
   const verificationUrl = await latestMailAction(page.request, email, "Verify your Waflo email");
-  await page.goto(verificationUrl);
+  const verificationParsed = new URL(verificationUrl);
+  expect(new URL(verificationUrl).hash).toMatch(/^#token=.+/);
+  // Signup already leaves the browser on this pathname; add a harmless query
+  // so Playwright performs a full navigation before the fragment is consumed.
+  verificationParsed.searchParams.set("round3", "fragment");
+  await page.goto(verificationParsed.toString());
   await expect(page.getByText("Email verified", { exact: true })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe("");
 }
 
 async function login(page: Page, email: string, password: string): Promise<void> {
@@ -184,6 +192,34 @@ test.describe
       await screenshot(page, "11-dashboard-en");
     });
 
+    test("completes password reset from a #token fragment and clears it before submission", async ({
+      page,
+    }) => {
+      await signup(page, resetEmail, initialPassword);
+      await verifyLatestEmail(page, resetEmail);
+      await page.goto("/en/forgot-password");
+      await page.locator('input[name="email"]').fill(resetEmail);
+      await page.getByRole("button", { name: "Send instructions" }).click();
+      await expect(
+        page.getByText("If the account exists, reset instructions have been sent."),
+      ).toBeVisible();
+      const resetUrl = await latestMailAction(
+        page.request,
+        resetEmail,
+        "Reset your Waflo password",
+      );
+      expect(new URL(resetUrl).hash).toMatch(/^#token=.+/);
+      const resetParsed = new URL(resetUrl);
+      resetParsed.searchParams.set("round3", "fragment");
+      await page.goto(resetParsed.toString());
+      await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
+      await expect.poll(() => new URL(page.url()).hash).toBe("");
+      await page.locator('input[name="password"]').fill(resetPassword);
+      await page.locator('input[name="confirmPassword"]').fill(resetPassword);
+      await page.getByRole("button", { name: "Save password" }).click();
+      await expect(page.getByText("Password changed", { exact: true })).toBeVisible();
+    });
+
     test("edits settings, reaches the location limit, upgrades setup plan, and creates a location", async ({
       page,
     }) => {
@@ -220,6 +256,70 @@ test.describe
       await screenshot(page, "14-locations");
     });
 
+    test("sends a Checkout command ID, suppresses double clicks, and reuses uncertain retries", async ({
+      page,
+    }) => {
+      await login(page, ownerEmail, initialPassword);
+      const checkoutKeys: string[] = [];
+      let checkoutCalls = 0;
+      let uncertainRetry = false;
+      await page.route("**/v1/organizations/*/billing", async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const upstream = await route.fetch();
+        const body = (await upstream.json()) as {
+          data: { stripeConfigured: boolean; profile: { stripeCustomerId: string | null } };
+        };
+        body.data.stripeConfigured = true;
+        body.data.profile.stripeCustomerId = "cus_browser_checkout";
+        await route.fulfill({ response: upstream, json: body });
+      });
+      await page.route("**/v1/organizations/*/billing/checkout", async (route) => {
+        checkoutCalls += 1;
+        const key = route.request().headers()["x-idempotency-key"];
+        if (key) checkoutKeys.push(key);
+        if (checkoutCalls === 2 && uncertainRetry) {
+          await route.abort("failed");
+          return;
+        }
+        if (checkoutCalls === 1) await new Promise((resolve) => setTimeout(resolve, 150));
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: {
+              sessionId: `cs_browser_${checkoutCalls}`,
+              url: "http://localhost:3001/en/dashboard/billing?checkout=returned",
+            },
+            requestId: `browser-checkout-${runId}`,
+          }),
+        });
+      });
+
+      await page.goto("/en/dashboard/billing");
+      const checkout = page.getByRole("button", { name: "Continue to Stripe Checkout" });
+      await expect(checkout).toBeEnabled();
+      await checkout.dblclick();
+      await expect.poll(() => checkoutCalls).toBe(1);
+      expect(checkoutKeys[0]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+
+      uncertainRetry = true;
+      await page.goto("/en/dashboard/billing");
+      await checkout.click();
+      await expect(page.getByText("Waflo could not reach the server. Try again.")).toBeVisible();
+      await checkout.click();
+      await expect.poll(() => checkoutCalls).toBe(3);
+      expect(checkoutKeys[2]).toBe(checkoutKeys[1]);
+      await expect(page).toHaveURL(/checkout=returned/);
+
+      await page.goto("/en/dashboard/billing");
+      await checkout.click();
+      await expect.poll(() => checkoutCalls).toBe(4);
+      expect(checkoutKeys[3]).not.toBe(checkoutKeys[2]);
+      await expect(page).toHaveURL(/checkout=returned/);
+    });
+
     test("invites a Staff user who registers, verifies, and accepts the invitation", async ({
       browser,
       page,
@@ -244,7 +344,9 @@ test.describe
       await verifyLatestEmail(staffPage, staffEmail);
       await login(staffPage, staffEmail, initialPassword);
       await expect(staffPage).toHaveURL(/\/en\/onboarding\/business/);
-      await staffPage.goto(invitationUrl);
+      const invitationParsed = new URL(invitationUrl);
+      invitationParsed.searchParams.set("round3", "fragment");
+      await staffPage.goto(invitationParsed.toString());
       await expect(staffPage.getByRole("heading", { name: /Join Browser Coffee/ })).toBeVisible();
       await staffPage.getByRole("button", { name: "Accept invitation" }).click();
       await expect(staffPage.getByText("Invitation accepted")).toBeVisible();

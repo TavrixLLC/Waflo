@@ -62,7 +62,7 @@ export class AuthController {
 
   @Post("login")
   @Public()
-  @RateLimit(8, 300)
+  @RateLimit(20, 300)
   async login(
     @Body() body: unknown,
     @Req() request: WafloRequest,

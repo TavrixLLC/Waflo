@@ -1,0 +1,24 @@
+COMMAND: pnpm test
+pnpm.exe : $ vitest run --config vitest.config.ts
+At C:\Users\Alhamza Nazhan\AppData\Local\pnpm\bin\pnpm.ps1:14 char:3
++   & "$basedir/../global/v11/4508-19eae16b90e/node_modules/@pnpm/exe/p ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ vitest run --config vitest.config.ts:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+
+ RUN  v4.1.10 C:/waflo
+
+(node:24260) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and
+will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:21260) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and
+will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  9 passed (9)
+      Tests  150 passed (150)
+   Start at  12:08:01
+   Duration  20.49s (transform 1.01s, setup 0ms, import 7.43s, tests 11.44s, environment 1ms)
+
+exit_code=0

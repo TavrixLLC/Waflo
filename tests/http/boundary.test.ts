@@ -3,6 +3,7 @@ import { createOpaqueToken, hashOpaqueToken, hashPassword } from "../../packages
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app";
+import { BillingService } from "../../apps/api/src/billing/billing.service";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service";
 import { PrismaService } from "../../apps/api/src/database/prisma.service";
 
@@ -16,6 +17,7 @@ const previousStripeEnvironment = {
   STRIPE_STARTER_MONTHLY_PRICE_ID: process.env.STRIPE_STARTER_MONTHLY_PRICE_ID,
   STRIPE_GROWTH_MONTHLY_PRICE_ID: process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID,
   STRIPE_SCALE_MONTHLY_PRICE_ID: process.env.STRIPE_SCALE_MONTHLY_PRICE_ID,
+  STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID: process.env.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID,
 };
 
 interface Identity {
@@ -110,6 +112,7 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
     process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
     process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
+    process.env.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID = "bpc_test_w1_no_plan_switching";
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);
@@ -399,6 +402,124 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       expect(response.statusCode).toBe(422);
       expect(response.json().error.code).toBe("VALIDATION_FAILED");
     }
+  });
+
+  it("validates Checkout command IDs at the HTTP boundary before Stripe access", async () => {
+    const csrfState = await csrf();
+    const cases = [
+      {
+        headers: mutationHeaders(csrfState, owner),
+        code: "CHECKOUT_IDEMPOTENCY_KEY_REQUIRED",
+      },
+      {
+        headers: { ...mutationHeaders(csrfState, owner), "x-idempotency-key": "not-a-uuid" },
+        code: "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
+      },
+      {
+        headers: { ...mutationHeaders(csrfState, owner), "x-idempotency-key": "1234" },
+        code: "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
+      },
+      {
+        headers: {
+          ...mutationHeaders(csrfState, owner),
+          "x-idempotency-key": "a".repeat(256),
+        },
+        code: "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
+      },
+    ];
+    for (const item of cases) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/organizations/${organizationId}/billing/checkout`,
+        headers: item.headers,
+        payload: {},
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error.code).toBe(item.code);
+    }
+  });
+
+  it("replays concurrent Checkout requests through the HTTP boundary", async () => {
+    const replayOwner = await createIdentity("replay-owner");
+    const replayOrganizationId = await createOrganization(replayOwner.userId, "replay");
+    const billing = app.get(BillingService);
+    const stripe = (
+      billing as unknown as {
+        stripe: {
+          customers: { create: (...args: never[]) => Promise<{ id: string }> };
+          checkout: {
+            sessions: {
+              create: (...args: never[]) => Promise<{ id: string; url: string }>;
+            };
+          };
+          billingPortal: { sessions: { create: (...args: never[]) => Promise<{ url: string }> } };
+        };
+      }
+    ).stripe;
+    stripe.customers.create = async () => ({ id: `cus_http_${runId}` });
+    stripe.checkout.sessions.create = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return {
+        id: `cs_http_${runId}`,
+        url: `https://checkout.stripe.com/pay/cs_http_${runId}`,
+      };
+    };
+    const csrfState = await csrf();
+    const key = randomUUID();
+    const [first, second] = await Promise.all(
+      [1, 2].map(() =>
+        app.inject({
+          method: "POST",
+          url: `/v1/organizations/${replayOrganizationId}/billing/checkout`,
+          headers: { ...mutationHeaders(csrfState, replayOwner), "x-idempotency-key": key },
+          payload: {},
+          remoteAddress: "127.0.0.2",
+        }),
+      ),
+    );
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    const firstResult = first.json().data;
+    const secondResult = second.json().data;
+    expect(firstResult.sessionId).toBeTruthy();
+    expect(firstResult.url).toBeTruthy();
+    expect(secondResult).toEqual(firstResult);
+    expect(
+      await prisma.client.checkoutIdempotencyKey.count({
+        where: { organizationId: replayOrganizationId, idempotencyKey: key },
+      }),
+    ).toBe(1);
+  });
+
+  it("keeps Portal requests separate from Checkout idempotency semantics", async () => {
+    const billing = app.get(BillingService);
+    const stripe = (
+      billing as unknown as {
+        stripe: {
+          billingPortal: {
+            sessions: { create: (...args: never[]) => Promise<{ url: string }> };
+          };
+        };
+      }
+    ).stripe;
+    let portalArguments: unknown[] = [];
+    stripe.billingPortal.sessions.create = async (...args) => {
+      portalArguments = args;
+      return { url: "https://billing.stripe.com/session/http-portal" };
+    };
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId },
+      data: { stripeCustomerId: `cus_portal_${runId}` },
+    });
+    const portalCsrf = await csrf();
+    const response = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/billing/portal`,
+      headers: mutationHeaders(portalCsrf, owner),
+      payload: {},
+    });
+    expect(response.statusCode).toBe(201);
+    expect(portalArguments[1]).toBeUndefined();
   });
 
   it("verifies Stripe signatures against the exact raw HTTP body", async () => {

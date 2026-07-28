@@ -22,7 +22,7 @@ import {
   UsageMeter,
 } from "@waflo/ui";
 import { BarChart3, CalendarClock, Copy, Gift, MapPin, Plus, Users } from "lucide-react";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiClientError, resetCsrf } from "../lib/api-client";
 import type { DashboardSection, MembershipView } from "./dashboard";
 
@@ -697,6 +697,11 @@ export function BillingScreen({
   const [data, setData] = useState<BillingView | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<PlanCode | null>(null);
+  const [stripeActionInFlight, setStripeActionInFlight] = useState<"checkout" | "portal" | null>(
+    null,
+  );
+  const stripeActionInFlightRef = useRef<"checkout" | "portal" | null>(null);
+  const [checkoutCommandId, setCheckoutCommandId] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       setData(await apiFetch(`/v1/organizations/${membership.organization.id}/billing`));
@@ -722,14 +727,40 @@ export function BillingScreen({
     }
   }
   async function stripeAction(kind: "checkout" | "portal") {
+    if (stripeActionInFlightRef.current) return;
+    const commandId =
+      kind === "checkout" ? (checkoutCommandId ?? globalThis.crypto.randomUUID()) : null;
+    if (kind === "checkout" && !checkoutCommandId) setCheckoutCommandId(commandId);
+    stripeActionInFlightRef.current = kind;
+    setStripeActionInFlight(kind);
     try {
-      const result = await apiFetch<{ url: string | null }>(
+      const result = await apiFetch<{ url: string | null; sessionId?: string | null }>(
         `/v1/organizations/${membership.organization.id}/billing/${kind}`,
-        { method: "POST" },
+        {
+          method: "POST",
+          ...(commandId ? { headers: { "x-idempotency-key": commandId } } : {}),
+        },
       );
-      if (result.url) window.location.assign(result.url);
+      if (result.url) {
+        if (kind === "checkout") setCheckoutCommandId(null);
+        window.location.assign(result.url);
+      }
     } catch (caught) {
+      if (
+        kind === "checkout" &&
+        caught instanceof ApiClientError &&
+        [
+          "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
+          "CHECKOUT_IDEMPOTENCY_KEY_REQUIRED",
+          "CHECKOUT_IDEMPOTENCY_KEY_CONFLICT",
+        ].includes(caught.code)
+      ) {
+        setCheckoutCommandId(null);
+      }
       setError(message(caught, ar ? "تعذر فتح Stripe." : "Unable to open Stripe."));
+    } finally {
+      stripeActionInFlightRef.current = null;
+      setStripeActionInFlight(null);
     }
   }
   return (
@@ -801,13 +832,22 @@ export function BillingScreen({
             ))}
           </div>
           <div className="dashboard-actions" style={{ marginTop: "1.5rem" }}>
-            <Button onClick={() => void stripeAction("checkout")} disabled={!data.stripeConfigured}>
+            <Button
+              onClick={() => void stripeAction("checkout")}
+              loading={stripeActionInFlight === "checkout"}
+              disabled={!data.stripeConfigured || stripeActionInFlight !== null}
+            >
               {ar ? "الاشتراك عبر Stripe" : "Continue to Stripe Checkout"}
             </Button>
             <Button
               variant="secondary"
               onClick={() => void stripeAction("portal")}
-              disabled={!data.stripeConfigured || !data.profile.stripeCustomerId}
+              loading={stripeActionInFlight === "portal"}
+              disabled={
+                !data.stripeConfigured ||
+                !data.profile.stripeCustomerId ||
+                stripeActionInFlight !== null
+              }
             >
               {ar ? "فتح بوابة العميل" : "Open Customer Portal"}
             </Button>

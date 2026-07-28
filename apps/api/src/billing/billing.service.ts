@@ -240,6 +240,13 @@ export class BillingService {
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
+    if (idempotencyKey !== idempotencyKey.trim() || idempotencyKey.length > 255) {
+      throw new AppError(
+        "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
+        "The checkout idempotency key is invalid.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
     const organization = await this.prisma.client.organization.findUniqueOrThrow({
       where: { id: organizationId },
       include: {
@@ -338,15 +345,36 @@ export class BillingService {
     );
 
     // Persist the key so repeated calls with the same key replay this result.
-    await this.prisma.client.checkoutIdempotencyKey.create({
-      data: {
-        organizationId,
-        idempotencyKey,
-        planCode: planKey,
-        stripeSessionId: session.id,
-        stripeSessionUrl: session.url,
-      },
-    });
+    // Two callers can both reach Stripe before either local insert commits. If
+    // this caller loses the unique race, the winner is the authoritative local
+    // result for the same organization, command ID, and plan.
+    try {
+      await this.prisma.client.checkoutIdempotencyKey.create({
+        data: {
+          organizationId,
+          idempotencyKey,
+          planCode: planKey,
+          stripeSessionId: session.id,
+          stripeSessionUrl: session.url,
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
+        throw error;
+      }
+      const winner = await this.prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
+        where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
+      });
+      if (winner.planCode !== planKey) {
+        throw new AppError(
+          "CHECKOUT_IDEMPOTENCY_KEY_CONFLICT",
+          "This idempotency key was already used with a different plan.",
+          HttpStatus.CONFLICT,
+          { existingPlan: winner.planCode, requestedPlan: planKey },
+        );
+      }
+      return { url: winner.stripeSessionUrl, sessionId: winner.stripeSessionId };
+    }
 
     await this.audit.record(
       {
@@ -375,12 +403,18 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
+    const portalConfigurationId = this.environment.values.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID;
+    if (!portalConfigurationId) {
+      throw new AppError(
+        "STRIPE_PORTAL_CONFIGURATION_REQUIRED",
+        "Stripe Customer Portal is not configured for W1 plan policy.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
     const portal = await stripe.billingPortal.sessions.create({
       customer: profile.stripeCustomerId,
       return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing`,
-      ...(this.environment.values.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID
-        ? { configuration: this.environment.values.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID }
-        : {}),
+      configuration: portalConfigurationId,
     });
     await this.audit.record(
       {
@@ -435,9 +469,19 @@ export class BillingService {
     if (!claim) return { received: true, duplicate: true };
 
     try {
+      // Retrieve the provider's current snapshot before opening the database
+      // transaction. The lease is revalidated inside the subscription lock
+      // before any local business state can be committed.
+      const subscriptionId = this.subscriptionIdFromEvent(event);
+      const currentSubscription = subscriptionId
+        ? await this.retrieveCurrentSubscription(subscriptionId)
+        : undefined;
+      const businessLockKey = subscriptionId
+        ? `stripe-subscription:${subscriptionId}`
+        : `stripe-event:${event.id}`;
       const applied = await withInvariantLock(
         this.prisma.client,
-        `stripe-event:${event.id}`,
+        businessLockKey,
         async (transaction) => {
           const ownership = await transaction.processedWebhookEvent.findUniqueOrThrow({
             where: { id: claim.id },
@@ -452,7 +496,12 @@ export class BillingService {
               HttpStatus.CONFLICT,
             );
           }
-          const result = await this.applyStripeEvent(event, transaction, request);
+          const result = await this.applyStripeEvent(
+            event,
+            transaction,
+            request,
+            currentSubscription,
+          );
           const statusValue = result.staleness === "ignored_stale" ? "IGNORED_STALE" : "PROCESSED";
           const completed = await transaction.processedWebhookEvent.updateMany({
             where: {
@@ -595,6 +644,31 @@ export class BillingService {
     return claimed.count === 1 ? { id: existing.id, leaseExpiresAt } : null;
   }
 
+  private subscriptionIdFromEvent(event: Stripe.Event): string | null {
+    if (
+      event.type !== "customer.subscription.created" &&
+      event.type !== "customer.subscription.updated" &&
+      event.type !== "customer.subscription.deleted"
+    ) {
+      return null;
+    }
+    const id = (event.data.object as { id?: unknown }).id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  }
+
+  private async retrieveCurrentSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
+    try {
+      return await this.subscriptionProvider.retrieveSubscription(subscriptionId);
+    } catch {
+      throw new AppError(
+        "STRIPE_PROVIDER_RETRIEVAL_FAILED",
+        "Failed to retrieve current subscription state from Stripe. Will retry.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+        { subscriptionId },
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // applyStripeEvent – event ordering via current-state retrieval
   // ---------------------------------------------------------------------------
@@ -603,6 +677,7 @@ export class BillingService {
     event: Stripe.Event,
     transaction: Prisma.TransactionClient,
     request: WafloRequest,
+    currentSubscription?: Stripe.Subscription,
   ): Promise<{
     organizationId: string | null;
     staleness: "applied" | "ignored_stale";
@@ -629,24 +704,12 @@ export class BillingService {
       return { organizationId: null, staleness: "applied", notification: null };
     }
 
-    // Step 1: Extract subscription ID from the event to fetch the CURRENT object.
-    const eventSubscription = event.data.object as Stripe.Subscription;
-    const subscriptionId = eventSubscription.id;
-
-    // Step 2: Retrieve the CURRENT subscription from Stripe (authoritative state).
-    // If retrieval fails, mark the event retryable rather than applying stale data.
-    let currentSubscription: Stripe.Subscription;
-    try {
-      currentSubscription = await this.subscriptionProvider.retrieveSubscription(subscriptionId);
-    } catch (providerError) {
+    const subscriptionId = this.subscriptionIdFromEvent(event);
+    if (!subscriptionId || !currentSubscription) {
       throw new AppError(
-        "STRIPE_PROVIDER_RETRIEVAL_FAILED",
-        "Failed to retrieve current subscription state from Stripe. Will retry.",
-        HttpStatus.SERVICE_UNAVAILABLE,
-        {
-          subscriptionId,
-          originalError: providerError instanceof Error ? providerError.message : "unknown",
-        },
+        "STRIPE_SUBSCRIPTION_ID_MISSING",
+        "The Stripe subscription ID is missing.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
 
@@ -726,9 +789,9 @@ export class BillingService {
       );
     }
 
-    // Step 4: Check freshness using the invariant lock scoped to the subscription.
-    // The event.created timestamp is compared against the last applied event's
-    // creation timestamp to prevent an older event from overwriting newer state.
+    // Step 4: Check freshness while holding the subscription invariant lock.
+    // Same-second events have equal authority; only strictly older timestamps
+    // are stale. A different event ID remains independently claimable.
     const eventCreatedAt = new Date(event.created * 1000);
 
     const existingSubscription = await transaction.subscription.findUnique({
@@ -737,10 +800,9 @@ export class BillingService {
 
     if (
       existingSubscription?.lastAppliedStripeEventAt &&
-      eventCreatedAt <= existingSubscription.lastAppliedStripeEventAt
+      eventCreatedAt < existingSubscription.lastAppliedStripeEventAt
     ) {
-      // This event is older than (or exactly equal to) the last applied event.
-      // Audit but do NOT apply.
+      // This event is strictly older than the last applied event.
       await transaction.auditLog.create({
         data: {
           organizationId: profile.organizationId,

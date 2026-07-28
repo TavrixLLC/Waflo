@@ -292,15 +292,17 @@ describe.sequential("Stripe Checkout outbound idempotency", () => {
       billing.checkout(userC.id, orgC.id, request, key),
     ]);
 
-    // Both should fulfill (one creates, one replays).
-    const fulfilled = [r1, r2].filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<{
-      url: string | null;
-      sessionId: string | null;
-    }>[];
-    expect(fulfilled.length).toBeGreaterThanOrEqual(1);
-    // All successful results should reference the same session.
-    const sessionIds = fulfilled.map((r) => r.value.sessionId);
-    expect(new Set(sessionIds).size).toBe(1);
+    // Both callers must fulfill with the same non-null effective session.
+    expect(r1.status).toBe("fulfilled");
+    expect(r2.status).toBe("fulfilled");
+    const first = (r1 as PromiseFulfilledResult<{ url: string | null; sessionId: string | null }>)
+      .value;
+    const second = (r2 as PromiseFulfilledResult<{ url: string | null; sessionId: string | null }>)
+      .value;
+    expect(first.sessionId).toBeTruthy();
+    expect(first.url).toBeTruthy();
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.url).toBe(first.url);
 
     // Only one CheckoutIdempotencyKey record should exist.
     const records = await prisma.client.checkoutIdempotencyKey.findMany({

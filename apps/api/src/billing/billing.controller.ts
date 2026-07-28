@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from "@nestjs
 import { selectedPlanSchema } from "@waflo/contracts";
 import { CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseInput, parseUuid } from "../common/validation.js";
+import { parseCheckoutIdempotencyKey, parseInput, parseUuid } from "../common/validation.js";
 import { BillingService } from "./billing.service.js";
 
 @Controller("v1/organizations/:organizationId/billing")
@@ -33,7 +33,12 @@ export class BillingController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: WafloRequest,
   ) {
-    return this.billing.checkout(user.id, parseUuid(organizationId), request, idempotencyKey ?? "");
+    return this.billing.checkout(
+      user.id,
+      parseUuid(organizationId),
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
   }
 
   @Post("portal")

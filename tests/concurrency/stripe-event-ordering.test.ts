@@ -19,6 +19,7 @@ import { PrismaService } from "../../apps/api/src/database/prisma.service";
 import type { NotificationService } from "../../apps/api/src/notifications/notification.service";
 import { TenantService } from "../../apps/api/src/tenancy/tenant.service";
 import type Stripe from "stripe";
+import { withInvariantLock } from "../../apps/api/src/common/organization-transaction";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -148,6 +149,14 @@ function sign(event: object): { payload: Buffer; signature: string } {
     .update(`${timestamp}.${payload.toString()}`)
     .digest("hex");
   return { payload, signature: `t=${timestamp},v1=${digest}` };
+}
+
+async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  if (!condition()) throw new Error("Timed out waiting for the deterministic concurrency seam.");
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +588,177 @@ describe.sequential("Stripe event ordering – current-state strategy", () => {
       where: { provider_externalEventId: { provider: "stripe", externalEventId: ev2 } },
     });
     expect(ev2Record.status).toBe("IGNORED_STALE");
+  });
+
+  it("serializes different event IDs for one subscription through the subscription lock", async () => {
+    const subId = `sub_order_lock_${runId}`;
+    const eventIdA = `evt_lock_a_${runId}`;
+    const eventIdB = `evt_lock_b_${runId}`;
+    const subscriptions = new Map([
+      [
+        subId,
+        mockSubscription({
+          id: subId,
+          status: "active",
+          priceId: PRICE_GROWTH,
+          plan: "growth",
+          organizationId: orgId,
+          customerId,
+        }),
+      ],
+    ]);
+    const billing = billingWith(subscriptions);
+    const seam = billing as unknown as {
+      applyStripeEvent: (...args: never[]) => Promise<unknown>;
+    };
+    const original = seam.applyStripeEvent.bind(billing);
+    let entered = 0;
+    let active = 0;
+    let maximumActive = 0;
+    let releaseFirst!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    seam.applyStripeEvent = async (...args: never[]) => {
+      entered += 1;
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      if (entered === 1) await firstRelease;
+      const result = await original(...args);
+      active -= 1;
+      return result;
+    };
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signedA = sign(
+      buildEvent({
+        id: eventIdA,
+        subscriptionId: subId,
+        organizationId: orgId,
+        customerId,
+        priceId: PRICE_GROWTH,
+        plan: "growth",
+        created: timestamp,
+      }),
+    );
+    const signedB = sign(
+      buildEvent({
+        id: eventIdB,
+        subscriptionId: subId,
+        organizationId: orgId,
+        customerId,
+        priceId: PRICE_GROWTH,
+        plan: "growth",
+        created: timestamp + 1,
+      }),
+    );
+    const first = billing.processWebhook(signedA.payload, signedA.signature, request);
+    await waitFor(() => entered === 1);
+    const second = billing.processWebhook(signedB.payload, signedB.signature, request);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(maximumActive).toBe(1);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(entered).toBeGreaterThanOrEqual(2);
+  });
+
+  it("allows different subscription locks to process independently", async () => {
+    let active = 0;
+    let maximumActive = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const criticalSection = async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await gate;
+      active -= 1;
+    };
+    const first = withInvariantLock(
+      prisma.client,
+      `stripe-subscription:independent-a-${runId}`,
+      criticalSection,
+    );
+    await waitFor(() => maximumActive === 1);
+    const second = withInvariantLock(
+      prisma.client,
+      `stripe-subscription:independent-b-${runId}`,
+      criticalSection,
+    );
+    await waitFor(() => maximumActive === 2);
+    expect(maximumActive).toBe(2);
+    release();
+    await Promise.all([first, second]);
+  });
+
+  it("applies a different event ID in the same created second using the new provider state", async () => {
+    const subId = `sub_order_same_second_${runId}`;
+    const eventIdA = `evt_same_second_a_${runId}`;
+    const eventIdB = `evt_same_second_b_${runId}`;
+    const timestamp = Math.floor(Date.now() / 1000);
+    const stateA = mockSubscription({
+      id: subId,
+      status: "active",
+      priceId: PRICE_GROWTH,
+      plan: "growth",
+      organizationId: orgId,
+      customerId,
+    });
+    const stateB = mockSubscription({
+      id: subId,
+      status: "canceled",
+      priceId: PRICE_STARTER,
+      plan: "starter",
+      organizationId: orgId,
+      customerId,
+      canceledAt: timestamp,
+    });
+    let currentState = stateA;
+    const billing = billingWith(new Map([[subId, stateA]]));
+    billing.subscriptionProvider = {
+      async retrieveSubscription() {
+        return currentState;
+      },
+    };
+    const first = sign(
+      buildEvent({
+        id: eventIdA,
+        subscriptionId: subId,
+        organizationId: orgId,
+        customerId,
+        priceId: PRICE_GROWTH,
+        plan: "growth",
+        status: "active",
+        created: timestamp,
+      }),
+    );
+    await billing.processWebhook(first.payload, first.signature, request);
+    currentState = stateB;
+    const second = sign(
+      buildEvent({
+        id: eventIdB,
+        subscriptionId: subId,
+        organizationId: orgId,
+        customerId,
+        priceId: PRICE_STARTER,
+        plan: "starter",
+        status: "canceled",
+        created: timestamp,
+      }),
+    );
+    await billing.processWebhook(second.payload, second.signature, request);
+    const local = await prisma.client.subscription.findUniqueOrThrow({
+      where: { stripeSubscriptionId: subId },
+    });
+    expect(local.status).toBe("CANCELED");
+    expect(local.planCode).toBe("STARTER");
+    expect(local.stripePriceId).toBe(PRICE_STARTER);
+    expect(local.lastAppliedStripeEventId).toBe(eventIdB);
+    expect(
+      await prisma.client.processedWebhookEvent.findUniqueOrThrow({
+        where: { provider_externalEventId: { provider: "stripe", externalEventId: eventIdB } },
+      }),
+    ).toMatchObject({ status: "PROCESSED" });
   });
 
   it("provider transient failure marks event FAILED and is retryable", async () => {

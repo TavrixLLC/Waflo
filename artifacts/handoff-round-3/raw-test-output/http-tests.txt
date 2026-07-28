@@ -1,0 +1,18 @@
+COMMAND: pnpm test:http
+pnpm.exe : $ vitest run --config vitest.config.ts --project http
+At C:\Users\Alhamza Nazhan\AppData\Local\pnpm\bin\pnpm.ps1:14 char:3
++   & "$basedir/../global/v11/4508-19eae16b90e/node_modules/@pnpm/exe/p ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ vitest run --... --project http:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+
+ RUN  v4.1.10 C:/waflo
+
+
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Start at  12:07:47
+   Duration  3.52s (transform 353ms, setup 0ms, import 1.71s, tests 1.62s, environment 0ms)
+
+exit_code=0
