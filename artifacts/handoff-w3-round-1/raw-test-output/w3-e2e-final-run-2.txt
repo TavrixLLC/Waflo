@@ -1,0 +1,14 @@
+
+Running 7 tests using 1 worker
+
+  ok 1 [w3] › tests\e2e\w3-platform.spec.ts:358:9 › W3 customer enrollment and Wallet browser evidence › shows merchant enrollment controls, canonical URL, QR, and truthful provider health (2.4s)
+  ok 2 [w3] › tests\e2e\w3-platform.spec.ts:374:9 › W3 customer enrollment and Wallet browser evidence › renders public discovery, English enrollment, Arabic RTL, and consent validation (1.3s)
+  ok 3 [w3] › tests\e2e\w3-platform.spec.ts:395:9 › W3 customer enrollment and Wallet browser evidence › routes a single published Program directly in English, Arabic, and merchant-host forms (785ms)
+  ok 4 [w3] › tests\e2e\w3-platform.spec.ts:428:9 › W3 customer enrollment and Wallet browser evidence › enrolls name-only, displays an opaque 0/8 card, and reaches both Test Adapters (17.0s)
+  ok 5 [w3] › tests\e2e\w3-platform.spec.ts:490:9 › W3 customer enrollment and Wallet browser evidence › completes the warned no-email transfer exactly once (1.6s)
+  ok 6 [w3] › tests\e2e\w3-platform.spec.ts:506:9 › W3 customer enrollment and Wallet browser evidence › uses a fragment email confirmation, scrubs it, and leaves the old session transferred (2.2s)
+  ok 7 [w3] › tests\e2e\w3-platform.spec.ts:544:9 › W3 customer enrollment and Wallet browser evidence › shows paused, archived, suspended, and provider-disabled truthfully (950ms)
+
+  7 passed (27.6s)
+
+EXIT_CODE=0

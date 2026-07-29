@@ -1,0 +1,7 @@
+Archive: waflo-w2-round-2-portable-source.zip
+Size bytes: 7159809
+Entries: 945
+SHA-256: 7F7358109C50C429E82176AB24F13FB5C90DFD5002B0E8BDA56EAB7724F3A0D1
+Environment example included: yes
+Local .env included: no
+Forbidden dependency/build/Git entries: 0

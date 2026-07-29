@@ -1,0 +1,8 @@
+$ prisma validate
+◇ injected env (33) from ..\..\.env // tip: ◈ secrets for agents [www.dotenvx.com]
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma\schema.prisma.
+The schema at prisma\schema.prisma is valid 🚀
+
+EXIT_CODE=0

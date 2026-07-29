@@ -3,10 +3,13 @@ import type { AuthenticatedUser, WafloRequest } from "./request-context.js";
 
 export const IS_PUBLIC = "waflo:is-public";
 export const SKIP_CSRF = "waflo:skip-csrf";
+export const CUSTOMER_CSRF = "waflo:customer-csrf";
 export const RATE_LIMIT = "waflo:rate-limit";
 
 export const Public = () => SetMetadata(IS_PUBLIC, true);
 export const SkipCsrf = () => SetMetadata(SKIP_CSRF, true);
+export const CustomerCsrf = () => SetMetadata(CUSTOMER_CSRF, true);
+export const CustomerCsrfOptionalSession = () => SetMetadata(CUSTOMER_CSRF, "optional");
 export const RateLimit = (limit: number, windowSeconds = 60) =>
   SetMetadata(RATE_LIMIT, { limit, windowSeconds });
 

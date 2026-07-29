@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import fastifyCookie from "@fastify/cookie";
 import fastifyHelmet from "@fastify/helmet";
+import fastifyMultipart from "@fastify/multipart";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
@@ -67,6 +68,13 @@ export async function createApiApplication(
   const environment = app.get(EnvironmentService);
 
   await app.register(fastifyCookie);
+  await app.register(fastifyMultipart, {
+    limits: {
+      files: 1,
+      fields: 8,
+      fileSize: 2 * 1024 * 1024,
+    },
+  });
   await app.register(fastifyHelmet, {
     global: true,
     contentSecurityPolicy: {

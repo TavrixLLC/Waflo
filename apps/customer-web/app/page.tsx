@@ -1,157 +1,158 @@
-import { Alert, Badge, Button, Card } from "@waflo/ui";
-import { Clock3, MapPin, ShieldCheck, Sparkles } from "lucide-react";
+import { Badge, Card } from "@waflo/ui";
+import { ArrowRight, MapPin, ShieldCheck } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { fetchCustomerApi, localeForRequest, type PublicProgram } from "./server-api";
 
 export const dynamic = "force-dynamic";
 
-type Resolution =
-  | {
-      status: "active";
-      merchant: {
-        name: string;
-        slug: string;
-        defaultLocale: "en" | "ar";
-        hostname: string;
-      };
-    }
-  | { status: "unknown" | "reserved" | "suspended" | "malformed" };
-
-async function resolveMerchant(host: string, tenant?: string): Promise<Resolution> {
-  const apiUrl = process.env.API_PUBLIC_URL ?? "http://localhost:4000";
-  const url = new URL("/v1/public/merchant-host/resolve", apiUrl);
-  url.searchParams.set("host", host);
-  if (tenant) url.searchParams.set("tenant", tenant);
-
-  try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) return { status: "unknown" };
-    const payload = (await response.json()) as { data?: Resolution };
-    return payload.data ?? { status: "unknown" };
-  } catch {
-    return { status: "unknown" };
-  }
-}
-
-export default async function MerchantPage({
+export default async function MerchantProgramsPage({
   searchParams,
 }: {
   searchParams: Promise<{ lang?: string; tenant?: string }>;
 }) {
-  const requestHeaders = await headers();
   const query = await searchParams;
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "";
-  const resolution = await resolveMerchant(host, query.tenant);
-  const locale =
-    query.lang === "ar" || query.lang === "en"
-      ? query.lang
-      : resolution.status === "active"
-        ? resolution.merchant.defaultLocale
-        : "en";
+  const requestHeaders = await headers();
+  const directHost = requestHeaders.get("host") ?? "";
+  const host =
+    directHost.includes(".localhost") || directHost.includes(".lvh.me")
+      ? directHost
+      : (requestHeaders.get("x-forwarded-host") ?? directHost);
+  const suffix = query.tenant ? `?tenant=${encodeURIComponent(query.tenant)}` : "";
+  const result = await fetchCustomerApi<{
+    status: string;
+    merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
+    programs: PublicProgram[];
+  }>("/v1/public/merchant-programs", host, query.tenant);
+  const locale = localeForRequest(query.lang, result.merchant?.defaultLocale);
   const ar = locale === "ar";
 
-  if (resolution.status !== "active") {
-    const suspended = resolution.status === "suspended";
+  if (result.status === "active" && result.merchant && result.programs.length === 1) {
+    const program = result.programs[0];
+    if (!program) throw new Error("Single-program discovery result is unavailable.");
+    const params = new URLSearchParams();
+    if (query.tenant) params.set("tenant", query.tenant);
+    if (query.lang) params.set("lang", locale);
+    const queryString = params.toString();
+    redirect(`/join/${program.slug}${queryString ? `?${queryString}` : ""}`);
+  }
+
+  if (result.status !== "active" || !result.merchant) {
     return (
-      <main className="customer-page" dir={ar ? "rtl" : "ltr"} lang={locale}>
-        <section className="customer-state-card">
-          <Image
-            className="customer-logo"
-            src="/brand/waflo-logo-primary-horizontal.svg"
-            alt="Waflo"
-            width={280}
-            height={80}
-          />
-          <span className="customer-kicker">{suspended ? "503" : "404"}</span>
-          <h1>
-            {ar
-              ? suspended
-                ? "هذه الصفحة غير متاحة مؤقتاً"
-                : "لم نعثر على هذا التاجر"
-              : suspended
-                ? "This page is temporarily unavailable"
-                : "We could not find this merchant"}
-          </h1>
-          <p>
-            {ar
-              ? suspended
-                ? "يرجى المحاولة لاحقاً أو التواصل مع التاجر مباشرة."
-                : "تحقق من الرابط ثم حاول مرة أخرى."
-              : suspended
-                ? "Please try again later or contact the merchant directly."
-                : "Check the address and try again."}
-          </p>
-          <a href="https://waflo.app">
-            <Button>{ar ? "زيارة Waflo" : "Visit Waflo"}</Button>
-          </a>
-        </section>
+      <main className="customer-page customer-centered" lang={locale} dir={ar ? "rtl" : "ltr"}>
+        <StateCard
+          title={ar ? "هذه الصفحة غير متاحة" : "This page is unavailable"}
+          body={
+            ar
+              ? "تحقق من الرابط أو تواصل مع التاجر مباشرة."
+              : "Check the address or contact the merchant directly."
+          }
+        />
       </main>
     );
   }
 
-  const merchant = resolution.merchant;
   return (
-    <main className="customer-page" dir={ar ? "rtl" : "ltr"} lang={locale}>
-      <header className="customer-header">
+    <main className="customer-page" lang={locale} dir={ar ? "rtl" : "ltr"}>
+      <CustomerHeader locale={locale} {...(query.tenant ? { tenant: query.tenant } : {})} />
+      <section className="customer-hero customer-hero--compact">
+        <Badge tone="brand">{ar ? "مدعوم من Waflo" : "Powered by Waflo"}</Badge>
+        <span className="customer-merchant-mark" aria-hidden="true">
+          {result.merchant.name.slice(0, 1).toLocaleUpperCase(locale)}
+        </span>
+        <p className="customer-kicker">{result.merchant.name}</p>
+        <h1>{ar ? "اختر بطاقة الولاء" : "Choose your loyalty card"}</h1>
+        <p className="customer-lead">
+          {ar
+            ? "انضم خلال لحظات. لا تحتاج إلى تنزيل تطبيق."
+            : "Join in moments. No app download is required."}
+        </p>
+      </section>
+      {result.programs.length ? (
+        <section className="program-grid" aria-label={ar ? "برامج الولاء" : "Loyalty programs"}>
+          {result.programs.map((program) => {
+            const copy = program.translations[locale] ?? program.translations.en;
+            return (
+              <Link
+                className="program-choice"
+                href={`/join/${program.slug}${suffix}`}
+                key={program.slug}
+              >
+                <Card>
+                  <span
+                    className="program-choice__swatch"
+                    style={{ background: program.theme.accentColor }}
+                    aria-hidden="true"
+                  />
+                  <div>
+                    <h2>{copy?.programName ?? program.slug}</h2>
+                    <p>{copy?.shortDescription}</p>
+                    <small>
+                      <MapPin size={14} /> {program.locations.length}{" "}
+                      {ar ? "موقع متاح" : "participating locations"}
+                    </small>
+                  </div>
+                  <ArrowRight aria-hidden="true" />
+                </Card>
+              </Link>
+            );
+          })}
+        </section>
+      ) : (
+        <StateCard
+          title={ar ? "لا توجد بطاقة متاحة الآن" : "No card is available yet"}
+          body={
+            ar
+              ? "سيعرض التاجر برنامجه هنا عند فتح التسجيل."
+              : "The merchant’s program will appear here when enrollment opens."
+          }
+        />
+      )}
+      <footer className="customer-footer">
+        <ShieldCheck size={17} />
+        {ar ? "خصوصيتك مصممة بعناية · Tavrix LLC" : "Privacy by design · Tavrix LLC"}
+      </footer>
+    </main>
+  );
+}
+
+export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant?: string }) {
+  const nextLocale = locale === "ar" ? "en" : "ar";
+  const params = new URLSearchParams({ lang: nextLocale });
+  if (tenant) params.set("tenant", tenant);
+  return (
+    <header className="customer-header">
+      <Link href="/">
         <Image
           className="customer-logo"
           src="/brand/waflo-logo-primary-horizontal.svg"
           alt="Waflo"
           width={280}
           height={80}
+          priority
         />
-        <a
-          className="customer-language"
-          href={`/?lang=${ar ? "en" : "ar"}${query.tenant ? `&tenant=${query.tenant}` : ""}`}
-        >
-          {ar ? "English" : "العربية"}
-        </a>
-      </header>
+      </Link>
+      <Link className="customer-language" href={`/?${params.toString()}`}>
+        {locale === "ar" ? "English" : "العربية"}
+      </Link>
+    </header>
+  );
+}
 
-      <section className="customer-hero">
-        <Badge tone="brand">{ar ? "مدعوم من Waflo" : "Powered by Waflo"}</Badge>
-        <span className="customer-merchant-mark" aria-hidden="true">
-          {merchant.name.slice(0, 1).toLocaleUpperCase(locale)}
-        </span>
-        <p className="customer-kicker">{merchant.name}</p>
-        <h1>{ar ? "تجربة الولاء قيد التحضير" : "The loyalty experience is being prepared"}</h1>
-        <p className="customer-lead">
-          {ar
-            ? "يجهّز هذا التاجر تجربة ولاء جديدة. لا يوجد برنامج منشور أو تسجيل عملاء في هذه المرحلة."
-            : "This merchant is preparing a new loyalty experience. No program is published and customer enrollment is not active yet."}
-        </p>
-        <Alert
-          tone="info"
-          title={ar ? "لا يلزمك إجراء أي شيء الآن" : "Nothing is required from you yet"}
-        >
-          {ar
-            ? "عد لاحقاً عندما يعلن التاجر عن إطلاق برنامجه."
-            : "Return when the merchant announces that its program is live."}
-        </Alert>
-      </section>
-
-      <section className="customer-facts" aria-label={ar ? "معلومات الصفحة" : "Page information"}>
-        <Card>
-          <Clock3 aria-hidden="true" />
-          <h2>{ar ? "قريباً" : "Coming later"}</h2>
-          <p>{ar ? "النشر يبدأ في مرحلة لاحقة." : "Publishing starts in a later phase."}</p>
-        </Card>
-        <Card>
-          <ShieldCheck aria-hidden="true" />
-          <h2>{ar ? "صفحة آمنة" : "Safe by design"}</h2>
-          <p>{ar ? "لا تطلب هذه الصفحة بياناتك." : "This page does not ask for your data."}</p>
-        </Card>
-        <Card>
-          <MapPin aria-hidden="true" />
-          <h2>{ar ? "من التاجر" : "From the merchant"}</h2>
-          <p>{ar ? "سيشارك التاجر تفاصيل الإطلاق." : "The merchant will share launch details."}</p>
-        </Card>
-      </section>
-
-      <footer className="customer-footer">
-        <Sparkles aria-hidden="true" size={18} />
-        <span>{ar ? "تجربة مدعومة من Waflo" : "An experience powered by Waflo"}</span>
-      </footer>
-    </main>
+export function StateCard({ title, body }: { title: string; body: string }) {
+  return (
+    <section className="customer-state-card">
+      <Image
+        className="customer-logo"
+        src="/brand/waflo-logo-primary-horizontal.svg"
+        alt="Waflo"
+        width={280}
+        height={80}
+      />
+      <h1>{title}</h1>
+      <p>{body}</p>
+    </section>
   );
 }

@@ -1,0 +1,44 @@
+{
+  "id": "synthetic-issuer.waflo_loyalty_v1_testprogramversionv1",
+  "issuerName": "Today Coffee",
+  "programName": "Today Coffee Rewards",
+  "reviewStatus": "UNDER_REVIEW",
+  "hexBackgroundColor": "#F7F4EE",
+  "programLogo": {
+    "sourceUri": {
+      "uri": "https://assets.example.test/waflo/program-logo"
+    },
+    "contentDescription": {
+      "defaultValue": {
+        "language": "en-US",
+        "value": "Today Coffee Rewards logo"
+      }
+    }
+  },
+  "localizedIssuerName": {
+    "defaultValue": {
+      "language": "en-US",
+      "value": "Today Coffee"
+    }
+  },
+  "localizedProgramName": {
+    "defaultValue": {
+      "language": "en-US",
+      "value": "Today Coffee Rewards"
+    }
+  },
+  "textModulesData": [
+    {
+      "id": "reward",
+      "header": "Reward",
+      "body": "A complimentary signature drink."
+    },
+    {
+      "id": "waflo",
+      "header": "Operator",
+      "body": "Waflo is owned and operated by Tavrix LLC."
+    }
+  ],
+  "evidenceMode": "TEST_ADAPTER_MAPPING",
+  "externallyCertified": false
+}

@@ -187,6 +187,7 @@ enum ProgramTestEventType {
   TEST_STAMP_EARNED
   TEST_STAMP_REVERSED
   TEST_REWARD_UNLOCKED
+  TEST_REWARD_RELOCKED
   TEST_REWARD_REDEEMED
   TEST_SESSION_RESET
 }
@@ -195,6 +196,120 @@ enum ProgramPublishCommandStatus {
   PROCESSING
   COMPLETED
   FAILED
+}
+
+enum EmailCollectionMode {
+  HIDDEN
+  OPTIONAL
+  REQUIRED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum CustomerContactType {
+  EMAIL
+}
+
+enum ContactVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+}
+
+enum CustomerConsentType {
+  WAFLO_PRIVACY
+  PROGRAM_TERMS
+  MARKETING_EMAIL
+}
+
+enum MembershipStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  REVOKED
+}
+
+enum EnrollmentCommandStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum MembershipCredentialStatus {
+  ACTIVE
+  TRANSFERRED
+  REVOKED
+  EXPIRED
+}
+
+enum WalletProviderCode {
+  APPLE
+  GOOGLE
+}
+
+enum WalletPassStatus {
+  PENDING
+  ISSUED
+  ACTIVE
+  UPDATE_PENDING
+  INVALIDATION_PENDING
+  INVALIDATED
+  ERROR
+}
+
+enum WalletBindingStatus {
+  PENDING
+  READY
+  ERROR
+  DISABLED
+}
+
+enum WalletCommandType {
+  ENSURE_TEMPLATE
+  ISSUE
+  UPDATE
+  INVALIDATE
+  RECONCILE
+  APPLE_PUSH
+}
+
+enum WalletCommandStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum ProgramWalletSyncJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum MembershipTransferMethod {
+  EMAIL_CONFIRMED
+  QR_WITHOUT_EMAIL
+}
+
+enum MembershipTransferStatus {
+  PENDING_CONFIRMATION
+  PROCESSING
+  COMPLETED
+  EXPIRED
+  CANCELED
+  FAILED
+}
+
+enum MembershipTransferActorType {
+  CUSTOMER
+  SYSTEM
+  SUPPORT
 }
 
 model User {
@@ -309,6 +424,22 @@ model Organization {
   validationRuns         ProgramValidationRun[]
   testSessions           ProgramTestSession[]
   publishCommands        ProgramPublishCommand[]
+  customers              Customer[]
+  customerContacts       CustomerContact[]
+  customerConsents       CustomerConsent[]
+  customerMemberships    Membership[]
+  enrollmentPolicies     ProgramEnrollmentPolicy[]
+  enrollmentCommands     EnrollmentCommand[]
+  membershipProgress     MembershipProgressProjection[]
+  membershipSessions     MembershipAccessSession[]
+  membershipCredentials  MembershipCredential[]
+  walletPassInstances    WalletPassInstance[]
+  walletProgramBindings  WalletProgramBinding[]
+  walletCommands         WalletCommand[]
+  transferCommands       MembershipTransferCommand[]
+  transferEvents         MembershipTransferEvent[]
+  publicWalletAssets      PublicWalletAsset[]
+  programWalletSyncJobs   ProgramWalletSyncJob[]
 
   @@index([status])
   @@map("organizations")
@@ -536,6 +667,7 @@ model LoyaltyProgram {
   id                    String              @id @default(uuid()) @db.Uuid
   organizationId        String              @map("organization_id") @db.Uuid
   internalName          String              @map("internal_name") @db.VarChar(120)
+  publicSlug            String?             @map("public_slug") @db.VarChar(50)
   programType           LoyaltyProgramType  @default(STAMP) @map("program_type")
   status                LoyaltyProgramStatus @default(DRAFT)
   currentDraftVersionId String?             @unique @map("current_draft_version_id") @db.Uuid
@@ -556,9 +688,15 @@ model LoyaltyProgram {
   currentDraftVersion   LoyaltyProgramVersion? @relation("CurrentDraftVersion", fields: [currentDraftVersionId], references: [id], onDelete: Restrict)
   currentPublishedVersion LoyaltyProgramVersion? @relation("CurrentPublishedVersion", fields: [currentPublishedVersionId], references: [id], onDelete: Restrict)
   publishCommands       ProgramPublishCommand[]
+  publicSlugHistory     ProgramPublicSlugHistory[]
+  memberships           Membership[]
+  enrollmentCommands    EnrollmentCommand[]
+  walletBindings        WalletProgramBinding[]
+  walletSyncJobs        ProgramWalletSyncJob[]
 
   @@index([organizationId, status, updatedAt(sort: Desc)])
   @@index([organizationId, createdAt(sort: Desc)])
+  @@unique([organizationId, publicSlug])
   @@map("loyalty_programs")
 }
 
@@ -570,6 +708,7 @@ model LoyaltyProgramVersion {
   status              LoyaltyProgramVersionStatus @default(DRAFT)
   editingMode         ProgramEditingMode       @default(QUICK) @map("editing_mode")
   baseTemplateCode    String?                   @map("base_template_code") @db.VarChar(80)
+  baseTemplateVersion Int?                      @default(1) @map("base_template_version")
   configurationSchemaVersion Int                @default(1) @map("configuration_schema_version")
   revision            Int                       @default(1)
   createdByUserId     String                    @map("created_by_user_id") @db.Uuid
@@ -597,6 +736,11 @@ model LoyaltyProgramVersion {
   validationRuns      ProgramValidationRun[]
   testSessions        ProgramTestSession[]
   publishCommands     ProgramPublishCommand[]
+  enrollmentPolicy    ProgramEnrollmentPolicy?
+  memberships         Membership[]
+  enrollmentCommands  EnrollmentCommand[]
+  walletBindings      WalletProgramBinding[]
+  publicWalletAssets  PublicWalletAsset[]
 
   @@unique([programId, versionNumber])
   @@index([organizationId, programId, status])
@@ -771,7 +915,7 @@ model MerchantAsset {
   milestoneThemes ProgramVisualTheme[]      @relation("ThemeMilestone")
   rewardOverrides RewardVisualOverride[]    @relation("RewardStampAsset")
 
-  @@unique([organizationId, sha256Digest])
+  @@unique([organizationId, sha256Digest, category])
   @@index([organizationId, category, processingStatus])
   @@map("merchant_assets")
 }
@@ -798,9 +942,12 @@ model GeneratedProgramPreview {
   id              String                @id @default(uuid()) @db.Uuid
   organizationId  String                @map("organization_id") @db.Uuid
   versionId       String                @map("version_id") @db.Uuid
+  versionRevision Int                   @default(1) @map("version_revision")
   previewType     ProgramPreviewType    @map("preview_type")
   progressState   Int?                 @map("progress_state")
   configurationHash String              @map("configuration_hash") @db.Char(64)
+  contentDigest   String                @default("") @map("content_digest") @db.Char(64)
+  warnings        Json                  @default("[]") @db.JsonB
   objectKey       String                @map("object_key") @db.VarChar(500)
   mimeType        String                @map("mime_type") @db.VarChar(100)
   width           Int
@@ -841,6 +988,8 @@ model ProgramTestSession {
   syntheticDisplayName String               @map("synthetic_display_name") @db.VarChar(120)
   currentStampCount Int                     @default(0) @map("current_stamp_count")
   cycleCount        Int                     @default(0) @map("cycle_count")
+  versionRevision   Int                     @default(1) @map("version_revision")
+  validationFingerprint String?             @map("validation_fingerprint") @db.Char(64)
   status            ProgramTestSessionStatus @default(ACTIVE)
   createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -893,4 +1042,438 @@ model ProgramPublishCommand {
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, programId, createdAt(sort: Desc)])
   @@map("program_publish_commands")
+}
+
+model ProgramPublicSlugHistory {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  programId      String         @map("program_id") @db.Uuid
+  slug           String         @db.VarChar(50)
+  releasedAt     DateTime       @map("released_at") @db.Timestamptz(6)
+  reservedUntil  DateTime       @map("reserved_until") @db.Timestamptz(6)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  program        LoyaltyProgram @relation(fields: [programId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, slug, reservedUntil])
+  @@index([programId, createdAt])
+  @@map("program_public_slug_history")
+}
+
+model ProgramEnrollmentPolicy {
+  id                          String                @id @default(uuid()) @db.Uuid
+  organizationId              String                @map("organization_id") @db.Uuid
+  programVersionId            String                @unique @map("program_version_id") @db.Uuid
+  emailCollectionMode         EmailCollectionMode   @default(OPTIONAL) @map("email_collection_mode")
+  primaryCustomerLocale       Locale                @default(EN) @map("primary_customer_locale")
+  allowLocaleSelection        Boolean               @default(true) @map("allow_locale_selection")
+  marketingConsentVisible     Boolean               @default(false) @map("marketing_consent_visible")
+  marketingConsentDefault     Boolean               @default(false) @map("marketing_consent_default")
+  customerTermsRequired       Boolean               @default(true) @map("customer_terms_required")
+  transferWithoutEmailAllowed Boolean               @default(true) @map("transfer_without_email_allowed")
+  enrollmentOpen              Boolean               @default(true) @map("enrollment_open")
+  createdAt                   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization                Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  programVersion              LoyaltyProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, enrollmentOpen])
+  @@map("program_enrollment_policies")
+}
+
+model Customer {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  displayName     String         @map("display_name") @db.VarChar(120)
+  preferredLocale Locale         @default(EN) @map("preferred_locale")
+  status          CustomerStatus @default(ACTIVE)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt      DateTime?      @map("archived_at") @db.Timestamptz(6)
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  contacts        CustomerContact[]
+  consents        CustomerConsent[]
+  memberships     Membership[]
+  enrollmentCommands EnrollmentCommand[]
+
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@map("customers")
+}
+
+model CustomerContact {
+  id                      String                    @id @default(uuid()) @db.Uuid
+  organizationId          String                    @map("organization_id") @db.Uuid
+  customerId              String                    @map("customer_id") @db.Uuid
+  type                    CustomerContactType
+  encryptedValue          String                    @map("encrypted_value") @db.Text
+  encryptionKeyVersion    Int                       @map("encryption_key_version")
+  normalizedValueHash     String                    @map("normalized_value_hash") @db.Char(64)
+  maskedDisplayValue      String                    @map("masked_display_value") @db.VarChar(254)
+  verificationStatus      ContactVerificationStatus @default(UNVERIFIED) @map("verification_status")
+  verifiedAt              DateTime?                 @map("verified_at") @db.Timestamptz(6)
+  isPrimary               Boolean                   @default(true) @map("is_primary")
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt              DateTime?                 @map("archived_at") @db.Timestamptz(6)
+  organization            Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer                Customer                  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@unique([customerId, type, isPrimary])
+  @@index([organizationId, normalizedValueHash, type])
+  @@map("customer_contacts")
+}
+
+model CustomerConsent {
+  id                  String              @id @default(uuid()) @db.Uuid
+  organizationId      String              @map("organization_id") @db.Uuid
+  customerId          String              @map("customer_id") @db.Uuid
+  membershipId        String?             @map("membership_id") @db.Uuid
+  consentType         CustomerConsentType @map("consent_type")
+  granted             Boolean
+  documentFingerprint String              @map("document_fingerprint") @db.VarChar(160)
+  locale              Locale
+  capturedAt          DateTime            @default(now()) @map("captured_at") @db.Timestamptz(6)
+  revokedAt           DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  safeMetadata        Json?               @map("safe_metadata") @db.JsonB
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer            Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  membership          Membership?         @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, customerId, capturedAt(sort: Desc)])
+  @@index([membershipId, consentType])
+  @@map("customer_consents")
+}
+
+model Membership {
+  id                         String           @id @default(uuid()) @db.Uuid
+  organizationId             String           @map("organization_id") @db.Uuid
+  customerId                 String           @map("customer_id") @db.Uuid
+  programId                  String           @map("program_id") @db.Uuid
+  enrollmentProgramVersionId String           @map("enrollment_program_version_id") @db.Uuid
+  publicMembershipId         String           @unique @map("public_membership_id") @db.VarChar(80)
+  status                     MembershipStatus @default(ACTIVE)
+  enrolledAt                 DateTime         @default(now()) @map("enrolled_at") @db.Timestamptz(6)
+  suspendedAt                DateTime?        @map("suspended_at") @db.Timestamptz(6)
+  expiredAt                  DateTime?        @map("expired_at") @db.Timestamptz(6)
+  revokedAt                  DateTime?        @map("revoked_at") @db.Timestamptz(6)
+  createdAt                  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization               Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer                   Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  program                    LoyaltyProgram   @relation(fields: [programId], references: [id], onDelete: Restrict)
+  enrollmentProgramVersion   LoyaltyProgramVersion @relation(fields: [enrollmentProgramVersionId], references: [id], onDelete: Restrict)
+  progress                   MembershipProgressProjection?
+  consents                   CustomerConsent[]
+  accessSessions             MembershipAccessSession[]
+  credentials                MembershipCredential[]
+  walletPassInstances        WalletPassInstance[]
+  enrollmentCommands         EnrollmentCommand[]
+  walletCommands             WalletCommand[]
+  transferCommands           MembershipTransferCommand[]
+  transferEvents             MembershipTransferEvent[]
+  publicWalletAssets         PublicWalletAsset[]
+
+  @@index([organizationId, programId, status, enrolledAt(sort: Desc)])
+  @@index([customerId, status])
+  @@map("memberships")
+}
+
+model MembershipProgressProjection {
+  membershipId          String       @id @map("membership_id") @db.Uuid
+  organizationId        String       @map("organization_id") @db.Uuid
+  currentCycleStampCount Int         @default(0) @map("current_cycle_stamp_count")
+  completedCycleCount   Int          @default(0) @map("completed_cycle_count")
+  rewardReady           Boolean      @default(false) @map("reward_ready")
+  projectionVersion     Int          @default(0) @map("projection_version")
+  lastSourceEventId     String?      @map("last_source_event_id") @db.Uuid
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership            Membership   @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, updatedAt])
+  @@map("membership_progress_projections")
+}
+
+model EnrollmentCommand {
+  id               String                  @id @default(uuid()) @db.Uuid
+  organizationId   String                  @map("organization_id") @db.Uuid
+  programId        String                  @map("program_id") @db.Uuid
+  programVersionId String                  @map("program_version_id") @db.Uuid
+  idempotencyKey   String                  @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint String                @map("request_fingerprint") @db.Char(64)
+  status           EnrollmentCommandStatus @default(PROCESSING)
+  customerId       String?                 @map("customer_id") @db.Uuid
+  membershipId     String?                 @map("membership_id") @db.Uuid
+  accessSessionId  String?                 @map("access_session_id") @db.Uuid
+  failureCode      String?                 @map("failure_code") @db.VarChar(120)
+  leaseOwner       String?                 @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt   DateTime?               @map("lease_expires_at") @db.Timestamptz(6)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt      DateTime?               @map("completed_at") @db.Timestamptz(6)
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program          LoyaltyProgram          @relation(fields: [programId], references: [id], onDelete: Restrict)
+  programVersion   LoyaltyProgramVersion   @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  customer         Customer?               @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  membership       Membership?             @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  accessSession    MembershipAccessSession? @relation(fields: [accessSessionId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([status, leaseExpiresAt])
+  @@map("enrollment_commands")
+}
+
+model MembershipAccessSession {
+  id                     String                @id @default(uuid()) @db.Uuid
+  organizationId         String                @map("organization_id") @db.Uuid
+  membershipId           String                @map("membership_id") @db.Uuid
+  membershipCredentialId String?               @map("membership_credential_id") @db.Uuid
+  tokenHash              String                @unique @map("token_hash") @db.Char(64)
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastActiveAt           DateTime              @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  expiresAt              DateTime              @map("expires_at") @db.Timestamptz(6)
+  revokedAt              DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  userAgent              String?               @map("user_agent") @db.VarChar(512)
+  deviceLabel            String?               @map("device_label") @db.VarChar(100)
+  organization           Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership             Membership            @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  membershipCredential   MembershipCredential? @relation(fields: [membershipCredentialId], references: [id], onDelete: Restrict)
+  enrollmentCommands EnrollmentCommand[]
+  transferCommands MembershipTransferCommand[]
+
+  @@index([organizationId, membershipId, expiresAt])
+  @@index([membershipId, revokedAt])
+  @@index([membershipCredentialId, revokedAt])
+  @@map("membership_access_sessions")
+}
+
+model MembershipCredential {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  organizationId      String                     @map("organization_id") @db.Uuid
+  membershipId        String                     @map("membership_id") @db.Uuid
+  credentialVersion   Int                        @map("credential_version")
+  publicCredentialId  String                     @unique @map("public_credential_id") @db.VarChar(80)
+  secretVersion       Int                        @map("secret_version")
+  secretHash          String                     @map("secret_hash") @db.Char(64)
+  status              MembershipCredentialStatus @default(ACTIVE)
+  createdAt           DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  activatedAt         DateTime                   @default(now()) @map("activated_at") @db.Timestamptz(6)
+  transferredAt       DateTime?                  @map("transferred_at") @db.Timestamptz(6)
+  revokedAt           DateTime?                  @map("revoked_at") @db.Timestamptz(6)
+  replacedByCredentialId String?                 @unique @map("replaced_by_credential_id") @db.Uuid
+  organization        Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership          Membership                 @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  replacedBy          MembershipCredential?      @relation("CredentialReplacement", fields: [replacedByCredentialId], references: [id], onDelete: Restrict)
+  replaces            MembershipCredential?      @relation("CredentialReplacement")
+  walletPassInstances WalletPassInstance[]
+  accessSessions      MembershipAccessSession[]
+  oldTransferCommands MembershipTransferCommand[] @relation("TransferOldCredential")
+  newTransferCommands MembershipTransferCommand[] @relation("TransferNewCredential")
+  oldTransferEvents   MembershipTransferEvent[]   @relation("TransferEventOldCredential")
+  newTransferEvents   MembershipTransferEvent[]   @relation("TransferEventNewCredential")
+
+  @@unique([membershipId, credentialVersion])
+  @@index([organizationId, membershipId, status])
+  @@map("membership_credentials")
+}
+
+model WalletProgramBinding {
+  id                       String              @id @default(uuid()) @db.Uuid
+  organizationId           String              @map("organization_id") @db.Uuid
+  programId                String              @map("program_id") @db.Uuid
+  programVersionId         String              @map("program_version_id") @db.Uuid
+  provider                 WalletProviderCode
+  providerTemplateId       String?             @map("provider_template_id") @db.VarChar(255)
+  status                   WalletBindingStatus @default(PENDING)
+  configurationFingerprint String              @map("configuration_fingerprint") @db.Char(64)
+  providerState            Json?               @map("provider_state") @db.JsonB
+  lastSyncedAt             DateTime?           @map("last_synced_at") @db.Timestamptz(6)
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program                  LoyaltyProgram      @relation(fields: [programId], references: [id], onDelete: Restrict)
+  programVersion           LoyaltyProgramVersion @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  walletPassInstances      WalletPassInstance[]
+
+  @@unique([organizationId, programVersionId, provider])
+  @@unique([provider, providerTemplateId])
+  @@index([organizationId, status])
+  @@map("wallet_program_bindings")
+}
+
+model WalletPassInstance {
+  id                              String           @id @default(uuid()) @db.Uuid
+  organizationId                  String           @map("organization_id") @db.Uuid
+  membershipId                    String           @map("membership_id") @db.Uuid
+  membershipCredentialId          String           @map("membership_credential_id") @db.Uuid
+  provider                        WalletProviderCode
+  walletProgramBindingId          String?          @map("wallet_program_binding_id") @db.Uuid
+  providerIdentity                String           @map("provider_identity") @db.VarChar(255)
+  status                          WalletPassStatus @default(PENDING)
+  providerState                   Json?            @map("provider_state") @db.JsonB
+  updateTag                       Int              @default(1) @map("update_tag")
+  lastRenderedProjectionVersion   Int              @default(0) @map("last_rendered_projection_version")
+  lastProviderSyncAt              DateTime?        @map("last_provider_sync_at") @db.Timestamptz(6)
+  lastProviderErrorCode           String?          @map("last_provider_error_code") @db.VarChar(120)
+  createdAt                       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  invalidatedAt                   DateTime?        @map("invalidated_at") @db.Timestamptz(6)
+  organization                    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership                      Membership       @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  membershipCredential            MembershipCredential @relation(fields: [membershipCredentialId], references: [id], onDelete: Restrict)
+  walletProgramBinding            WalletProgramBinding? @relation(fields: [walletProgramBindingId], references: [id], onDelete: Restrict)
+  appleRegistrations              ApplePassRegistration[]
+  walletCommands                  WalletCommand[]
+
+  @@unique([provider, providerIdentity])
+  @@unique([membershipCredentialId, provider])
+  @@index([organizationId, membershipId, status])
+  @@index([provider, status, updatedAt])
+  @@map("wallet_pass_instances")
+}
+
+model ApplePassRegistration {
+  id                          String             @id @default(uuid()) @db.Uuid
+  walletPassInstanceId        String             @map("wallet_pass_instance_id") @db.Uuid
+  deviceLibraryIdentifierHash String             @map("device_library_identifier_hash") @db.Char(64)
+  pushTokenEncrypted          String             @map("push_token_encrypted") @db.Text
+  encryptionKeyVersion        Int                @map("encryption_key_version")
+  createdAt                   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  unregisteredAt              DateTime?          @map("unregistered_at") @db.Timestamptz(6)
+  walletPassInstance          WalletPassInstance @relation(fields: [walletPassInstanceId], references: [id], onDelete: Restrict)
+
+  @@index([deviceLibraryIdentifierHash, unregisteredAt])
+  @@unique([walletPassInstanceId, deviceLibraryIdentifierHash])
+  @@index([walletPassInstanceId, unregisteredAt])
+  @@map("apple_pass_registrations")
+}
+
+model WalletCommand {
+  id                   String              @id @default(uuid()) @db.Uuid
+  organizationId       String              @map("organization_id") @db.Uuid
+  membershipId         String              @map("membership_id") @db.Uuid
+  walletPassInstanceId String?             @map("wallet_pass_instance_id") @db.Uuid
+  provider             WalletProviderCode
+  commandType          WalletCommandType   @map("command_type")
+  idempotencyKey       String              @unique @map("idempotency_key") @db.VarChar(255)
+  payloadFingerprint   String              @map("payload_fingerprint") @db.Char(64)
+  safePayload          Json?               @map("safe_payload") @db.JsonB
+  status               WalletCommandStatus @default(PENDING)
+  attemptCount         Int                 @default(0) @map("attempt_count")
+  leaseOwner           String?             @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt       DateTime?           @map("lease_expires_at") @db.Timestamptz(6)
+  nextAttemptAt        DateTime            @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  providerRequestId    String?             @map("provider_request_id") @db.VarChar(255)
+  safeErrorCode        String?             @map("safe_error_code") @db.VarChar(120)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt          DateTime?           @map("completed_at") @db.Timestamptz(6)
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership           Membership          @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  walletPassInstance   WalletPassInstance? @relation(fields: [walletPassInstanceId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@index([organizationId, membershipId, provider, createdAt])
+  @@map("wallet_commands")
+}
+
+model ProgramWalletSyncJob {
+  id                   String                     @id @default(uuid()) @db.Uuid
+  organizationId       String                     @map("organization_id") @db.Uuid
+  programId            String                     @map("program_id") @db.Uuid
+  action               String                     @db.VarChar(30)
+  reason               String                     @db.VarChar(80)
+  commandType          WalletCommandType          @map("command_type")
+  idempotencyKey       String                     @unique @map("idempotency_key") @db.VarChar(255)
+  status               ProgramWalletSyncJobStatus @default(PENDING)
+  snapshotAt           DateTime                   @default(now()) @map("snapshot_at") @db.Timestamptz(6)
+  cursorCreatedAt      DateTime?                  @map("cursor_created_at") @db.Timestamptz(6)
+  cursorPassInstanceId String?                    @map("cursor_pass_instance_id") @db.Uuid
+  batchSize            Int                        @default(500) @map("batch_size")
+  processedCount       Int                        @default(0) @map("processed_count")
+  attemptCount         Int                        @default(0) @map("attempt_count")
+  leaseOwner           String?                    @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt       DateTime?                  @map("lease_expires_at") @db.Timestamptz(6)
+  nextAttemptAt        DateTime                   @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  safeErrorCode        String?                    @map("safe_error_code") @db.VarChar(120)
+  createdAt            DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt          DateTime?                  @map("completed_at") @db.Timestamptz(6)
+  organization         Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program              LoyaltyProgram             @relation(fields: [programId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@index([organizationId, programId, createdAt])
+  @@index([programId, snapshotAt, cursorCreatedAt, cursorPassInstanceId])
+  @@map("program_wallet_sync_jobs")
+}
+
+model MembershipTransferCommand {
+  id                           String                   @id @default(uuid()) @db.Uuid
+  publicTransferId             String                   @unique @map("public_transfer_id") @db.VarChar(80)
+  organizationId               String                   @map("organization_id") @db.Uuid
+  membershipId                 String                   @map("membership_id") @db.Uuid
+  oldCredentialId              String                   @map("old_credential_id") @db.Uuid
+  newCredentialId              String?                  @map("new_credential_id") @db.Uuid
+  transferMethod               MembershipTransferMethod @map("transfer_method")
+  idempotencyKey               String                   @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint           String                   @map("request_fingerprint") @db.Char(64)
+  status                       MembershipTransferStatus @default(PENDING_CONFIRMATION)
+  confirmationTokenHash        String?                  @map("confirmation_token_hash") @db.Char(64)
+  confirmationExpiresAt        DateTime?                @map("confirmation_expires_at") @db.Timestamptz(6)
+  createdAt                    DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  confirmedAt                  DateTime?                @map("confirmed_at") @db.Timestamptz(6)
+  completedAt                  DateTime?                @map("completed_at") @db.Timestamptz(6)
+  safeFailureCode              String?                  @map("safe_failure_code") @db.VarChar(120)
+  createdFromCustomerSessionId String?                  @map("created_from_customer_session_id") @db.Uuid
+  organization                 Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership                   Membership               @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  oldCredential                MembershipCredential     @relation("TransferOldCredential", fields: [oldCredentialId], references: [id], onDelete: Restrict)
+  newCredential                MembershipCredential?    @relation("TransferNewCredential", fields: [newCredentialId], references: [id], onDelete: Restrict)
+  createdFromCustomerSession   MembershipAccessSession? @relation(fields: [createdFromCustomerSessionId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([membershipId, status, createdAt])
+  @@index([status, confirmationExpiresAt])
+  @@map("membership_transfer_commands")
+}
+
+model MembershipTransferEvent {
+  id                  String                      @id @default(uuid()) @db.Uuid
+  organizationId      String                      @map("organization_id") @db.Uuid
+  membershipId        String                      @map("membership_id") @db.Uuid
+  oldCredentialId     String                      @map("old_credential_id") @db.Uuid
+  newCredentialId     String                      @map("new_credential_id") @db.Uuid
+  method              MembershipTransferMethod
+  actorType           MembershipTransferActorType @map("actor_type")
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  safeMetadata        Json?                       @map("safe_metadata") @db.JsonB
+  organization        Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  membership          Membership                  @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  oldCredential       MembershipCredential        @relation("TransferEventOldCredential", fields: [oldCredentialId], references: [id], onDelete: Restrict)
+  newCredential       MembershipCredential        @relation("TransferEventNewCredential", fields: [newCredentialId], references: [id], onDelete: Restrict)
+
+  @@index([membershipId, createdAt(sort: Desc)])
+  @@map("membership_transfer_events")
+}
+
+model PublicWalletAsset {
+  id               String                @id @default(uuid()) @db.Uuid
+  organizationId   String                @map("organization_id") @db.Uuid
+  programVersionId String?               @map("program_version_id") @db.Uuid
+  membershipId     String?               @map("membership_id") @db.Uuid
+  assetType         String                @map("asset_type") @db.VarChar(80)
+  contentDigest     String                @map("content_digest") @db.Char(64)
+  objectKey         String                @map("object_key") @db.VarChar(500)
+  publicToken       String                @unique @map("public_token") @db.VarChar(100)
+  mimeType          String                @map("mime_type") @db.VarChar(100)
+  width             Int?
+  height            Int?
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt         DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  programVersion    LoyaltyProgramVersion? @relation(fields: [programVersionId], references: [id], onDelete: Restrict)
+  membership        Membership?           @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, contentDigest, assetType])
+  @@index([publicToken, revokedAt])
+  @@map("public_wallet_assets")
 }

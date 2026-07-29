@@ -20,7 +20,12 @@ import { OrganizationsController } from "./organizations/organizations.controlle
 import { OrganizationsService } from "./organizations/organizations.service.js";
 import { PublicController } from "./public/public.controller.js";
 import { HostResolutionService } from "./public/host-resolution.service.js";
-import { ApiRateLimitGuard, CsrfGuard, SessionGuard } from "./security/guards.js";
+import {
+  ApiRateLimitGuard,
+  CsrfGuard,
+  CustomerCsrfGuard,
+  SessionGuard,
+} from "./security/guards.js";
 import { RateLimitService } from "./security/rate-limit.service.js";
 import { InvitationsController, TeamController } from "./team/team.controller.js";
 import { TeamService } from "./team/team.service.js";
@@ -29,6 +34,22 @@ import { ProgramsController } from "./programs/programs.controller.js";
 import { ProgramsService } from "./programs/programs.service.js";
 import { AssetsController } from "./programs/assets.controller.js";
 import { AssetsService } from "./programs/assets.service.js";
+import { OBJECT_STORAGE, S3ObjectStorage } from "./programs/object-storage.js";
+import { EnrollmentSettingsController } from "./enrollment/enrollment-settings.controller.js";
+import { EnrollmentSettingsService } from "./enrollment/enrollment-settings.service.js";
+import { PublicEnrollmentController } from "./enrollment/public-enrollment.controller.js";
+import { PublicEnrollmentService } from "./enrollment/public-enrollment.service.js";
+import { CustomerCardController } from "./customer/customer-card.controller.js";
+import { CustomerCardService } from "./customer/customer-card.service.js";
+import { CustomerSecurityService } from "./customer/customer-security.service.js";
+import { TransferController } from "./customer/transfer.controller.js";
+import { TransferService } from "./customer/transfer.service.js";
+import { WalletController } from "./wallet/wallet.controller.js";
+import { WalletService } from "./wallet/wallet.service.js";
+import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
+import { AppleUpdateController } from "./wallet/apple-update.controller.js";
+import { AppleUpdateService } from "./wallet/apple-update.service.js";
+import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.controller.js";
 
 @Module({
   controllers: [
@@ -44,6 +65,13 @@ import { AssetsService } from "./programs/assets.service.js";
     HealthController,
     ProgramsController,
     AssetsController,
+    EnrollmentSettingsController,
+    PublicEnrollmentController,
+    CustomerCardController,
+    TransferController,
+    WalletController,
+    AppleUpdateController,
+    PublicWalletAssetsController,
   ],
   providers: [
     EnvironmentService,
@@ -58,6 +86,27 @@ import { AssetsService } from "./programs/assets.service.js";
     TeamService,
     ProgramsService,
     AssetsService,
+    EnrollmentSettingsService,
+    PublicEnrollmentService,
+    CustomerSecurityService,
+    CustomerCardService,
+    TransferService,
+    WalletProviderRegistry,
+    WalletService,
+    AppleUpdateService,
+    {
+      provide: OBJECT_STORAGE,
+      inject: [EnvironmentService],
+      useFactory: (environment: EnvironmentService) =>
+        new S3ObjectStorage({
+          endpoint: environment.values.OBJECT_STORAGE_ENDPOINT,
+          region: environment.values.OBJECT_STORAGE_REGION,
+          bucket: environment.values.OBJECT_STORAGE_BUCKET,
+          accessKeyId: environment.values.OBJECT_STORAGE_ACCESS_KEY_ID,
+          secretAccessKey: environment.values.OBJECT_STORAGE_SECRET_ACCESS_KEY,
+          forcePathStyle: environment.values.OBJECT_STORAGE_FORCE_PATH_STYLE,
+        }),
+    },
     BillingService,
     HostResolutionService,
     {
@@ -69,6 +118,7 @@ import { AssetsService } from "./programs/assets.service.js";
     { provide: APP_GUARD, useClass: ApiRateLimitGuard },
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
+    { provide: APP_GUARD, useClass: CustomerCsrfGuard },
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
     { provide: APP_FILTER, useClass: ErrorEnvelopeFilter },
   ],

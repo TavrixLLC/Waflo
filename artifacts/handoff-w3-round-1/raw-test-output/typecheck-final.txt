@@ -1,0 +1,64 @@
+$ turbo run typecheck
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/api, @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/customer-web, @waflo/database, @waflo/i18n, @waflo/marketing-web, @waflo/merchant-dashboard, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google, @waflo/wallet-worker
+   • Running typecheck in 21 packages
+   • Remote caching disabled
+
+@waflo/qr-core:typecheck: cache hit, replaying logs 72dde95a9bae8091
+@waflo/qr-core:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/auth:typecheck: cache hit, replaying logs ee887e4f3612bdc7
+@waflo/auth:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/config:typecheck: cache hit, replaying logs b5de6f5878ab09ae
+@waflo/config:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/customer-security:typecheck: cache hit, replaying logs 4dfbc63fa4d16ead
+@waflo/customer-security:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/stamp-engine:typecheck: cache hit, replaying logs e258e142329a79fb
+@waflo/stamp-engine:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/contracts:typecheck: cache hit, replaying logs 5990c6488832bc35
+@waflo/contracts:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/security:typecheck: cache hit, replaying logs 3cc92cb6fb5314ed
+@waflo/security:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/brand:typecheck: cache hit, replaying logs fbb6e98ac5897888
+@waflo/brand:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/database:typecheck: cache hit, replaying logs b98a8c789f08a221
+@waflo/database:typecheck: $ pnpm generate && tsc -p tsconfig.json --noEmit
+@waflo/database:typecheck: $ prisma generate
+@waflo/database:typecheck: ◇ injected env (33) from ..\..\.env // tip: ◈ encrypted .env [www.dotenvx.com]
+@waflo/database:typecheck: Loaded Prisma config from prisma.config.ts.
+@waflo/database:typecheck: 
+@waflo/database:typecheck: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:typecheck: 
+@waflo/database:typecheck: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 555ms
+@waflo/database:typecheck: 
+@waflo/wallet-core:typecheck: cache hit, replaying logs ad62d9290cdeb533
+@waflo/wallet-core:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/permissions:typecheck: cache hit, replaying logs 994878af46e115a3
+@waflo/permissions:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/billing:typecheck: cache hit, replaying logs 389dcf4685cfc91a
+@waflo/billing:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/i18n:typecheck: cache hit, replaying logs 7536273d04a42765
+@waflo/i18n:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/wallet-google:typecheck: cache hit, replaying logs e01e7ec73ca909bb
+@waflo/wallet-google:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/wallet-apple:typecheck: cache hit, replaying logs e2a9b0f6d7b13584
+@waflo/wallet-apple:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/ui:typecheck: cache hit, replaying logs a67cc2f4cd892eb1
+@waflo/ui:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/wallet-worker:typecheck: cache miss, executing 274869a99dedf167
+@waflo/api:typecheck: cache hit, replaying logs 6027d856f2b60da4
+@waflo/api:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/customer-web:typecheck: cache miss, executing 006a781da12e75bc
+@waflo/merchant-dashboard:typecheck: cache hit, replaying logs 9438a98f754fac77
+@waflo/merchant-dashboard:typecheck: $ tsc --noEmit
+@waflo/marketing-web:typecheck: cache hit, replaying logs 0a84ea82616e30d4
+@waflo/marketing-web:typecheck: $ tsc --noEmit
+@waflo/wallet-worker:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/customer-web:typecheck: $ tsc --noEmit
+
+ Tasks:    21 successful, 21 total
+Cached:    19 cached, 21 total
+  Time:    3.192s 
+
+
+EXIT_CODE=0

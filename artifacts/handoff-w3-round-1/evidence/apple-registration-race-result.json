@@ -1,0 +1,14 @@
+{
+  "evidenceType": "automated PostgreSQL concurrency assertion summary",
+  "source": "tests/concurrency/w3-customer-wallet.test.ts",
+  "rawOutput": "../raw-test-output/concurrency.txt",
+  "result": "PASS",
+  "concurrentRegistration": "protocol-compatible",
+  "activeRows": 1,
+  "rawUniqueErrorExposed": false,
+  "pushTokenStoredEncrypted": true,
+  "materialRegistrationAuditEvents": 1,
+  "unregisterIdempotent": true,
+  "reregisterStatus": 200,
+  "containsPushToken": false
+}

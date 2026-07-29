@@ -1,0 +1,4 @@
+﻿Full streaming archive extraction passed.
+Entries extracted and decompressed: 501
+Filesystem deletion required: no
+EXIT_CODE=0

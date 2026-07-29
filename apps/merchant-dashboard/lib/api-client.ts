@@ -29,7 +29,22 @@ export class ApiClientError extends Error {
 
 let csrfToken: string | null = null;
 
+function csrfCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const value = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith("waflo_csrf="))
+    ?.slice("waflo_csrf=".length);
+  return value ? decodeURIComponent(value) : null;
+}
+
 async function ensureCsrf(): Promise<string> {
+  const sharedCookieToken = csrfCookie();
+  if (sharedCookieToken) {
+    csrfToken = sharedCookieToken;
+    return sharedCookieToken;
+  }
   if (csrfToken) return csrfToken;
   const response = await fetch(`${API_URL}/v1/auth/csrf`, {
     credentials: "include",
@@ -46,7 +61,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const unsafe = !["GET", "HEAD", "OPTIONS"].includes(method);
   const headers = new Headers(options.headers);
   headers.set("accept", "application/json");
-  if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+  if (
+    options.body &&
+    !(typeof FormData !== "undefined" && options.body instanceof FormData) &&
+    !headers.has("content-type")
+  )
+    headers.set("content-type", "application/json");
   if (unsafe) headers.set("x-csrf-token", await ensureCsrf());
   let response: Response;
   try {

@@ -39,6 +39,20 @@ export class HostResolutionService {
   ) {}
 
   async resolve(host: string, developmentOverride?: string) {
+    const resolved = await this.resolveOrganization(host, developmentOverride);
+    if (resolved.status !== "active") return { status: resolved.status };
+    return {
+      status: "active" as HostResolutionStatus,
+      merchant: {
+        name: resolved.organization.name,
+        slug: resolved.organization.merchantSlug,
+        defaultLocale: resolved.organization.defaultLocale === "AR" ? "ar" : "en",
+        hostname: `${resolved.organization.merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
+      },
+    };
+  }
+
+  async resolveOrganization(host: string, developmentOverride?: string) {
     if (developmentOverride && this.environment.values.NODE_ENV === "production") {
       throw new AppError(
         "TENANT_OVERRIDE_FORBIDDEN",
@@ -54,35 +68,32 @@ export class HostResolutionService {
       effectiveHost,
       this.environment.values.MERCHANT_BASE_DOMAIN,
     );
+    if (
+      this.environment.values.NODE_ENV === "production" &&
+      (parsed.normalizedHost?.endsWith(".localhost") || parsed.normalizedHost?.endsWith(".lvh.me"))
+    ) {
+      return { status: "malformed" as const };
+    }
     if (parsed.status === "malformed") {
-      return { status: "malformed" as HostResolutionStatus };
+      return { status: "malformed" as const };
     }
     if (parsed.status === "reserved") {
-      return { status: "reserved" as HostResolutionStatus };
+      return { status: "reserved" as const };
     }
     const organization = await this.prisma.client.organization.findUnique({
       where: { merchantSlug: parsed.slug ?? "" },
-      select: {
-        name: true,
-        merchantSlug: true,
-        defaultLocale: true,
-        status: true,
-      },
+      include: { billingProfile: true },
     });
     if (!organization || organization.status === "ARCHIVED") {
-      return { status: "unknown" as HostResolutionStatus };
+      return { status: "unknown" as const };
     }
     if (organization.status === "SUSPENDED") {
-      return { status: "suspended" as HostResolutionStatus };
+      return { status: "suspended" as const };
     }
     return {
-      status: "active" as HostResolutionStatus,
-      merchant: {
-        name: organization.name,
-        slug: organization.merchantSlug,
-        defaultLocale: organization.defaultLocale === "AR" ? "ar" : "en",
-        hostname: `${organization.merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
-      },
+      status: "active" as const,
+      organization,
+      normalizedHost: parsed.normalizedHost,
     };
   }
 }

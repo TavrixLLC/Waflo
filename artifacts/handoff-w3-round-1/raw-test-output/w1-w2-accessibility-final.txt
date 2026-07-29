@@ -1,0 +1,12 @@
+$ node scripts/run-playwright.mjs accessibility
+
+Running 3 tests using 1 worker
+
+  ok 1 [accessibility] › tests\e2e\accessibility.spec.ts:36:5 › public, authentication, and form-error screens have no serious accessibility violations (10.2s)
+  ok 2 [accessibility] › tests\e2e\accessibility.spec.ts:72:5 › authenticated English and Arabic dashboard screens and dialogs are accessible (16.4s)
+  ok 3 [accessibility] › tests\e2e\accessibility.spec.ts:109:5 › Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts, and RTL are accessible (32.4s)
+
+  3 passed (1.0m)
+Playwright accessibility cleanup: all managed ports closed.
+
+EXIT_CODE=0

@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { expect, type Page, type APIRequestContext, test } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-round-3/screenshots";
+const screenshots = "artifacts/handoff-w2-round-5/screenshots";
 const runId = randomUUID().slice(0, 8);
 const ownerEmail = `browser-owner-${runId}@waflo.local`;
 const staffEmail = `browser-staff-${runId}@waflo.local`;
@@ -12,6 +12,7 @@ const changedPassword = "Browser Waflo Changed 2026!";
 const resetPassword = "Browser Waflo Reset 2026!";
 const initialSlug = `browser-${runId}`;
 const changedSlug = `flow-${runId}`;
+let browserOrganizationId = "";
 
 interface MailpitAddress {
   Address: string;
@@ -35,11 +36,12 @@ interface MailpitDetail {
 
 async function screenshot(page: Page, name: string): Promise<void> {
   await mkdir(screenshots, { recursive: true });
-  await page.screenshot({
-    path: `${screenshots}/${name}.png`,
-    fullPage: true,
-    animations: "disabled",
-  });
+  const path = `${screenshots}/${name}.png`;
+  try {
+    await page.screenshot({ path, fullPage: true, animations: "disabled" });
+  } catch {
+    await page.screenshot({ path, fullPage: false, animations: "disabled" });
+  }
 }
 
 async function latestMailAction(
@@ -106,8 +108,22 @@ async function login(page: Page, email: string, password: string): Promise<void>
   await expect(page).toHaveURL(/\/en\/(?:dashboard(?:\/|$)|onboarding\/)/);
 }
 
+async function finishQuickWizard(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByPlaceholder("Weekend rewards").fill(name);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.locator('input[name="en-program-name"]').fill(name);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.locator('input[name="ar-program-name"]').fill("برنامج ستارتر");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.locator(".studio-check-grid input[type=checkbox]").first().check();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Save and open Studio" }).click();
+}
+
 test.describe
-  .serial("Waflo W1 browser flows", () => {
+  .serial("Waflo W2 browser flows", () => {
     test("marketing pages render in English and Arabic with real RTL", async ({ page }) => {
       await page.goto("http://localhost:3000/en");
       await expect(page.getByRole("heading", { level: 1 })).toContainText("Turn every visit");
@@ -161,10 +177,10 @@ test.describe
       await expect(page).toHaveURL(/\/en\/onboarding\/complete/);
       await expect(page.getByText("Not started", { exact: true })).toBeVisible();
       await expect(page.getByText("no payment was taken")).toBeVisible();
-      const organizationId = new URL(page.url()).searchParams.get("organization");
-      expect(organizationId).toBeTruthy();
+      browserOrganizationId = new URL(page.url()).searchParams.get("organization") ?? "";
+      expect(browserOrganizationId).toBeTruthy();
       const organizationResponse = await page.request.get(
-        `http://localhost:4000/v1/organizations/${organizationId}`,
+        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
       );
       const organizationEnvelope = (await organizationResponse.json()) as {
         data: {
@@ -192,23 +208,454 @@ test.describe
       await screenshot(page, "11-dashboard-en");
     });
 
-    test("creates a Loyalty Studio draft and shows the server-backed preview", async ({ page }) => {
+    test("completes Quick Mode, autosaves Studio, validates, tests, and publishes", async ({
+      page,
+    }) => {
       await login(page, ownerEmail, initialPassword);
       await page.goto("/en/dashboard/programs");
-      await expect(page.getByRole("main").getByRole("heading", { name: "Programs" })).toBeVisible();
+      await expect(
+        page.getByRole("main").getByRole("heading", { name: "Loyalty programs" }),
+      ).toBeVisible();
       await page.getByRole("button", { name: "Create program" }).click();
+
+      await page.locator(".template-card").filter({ hasText: "Cookies" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByPlaceholder("Weekend rewards").fill("Browser Studio Rewards");
       await page.getByRole("button", { name: "Continue" }).click();
+
+      await page.locator('input[name="en-program-name"]').fill("Browser Studio Rewards");
       await page.getByRole("button", { name: "Continue" }).click();
+
+      await page.locator('input[name="ar-program-name"]').fill("مكافآت استوديو المتصفح");
       await page.getByRole("button", { name: "Continue" }).click();
-      await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
-      await page.getByRole("button", { name: "Save draft" }).click();
-      await expect(page.getByText("Browser Studio Rewards", { exact: true })).toBeVisible();
-      await page.getByText("Browser Studio Rewards", { exact: true }).click();
-      await expect(page.getByText("Live progress preview", { exact: true })).toBeVisible();
+
+      await page.getByRole("checkbox", { name: "Browser Main Branch" }).check();
+      await page.getByRole("button", { name: "Continue" }).click();
+
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByRole("button", { name: "Save and open Studio" })).toBeEnabled();
+      await page.getByRole("button", { name: "Save and open Studio" }).click();
+
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Browser Studio Rewards" }),
+      ).toBeVisible();
+      await expect(page.locator(".studio-section-nav button")).toHaveCount(16);
       await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
-      await screenshot(page, "23-loyalty-studio-preview");
+      await screenshot(page, "23-loyalty-studio-customer-preview");
+      const previewProgress = page.locator(".studio-preview-panel input[type=range]");
+      await previewProgress.fill("0");
+      await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
+      await screenshot(page, "41-r4-stamp-0-of-8-all-empty");
+      await previewProgress.fill("5");
+      await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
+      await screenshot(page, "42-r4-stamp-5-of-8-two-state");
+      await previewProgress.fill("8");
+      await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
+      await screenshot(page, "43-r4-stamp-8-of-8-reward-ready");
+      await previewProgress.fill("0");
+
+      const internalName = page.locator(".studio-editor-panel input").first();
+      const autosave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await internalName.fill("Browser Studio Rewards Updated");
+      await autosave;
+      await expect(page.locator(".studio-save-state")).toContainText("Saved");
+
+      for (const [section, profile] of [
+        ["Customer Web", "CUSTOMER_WEB"],
+        ["Apple Wallet", "APPLE_WALLET"],
+        ["Google Wallet", "GOOGLE_WALLET"],
+      ] as const) {
+        await page
+          .locator(".studio-section-nav")
+          .getByRole("button", { name: new RegExp(section) })
+          .click();
+        await expect(page.locator(`img[alt="${profile} preview"]`)).toBeVisible();
+        if (profile === "APPLE_WALLET") await screenshot(page, "24-loyalty-studio-apple-preview");
+      }
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Validation/ })
+        .click();
+      await page.getByRole("button", { name: "Run validation" }).click();
+      await expect(page.getByText(/0 errors/)).toBeVisible();
+
+      await page.goto("/ar/dashboard/programs");
+      const arabicProgramCard = page
+        .locator(".program-list__card")
+        .filter({ hasText: "Browser Studio Rewards Updated" });
+      await arabicProgramCard.locator("button").last().click();
+      await expect(page.locator(".studio-shell")).toHaveAttribute("dir", "rtl");
+      await page.locator(".studio-preview-panel input[type=range]").fill("8");
+      await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
+      await screenshot(page, "47-r4-arabic-rtl-reward-ready");
+
+      await page.goto("/en/dashboard/programs");
+      const englishProgramCard = page
+        .locator(".program-list__card")
+        .filter({ hasText: "Browser Studio Rewards Updated" });
+      await englishProgramCard.getByRole("button", { name: "Open Studio" }).click();
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Test Mode/ })
+        .click();
+      await page.getByRole("button", { name: "Start Test Mode" }).click();
+      await screenshot(page, "44-r4-test-mode-cycle-start-empty");
+      await page.getByRole("button", { name: "+5 stamps" }).click();
+      await page.getByRole("button", { name: "Reverse latest stamp" }).click();
+      await expect(page.getByText("TEST_STAMP_REVERSED")).toBeVisible();
+      await page.getByRole("button", { name: "+5 stamps" }).click();
+      await expect(page.getByText("Reward ready", { exact: true })).toBeVisible();
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Apple Wallet/ })
+        .click();
+      await expect(page.locator('img[alt="APPLE_WALLET preview"]')).toBeVisible();
+      await screenshot(page, "45-r4-apple-8-of-8-no-star");
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Google Wallet/ })
+        .click();
+      await expect(page.locator('img[alt="GOOGLE_WALLET preview"]')).toBeVisible();
+      await screenshot(page, "46-r4-google-8-of-8-no-star");
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Test Mode/ })
+        .click();
+      await page.getByRole("button", { name: "Synthetic redeem" }).click();
+      await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
+      await expect(page.getByText("Reward ready", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("0/8", { exact: true })).toBeVisible();
+      await screenshot(page, "48-r4-after-redemption-all-empty");
+      await screenshot(page, "25-loyalty-studio-test-mode");
+
+      await page.getByRole("button", { name: "Publish program" }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByText("The published version remains live")).toBeVisible();
+      await screenshot(page, "26-loyalty-studio-published");
+    });
+
+    test("handles two-editor conflicts, publishes v2, preserves history, and completes lifecycle actions", async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      await login(page, ownerEmail, initialPassword);
+      await page.goto("/en/dashboard/programs");
+      const programCard = page
+        .locator(".program-list__card")
+        .filter({ hasText: "Browser Studio Rewards Updated" });
+      await programCard.getByRole("button", { name: "Open Studio" }).click();
+      await expect(page.getByText("The published version remains live")).toBeVisible();
+
+      const billingResponse = await page.request.get(
+        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
+      );
+      expect(billingResponse.ok()).toBe(true);
+      const billingEnvelope = (await billingResponse.json()) as {
+        data: {
+          billingProfile: {
+            subscriptionStatus: string;
+            trialStart: string | null;
+            trialTriggeringProgramId: string | null;
+          };
+        };
+      };
+      expect(billingEnvelope.data.billingProfile.subscriptionStatus).toBe("TRIALING");
+      expect(billingEnvelope.data.billingProfile.trialStart).toBeTruthy();
+      expect(billingEnvelope.data.billingProfile.trialTriggeringProgramId).toBeTruthy();
+
+      await page.getByRole("button", { name: "Create draft from published" }).click();
+      await expect(page.getByText(/LOYALTY STUDIO.*v2/)).toBeVisible();
+      await expect(
+        page.getByText("Unpublished changes are isolated from the live version"),
+      ).toBeVisible();
+
+      const otherPage = await page.context().newPage();
+      await otherPage.goto("/en/dashboard/programs");
+      const otherCard = otherPage
+        .locator(".program-list__card")
+        .filter({ hasText: "Browser Studio Rewards Updated" });
+      await otherCard.getByRole("button", { name: "Open Studio" }).click();
+      await expect(otherPage.getByText(/LOYALTY STUDIO.*v2/)).toBeVisible();
+
+      const otherSave = otherPage.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await otherPage
+        .locator(".studio-editor-panel input")
+        .first()
+        .fill("Browser Studio v2 remote");
+      await otherSave;
+      await expect(otherPage.locator(".studio-save-state")).toContainText("Saved");
+
+      await page.locator(".studio-editor-panel input").first().fill("Browser Studio v2 local");
+      const conflictDialog = page.getByRole("dialog").filter({ hasText: "Edited elsewhere" });
+      await expect(conflictDialog).toBeVisible();
+      await expect(page.getByText("Your local edits are preserved")).toBeVisible();
+      await expect(page.getByText(/Local revision .*server revision/)).toBeVisible();
+      await screenshot(page, "27-loyalty-studio-conflict");
+
+      const reapplySave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await page.getByRole("button", { name: "Reapply deliberately" }).click();
+      await reapplySave;
+      await expect(conflictDialog).toBeHidden();
+      await expect(page.locator(".studio-save-state")).toContainText("Saved");
+      await otherPage.close();
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Overview/ })
+        .click();
+      const changeSummary = page.getByPlaceholder("What changed in this version?");
+      const summarySave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await changeSummary.fill("Conflict-safe v2 replacement");
+      await summarySave;
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Validation/ })
+        .click();
+      await page.getByRole("button", { name: "Run validation" }).click();
+      await expect(page.getByText(/0 errors/)).toBeVisible();
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Test Mode/ })
+        .click();
+      await page.getByRole("button", { name: "Start Test Mode" }).click();
+      await page.getByRole("button", { name: "+5 stamps" }).click();
+      await page.getByRole("button", { name: "+5 stamps" }).click();
+      await page.getByRole("button", { name: "Synthetic redeem" }).click();
+      await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Pause" }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+      await expect(
+        page.getByText("Unpublished changes are isolated from the paused published version."),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Publish program" }).click();
+      await expect(
+        page.getByText(
+          "The new version will be published, but the program will remain paused. Use Resume separately when you are ready to make it live.",
+        ),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByText("The published version remains paused")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+      await screenshot(page, "61-r5-paused-replacement-remains-paused");
+
+      const history = page.locator(".studio-version-history");
+      await expect(history).toContainText("v2");
+      await expect(history).toContainText("PUBLISHED");
+      await expect(history).toContainText("v1");
+      await expect(history).toContainText("SUPERSEDED");
+      await history.getByRole("button").filter({ hasText: "v1" }).click();
+      await expect(page.getByText("Immutable historical version")).toBeVisible();
+      await expect(page.getByText("Historical versions cannot be edited.")).toBeVisible();
+      await page.getByRole("button", { name: "Close" }).click();
+      await screenshot(page, "28-loyalty-studio-v2-history");
+
+      await screenshot(page, "29-loyalty-studio-paused");
+
+      await page.getByRole("button", { name: "Resume" }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+      await expect(page.getByText("The published version remains live")).toBeVisible();
+      await screenshot(page, "62-r5-explicit-resume-after-paused-replacement");
+
+      await page.getByRole("button", { name: "Archive" }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+      await screenshot(page, "30-loyalty-studio-archived");
+
+      await page.getByRole("button", { name: "Restore", exact: true }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+      await screenshot(page, "31-loyalty-studio-restored");
+    });
+
+    test("shows versioned concept templates, switch confirmation, background capability truth, and pagination", async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      await page.context().clearCookies();
+      await login(page, "owner@waflo.local", "Waflo-Development-2026");
+      const switcher = page.locator(".wf-org-switcher select");
+      const growthOrganizationId = await switcher.locator("option").nth(1).getAttribute("value");
+      expect(growthOrganizationId).toBeTruthy();
+      await switcher.selectOption(growthOrganizationId as string);
+      await page.goto("/en/dashboard/programs");
+      await page.getByRole("button", { name: "Create program" }).click();
+
+      const cookies = page.locator(".template-card").filter({ hasText: "Cookies & bakery" });
+      await cookies.click();
+      await expect(cookies).toHaveClass(/template-card--selected/);
+      await expect(cookies.locator("img")).toHaveCount(3);
+      await expect(cookies.getByAltText("Cookies & bakery filled stamp")).toBeVisible();
+      await expect(cookies.getByAltText("Cookies & bakery empty stamp")).toBeVisible();
+      await screenshot(page, "33-w2r3-cookies-colored-outline");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByText("8 stamps", { exact: true })).toBeVisible();
+      await expect(page.locator(".quick-step input").nth(2)).toHaveValue(/cookie stamp/i);
+      await page.getByPlaceholder("Weekend rewards").fill(`Round 3 edited ${runId}`);
+      await page.getByRole("button", { name: "Back" }).click();
+
+      await page.locator(".template-card").filter({ hasText: "Coffee" }).click();
+      const replacementDialog = page
+        .getByRole("dialog")
+        .filter({ hasText: "Replace template settings?" })
+        .last();
+      await expect(replacementDialog).toBeVisible();
+      await expect(replacementDialog).toContainText("stamp goal and earning rule");
+      await expect(replacementDialog).toContainText("English and Arabic customer copy");
+      await expect(replacementDialog).toContainText("colors and stamp artwork");
+      await screenshot(page, "34-w2r3-template-switch-warning");
+      await replacementDialog.getByRole("button", { name: "Replace settings" }).click();
+
+      const coffee = page.locator(".template-card").filter({ hasText: "Coffee" });
+      await expect(coffee).toHaveClass(/template-card--selected/);
+      await screenshot(page, "35-w2r3-coffee-cup-template");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.locator(".quick-step input").nth(2)).toHaveValue(/cup stamp/i);
+      await page.getByRole("button", { name: "Back" }).click();
+
+      const carWash = page.locator(".template-card").filter({ hasText: "Car wash" });
+      await carWash.click();
+      await expect(carWash).toHaveClass(/template-card--selected/);
+      await expect(carWash.getByAltText("Car wash filled stamp")).toBeVisible();
+      await expect(carWash.getByAltText("Car wash milestone artwork")).toBeVisible();
+      await screenshot(page, "36-w2r3-car-wash-car-water");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByText("6 stamps", { exact: true })).toBeVisible();
+      await expect(page.locator(".quick-step input").nth(2)).toHaveValue(/car stamp/i);
+      await page.getByRole("button", { name: "Back" }).click();
+
+      const barbershop = page.locator(".template-card").filter({ hasText: "Barbershop" });
+      await barbershop.click();
+      await expect(barbershop).toHaveClass(/template-card--selected/);
+      await screenshot(page, "37-w2r3-barbershop-scissors");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByText("6 stamps", { exact: true })).toBeVisible();
+      await expect(page.locator(".quick-step input").nth(2)).toHaveValue(/scissors stamp/i);
+      await page.getByPlaceholder("Weekend rewards").fill(`Round 3 Barbershop ${runId}`);
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.locator(".studio-check-grid input[type=checkbox]").first().check();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Save and open Studio" }).click();
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: `Round 3 Barbershop ${runId}`,
+        }),
+      ).toBeVisible();
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Artwork/ })
+        .click();
+      const backgroundPicker = page.locator(".studio-asset-picker").filter({
+        has: page.getByRole("heading", { name: "Background" }),
+      });
+      await backgroundPicker.locator('input[type="file"]').setInputFiles({
+        name: "round3-background.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAPoAAAD6AG1e1JrAAAARklEQVRYhe3XwQ0AMAhC0U7EOuyfuIfdor28g3cTET5nmv05xwLjBCXCeMNlRMOKK4wijheQDCQrKA0sX8VkVLMqp3mugwtMYqCIQ8Mt0gAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      });
+      const cropDialog = page.getByRole("dialog").filter({ hasText: "Crop image safely" });
+      await expect(cropDialog).toBeVisible();
+      const uploaded = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().includes("/assets") &&
+          response.status() === 201,
+      );
+      const backgroundSave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await cropDialog.getByRole("button", { name: "Process and upload" }).click();
+      await uploaded;
+      await backgroundSave;
+      await expect(cropDialog).toBeHidden();
+      await expect(page.locator(".studio-save-state")).toContainText("Saved");
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Customer Web/ })
+        .click();
+      await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
+      await screenshot(page, "38-w2r3-customer-background-preview");
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Apple Wallet/ })
+        .click();
+      await expect(page.locator('img[alt="APPLE_WALLET preview"]')).toBeVisible();
+      await page.locator(".studio-capability-summary summary").click();
+      await expect(page.locator(".studio-capability-summary")).toContainText(
+        "selected background artwork is not used",
+      );
+      await expect(page.locator(".studio-preview-panel")).toContainText(
+        "selected background artwork is not used",
+      );
+      await screenshot(page, "39-w2r3-platform-capability-warning");
+
+      const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
+      const database = createPrismaClient(
+        process.env.DATABASE_URL ??
+          "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
+      );
+      try {
+        const member = await database.organizationMember.findFirstOrThrow({
+          where: {
+            organizationId: growthOrganizationId as string,
+            role: "OWNER",
+          },
+        });
+        await database.loyaltyProgram.createMany({
+          data: Array.from({ length: 22 }, (_, index) => ({
+            organizationId: growthOrganizationId as string,
+            internalName: `Round 3 pagination ${runId}-${String(index).padStart(2, "0")}`,
+            programType: "STAMP" as const,
+            status: "DRAFT" as const,
+            createdByUserId: member.userId,
+          })),
+        });
+      } finally {
+        await database.$disconnect();
+      }
+      await page.goto("/en/dashboard/programs");
+      await expect(page.getByRole("button", { name: "Load more programs" })).toBeVisible();
+      const firstPageCount = await page.locator(".program-list__card").count();
+      expect(firstPageCount).toBe(20);
+      await page.getByRole("button", { name: "Load more programs" }).click();
+      await expect.poll(() => page.locator(".program-list__card").count()).toBeGreaterThan(20);
+      await screenshot(page, "40-w2r3-program-pagination-loaded");
     });
 
     test("completes password reset from a #token fragment and clears it before submission", async ({
@@ -377,11 +824,20 @@ test.describe
       );
       await staffPage.goto("/en/dashboard/locations");
       await expect(staffPage.getByText("Your role does not allow this action.")).toBeVisible();
+      await staffPage.goto("/en/dashboard/programs");
+      await expect(
+        staffPage.getByText("Your role does not allow access to Loyalty Studio."),
+      ).toBeVisible();
       await page.reload();
       const roleSelect = page.getByRole("combobox", { name: "Role for Browser Staff" });
       await expect(roleSelect).toBeVisible();
       await roleSelect.selectOption("MANAGER");
       await expect(roleSelect).toHaveValue("MANAGER");
+      await staffPage.goto("/en/dashboard/programs");
+      await expect(
+        staffPage.getByRole("main").getByRole("heading", { name: "Loyalty programs" }),
+      ).toBeVisible();
+      await expect(staffPage.getByRole("button", { name: "Create program" })).toBeVisible();
       await staffContext.close();
     });
 
@@ -426,10 +882,12 @@ test.describe
       await expect(page.getByText(/previous slug is temporarily reserved/)).toBeVisible();
 
       await page.goto(`http://localhost:3002/?tenant=${changedSlug}`);
+      await expect(page).toHaveURL(
+        new RegExp(`/join/browser-studio-rewards\\?tenant=${changedSlug}$`),
+      );
       await expect(
-        page.getByRole("heading", { name: /loyalty experience is being prepared/i }),
+        page.getByRole("heading", { name: "Browser Studio Rewards", exact: true }),
       ).toBeVisible();
-      await expect(page.getByText(`Browser Coffee ${runId}`, { exact: true })).toBeVisible();
       await screenshot(page, "20-merchant-placeholder");
 
       const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
@@ -443,9 +901,7 @@ test.describe
           data: { status: "SUSPENDED" },
         });
         await page.goto(`http://localhost:3002/?tenant=${changedSlug}`);
-        await expect(
-          page.getByRole("heading", { name: "This page is temporarily unavailable" }),
-        ).toBeVisible();
+        await expect(page.getByRole("heading", { name: "This page is unavailable" })).toBeVisible();
         await expect(page.getByText(`Browser Coffee ${runId}`, { exact: true })).toHaveCount(0);
         await database.organization.update({
           where: { merchantSlug: changedSlug },
@@ -456,9 +912,7 @@ test.describe
       }
 
       await page.goto(`http://localhost:3002/?tenant=unknown-${runId}`);
-      await expect(
-        page.getByRole("heading", { name: "We could not find this merchant" }),
-      ).toBeVisible();
+      await expect(page.getByRole("heading", { name: "This page is unavailable" })).toBeVisible();
       await screenshot(page, "21-unknown-merchant");
 
       await page.goto("http://localhost:3001/en/dashboard/security");
@@ -500,6 +954,364 @@ test.describe
       await page.getByRole("button", { name: "دعوة عضو" }).click();
       await expect(page.getByRole("dialog")).toHaveCSS("direction", "rtl");
       await screenshot(page, "22-dashboard-ar-rtl");
+    });
+
+    test("explains Starter Pro restrictions and blocks a second active program", async ({
+      page,
+    }) => {
+      await page.context().clearCookies();
+      await login(page, "owner@waflo.local", "Waflo-Development-2026");
+      const switcher = page.locator(".wf-org-switcher select");
+      await switcher.selectOption({ label: "Today Coffee" });
+      await page.goto("/en/dashboard/programs");
+      await expect
+        .poll(
+          async () =>
+            (await page.locator(".program-list__card").count()) +
+            (await page.getByText("Create your first stamp program").count()),
+        )
+        .toBeGreaterThan(0);
+
+      if ((await page.locator(".program-list__card").count()) === 0) {
+        await page.getByRole("button", { name: "Create program" }).click();
+        const proMode = page.getByRole("radio", { name: /Pro Mode/ });
+        await proMode.click();
+        await expect(proMode).not.toBeChecked();
+        await expect(page.getByText("Pro Mode is available on Growth")).toBeVisible();
+        await finishQuickWizard(page, `Starter first ${runId}`);
+        await expect(page.getByText("The published version remains live")).toHaveCount(0);
+        await expect(
+          page.locator(".studio-toolbar").getByRole("heading", { level: 1 }),
+        ).toContainText("Starter first");
+        await page.getByRole("button", { name: "Programs" }).click();
+      }
+
+      await page.getByRole("button", { name: "Create program" }).click();
+      await finishQuickWizard(page, `Starter blocked ${runId}`);
+      await expect(page.getByText("Your plan has reached its active program limit.")).toBeVisible();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await screenshot(page, "32-starter-program-limit");
+    });
+
+    test("captures the Round 4 lifecycle, asset, PATCH, publication, and entitlement evidence", async ({
+      page,
+    }) => {
+      test.setTimeout(240_000);
+      const round4Email = `round4-${runId}@waflo.local`;
+      const round4Password = "Round 4 Browser Waflo 2026!";
+      const firstProgramName = `Round 4 archived ${runId}`;
+      const secondProgramName = `Round 4 active ${runId}`;
+      const updatedProgramName = `Round 4 active updated ${runId}`;
+      const sameImage = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAPoAAAD6AG1e1JrAAAARklEQVRYhe3XwQ0AMAhC0U7EOuyfuIfdor28g3cTET5nmv05xwLjBCXCeMNlRMOKK4wijheQDCQrKA0sX8VkVLMqp3mugwtMYqCIQ8Mt0gAAAABJRU5ErkJggg==",
+        "base64",
+      );
+
+      await signup(page, round4Email, round4Password);
+      await verifyLatestEmail(page, round4Email);
+      await page.getByRole("button", { name: "Continue to sign in" }).click();
+      await login(page, round4Email, round4Password);
+      await page.locator('input[name="name"]').fill(`Round 4 Coffee ${runId}`);
+      await page.locator('input[name="slug"]').fill(`round4-${runId}`);
+      await page.getByRole("button", { name: "Save and continue" }).click();
+      await expect(page).toHaveURL(/\/en\/onboarding\/location/);
+      await page.locator('input[name="name"]').fill("Round 4 Main Branch");
+      await page.getByRole("button", { name: "Create location and finish setup" }).click();
+      await expect(page).toHaveURL(/\/en\/onboarding\/complete/);
+      const round4OrganizationId = new URL(page.url()).searchParams.get("organization");
+      expect(round4OrganizationId).toBeTruthy();
+      await page.getByRole("button", { name: "Continue to dashboard" }).click();
+      await page.goto("/en/dashboard/programs");
+
+      await page.getByRole("button", { name: "Create program" }).click();
+      await finishQuickWizard(page, firstProgramName);
+      await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Version history/ })
+        .click();
+      await expect(page.getByText("Initial draft is preserved")).toBeVisible();
+      await screenshot(page, "52-r4-initial-unpublished-archive-action");
+      await page.getByRole("button", { name: "Archive" }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Programs" }).click();
+      await expect(page.getByRole("button", { name: "Create program" })).toBeEnabled();
+      await screenshot(page, "53-r4-starter-slot-released-after-archive");
+
+      await page.getByRole("button", { name: "Create program" }).click();
+      await finishQuickWizard(page, secondProgramName);
+      await page.getByRole("button", { name: "Programs" }).click();
+      const archivedCard = page
+        .locator(".program-list__card")
+        .filter({ hasText: firstProgramName });
+      await archivedCard.getByRole("button", { name: "Open Studio" }).click();
+      await expect(page.getByText("Restore required before publishing")).toBeVisible();
+      await expect(
+        page.getByText(
+          "Restore this program before publishing. Its preserved draft will remain available.",
+        ),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Publish program" })).toBeDisabled();
+      await screenshot(page, "59-r5-archived-publication-blocked-restore-guidance");
+      await page.getByRole("button", { name: "Restore", exact: true }).click();
+      await page.getByRole("button", { name: "Confirm" }).click();
+      await expect(
+        page.getByText("Your plan cannot restore another active program."),
+      ).toBeVisible();
+      await screenshot(page, "54-r4-restore-blocked-at-program-limit");
+      await page.getByRole("button", { name: "Cancel" }).click();
+      await page.getByRole("button", { name: "Programs" }).click();
+      const activeCard = page.locator(".program-list__card").filter({ hasText: secondProgramName });
+      await activeCard.getByRole("button", { name: "Open Studio" }).click();
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Rewards & milestones/ })
+        .click();
+      const instructionSave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await page
+        .getByLabel("English redemption instructions")
+        .fill("Round 4 preserved redemption instructions.");
+      await instructionSave;
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Overview/ })
+        .click();
+      const nameSave = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().includes("/programs/") &&
+          response.status() === 200,
+      );
+      await page.locator(".studio-editor-panel input").first().fill(updatedProgramName);
+      await nameSave;
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Rewards & milestones/ })
+        .click();
+      await expect(page.getByLabel("English redemption instructions")).toHaveValue(
+        "Round 4 preserved redemption instructions.",
+      );
+      await screenshot(page, "57-r4-partial-name-patch-preserves-reward-instructions");
+
+      await page
+        .locator(".studio-section-nav")
+        .getByRole("button", { name: /Artwork/ })
+        .click();
+      const uploadToPicker = async (label: "Logo" | "Background", expectProgramSave = true) => {
+        const picker = page.locator(".studio-asset-picker").filter({
+          has: page.getByRole("heading", { name: label }),
+        });
+        await picker.locator('input[type="file"]').setInputFiles({
+          name: "round4-same-image.png",
+          mimeType: "image/png",
+          buffer: sameImage,
+        });
+        const cropDialog = page.getByRole("dialog").filter({ hasText: "Crop image safely" });
+        await expect(cropDialog).toBeVisible();
+        const uploaded = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            response.url().includes("/assets") &&
+            response.status() === 201,
+        );
+        const saved = expectProgramSave
+          ? page.waitForResponse(
+              (response) =>
+                response.request().method() === "PATCH" &&
+                response.url().includes("/programs/") &&
+                response.status() === 200,
+            )
+          : null;
+        await cropDialog.getByRole("button", { name: "Process and upload" }).click();
+        const response = await uploaded;
+        if (saved) await saved;
+        const envelope = (await response.json()) as {
+          data: { id: string; uploadDisposition: string };
+        };
+        return envelope.data;
+      };
+      const logoAsset = await uploadToPicker("Logo");
+      const backgroundAsset = await uploadToPicker("Background");
+      expect(logoAsset.id).not.toBe(backgroundAsset.id);
+      await screenshot(page, "55-r4-identical-image-two-visual-categories");
+
+      const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
+      const database = createPrismaClient(
+        process.env.DATABASE_URL ??
+          "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
+      );
+      try {
+        await database.merchantAsset.update({
+          where: { id: backgroundAsset.id },
+          data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
+        });
+        const restoredBackground = await uploadToPicker("Background", false);
+        expect(restoredBackground).toMatchObject({
+          id: backgroundAsset.id,
+          uploadDisposition: "RESTORED",
+        });
+        await expect(
+          page.getByText("The archived matching asset was restored and repaired."),
+        ).toBeVisible();
+        await screenshot(page, "56-r4-archived-image-reupload-restored");
+
+        for (const section of ["Customer Web", "Apple Wallet", "Google Wallet"]) {
+          await page
+            .locator(".studio-section-nav")
+            .getByRole("button", { name: new RegExp(section) })
+            .click();
+          await expect(page.locator('img[alt$="preview"]')).toBeVisible();
+        }
+        await page
+          .locator(".studio-section-nav")
+          .getByRole("button", { name: /Validation/ })
+          .click();
+        await page.getByRole("button", { name: "Run validation" }).click();
+        await expect(page.getByText(/0 errors/)).toBeVisible();
+        await page
+          .locator(".studio-section-nav")
+          .getByRole("button", { name: /Test Mode/ })
+          .click();
+        await page.getByRole("button", { name: "Start Test Mode" }).click();
+        await page.getByRole("button", { name: "+5 stamps" }).click();
+        await page.getByRole("button", { name: "+5 stamps" }).click();
+        await page.getByRole("button", { name: "Synthetic redeem" }).click();
+        await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
+
+        const storedProgram = await database.loyaltyProgram.findFirstOrThrow({
+          where: {
+            organizationId: round4OrganizationId as string,
+            internalName: updatedProgramName,
+          },
+          include: {
+            currentDraftVersion: {
+              include: {
+                visualTheme: true,
+                locations: true,
+              },
+            },
+          },
+        });
+        const draft = storedProgram.currentDraftVersion;
+        expect(draft?.visualTheme).toBeTruthy();
+        const locationId = draft?.locations[0]?.locationId as string;
+        const publicationAssetId = backgroundAsset.id;
+
+        await database.loyaltyProgram.update({
+          where: { id: storedProgram.id },
+          data: { status: "SUSPENDED" },
+        });
+        await page.getByRole("button", { name: "Programs" }).click();
+        await page
+          .locator(".program-list__card")
+          .filter({ hasText: secondProgramName })
+          .getByRole("button", { name: "Open Studio" })
+          .click();
+        await expect(page.getByText("Publishing is unavailable")).toBeVisible();
+        await expect(
+          page.getByText(
+            "This program cannot be published in its current state. Contact support for assistance.",
+          ),
+        ).toBeVisible();
+        await expect(page.getByRole("button", { name: "Publish program" })).toBeDisabled();
+        await screenshot(page, "60-r5-suspended-publication-blocked");
+        await database.loyaltyProgram.update({
+          where: { id: storedProgram.id },
+          data: { status: "TEST" },
+        });
+        await page.getByRole("button", { name: "Programs" }).click();
+        await page
+          .locator(".program-list__card")
+          .filter({ hasText: secondProgramName })
+          .getByRole("button", { name: "Open Studio" })
+          .click();
+
+        await database.location.update({
+          where: { id: locationId },
+          data: { status: "ARCHIVED" },
+        });
+        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Confirm" }).click();
+        await expect(
+          page.getByText(
+            "Every selected location must still belong to the organization and be active.",
+          ),
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Cancel" }).click();
+        await screenshot(page, "49-r4-publication-blocked-inactive-location");
+        await database.location.update({
+          where: { id: locationId },
+          data: { status: "ACTIVE" },
+        });
+
+        await database.merchantAsset.update({
+          where: { id: publicationAssetId },
+          data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
+        });
+        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Confirm" }).click();
+        await expect(page.getByText(/asset is no longer publication-ready/)).toBeVisible();
+        await page.getByRole("button", { name: "Cancel" }).click();
+        await screenshot(page, "50-r4-publication-blocked-unavailable-asset");
+        await database.merchantAsset.update({
+          where: { id: publicationAssetId },
+          data: { archivedAt: null, processingStatus: "READY" },
+        });
+
+        await database.organization.update({
+          where: { id: round4OrganizationId as string },
+          data: { selectedPlan: "GROWTH" },
+        });
+        await database.organizationBillingProfile.update({
+          where: { organizationId: round4OrganizationId as string },
+          data: { selectedPlan: "GROWTH" },
+        });
+        await database.loyaltyProgramVersion.update({
+          where: { id: draft?.id as string },
+          data: { editingMode: "PRO" },
+        });
+        await database.programVisualTheme.update({
+          where: { versionId: draft?.id as string },
+          data: { layoutType: "PATH" },
+        });
+        await database.organization.update({
+          where: { id: round4OrganizationId as string },
+          data: { selectedPlan: "STARTER" },
+        });
+        await database.organizationBillingProfile.update({
+          where: { organizationId: round4OrganizationId as string },
+          data: { selectedPlan: "STARTER" },
+        });
+        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Confirm" }).click();
+        await expect(
+          page.getByText("The draft uses features that are unavailable on the current plan."),
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Cancel" }).click();
+        await screenshot(page, "51-r4-publication-blocked-growth-to-starter");
+
+        await database.loyaltyProgramVersion.update({
+          where: { id: draft?.id as string },
+          data: { editingMode: "QUICK" },
+        });
+        await database.programVisualTheme.update({
+          where: { versionId: draft?.id as string },
+          data: { layoutType: "GRID" },
+        });
+        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Confirm" }).click();
+        await expect(page.getByText("The published version remains live")).toBeVisible();
+        await screenshot(page, "58-r4-final-valid-publication");
+      } finally {
+        await database.$disconnect();
+      }
     });
 
     test("blocks unauthenticated dashboard access", async ({ browser }) => {

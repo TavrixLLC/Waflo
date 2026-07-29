@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { programOperationalStatuses } from "./program-publication-state.js";
+
+export * from "./platform-capabilities.js";
+export * from "./program-publication-state.js";
+export * from "./program-template-catalog.js";
+export * from "./w4-policy-backlog.js";
+export * from "./w3.js";
 
 export const locales = ["en", "ar"] as const;
 export type Locale = (typeof locales)[number];
@@ -162,16 +169,7 @@ export type OrganizationInput = z.infer<typeof organizationSchema>;
 export type LocationInput = z.infer<typeof locationSchema>;
 
 export const programEditingModeSchema = z.enum(["quick", "pro"]);
-export const programStatusSchema = z.enum([
-  "DRAFT",
-  "VALIDATED",
-  "TEST",
-  "SCHEDULED",
-  "PUBLISHED",
-  "PAUSED",
-  "ARCHIVED",
-  "SUSPENDED",
-]);
+export const programStatusSchema = z.enum(programOperationalStatuses);
 export const stampLayoutSchema = z.enum(["ROW", "GRID", "PATH", "RING"]);
 export const rewardTypeSchema = z.enum([
   "TEXT_REWARD",
@@ -199,7 +197,18 @@ const rewardInputSchema = z.object({
   sortOrder: z.number().int().min(0).max(100).default(0),
   validityDurationDays: z.number().int().min(1).max(3650).nullable().optional(),
   requiresManagerApproval: z.boolean().default(false),
-  maximumRedemptionsPerEarned: z.number().int().min(1).max(1).default(1),
+  maximumRedemptionsPerEarned: z.number().int().min(1).max(10).default(1),
+  visualOverride: z
+    .object({
+      stampAssetId: z.uuid().nullable().optional(),
+      accentOverride: z
+        .string()
+        .regex(/^#[0-9A-Fa-f]{6}$/)
+        .nullable()
+        .optional(),
+    })
+    .strict()
+    .optional(),
   translations: z.object({
     en: z.object({
       name: z.string().trim().min(1).max(120),
@@ -214,35 +223,97 @@ const rewardInputSchema = z.object({
   }),
 });
 
-const visualThemeInputSchema = z.object({
-  backgroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-  foregroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-  accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-  secondaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-  mutedColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-  filledStampAssetId: z.uuid().optional(),
-  emptyStampAssetId: z.uuid().optional(),
-  logoAssetId: z.uuid().nullable().optional(),
-  heroAssetId: z.uuid().nullable().optional(),
-  backgroundAssetId: z.uuid().nullable().optional(),
-  defaultMilestoneAssetId: z.uuid().nullable().optional(),
-  layoutType: stampLayoutSchema,
-  layoutConfiguration: z.record(z.string(), z.unknown()).default({}),
-  stampSize: z.number().int().min(24).max(96).default(48),
-  stampSpacing: z.number().int().min(0).max(32).default(8),
-  borderRadius: z.number().int().min(0).max(40).default(18),
-  progressLabelVisible: z.boolean().default(true),
-  rewardLabelVisible: z.boolean().default(true),
-  customerWebVariant: z.enum(["CARD", "MINIMAL", "HERO"]).default("CARD"),
-  applePreviewConfig: z.record(z.string(), z.unknown()).default({}),
-  googlePreviewConfig: z.record(z.string(), z.unknown()).default({}),
-});
+const layoutConfigurationSchema = z
+  .object({
+    columns: z.number().int().min(2).max(6).optional(),
+    maxPerRow: z.number().int().min(2).max(10).optional(),
+    serpentine: z.boolean().optional(),
+    startAngle: z.number().min(-180).max(180).optional(),
+  })
+  .strict()
+  .default({});
 
-export const programCreateSchema = z
+const applePreviewConfigSchema = z
+  .object({
+    headerLabel: z.string().trim().max(24).default("REWARDS"),
+    headerValue: z.string().trim().max(32).default("Waflo"),
+    secondaryLabel: z.string().trim().max(24).default("NEXT REWARD"),
+    barcodeLabel: z.string().trim().max(32).default("Preview barcode"),
+    showBackContent: z.boolean().default(true),
+  })
+  .strict()
+  .default({
+    headerLabel: "REWARDS",
+    headerValue: "Waflo",
+    secondaryLabel: "NEXT REWARD",
+    barcodeLabel: "Preview barcode",
+    showBackContent: true,
+  });
+
+const googlePreviewConfigSchema = z
+  .object({
+    title: z.string().trim().max(48).default("Waflo Rewards"),
+    subtitle: z.string().trim().max(64).default("Collect stamps and unlock rewards"),
+    detailsLabel: z.string().trim().max(32).default("Reward progress"),
+    barcodeLabel: z.string().trim().max(32).default("Preview barcode"),
+  })
+  .strict()
+  .default({
+    title: "Waflo Rewards",
+    subtitle: "Collect stamps and unlock rewards",
+    detailsLabel: "Reward progress",
+    barcodeLabel: "Preview barcode",
+  });
+
+const visualThemeInputSchema = z
+  .object({
+    backgroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    foregroundColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    secondaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    mutedColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    filledStampAssetId: z.uuid().optional(),
+    emptyStampAssetId: z.uuid().optional(),
+    logoAssetId: z.uuid().nullable().optional(),
+    heroAssetId: z.uuid().nullable().optional(),
+    backgroundAssetId: z.uuid().nullable().optional(),
+    defaultMilestoneAssetId: z.uuid().nullable().optional(),
+    layoutType: stampLayoutSchema,
+    layoutConfiguration: layoutConfigurationSchema,
+    stampSize: z.number().int().min(24).max(96).default(48),
+    stampSpacing: z.number().int().min(0).max(32).default(8),
+    borderRadius: z.number().int().min(0).max(40).default(18),
+    progressLabelVisible: z.boolean().default(true),
+    rewardLabelVisible: z.boolean().default(true),
+    customerWebVariant: z.enum(["CARD", "MINIMAL", "HERO"]).default("CARD"),
+    applePreviewConfig: applePreviewConfigSchema,
+    googlePreviewConfig: googlePreviewConfigSchema,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const columns = value.layoutConfiguration.columns;
+    if (value.layoutType === "GRID" && columns && columns > value.stampSize / 8) {
+      context.addIssue({
+        code: "custom",
+        path: ["layoutConfiguration", "columns"],
+        message: "Grid columns are too dense for the configured stamp size.",
+      });
+    }
+    if (value.layoutType !== "RING" && value.layoutConfiguration.startAngle !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["layoutConfiguration", "startAngle"],
+        message: "Start angle is only supported by the ring layout.",
+      });
+    }
+  });
+
+const programInputSchema = z
   .object({
     internalName: z.string().trim().min(2).max(120),
     editingMode: programEditingModeSchema.default("quick"),
     templateCode: z.string().trim().max(80).optional(),
+    templateVersion: z.number().int().min(1).max(10_000).optional(),
     requiredStampCount: z.number().int().min(2).max(30).default(8),
     translations: z.object({ en: translationInputSchema, ar: translationInputSchema }),
     earningDescription: z
@@ -257,7 +328,27 @@ export const programCreateSchema = z
   })
   .strict();
 
-export const programUpdateSchema = programCreateSchema
+function validateProgramInput(value: z.infer<typeof programInputSchema>, context: z.RefinementCtx) {
+  const thresholds = value.rewards.map((reward) => reward.thresholdStampCount);
+  if (new Set(thresholds).size !== thresholds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["rewards"],
+      message: "Reward thresholds must be unique.",
+    });
+  }
+  if (value.editingMode === "quick" && value.rewards.length !== 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["rewards"],
+      message: "Quick Mode supports one final reward.",
+    });
+  }
+}
+
+export const programCreateSchema = programInputSchema.superRefine(validateProgramInput);
+
+export const programUpdateSchema = programInputSchema
   .partial()
   .extend({
     revision: z.number().int().min(1),
@@ -280,14 +371,20 @@ export const programPublishSchema = z
 
 export const programTestResetSchema = z
   .object({
-    idempotencyKey: z.uuid().optional(),
+    idempotencyKey: z.uuid(),
+  })
+  .strict();
+
+export const programTestReverseSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
   })
   .strict();
 
 export type ProgramCreateInput = z.infer<typeof programCreateSchema>;
 export type ProgramUpdateInput = z.infer<typeof programUpdateSchema>;
 
-export const merchantAssetUploadSchema = z
+export const merchantAssetUploadMetadataSchema = z
   .object({
     category: z.enum([
       "LOGO",
@@ -298,13 +395,29 @@ export const merchantAssetUploadSchema = z
       "STAMP_MILESTONE",
       "GENERAL",
     ]),
-    filename: z.string().trim().min(1).max(255),
-    mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
-    contentBase64: z.string().min(16).max(3_000_000),
+    crop: z
+      .object({
+        x: z.number().min(0).max(1).default(0),
+        y: z.number().min(0).max(1).default(0),
+        width: z.number().gt(0).max(1).default(1),
+        height: z.number().gt(0).max(1).default(1),
+        zoom: z.number().min(1).max(4).default(1),
+      })
+      .strict()
+      .default({ x: 0, y: 0, width: 1, height: 1, zoom: 1 }),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.crop.x + value.crop.width > 1.000001 || value.crop.y + value.crop.height > 1.000001) {
+      context.addIssue({
+        code: "custom",
+        path: ["crop"],
+        message: "Crop rectangle must remain inside the image.",
+      });
+    }
+  });
 
-export type MerchantAssetUploadInput = z.infer<typeof merchantAssetUploadSchema>;
+export type MerchantAssetUploadMetadataInput = z.infer<typeof merchantAssetUploadMetadataSchema>;
 
 export function createErrorEnvelope(
   code: string,

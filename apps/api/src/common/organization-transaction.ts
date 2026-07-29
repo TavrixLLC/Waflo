@@ -61,3 +61,20 @@ export function withOrganizationInvariantLock<T>(
 ): Promise<T> {
   return withInvariantLock(client, `organization:${organizationId}`, operation);
 }
+
+export function withOrganizationCacheLock<T>(
+  client: PrismaClient,
+  organizationId: string,
+  operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return client.$transaction(
+    async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT 1::int AS locked
+        FROM pg_advisory_xact_lock(hashtextextended(${`organization:${organizationId}`}, 0))
+      `;
+      return operation(transaction);
+    },
+    { isolationLevel: "ReadCommitted" },
+  );
+}

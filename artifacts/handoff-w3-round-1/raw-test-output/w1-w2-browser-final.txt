@@ -1,0 +1,23 @@
+$ node scripts/run-playwright.mjs chromium
+
+Running 14 tests using 1 worker
+
+  ok  1 [chromium] › tests\e2e\platform.spec.ts:127:9 › Waflo W2 browser flows › marketing pages render in English and Arabic with real RTL (916ms)
+  ok  2 [chromium] › tests\e2e\platform.spec.ts:145:9 › Waflo W2 browser flows › registers, opens the Mailpit verification action, and completes onboarding (4.9s)
+  ok  3 [chromium] › tests\e2e\platform.spec.ts:211:9 › Waflo W2 browser flows › completes Quick Mode, autosaves Studio, validates, tests, and publishes (10.4s)
+  ok  4 [chromium] › tests\e2e\platform.spec.ts:344:9 › Waflo W2 browser flows › handles two-editor conflicts, publishes v2, preserves history, and completes lifecycle actions (10.9s)
+  ok  5 [chromium] › tests\e2e\platform.spec.ts:495:9 › Waflo W2 browser flows › shows versioned concept templates, switch confirmation, background capability truth, and pagination (8.5s)
+  ok  6 [chromium] › tests\e2e\platform.spec.ts:661:9 › Waflo W2 browser flows › completes password reset from a #token fragment and clears it before submission (2.4s)
+  ok  7 [chromium] › tests\e2e\platform.spec.ts:689:9 › Waflo W2 browser flows › edits settings, reaches the location limit, upgrades setup plan, and creates a location (2.7s)
+  ok  8 [chromium] › tests\e2e\platform.spec.ts:725:9 › Waflo W2 browser flows › sends a Checkout command ID, suppresses double clicks, and reuses uncertain retries (2.8s)
+  ok  9 [chromium] › tests\e2e\platform.spec.ts:789:9 › Waflo W2 browser flows › invites a Staff user who registers, verifies, and accepts the invitation (5.7s)
+  ok 10 [chromium] › tests\e2e\platform.spec.ts:844:9 › Waflo W2 browser flows › shows audit history, manages sessions, changes slug and password, and resolves the new host (5.8s)
+  ok 11 [chromium] › tests\e2e\platform.spec.ts:927:9 › Waflo W2 browser flows › enforces Manager billing restrictions and supports organization/language switching (3.0s)
+  ok 12 [chromium] › tests\e2e\platform.spec.ts:959:9 › Waflo W2 browser flows › explains Starter Pro restrictions and blocks a second active program (3.3s)
+  ok 13 [chromium] › tests\e2e\platform.spec.ts:996:9 › Waflo W2 browser flows › captures the Round 4 lifecycle, asset, PATCH, publication, and entitlement evidence (20.7s)
+  ok 14 [chromium] › tests\e2e\platform.spec.ts:1317:9 › Waflo W2 browser flows › blocks unauthenticated dashboard access (1.2s)
+
+  14 passed (1.4m)
+Playwright chromium cleanup: all managed ports closed.
+
+EXIT_CODE=0

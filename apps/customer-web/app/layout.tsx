@@ -10,6 +10,11 @@ export const metadata: Metadata = {
     icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],
     apple: "/apple-touch-icon-180.png",
   },
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

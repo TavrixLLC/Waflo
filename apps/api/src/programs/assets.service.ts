@@ -1,16 +1,20 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
-import type { MerchantAssetUploadInput } from "@waflo/contracts";
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import type { MerchantAssetUploadMetadataInput } from "@waflo/contracts";
+import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
+import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
+import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
+import { decodeTimestampCursor, encodeCursor } from "../common/cursor-pagination.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { AuditService } from "../audit/audit.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { processMerchantImage, type SupportedImageMime } from "./image-processing.js";
+import { OBJECT_STORAGE, type ObjectStorage } from "./object-storage.js";
 
 const MAX_BYTES = 2 * 1024 * 1024;
-const storageRoot = join(process.cwd(), "tmp", "waflo-assets");
+const variantCodes = ["ORIGINAL_SAFE", "STAMP_256", "THUMBNAIL_96"] as const;
+export type AssetVariantCode = (typeof variantCodes)[number];
 
 function safeFilename(filename: string) {
   const normalized = basename(filename)
@@ -20,41 +24,8 @@ function safeFilename(filename: string) {
   return normalized || "upload";
 }
 
-function hasValidSignature(mimeType: MerchantAssetUploadInput["mimeType"], bytes: Buffer) {
-  if (mimeType === "image/png")
-    return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (mimeType === "image/jpeg") return bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]));
-  return (
-    bytes.subarray(0, 4).equals(Buffer.from("RIFF")) &&
-    bytes.subarray(8, 12).equals(Buffer.from("WEBP"))
-  );
-}
-
-function dimensions(mimeType: MerchantAssetUploadInput["mimeType"], bytes: Buffer) {
-  if (mimeType === "image/png" && bytes.length >= 24)
-    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
-  if (mimeType === "image/webp" && bytes.length >= 30 && bytes.toString("ascii", 12, 16) === "VP8X")
-    return { width: 1 + bytes.readUIntLE(24, 3), height: 1 + bytes.readUIntLE(27, 3) };
-  if (mimeType === "image/jpeg") {
-    let offset = 2;
-    while (offset + 9 < bytes.length) {
-      if (bytes[offset] !== 0xff) {
-        offset += 1;
-        continue;
-      }
-      const marker = bytes[offset + 1] ?? -1;
-      const length = bytes.readUInt16BE(offset + 2);
-      if (
-        (marker >= 0xc0 && marker <= 0xc3) ||
-        (marker >= 0xc5 && marker <= 0xc7) ||
-        (marker >= 0xc9 && marker <= 0xcb) ||
-        (marker >= 0xcd && marker <= 0xcf)
-      )
-        return { height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) };
-      offset += 2 + length;
-    }
-  }
-  return null;
+function processedExtension(mimeType: string): "png" | "webp" {
+  return mimeType === "image/png" ? "png" : "webp";
 }
 
 @Injectable()
@@ -63,157 +34,346 @@ export class AssetsService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantService,
     private readonly audit: AuditService,
+    @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
 
-  async list(userId: string, organizationId: string) {
+  async list(userId: string, organizationId: string, cursor?: string, limit = 30) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
-    return this.prisma.client.merchantAsset.findMany({
-      where: { organizationId, archivedAt: null, processingStatus: "READY" },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: {
-        id: true,
-        category: true,
-        originalFilename: true,
-        mimeType: true,
-        fileSize: true,
-        width: true,
-        height: true,
-        sha256Digest: true,
-        createdAt: true,
+    const decoded = decodeTimestampCursor(cursor);
+    const assets = await this.prisma.client.merchantAsset.findMany({
+      where: {
+        organizationId,
+        archivedAt: null,
+        processingStatus: "READY",
+        ...(decoded
+          ? {
+              OR: [
+                { createdAt: { lt: new Date(decoded.timestamp) } },
+                { createdAt: new Date(decoded.timestamp), id: { lt: decoded.id } },
+              ],
+            }
+          : {}),
       },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      include: { variants: { orderBy: { variantCode: "asc" } } },
     });
+    const items = assets.slice(0, limit).map((asset) => ({
+      ...asset,
+      contentUrl: `/v1/organizations/${organizationId}/assets/${asset.id}/content?variant=THUMBNAIL_96`,
+    }));
+    const last = assets.length > limit ? items.at(-1) : undefined;
+    return {
+      items,
+      nextCursor: last
+        ? encodeCursor({ id: last.id, timestamp: last.createdAt.toISOString() })
+        : null,
+    };
   }
 
   async upload(
     userId: string,
     organizationId: string,
-    input: MerchantAssetUploadInput,
+    metadata: MerchantAssetUploadMetadataInput,
+    file: { filename: string; mimeType: string; bytes: Buffer },
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.edit");
-    let bytes: Buffer;
-    try {
-      bytes = Buffer.from(input.contentBase64, "base64");
-    } catch {
-      throw new AppError(
-        "ASSET_INVALID_BASE64",
-        "The image payload is invalid.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    if (bytes.length === 0 || bytes.length > MAX_BYTES)
-      throw new AppError(
-        "ASSET_TOO_LARGE",
-        "Images must be smaller than 2 MB.",
-        HttpStatus.PAYLOAD_TOO_LARGE,
-      );
-    if (!hasValidSignature(input.mimeType, bytes))
-      throw new AppError(
-        "ASSET_MALFORMED",
-        "The uploaded bytes do not match the declared image format.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    const size = dimensions(input.mimeType, bytes);
     if (
-      !size ||
-      size.width < 1 ||
-      size.height < 1 ||
-      size.width > 4096 ||
-      size.height > 4096 ||
-      size.width * size.height > 16_000_000
-    )
+      !["image/png", "image/jpeg", "image/webp"].includes(file.mimeType) ||
+      file.bytes.length === 0 ||
+      file.bytes.length > MAX_BYTES
+    ) {
       throw new AppError(
-        "ASSET_DIMENSIONS_INVALID",
-        "Images must have safe dimensions below 4096px and 16 megapixels.",
+        "ASSET_UPLOAD_INVALID",
+        "Upload one PNG, JPEG, or WebP image smaller than 2 MB.",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
-    const sha256Digest = createHash("sha256").update(bytes).digest("hex");
-    const existing = await this.prisma.client.merchantAsset.findUnique({
-      where: { organizationId_sha256Digest: { organizationId, sha256Digest } },
-    });
-    if (existing) return existing;
-    const id = randomUUID();
-    const filename = safeFilename(input.filename);
-    const objectKey = `private/${organizationId}/${id}/${filename}`;
-    await mkdir(join(storageRoot, organizationId, id), { recursive: true });
-    await writeFile(join(storageRoot, organizationId, id, filename), bytes, { flag: "wx" });
-    const asset = await this.prisma.client.merchantAsset.create({
-      data: {
-        id,
-        organizationId,
-        category: input.category,
-        source: "MERCHANT_UPLOAD",
-        originalObjectKey: objectKey,
-        originalFilename: filename,
-        mimeType: input.mimeType,
-        fileSize: bytes.length,
-        width: size.width,
-        height: size.height,
-        sha256Digest,
-        processingStatus: "READY",
-        createdByUserId: userId,
-        safeMetadata: {
-          storage: "local",
-          sanitizedFilename: filename,
-          metadataStripped: false,
-          pixelCount: size.width * size.height,
-        },
-      },
-    });
-    const variantCodes = ["ORIGINAL_SAFE", "STAMP_256", "THUMBNAIL_96"] as const;
-    for (const variantCode of variantCodes) {
-      const variantFilename = `${variantCode.toLowerCase()}-${filename}`;
-      await writeFile(join(storageRoot, organizationId, id, variantFilename), bytes, {
-        flag: "wx",
-      });
-      await this.prisma.client.merchantAssetVariant.create({
-        data: {
-          assetId: asset.id,
-          variantCode,
-          objectKey: `private/${organizationId}/${id}/${variantFilename}`,
-          mimeType: input.mimeType,
-          width: size.width,
-          height: size.height,
-          fileSize: bytes.length,
-          digest: sha256Digest,
-        },
-      });
     }
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "program.asset_uploaded",
-        targetType: "merchant_asset",
-        targetId: asset.id,
-        metadata: { category: asset.category, mimeType: asset.mimeType, fileSize: asset.fileSize },
+
+    let processed: Awaited<ReturnType<typeof processMerchantImage>>;
+    try {
+      processed = await processMerchantImage(
+        file.bytes,
+        file.mimeType as SupportedImageMime,
+        metadata.crop,
+      );
+    } catch (error) {
+      throw new AppError(
+        "ASSET_PROCESSING_FAILED",
+        error instanceof Error ? error.message : "The image could not be decoded safely.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    const result = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const existing = await transaction.merchantAsset.findUnique({
+          where: {
+            organizationId_sha256Digest_category: {
+              organizationId,
+              sha256Digest: processed.original.digest,
+              category: metadata.category,
+            },
+          },
+          include: { variants: true },
+        });
+        await this.objectStorage.ensureReady();
+        const sanitizedFilename = safeFilename(file.filename);
+        if (existing) {
+          let valid = existing.archivedAt === null && existing.processingStatus === "READY";
+          if (valid)
+            for (const variant of processed.variants) {
+              const stored = existing.variants.find(
+                (candidate) => candidate.variantCode === variant.code,
+              );
+              if (!stored || stored.digest !== variant.digest) {
+                valid = false;
+                break;
+              }
+              try {
+                const bytes = await this.objectStorage.get(stored.objectKey);
+                if (!bytes.equals(variant.bytes)) {
+                  valid = false;
+                  break;
+                }
+              } catch {
+                valid = false;
+                break;
+              }
+            }
+          if (valid) return { asset: existing, uploadDisposition: "REPLAYED" as const };
+
+          const disposition =
+            existing.archivedAt || existing.processingStatus === "ARCHIVED"
+              ? ("RESTORED" as const)
+              : ("REPAIRED" as const);
+          const storedKeys = new Map<string, string>();
+          for (const variant of processed.variants) {
+            const current = existing.variants.find(
+              (candidate) => candidate.variantCode === variant.code,
+            );
+            const objectKey =
+              current?.objectKey ??
+              `organizations/${organizationId}/assets/${existing.id}/${variant.code.toLowerCase()}.${processedExtension(variant.mimeType)}`;
+            await this.objectStorage.put(objectKey, variant.bytes, variant.mimeType);
+            storedKeys.set(variant.code, objectKey);
+            await transaction.merchantAssetVariant.upsert({
+              where: {
+                assetId_variantCode: {
+                  assetId: existing.id,
+                  variantCode: variant.code,
+                },
+              },
+              create: {
+                assetId: existing.id,
+                variantCode: variant.code,
+                objectKey,
+                mimeType: variant.mimeType,
+                width: variant.width,
+                height: variant.height,
+                fileSize: variant.bytes.length,
+                digest: variant.digest,
+              },
+              update: {
+                objectKey,
+                mimeType: variant.mimeType,
+                width: variant.width,
+                height: variant.height,
+                fileSize: variant.bytes.length,
+                digest: variant.digest,
+              },
+            });
+          }
+          const restored = await transaction.merchantAsset.update({
+            where: { id: existing.id },
+            data: {
+              originalObjectKey: storedKeys.get("ORIGINAL_SAFE") as string,
+              originalFilename: sanitizedFilename,
+              mimeType: processed.original.mimeType,
+              fileSize: processed.original.bytes.length,
+              width: processed.original.width,
+              height: processed.original.height,
+              processingStatus: "READY",
+              archivedAt: null,
+              safeMetadata: {
+                storage: "private-object-storage",
+                sanitizedFilename,
+                metadataStripped: true,
+                rawUploadStored: false,
+                crop: metadata.crop,
+                source: processed.source,
+                semanticIdentityRestored: disposition === "RESTORED",
+                objectSetRepaired: true,
+              },
+            },
+            include: { variants: true },
+          });
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId,
+              actorUserId: userId,
+              action:
+                disposition === "RESTORED" ? "program.asset_restored" : "program.asset_repaired",
+              targetType: "merchant_asset",
+              targetId: restored.id,
+              metadata: {
+                category: restored.category,
+                semanticIdentity: `${organizationId}:${restored.sha256Digest}:${restored.category}`,
+              },
+            },
+            request,
+          );
+          return { asset: restored, uploadDisposition: disposition };
+        }
+
+        const id = randomUUID();
+        const prefix = `organizations/${organizationId}/assets/${id}`;
+        const storedKeys: string[] = [];
+        try {
+          for (const variant of processed.variants) {
+            const objectKey = `${prefix}/${variant.code.toLowerCase()}.${processedExtension(variant.mimeType)}`;
+            await this.objectStorage.put(objectKey, variant.bytes, variant.mimeType);
+            storedKeys.push(objectKey);
+          }
+          const originalKey = storedKeys[0];
+          if (!originalKey) throw new Error("Processed image produced no safe variant.");
+          const created = await transaction.merchantAsset.create({
+            data: {
+              id,
+              organizationId,
+              category: metadata.category,
+              source: "MERCHANT_UPLOAD",
+              originalObjectKey: originalKey,
+              originalFilename: sanitizedFilename,
+              mimeType: processed.original.mimeType,
+              fileSize: processed.original.bytes.length,
+              width: processed.original.width,
+              height: processed.original.height,
+              sha256Digest: processed.original.digest,
+              processingStatus: "READY",
+              createdByUserId: userId,
+              safeMetadata: {
+                storage: "private-object-storage",
+                sanitizedFilename,
+                metadataStripped: true,
+                rawUploadStored: false,
+                crop: metadata.crop,
+                source: processed.source,
+              },
+              variants: {
+                create: processed.variants.map((variant, index) => ({
+                  variantCode: variant.code,
+                  objectKey: storedKeys[index] as string,
+                  mimeType: variant.mimeType,
+                  width: variant.width,
+                  height: variant.height,
+                  fileSize: variant.bytes.length,
+                  digest: variant.digest,
+                })),
+              },
+            },
+            include: { variants: true },
+          });
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "program.asset_uploaded",
+              targetType: "merchant_asset",
+              targetId: created.id,
+              metadata: {
+                category: created.category,
+                mimeType: created.mimeType,
+                fileSize: created.fileSize,
+                metadataStripped: true,
+              },
+            },
+            request,
+          );
+          return { asset: created, uploadDisposition: "CREATED" as const };
+        } catch (error) {
+          await Promise.allSettled(storedKeys.map((key) => this.objectStorage.delete(key)));
+          throw error;
+        }
       },
-      request,
     );
-    return asset;
+    return {
+      ...result.asset,
+      uploadDisposition: result.uploadDisposition,
+      contentUrl: `/v1/organizations/${organizationId}/assets/${result.asset.id}/content?variant=THUMBNAIL_96`,
+    };
+  }
+
+  async read(
+    userId: string,
+    organizationId: string,
+    assetId: string,
+    variantCode: AssetVariantCode,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.view");
+    const asset = await this.prisma.client.merchantAsset.findFirst({
+      where: {
+        id: assetId,
+        organizationId,
+        archivedAt: null,
+        processingStatus: "READY",
+      },
+      include: { variants: true },
+    });
+    if (!asset) throw new AppError("ASSET_NOT_FOUND", "Asset not found.", HttpStatus.NOT_FOUND);
+    if (asset.source === "WAFLO_LIBRARY") {
+      const metadata = asset.safeMetadata as { inlineSvg?: unknown } | null;
+      if (typeof metadata?.inlineSvg !== "string")
+        throw new AppError("ASSET_NOT_FOUND", "Asset content not found.", HttpStatus.NOT_FOUND);
+      return { bytes: Buffer.from(metadata.inlineSvg), mimeType: "image/svg+xml" };
+    }
+    const variant =
+      asset.variants.find((item) => item.variantCode === variantCode) ??
+      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE");
+    if (!variant)
+      throw new AppError(
+        "ASSET_VARIANT_NOT_FOUND",
+        "Asset variant not found.",
+        HttpStatus.NOT_FOUND,
+      );
+    return {
+      bytes: await this.objectStorage.get(variant.objectKey),
+      mimeType: variant.mimeType,
+    };
   }
 
   async archive(userId: string, organizationId: string, assetId: string, request: WafloRequest) {
     await this.tenant.requireMembership(userId, organizationId, "programs.edit");
-    const asset = await this.prisma.client.merchantAsset.findFirst({
-      where: { id: assetId, organizationId, source: "MERCHANT_UPLOAD", archivedAt: null },
-    });
-    if (!asset) throw new AppError("ASSET_NOT_FOUND", "Asset not found.", HttpStatus.NOT_FOUND);
-    const updated = await this.prisma.client.merchantAsset.update({
-      where: { id: assetId },
-      data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
-    });
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "program.asset_archived",
-        targetType: "merchant_asset",
-        targetId: assetId,
+    return withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const asset = await transaction.merchantAsset.findFirst({
+          where: { id: assetId, organizationId, source: "MERCHANT_UPLOAD", archivedAt: null },
+        });
+        if (!asset) throw new AppError("ASSET_NOT_FOUND", "Asset not found.", HttpStatus.NOT_FOUND);
+        const updated = await transaction.merchantAsset.update({
+          where: { id: assetId },
+          data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "program.asset_archived",
+            targetType: "merchant_asset",
+            targetId: assetId,
+          },
+          request,
+        );
+        return updated;
       },
-      request,
     );
-    return updated;
   }
 }

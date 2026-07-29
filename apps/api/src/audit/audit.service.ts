@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { Prisma } from "@waflo/database";
 import { redactMetadata } from "@waflo/security";
 import type { WafloRequest } from "../common/request-context.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -17,21 +18,33 @@ export interface AuditInput {
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private data(input: AuditInput, request?: WafloRequest) {
+    return {
+      organizationId: input.organizationId ?? null,
+      actorUserId: input.actorUserId ?? null,
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId ?? null,
+      locationId: input.locationId ?? null,
+      requestId: request?.requestId ?? "system",
+      ...(input.metadata ? { metadata: redactMetadata(input.metadata) as object } : {}),
+      ipMetadata: null,
+      userAgent: request?.headers["user-agent"]?.slice(0, 512) ?? null,
+    };
+  }
+
   async record(input: AuditInput, request?: WafloRequest): Promise<void> {
     await this.prisma.client.auditLog.create({
-      data: {
-        organizationId: input.organizationId ?? null,
-        actorUserId: input.actorUserId ?? null,
-        action: input.action,
-        targetType: input.targetType,
-        targetId: input.targetId ?? null,
-        locationId: input.locationId ?? null,
-        requestId: request?.requestId ?? "system",
-        ...(input.metadata ? { metadata: redactMetadata(input.metadata) as object } : {}),
-        ipMetadata: null,
-        userAgent: request?.headers["user-agent"]?.slice(0, 512) ?? null,
-      },
+      data: this.data(input, request),
     });
+  }
+
+  async recordInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: AuditInput,
+    request?: WafloRequest,
+  ): Promise<void> {
+    await transaction.auditLog.create({ data: this.data(input, request) });
   }
 
   async security(

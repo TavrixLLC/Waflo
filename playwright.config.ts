@@ -21,12 +21,32 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testMatch: /platform\.spec\.ts/,
+      testMatch: /(?:^|[/\\])platform\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "accessibility",
-      testMatch: /accessibility\.spec\.ts/,
+      testMatch: /(?:^|[/\\])accessibility\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "w3",
+      testMatch: /w3-platform\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "w3-accessibility",
+      testMatch: /w3-accessibility\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "w3-evidence",
+      testMatch: /w3-evidence-extra\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "w3-provider-disabled",
+      testMatch: /w3-provider-disabled\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],
@@ -64,7 +84,7 @@ export default defineConfig({
         {
           command: "node node_modules/next/dist/bin/next start -p 3002",
           cwd: "apps/customer-web",
-          url: "http://localhost:3002/?tenant=today",
+          url: "http://localhost:3002/privacy",
           reuseExistingServer: true,
           timeout: 120_000,
           stdout: "pipe",

@@ -3,11 +3,13 @@ import { AppError } from "../common/app-error.js";
 import {
   programCreateSchema,
   programPublishSchema,
+  programTestReverseSchema,
   programTestResetSchema,
   programTestStampSchema,
   programUpdateSchema,
 } from "@waflo/contracts";
 import { CurrentUser } from "../common/decorators.js";
+import { pageLimit } from "../common/cursor-pagination.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { parseInput, parseUuid } from "../common/validation.js";
 import { ProgramsService } from "./programs.service.js";
@@ -17,8 +19,13 @@ export class ProgramsController {
   constructor(private readonly programs: ProgramsService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
-    return this.programs.list(user.id, parseUuid(organizationId));
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.programs.list(user.id, parseUuid(organizationId), cursor, pageLimit(limit));
   }
 
   @Get("templates")
@@ -58,8 +65,16 @@ export class ProgramsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
     @Param("programId") programId: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
   ) {
-    return this.programs.listVersions(user.id, parseUuid(organizationId), parseUuid(programId));
+    return this.programs.listVersions(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(programId),
+      cursor,
+      pageLimit(limit),
+    );
   }
 
   @Get(":programId/versions/:versionId")
@@ -129,31 +144,40 @@ export class ProgramsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
     @Param("programId") programId: string,
+    @Req() request: WafloRequest,
     @Query("progress") progress = "0",
-    @Query("layout") layout = "GRID",
+    @Query("layout") layout?: string,
     @Query("profile") profile = "CUSTOMER_WEB",
+    @Query("locale") locale = "EN",
   ) {
     const numericProgress = Number(progress);
-    const normalizedLayout = layout.toUpperCase();
     const normalizedProfile = profile.toUpperCase();
+    const normalizedLocale = locale.toUpperCase();
     if (
       !Number.isInteger(numericProgress) ||
       numericProgress < 0 ||
-      !["ROW", "GRID", "PATH", "RING"].includes(normalizedLayout) ||
-      !["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"].includes(normalizedProfile)
+      !["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"].includes(normalizedProfile) ||
+      !["EN", "AR"].includes(normalizedLocale)
     )
       throw new AppError(
         "PREVIEW_PARAMETERS_INVALID",
         "Invalid preview parameters.",
         HttpStatus.BAD_REQUEST,
       );
+    if (layout !== undefined)
+      throw new AppError(
+        "PREVIEW_LAYOUT_OVERRIDE_FORBIDDEN",
+        "Preview layout is read from the persisted program version.",
+        HttpStatus.CONFLICT,
+      );
     return this.programs.preview(
       user.id,
       parseUuid(organizationId),
       parseUuid(programId),
       numericProgress,
-      normalizedLayout as "ROW" | "GRID" | "PATH" | "RING",
       normalizedProfile as "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET",
+      normalizedLocale as "EN" | "AR",
+      request,
     );
   }
 
@@ -185,6 +209,15 @@ export class ProgramsController {
       parseUuid(programId),
       request,
     );
+  }
+
+  @Get("test-sessions/:sessionId")
+  getTestSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("sessionId") sessionId: string,
+  ) {
+    return this.programs.getTestSession(user.id, parseUuid(organizationId), parseUuid(sessionId));
   }
 
   @Post("test-sessions/:sessionId/stamps")
@@ -221,6 +254,24 @@ export class ProgramsController {
       parseUuid(organizationId),
       parseUuid(sessionId),
       parseUuid(rewardId),
+      input.idempotencyKey,
+      request,
+    );
+  }
+
+  @Post("test-sessions/:sessionId/reverse")
+  reverse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    const input = parseInput(programTestReverseSchema, body);
+    return this.programs.reverseTestStamp(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(sessionId),
       input.idempotencyKey,
       request,
     );

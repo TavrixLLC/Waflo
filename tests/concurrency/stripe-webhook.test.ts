@@ -519,6 +519,24 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         { organizationId: organizationAId, name: "Over limit 2", timezone: "UTC" },
       ],
     });
+    const organizationOwner = await prisma.client.organizationMember.findFirstOrThrow({
+      where: { organizationId: organizationAId, role: "OWNER" },
+      select: { userId: true },
+    });
+    await prisma.client.loyaltyProgram.createMany({
+      data: [
+        {
+          organizationId: organizationAId,
+          internalName: "Stripe downgrade program A",
+          createdByUserId: organizationOwner.userId,
+        },
+        {
+          organizationId: organizationAId,
+          internalName: "Stripe downgrade program B",
+          createdByUserId: organizationOwner.userId,
+        },
+      ],
+    });
     const eventId = `evt_overlimit_${runId}`;
     const { event, subId } = subscriptionEvent({
       id: eventId,
@@ -558,6 +576,8 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
     });
     expect(auditEntry.metadata).toMatchObject({
       overLimit: true,
+      programUsage: 2,
+      programLimit: 1,
       overLimitPolicy: "preserve_resources_and_block_new_capacity",
     });
   });

@@ -1,0 +1,308 @@
+import { createHash } from "node:crypto";
+import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { queueWalletPassStateChange, type Prisma } from "@waflo/database";
+import type {
+  WalletMembershipInput,
+  WalletProgramInput,
+  WalletProviderCode,
+} from "@waflo/wallet-core";
+import { AuditService } from "../audit/audit.service.js";
+import { AppError } from "../common/app-error.js";
+import type { WafloRequest } from "../common/request-context.js";
+import { CustomerCardService } from "../customer/customer-card.service.js";
+import { CustomerSecurityService } from "../customer/customer-security.service.js";
+import { PrismaService } from "../database/prisma.service.js";
+import { TenantService } from "../tenancy/tenant.service.js";
+import { WalletProviderRegistry } from "./wallet-provider.registry.js";
+import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
+import {
+  publishedVisualThemeInclude,
+  renderPublishedStampArtwork,
+} from "../programs/published-stamp-render.js";
+
+const walletPassInclude = {
+  walletProgramBinding: true,
+  membershipCredential: true,
+  membership: {
+    include: {
+      organization: true,
+      customer: true,
+      program: true,
+      progress: true,
+      enrollmentProgramVersion: {
+        include: {
+          translations: true,
+          stampRule: true,
+          visualTheme: publishedVisualThemeInclude,
+        },
+      },
+    },
+  },
+} as const;
+
+@Injectable()
+export class WalletService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly registry: WalletProviderRegistry,
+    private readonly security: CustomerSecurityService,
+    private readonly cards: CustomerCardService,
+    private readonly tenant: TenantService,
+    private readonly audit: AuditService,
+    @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
+  ) {}
+
+  async providerHealth(userId: string, organizationId: string, request: WafloRequest) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.view");
+    const health = await Promise.all(this.registry.all().map((provider) => provider.healthCheck()));
+    await Promise.allSettled(
+      health
+        .filter((provider) => !["HEALTHY", "NOT_CONFIGURED"].includes(provider.status))
+        .map((provider) =>
+          this.audit.record(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "wallet.provider_health_degraded",
+              targetType: "wallet_provider",
+              targetId: provider.provider,
+              metadata: {
+                mode: provider.mode,
+                status: provider.status,
+                configured: provider.configured ?? false,
+                providerReachable: provider.providerReachable ?? false,
+                externallyCertified: provider.externallyCertified ?? false,
+              },
+            },
+            request,
+          ),
+        ),
+    );
+    return health;
+  }
+
+  async programStatus(userId: string, organizationId: string, programId: string) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.view");
+    const program = await this.prisma.client.loyaltyProgram.findFirst({
+      where: { id: programId, organizationId },
+      include: {
+        walletBindings: { orderBy: { provider: "asc" } },
+        memberships: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!program)
+      throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
+    const [commands, passes] = await Promise.all([
+      this.prisma.client.walletCommand.groupBy({
+        by: ["provider", "status"],
+        where: { organizationId, membership: { programId } },
+        _count: { _all: true },
+      }),
+      this.prisma.client.walletPassInstance.groupBy({
+        by: ["provider", "status"],
+        where: { organizationId, membership: { programId } },
+        _count: { _all: true },
+      }),
+    ]);
+    return {
+      programId,
+      bindings: program.walletBindings.map((binding) => ({
+        provider: binding.provider,
+        status: binding.status,
+        lastSyncedAt: binding.lastSyncedAt,
+        configurationFingerprint: binding.configurationFingerprint,
+      })),
+      commands: commands.map((item) => ({
+        provider: item.provider,
+        status: item.status,
+        count: item._count._all,
+      })),
+      passes: passes.map((item) => ({
+        provider: item.provider,
+        status: item.status,
+        count: item._count._all,
+      })),
+    };
+  }
+
+  async reconcile(
+    userId: string,
+    organizationId: string,
+    programId: string,
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.manage_state");
+    const passes = await this.prisma.client.walletPassInstance.findMany({
+      where: { organizationId, membership: { programId } },
+      select: {
+        id: true,
+        membershipId: true,
+        provider: true,
+        updateTag: true,
+      },
+      take: 500,
+    });
+    let queued = 0;
+    for (const pass of passes) {
+      const result = await this.prisma.client.$transaction((transaction) =>
+        queueWalletPassStateChange(transaction, {
+          walletPassInstanceId: pass.id,
+          commandType: "RECONCILE",
+          reason: "RECONCILIATION",
+          eventKey: `manual-reconcile:u${pass.updateTag}`,
+        }),
+      );
+      if (!result.replayed) {
+        queued += 1;
+      }
+    }
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "wallet.program_template_reconciled",
+        targetType: "loyalty_program",
+        targetId: programId,
+        metadata: { queued },
+      },
+      request,
+    );
+    return { queued };
+  }
+
+  async customerApplePass(request: WafloRequest, developmentOverride?: string): Promise<Buffer> {
+    const session = await this.cards.requireSession(request, developmentOverride);
+    if (session.session.membershipCredential?.status !== "ACTIVE") {
+      throw new AppError(
+        "APPLE_PASS_UNAVAILABLE",
+        "Apple Wallet is unavailable for this card.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const membershipCredentialId = session.session.membershipCredential.id;
+    const pass = await this.prisma.client.walletPassInstance.findFirst({
+      where: {
+        membershipId: session.session.membershipId,
+        membershipCredentialId,
+        provider: "APPLE",
+        status: { in: ["ISSUED", "ACTIVE"] },
+      },
+      include: walletPassInclude,
+    });
+    if (!pass) {
+      throw new AppError(
+        "APPLE_PASS_PREPARING",
+        "The Apple Wallet pass is not ready yet.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const result = await this.registry.get("APPLE").issueMembershipPass(await this.mapPass(pass));
+    if (!result.artifact) {
+      throw new AppError(
+        "APPLE_PASS_SIGNING_FAILED",
+        "The Apple Wallet pass could not be generated.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    return Buffer.from(result.artifact);
+  }
+
+  async customerGoogleAction(request: WafloRequest, developmentOverride?: string) {
+    const session = await this.cards.requireSession(request, developmentOverride);
+    if (session.session.membershipCredential?.status !== "ACTIVE") {
+      throw new AppError(
+        "GOOGLE_WALLET_UNAVAILABLE",
+        "Google Wallet is unavailable for this card.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const membershipCredentialId = session.session.membershipCredential.id;
+    const pass = await this.prisma.client.walletPassInstance.findFirst({
+      where: {
+        membershipId: session.session.membershipId,
+        membershipCredentialId,
+        provider: "GOOGLE",
+        status: { in: ["ISSUED", "ACTIVE"] },
+      },
+      include: walletPassInclude,
+    });
+    if (!pass) {
+      throw new AppError(
+        "GOOGLE_WALLET_PREPARING",
+        "The Google Wallet object is not ready yet.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    return this.registry.get("GOOGLE").createAddToWalletAction(await this.mapPass(pass));
+  }
+
+  async passByIdentity(provider: WalletProviderCode, identity: string) {
+    const pass = await this.prisma.client.walletPassInstance.findUnique({
+      where: { provider_providerIdentity: { provider, providerIdentity: identity } },
+      include: walletPassInclude,
+    });
+    return pass ? { record: pass, input: await this.mapPass(pass) } : null;
+  }
+
+  async mapPass(
+    pass: Prisma.WalletPassInstanceGetPayload<{ include: typeof walletPassInclude }>,
+  ): Promise<WalletMembershipInput> {
+    const membership = pass.membership;
+    const version = membership.enrollmentProgramVersion;
+    const locale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const translation =
+      version.translations.find((item) => item.locale === (locale === "ar" ? "AR" : "EN")) ??
+      version.translations.find((item) => item.locale === "EN") ??
+      version.translations[0];
+    const goal = version.stampRule?.requiredStampCount ?? 8;
+    const progress = membership.progress?.currentCycleStampCount ?? 0;
+    if (!version.visualTheme) throw new Error("Published Wallet stamp artwork is unavailable.");
+    const stampRender = await renderPublishedStampArtwork({
+      storage: this.objectStorage,
+      organizationId: membership.organizationId,
+      programId: membership.programId,
+      programVersionId: version.id,
+      membershipId: membership.id,
+      locale,
+      requiredStampCount: goal,
+      currentStampCount: progress,
+      rewardReady: membership.progress?.rewardReady ?? false,
+      theme: version.visualTheme,
+      outputProfile: pass.provider === "APPLE" ? "APPLE_WALLET" : "GOOGLE_WALLET",
+    });
+    const programInput: WalletProgramInput = {
+      organizationId: membership.organizationId,
+      organizationName: membership.organization.name,
+      programId: membership.programId,
+      programVersionId: version.id,
+      programName: translation?.programName ?? membership.program.internalName,
+      description: translation?.shortDescription ?? "",
+      rewardSummary: translation?.rewardSummary ?? "",
+      backgroundColor: version.visualTheme?.backgroundColor ?? "#F7F4EE",
+      foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
+      configurationFingerprint:
+        pass.walletProgramBinding?.configurationFingerprint ??
+        version.renderFingerprint ??
+        createHash("sha256").update(version.id).digest("hex"),
+      locale,
+    };
+    return {
+      ...programInput,
+      walletPassInstanceId: pass.id,
+      providerIdentity: pass.providerIdentity,
+      publicMembershipId: membership.publicMembershipId,
+      displayName: membership.customer.displayName,
+      credentialPayload: this.security.payloadForCredential(pass.membershipCredential),
+      currentStampCount: progress,
+      requiredStampCount: goal,
+      rewardReady: membership.progress?.rewardReady ?? false,
+      membershipStatus: membership.status,
+      programStatus: membership.program.status,
+      transferred: pass.membershipCredential.status === "TRANSFERRED",
+      stampRenderInput: stampRender.renderInput,
+    };
+  }
+}

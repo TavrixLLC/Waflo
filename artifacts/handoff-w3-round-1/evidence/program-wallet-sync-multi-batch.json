@@ -1,0 +1,20 @@
+{
+  "evidenceType": "automated PostgreSQL stable-cursor job assertion summary",
+  "source": "tests/concurrency/w3-customer-wallet.test.ts",
+  "rawOutput": "../raw-test-output/concurrency.txt",
+  "result": "PASS",
+  "snapshotPasses": 61,
+  "configuredBatchSize": 17,
+  "firstCheckpointProcessed": 17,
+  "replayedFirstPageProcessed": 17,
+  "completedProcessed": 61,
+  "deterministicCommands": 61,
+  "passesWithSingleAppleTagIncrement": 61,
+  "completionAuditEvents": 1,
+  "postSnapshotPass": {
+    "included": false,
+    "walletCommandsFromJob": 0,
+    "updateTag": 1,
+    "policy": "Passes created after snapshotAt inherit current Program state at issuance and are handled by later reconciliation or lifecycle work."
+  }
+}

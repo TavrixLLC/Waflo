@@ -155,6 +155,127 @@ export function canRestoreProgram(plan: PlanCode, currentUsage: number): Entitle
   return canCreateProgram(plan, currentUsage);
 }
 
+export function canPublishWithinProgramLimit(
+  plan: PlanCode,
+  currentUsage: number,
+): EntitlementDecision {
+  const limit = planCatalog[plan].limits.programs;
+  const allowed = limit === null || currentUsage <= limit;
+  return {
+    allowed,
+    limit,
+    currentUsage,
+    remaining: limit === null ? null : Math.max(0, limit - currentUsage),
+    reasonCode: allowed ? "ALLOWED" : "LIMIT_REACHED",
+    recommendedPlan: allowed
+      ? null
+      : plan === "starter"
+        ? "growth"
+        : plan === "growth"
+          ? "scale"
+          : null,
+  };
+}
+
+export const programPublicationAllowedBillingStatuses = [
+  "pending_activation",
+  "trialing",
+  "active",
+  "grace_period",
+] as const satisfies readonly BillingStatus[];
+
+export function canPublishForBillingStatus(status: BillingStatus): boolean {
+  return (programPublicationAllowedBillingStatuses as readonly BillingStatus[]).includes(status);
+}
+
+export const enrollmentAllowedBillingStatuses = [
+  "trialing",
+  "active",
+  "grace_period",
+] as const satisfies readonly BillingStatus[];
+
+export interface EnrollmentBillingDecision {
+  readonly allowed: boolean;
+  readonly code:
+    | "ALLOWED"
+    | "PENDING_ACTIVATION_INCONSISTENCY"
+    | "PAST_DUE"
+    | "SUSPENDED"
+    | "CANCELED";
+  readonly existingCardsViewable: boolean;
+  readonly walletAvailable: boolean;
+}
+
+export function enrollmentBillingDecision(status: BillingStatus): EnrollmentBillingDecision {
+  if ((enrollmentAllowedBillingStatuses as readonly BillingStatus[]).includes(status)) {
+    return {
+      allowed: true,
+      code: "ALLOWED",
+      existingCardsViewable: true,
+      walletAvailable: true,
+    };
+  }
+  if (status === "pending_activation") {
+    return {
+      allowed: false,
+      code: "PENDING_ACTIVATION_INCONSISTENCY",
+      existingCardsViewable: true,
+      walletAvailable: false,
+    };
+  }
+  if (status === "past_due") {
+    return {
+      allowed: false,
+      code: "PAST_DUE",
+      existingCardsViewable: true,
+      walletAvailable: false,
+    };
+  }
+  return {
+    allowed: false,
+    code: status === "suspended" ? "SUSPENDED" : "CANCELED",
+    existingCardsViewable: false,
+    walletAvailable: false,
+  };
+}
+
+export function walletIncludedForPlan(_plan: PlanCode): boolean {
+  return true;
+}
+
+export type ProgramPublicationFeatureViolation =
+  | "PRO_MODE"
+  | "MULTIPLE_REWARDS"
+  | "MILESTONE_REWARDS"
+  | "ADVANCED_LAYOUT";
+
+export function programPublicationFeatureViolations(
+  plan: PlanCode,
+  input: {
+    editingMode: "QUICK" | "PRO";
+    rewardThresholds: readonly number[];
+    requiredStampCount: number;
+    layoutType: "ROW" | "GRID" | "PATH" | "RING";
+  },
+): ProgramPublicationFeatureViolation[] {
+  const violations: ProgramPublicationFeatureViolation[] = [];
+  if (input.editingMode === "PRO" && !programEntitlement(plan, "canUseProMode"))
+    violations.push("PRO_MODE");
+  if (input.rewardThresholds.length > 1 && !programEntitlement(plan, "canUseMultipleRewards"))
+    violations.push("MULTIPLE_REWARDS");
+  if (
+    input.rewardThresholds.some((threshold) => threshold < input.requiredStampCount) &&
+    !programEntitlement(plan, "canUseMilestoneRewards")
+  )
+    violations.push("MILESTONE_REWARDS");
+  if (
+    (input.layoutType === "PATH" || input.layoutType === "RING") &&
+    !programEntitlement(plan, "canUseAdvancedLayouts")
+  )
+    violations.push("ADVANCED_LAYOUT");
+  return violations;
+}
+
 export function formatPlanPrice(plan: PlanCode): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",

@@ -1,20 +1,98 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
-import { canCreateProgram, canRestoreProgram, programEntitlement } from "@waflo/billing";
-import type { ProgramCreateInput, ProgramUpdateInput } from "@waflo/contracts";
+import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import {
+  canCreateProgram,
+  canPublishForBillingStatus,
+  canPublishWithinProgramLimit,
+  canRestoreProgram,
+  programEntitlement,
+  programPublicationFeatureViolations,
+} from "@waflo/billing";
+import {
+  decideProgramPublicationState,
+  findProgramTemplate,
+  type ProgramCreateInput,
+  type ProgramTemplateDefinition,
+  type ProgramUpdateInput,
+  W2_STAMP_POLICY_DEFAULTS,
+} from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
-import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
+import {
+  withOrganizationCacheLock,
+  withOrganizationInvariantLock,
+} from "../common/organization-transaction.js";
+import {
+  decodeNumberCursor,
+  decodeTimestampCursor,
+  encodeCursor,
+} from "../common/cursor-pagination.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { renderStampSvg, type StampOutputProfile } from "@waflo/stamp-engine";
-import { artworkFor, conceptTemplates } from "./library-artwork.js";
+import { slugifyProgramName } from "@waflo/qr-core";
+import {
+  artworkFor,
+  canonicalArtworkBytes,
+  conceptTemplates,
+  LIBRARY_ARTWORK_SCHEMA_VERSION,
+  libraryArtworkDigest,
+} from "./library-artwork.js";
+import { OBJECT_STORAGE, type ObjectStorage } from "./object-storage.js";
+import {
+  type PreviewAsset,
+  previewAssetCacheIdentity,
+  resolvePreviewAssetContent,
+} from "./preview-assets.js";
+import { createProgramPreviewCacheKey, PREVIEW_RENDERER_SCHEMA_VERSION } from "./preview-cache.js";
+import { composeProgramPreview } from "./preview-composer.js";
+import {
+  absoluteTestPosition,
+  canRedeemEarnedReward,
+  crossedRewardThresholds,
+  projectTestStampAddition,
+} from "./program-rules.js";
+import { validateProgramConfiguration } from "./validation-engine.js";
 
 const templates = conceptTemplates();
+
+interface PersistedStampPolicy {
+  defaultStampsPerAction: number;
+  maximumStampsPerOperation: number;
+  maximumStampsPerCustomerPerDay: number | null;
+  minimumPurchaseAmountMinor: number | null;
+  minimumPurchaseCurrency: string | null;
+  resetBehaviorAfterReward: string;
+}
+
+interface PublicationAsset {
+  id: string;
+  organizationId: string;
+  category: string;
+  source: string;
+  processingStatus: string;
+  archivedAt: Date | null;
+  sha256Digest: string;
+  safeMetadata: unknown;
+  variants: Array<{
+    variantCode: string;
+    objectKey: string;
+    digest: string;
+  }>;
+}
+
+type CanonicalMutableProgramInput = ProgramCreateInput & {
+  changeSummary?: string;
+  persistedStampPolicy: PersistedStampPolicy;
+};
+
+const requiredPublicationPreviews = [
+  "CUSTOMER_WEB_CARD",
+  "APPLE_WALLET_PREVIEW",
+  "GOOGLE_WALLET_PREVIEW",
+] as const;
 
 const includeVersion = {
   translations: true,
@@ -22,7 +100,22 @@ const includeVersion = {
   rewards: { include: { translations: true, visualOverride: true } },
   locations: { include: { location: true } },
   visualTheme: true,
+  enrollmentPolicy: true,
 } as const;
+
+const reservedProgramSlugs = new Set([
+  "admin",
+  "api",
+  "card",
+  "join",
+  "privacy",
+  "program",
+  "support",
+  "terms",
+  "transfer",
+  "wallet",
+  "waflo",
+]);
 
 function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -32,8 +125,10 @@ function toPlan(value: "STARTER" | "GROWTH" | "SCALE") {
   return value.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
 }
 
-function templateFor(code?: string) {
-  const template = templates.find((item) => item.code === code) ?? templates[0];
+function templateFor(code?: string, version?: number) {
+  const template =
+    (code ? findProgramTemplate(code, version) : templates[0]) ??
+    (code && version === undefined ? findProgramTemplate(code) : undefined);
   if (!template)
     throw new AppError(
       "PROGRAM_TEMPLATE_NOT_FOUND",
@@ -43,36 +138,68 @@ function templateFor(code?: string) {
   return template;
 }
 
+function previewTypeFor(profile: StampOutputProfile) {
+  return profile === "APPLE_WALLET"
+    ? ("APPLE_WALLET_PREVIEW" as const)
+    : profile === "GOOGLE_WALLET"
+      ? ("GOOGLE_WALLET_PREVIEW" as const)
+      : ("CUSTOMER_WEB_CARD" as const);
+}
+
+function sha256Bytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 @Injectable()
 export class ProgramsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantService,
     private readonly audit: AuditService,
+    @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
 
-  list(userId: string, organizationId: string) {
-    return this.tenant.requireMembership(userId, organizationId, "programs.view").then(() =>
-      this.prisma.client.loyaltyProgram.findMany({
-        where: { organizationId },
-        orderBy: { updatedAt: "desc" },
-        include: {
-          currentDraftVersion: {
-            select: {
-              id: true,
-              versionNumber: true,
-              status: true,
-              editingMode: true,
-              revision: true,
-            },
+  async list(userId: string, organizationId: string, cursor?: string, limit = 20) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.view");
+    const decoded = decodeTimestampCursor(cursor);
+    const rows = await this.prisma.client.loyaltyProgram.findMany({
+      where: {
+        organizationId,
+        ...(decoded
+          ? {
+              OR: [
+                { updatedAt: { lt: new Date(decoded.timestamp) } },
+                { updatedAt: new Date(decoded.timestamp), id: { lt: decoded.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      include: {
+        currentDraftVersion: {
+          select: {
+            id: true,
+            versionNumber: true,
+            status: true,
+            editingMode: true,
+            revision: true,
           },
-          currentPublishedVersion: {
-            select: { id: true, versionNumber: true, status: true, publishedAt: true },
-          },
-          _count: { select: { versions: true } },
         },
-      }),
-    );
+        currentPublishedVersion: {
+          select: { id: true, versionNumber: true, status: true, publishedAt: true },
+        },
+        _count: { select: { versions: true } },
+      },
+    });
+    const items = rows.slice(0, limit);
+    const last = rows.length > limit ? items.at(-1) : undefined;
+    return {
+      items,
+      nextCursor: last
+        ? encodeCursor({ id: last.id, timestamp: last.updatedAt.toISOString() })
+        : null,
+    };
   }
 
   get(userId: string, organizationId: string, programId: string) {
@@ -91,18 +218,36 @@ export class ProgramsService {
     });
   }
 
-  listVersions(userId: string, organizationId: string, programId: string) {
+  listVersions(
+    userId: string,
+    organizationId: string,
+    programId: string,
+    cursor?: string,
+    limit = 20,
+  ) {
     return this.tenant.requireMembership(userId, organizationId, "programs.view").then(async () => {
+      const decoded = decodeNumberCursor(cursor);
       const program = await this.prisma.client.loyaltyProgram.findFirst({
         where: { id: programId, organizationId },
         select: { id: true },
       });
       if (!program)
         throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
-      return this.prisma.client.loyaltyProgramVersion.findMany({
-        where: { programId, organizationId },
-        orderBy: { versionNumber: "desc" },
-        take: 50,
+      const rows = await this.prisma.client.loyaltyProgramVersion.findMany({
+        where: {
+          programId,
+          organizationId,
+          ...(decoded
+            ? {
+                OR: [
+                  { versionNumber: { lt: decoded.value } },
+                  { versionNumber: decoded.value, id: { lt: decoded.id } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: [{ versionNumber: "desc" }, { id: "desc" }],
+        take: limit + 1,
         select: {
           id: true,
           versionNumber: true,
@@ -117,6 +262,12 @@ export class ProgramsService {
           testReadyAt: true,
         },
       });
+      const items = rows.slice(0, limit);
+      const last = rows.length > limit ? items.at(-1) : undefined;
+      return {
+        items,
+        nextCursor: last ? encodeCursor({ id: last.id, value: last.versionNumber }) : null,
+      };
     });
   }
 
@@ -141,8 +292,18 @@ export class ProgramsService {
       templates.map((template) => ({
         ...template,
         artwork: {
-          filled: `data:image/svg+xml;base64,${Buffer.from(artworkFor(template.filled)?.content ?? "", "utf8").toString("base64")}`,
-          empty: `data:image/svg+xml;base64,${Buffer.from(artworkFor(template.empty)?.content ?? "", "utf8").toString("base64")}`,
+          filled: {
+            ...template.artwork.filled,
+            previewUrl: `data:image/svg+xml;base64,${Buffer.from(artworkFor(template.artwork.filled)?.content ?? "", "utf8").toString("base64")}`,
+          },
+          empty: {
+            ...template.artwork.empty,
+            previewUrl: `data:image/svg+xml;base64,${Buffer.from(artworkFor(template.artwork.empty)?.content ?? "", "utf8").toString("base64")}`,
+          },
+          milestone: {
+            ...template.artwork.milestone,
+            previewUrl: `data:image/svg+xml;base64,${Buffer.from(artworkFor(template.artwork.milestone)?.content ?? "", "utf8").toString("base64")}`,
+          },
         },
       })),
     );
@@ -153,148 +314,406 @@ export class ProgramsService {
     organizationId: string,
     programId: string,
     progress: number,
-    layout: "ROW" | "GRID" | "PATH" | "RING",
-    outputProfile: StampOutputProfile = "CUSTOMER_WEB",
+    outputProfile: StampOutputProfile,
+    locale: "EN" | "AR",
+    request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
-    const program = await this.prisma.client.loyaltyProgram.findFirst({
-      where: { id: programId, organizationId },
-      include: {
-        currentDraftVersion: {
-          include: {
-            stampRule: true,
-            visualTheme: {
-              include: {
-                filledStampAsset: true,
-                emptyStampAsset: true,
-                defaultMilestoneAsset: true,
+    return withOrganizationCacheLock(this.prisma.client, organizationId, async (transaction) => {
+      const program = await transaction.loyaltyProgram.findFirst({
+        where: { id: programId, organizationId },
+        include: {
+          currentDraftVersion: {
+            include: {
+              translations: true,
+              stampRule: true,
+              rewards: {
+                include: {
+                  translations: true,
+                  visualOverride: { include: { stampAsset: { include: { variants: true } } } },
+                },
+              },
+              visualTheme: {
+                include: {
+                  filledStampAsset: { include: { variants: true } },
+                  emptyStampAsset: { include: { variants: true } },
+                  defaultMilestoneAsset: { include: { variants: true } },
+                  logoAsset: { include: { variants: true } },
+                  heroAsset: { include: { variants: true } },
+                  backgroundAsset: { include: { variants: true } },
+                },
+              },
+            },
+          },
+          currentPublishedVersion: {
+            include: {
+              translations: true,
+              stampRule: true,
+              rewards: {
+                include: {
+                  translations: true,
+                  visualOverride: { include: { stampAsset: { include: { variants: true } } } },
+                },
+              },
+              visualTheme: {
+                include: {
+                  filledStampAsset: { include: { variants: true } },
+                  emptyStampAsset: { include: { variants: true } },
+                  defaultMilestoneAsset: { include: { variants: true } },
+                  logoAsset: { include: { variants: true } },
+                  heroAsset: { include: { variants: true } },
+                  backgroundAsset: { include: { variants: true } },
+                },
               },
             },
           },
         },
-        currentPublishedVersion: {
-          include: {
-            stampRule: true,
-            visualTheme: {
-              include: {
-                filledStampAsset: true,
-                emptyStampAsset: true,
-                defaultMilestoneAsset: true,
-              },
-            },
-          },
-        },
-      },
-    });
-    const version = program?.currentDraftVersion ?? program?.currentPublishedVersion;
-    if (!version)
-      throw new AppError(
-        "PROGRAM_VERSION_NOT_FOUND",
-        "Program version not found.",
-        HttpStatus.NOT_FOUND,
-      );
-    const goal = version.stampRule?.requiredStampCount ?? 8;
-    const visual = version.visualTheme;
-    const safeProgress = Math.max(0, Math.min(goal, progress));
-    const storedLayout = visual?.layoutType ?? layout;
-    const safeLayout = storedLayout === layout ? storedLayout : layout;
-    const assetArtwork = async (
-      asset:
-        | { id: string; originalFilename: string; safeMetadata: unknown; mimeType: string }
-        | null
-        | undefined,
-    ) => {
-      const metadata = asset?.safeMetadata;
-      if (!asset) return undefined;
-      if (
-        metadata &&
-        typeof metadata === "object" &&
-        "inlineSvg" in metadata &&
-        typeof metadata.inlineSvg === "string"
-      )
-        return { kind: "svg" as const, content: metadata.inlineSvg, trusted: true as const };
-      if (!asset.mimeType.startsWith("image/")) return undefined;
-      try {
-        const bytes = await readFile(
-          join(
-            process.cwd(),
-            "tmp",
-            "waflo-assets",
-            organizationId,
-            asset.id,
-            asset.originalFilename,
-          ),
+      });
+      const version = program?.currentDraftVersion ?? program?.currentPublishedVersion;
+      if (!program || !version)
+        throw new AppError(
+          "PROGRAM_VERSION_NOT_FOUND",
+          "Program version not found.",
+          HttpStatus.NOT_FOUND,
         );
+      const goal = version.stampRule?.requiredStampCount ?? 8;
+      const visual = version.visualTheme;
+      const safeProgress = Math.max(0, Math.min(goal, progress));
+      const safeLayout = visual?.layoutType ?? "GRID";
+      const previewType = previewTypeFor(outputProfile);
+      const configurationFingerprint = digest({
+        versionId: version.id,
+        revision: version.revision,
+      });
+      const previewCacheKey = createProgramPreviewCacheKey({
+        rendererSchemaVersion: PREVIEW_RENDERER_SCHEMA_VERSION,
+        template: {
+          code: version.baseTemplateCode,
+          version: version.baseTemplateVersion,
+        },
+        version: { id: version.id, revision: version.revision },
+        progress: safeProgress,
+        locale,
+        profile: outputProfile,
+        goal,
+        translations: version.translations
+          .toSorted((left, right) => left.locale.localeCompare(right.locale))
+          .map((item) => ({
+            locale: item.locale,
+            programName: item.programName,
+            shortDescription: item.shortDescription,
+            rewardSummary: item.rewardSummary,
+            termsAndConditions: item.termsAndConditions,
+          })),
+        rewards: version.rewards
+          .toSorted((left, right) => left.id.localeCompare(right.id))
+          .map((reward) => ({
+            id: reward.id,
+            threshold: reward.thresholdStampCount,
+            internalName: reward.internalName,
+            translations: reward.translations.toSorted((left, right) =>
+              left.locale.localeCompare(right.locale),
+            ),
+            asset: previewAssetCacheIdentity(reward.visualOverride?.stampAsset, "STAMP_256"),
+          })),
+        visual: visual
+          ? {
+              colors: [
+                visual.backgroundColor,
+                visual.foregroundColor,
+                visual.accentColor,
+                visual.secondaryColor,
+                visual.mutedColor,
+              ],
+              layout: visual.layoutType,
+              layoutConfiguration: visual.layoutConfiguration,
+              stampSize: visual.stampSize,
+              stampSpacing: visual.stampSpacing,
+              progressLabelVisible: visual.progressLabelVisible,
+              rewardLabelVisible: visual.rewardLabelVisible,
+              customerWebVariant: visual.customerWebVariant,
+              applePreviewConfig: visual.applePreviewConfig,
+              googlePreviewConfig: visual.googlePreviewConfig,
+            }
+          : null,
+        assets: {
+          filled: previewAssetCacheIdentity(visual?.filledStampAsset, "STAMP_256"),
+          empty: previewAssetCacheIdentity(visual?.emptyStampAsset, "STAMP_256"),
+          milestone: previewAssetCacheIdentity(visual?.defaultMilestoneAsset, "STAMP_256"),
+          logo: previewAssetCacheIdentity(visual?.logoAsset, "ORIGINAL_SAFE"),
+          hero: previewAssetCacheIdentity(visual?.heroAsset, "ORIGINAL_SAFE"),
+          background: previewAssetCacheIdentity(visual?.backgroundAsset, "ORIGINAL_SAFE"),
+        },
+      });
+      const cached = await transaction.generatedProgramPreview.findUnique({
+        where: {
+          versionId_previewType_progressState_configurationHash: {
+            versionId: version.id,
+            previewType,
+            progressState: safeProgress,
+            configurationHash: previewCacheKey,
+          },
+        },
+      });
+      if (cached) {
+        let cachedBytes: Buffer;
+        try {
+          cachedBytes = await this.objectStorage.get(cached.objectKey);
+        } catch {
+          throw new AppError(
+            "PROGRAM_PREVIEW_CONTENT_UNAVAILABLE",
+            "The cached preview content is unavailable.",
+            HttpStatus.SERVICE_UNAVAILABLE,
+            { previewId: cached.id },
+          );
+        }
+        const cachedDigest = sha256Bytes(cachedBytes);
+        if (cached.contentDigest !== cachedDigest)
+          throw new AppError(
+            "PROGRAM_PREVIEW_CONTENT_UNAVAILABLE",
+            "The cached preview content failed its integrity check.",
+            HttpStatus.SERVICE_UNAVAILABLE,
+            { previewId: cached.id },
+          );
+        await transaction.generatedProgramPreview.update({
+          where: { id: cached.id },
+          data: { lastAccessedAt: new Date() },
+        });
+        await transaction.loyaltyProgramVersion.updateMany({
+          where: { id: version.id, revision: version.revision },
+          data: { renderFingerprint: configurationFingerprint },
+        });
         return {
-          kind: "data-uri" as const,
-          value: `data:${asset.mimeType};base64,${bytes.toString("base64")}`,
-          mimeType: asset.mimeType as "image/png" | "image/jpeg" | "image/webp",
-          trusted: true as const,
+          ...cached,
+          svg: cachedBytes.toString("utf8"),
+          digest: cachedDigest,
+          warnings: cached.warnings,
+          profile: outputProfile,
+          locale,
+          cacheStatus: "HIT" as const,
         };
-      } catch {
-        return undefined;
       }
-    };
-    const [filledArtwork, emptyArtwork, milestoneArtwork] = await Promise.all([
-      assetArtwork(visual?.filledStampAsset),
-      assetArtwork(visual?.emptyStampAsset),
-      assetArtwork(visual?.defaultMilestoneAsset),
-    ]);
-    const rendered = renderStampSvg({
-      goal,
-      progress: safeProgress,
-      layout: safeLayout,
-      outputProfile,
-      filledColor: visual?.accentColor ?? "#E4572E",
-      emptyColor: visual?.backgroundColor ?? "#F7F4EE",
-      accentColor: visual?.foregroundColor ?? "#222222",
-      ...(filledArtwork ? { filledArtwork } : {}),
-      ...(emptyArtwork ? { emptyArtwork } : {}),
-      ...(milestoneArtwork ? { milestoneArtwork } : {}),
-      label: `${safeProgress}/${goal}`,
-    });
-    const objectKey = `previews/${organizationId}/${version.id}/${rendered.digest}.svg`;
-    const filePath = join(
-      process.cwd(),
-      "tmp",
-      "waflo-previews",
-      organizationId,
-      version.id,
-      `${rendered.digest}.svg`,
-    );
-    await mkdir(join(process.cwd(), "tmp", "waflo-previews", organizationId, version.id), {
-      recursive: true,
-    });
-    await writeFile(filePath, rendered.svg, { flag: "w" });
-    const previewType =
-      outputProfile === "APPLE_WALLET"
-        ? "APPLE_WALLET_PREVIEW"
-        : outputProfile === "GOOGLE_WALLET"
-          ? "GOOGLE_WALLET_PREVIEW"
-          : "CUSTOMER_WEB_CARD";
-    const preview = await this.prisma.client.generatedProgramPreview.upsert({
-      where: {
-        versionId_previewType_progressState_configurationHash: {
+      const assetData = (
+        asset: PreviewAsset | null | undefined,
+        preferredVariant: "STAMP_256" | "ORIGINAL_SAFE",
+        role: string,
+        required = false,
+      ) => resolvePreviewAssetContent(this.objectStorage, asset, preferredVariant, role, required);
+      const [
+        filledAsset,
+        emptyAsset,
+        defaultMilestoneAsset,
+        logoAsset,
+        heroAsset,
+        backgroundAsset,
+      ] = await Promise.all([
+        assetData(visual?.filledStampAsset, "STAMP_256", "filled stamp", true),
+        assetData(visual?.emptyStampAsset, "STAMP_256", "empty stamp", true),
+        assetData(visual?.defaultMilestoneAsset, "STAMP_256", "default milestone"),
+        assetData(visual?.logoAsset, "ORIGINAL_SAFE", "logo"),
+        assetData(visual?.heroAsset, "ORIGINAL_SAFE", "hero"),
+        assetData(visual?.backgroundAsset, "ORIGINAL_SAFE", "background"),
+      ]);
+      await Promise.all(
+        version.rewards.map(async (reward) => ({
+          reward,
+          asset:
+            (await assetData(
+              reward.visualOverride?.stampAsset,
+              "STAMP_256",
+              `reward milestone ${reward.id}`,
+            )) ?? defaultMilestoneAsset,
+        })),
+      );
+      const translation =
+        version.translations.find((item) => item.locale === locale) ??
+        version.translations.find((item) => item.locale === "EN");
+      if (!translation)
+        throw new AppError(
+          "PROGRAM_TRANSLATION_NOT_FOUND",
+          "Program translation not found.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      const visualInput = visual ?? {
+        backgroundColor: "#F7F4EE",
+        foregroundColor: "#222222",
+        accentColor: "#E4572E",
+        secondaryColor: "#F3A712",
+        layoutConfiguration: {},
+        stampSize: 48,
+        stampSpacing: 8,
+        progressLabelVisible: true,
+        rewardLabelVisible: true,
+        customerWebVariant: "CARD",
+        applePreviewConfig: {},
+        googlePreviewConfig: {},
+      };
+      const rewardReady = safeProgress >= goal;
+      const rewardReadyText =
+        locale === "AR"
+          ? `المكافأة جاهزة: ${translation.rewardSummary}`
+          : `Reward ready: ${translation.rewardSummary}`;
+      const rendered = renderStampSvg({
+        goal,
+        progress: safeProgress,
+        layout: safeLayout,
+        layoutConfiguration: visualInput.layoutConfiguration as {
+          columns?: number;
+          maxPerRow?: number;
+          serpentine?: boolean;
+          startAngle?: number;
+        },
+        outputProfile,
+        filledColor: visualInput.accentColor,
+        emptyColor: visualInput.backgroundColor,
+        accentColor: visualInput.foregroundColor,
+        backgroundColor: visualInput.backgroundColor,
+        foregroundColor: visualInput.foregroundColor,
+        stampSize: visualInput.stampSize,
+        spacing: visualInput.stampSpacing,
+        ...(filledAsset ? { filledArtwork: filledAsset.artwork } : {}),
+        ...(emptyAsset ? { emptyArtwork: emptyAsset.artwork } : {}),
+        label: `${safeProgress}/${goal}`,
+        rewardLabel: rewardReady ? rewardReadyText : translation.rewardSummary,
+        rewardReady,
+        progressLabelVisible: visualInput.progressLabelVisible,
+        rewardLabelVisible: visualInput.rewardLabelVisible,
+      });
+      const appleConfig = visualInput.applePreviewConfig as Partial<{
+        headerLabel: string;
+        headerValue: string;
+        secondaryLabel: string;
+        barcodeLabel: string;
+        showBackContent: boolean;
+      }>;
+      const googleConfig = visualInput.googlePreviewConfig as Partial<{
+        title: string;
+        subtitle: string;
+        detailsLabel: string;
+        barcodeLabel: string;
+      }>;
+      const composed = composeProgramPreview({
+        profile: outputProfile,
+        locale,
+        programName: translation.programName,
+        shortDescription: translation.shortDescription,
+        rewardSummary: translation.rewardSummary,
+        terms: translation.termsAndConditions,
+        progress: safeProgress,
+        goal,
+        stampSvg: rendered.svg,
+        backgroundColor: visualInput.backgroundColor,
+        foregroundColor: visualInput.foregroundColor,
+        accentColor: visualInput.accentColor,
+        secondaryColor: visualInput.secondaryColor,
+        ...(logoAsset ? { logoDataUri: logoAsset.dataUri } : {}),
+        ...(heroAsset ? { heroDataUri: heroAsset.dataUri } : {}),
+        ...(backgroundAsset ? { backgroundDataUri: backgroundAsset.dataUri } : {}),
+        customerWebVariant: visualInput.customerWebVariant as "CARD" | "MINIMAL" | "HERO",
+        apple: {
+          headerLabel: appleConfig.headerLabel ?? "REWARDS",
+          headerValue: appleConfig.headerValue ?? program.internalName,
+          secondaryLabel: appleConfig.secondaryLabel ?? "NEXT REWARD",
+          barcodeLabel: appleConfig.barcodeLabel ?? "Preview barcode",
+          showBackContent: appleConfig.showBackContent ?? true,
+        },
+        google: {
+          title: googleConfig.title ?? translation.programName,
+          subtitle: googleConfig.subtitle ?? translation.shortDescription,
+          detailsLabel: googleConfig.detailsLabel ?? "Reward progress",
+          barcodeLabel: googleConfig.barcodeLabel ?? "Preview barcode",
+        },
+      });
+      const objectKey = `organizations/${organizationId}/previews/${version.id}/${outputProfile.toLowerCase()}-${locale.toLowerCase()}-${previewCacheKey}.svg`;
+      await this.objectStorage.ensureReady();
+      const previewBytes = Buffer.from(composed.svg);
+      const storageResult = await this.objectStorage.putImmutable(
+        objectKey,
+        previewBytes,
+        "image/svg+xml",
+      );
+      if (storageResult === "EXISTS") {
+        const existingBytes = await this.objectStorage.get(objectKey);
+        if (sha256Bytes(existingBytes) !== composed.digest)
+          throw new AppError(
+            "PROGRAM_PREVIEW_CONTENT_CONFLICT",
+            "An immutable preview key already contains different content.",
+            HttpStatus.CONFLICT,
+          );
+      }
+      const renderUpdate = await transaction.loyaltyProgramVersion.updateMany({
+        where: {
+          id: version.id,
+          revision: version.revision,
+          OR: [
+            { renderFingerprint: null },
+            { renderFingerprint: { not: configurationFingerprint } },
+          ],
+        },
+        data: { renderFingerprint: configurationFingerprint },
+      });
+      if (renderUpdate.count === 0) {
+        const latestVersion = await transaction.loyaltyProgramVersion.findUniqueOrThrow({
+          where: { id: version.id },
+          select: { revision: true, renderFingerprint: true },
+        });
+        if (
+          latestVersion.revision !== version.revision ||
+          latestVersion.renderFingerprint !== configurationFingerprint
+        ) {
+          await this.objectStorage.delete(objectKey);
+          throw new AppError(
+            "PREVIEW_DRAFT_CHANGED",
+            "The draft changed while this preview was rendering. Generate it again.",
+            HttpStatus.CONFLICT,
+          );
+        }
+      }
+      const preview = await transaction.generatedProgramPreview.create({
+        data: {
+          organizationId,
           versionId: version.id,
+          versionRevision: version.revision,
           previewType,
           progressState: safeProgress,
-          configurationHash: rendered.digest,
+          configurationHash: previewCacheKey,
+          contentDigest: composed.digest,
+          warnings: composed.warnings,
+          objectKey,
+          mimeType: "image/svg+xml",
+          width: composed.width,
+          height: composed.height,
         },
-      },
-      update: { lastAccessedAt: new Date() },
-      create: {
-        organizationId,
-        versionId: version.id,
-        previewType,
-        progressState: safeProgress,
-        configurationHash: rendered.digest,
-        objectKey,
-        mimeType: "image/svg+xml",
-        width: rendered.width,
-        height: rendered.height,
-      },
+      });
+      await this.audit.recordInTransaction(
+        transaction,
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "program.preview_generated",
+          targetType: "generated_program_preview",
+          targetId: preview.id,
+          metadata: {
+            programId,
+            versionId: version.id,
+            versionRevision: version.revision,
+            profile: outputProfile,
+            locale,
+            progress: safeProgress,
+          },
+        },
+        request,
+      );
+      return {
+        ...preview,
+        svg: composed.svg,
+        digest: composed.digest,
+        warnings: composed.warnings,
+        profile: outputProfile,
+        locale,
+        cacheStatus: "MISS" as const,
+      };
     });
-    return { ...preview, svg: rendered.svg, digest: rendered.digest };
   }
 
   async create(
@@ -377,23 +796,36 @@ export class ProgramsService {
             { recommendedPlan: "growth" },
           );
         }
+        const selectedTemplate = templateFor(input.templateCode, input.templateVersion);
         const themeAssets = await this.ensureBuiltInAssets(
           transaction,
           organizationId,
           userId,
-          templateFor(input.templateCode),
+          selectedTemplate,
         );
-        await this.assertAssetReferences(transaction, organizationId, input.visualTheme);
+        await this.assertAssetReferences(
+          transaction,
+          organizationId,
+          input.visualTheme,
+          input.rewards,
+        );
         const versionData = this.versionCreateData(
           input,
           themeAssets,
           locations.map((location) => location.id),
           userId,
+          selectedTemplate,
+        );
+        const publicSlug = await this.allocatePublicSlug(
+          transaction,
+          organizationId,
+          input.translations.en.programName || input.internalName,
         );
         const program = await transaction.loyaltyProgram.create({
           data: {
             organizationId,
             internalName: input.internalName,
+            publicSlug,
             programType: "STAMP",
             status: "DRAFT",
             createdByUserId: userId,
@@ -411,18 +843,37 @@ export class ProgramsService {
             "Unable to create program.",
             HttpStatus.INTERNAL_SERVER_ERROR,
           );
+        await transaction.programEnrollmentPolicy.create({
+          data: {
+            organizationId,
+            programVersionId: version.id,
+            emailCollectionMode: "OPTIONAL",
+            primaryCustomerLocale: organization.defaultLocale,
+            allowLocaleSelection: true,
+            marketingConsentVisible: false,
+            marketingConsentDefault: false,
+            customerTermsRequired: true,
+            transferWithoutEmailAllowed: true,
+            enrollmentOpen: true,
+          },
+        });
         const updated = await transaction.loyaltyProgram.update({
           where: { id: program.id },
           data: { currentDraftVersionId: version.id },
         });
-        await this.audit.record(
+        await this.audit.recordInTransaction(
+          transaction,
           {
             organizationId,
             actorUserId: userId,
             action: "program.created",
             targetType: "loyalty_program",
             targetId: program.id,
-            metadata: { versionId: version.id, templateCode: input.templateCode ?? null },
+            metadata: {
+              versionId: version.id,
+              templateCode: selectedTemplate.code,
+              templateVersion: selectedTemplate.version,
+            },
           },
           request,
         );
@@ -449,6 +900,12 @@ export class ProgramsService {
         });
         if (!program)
           throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
+        if (program.status === "ARCHIVED")
+          throw new AppError(
+            "PROGRAM_ARCHIVED_READ_ONLY",
+            "Restore this program before editing its draft.",
+            HttpStatus.CONFLICT,
+          );
         if (
           !program.currentDraftVersion ||
           ["PUBLISHED", "SUPERSEDED", "ABANDONED"].includes(program.currentDraftVersion.status)
@@ -482,23 +939,75 @@ export class ProgramsService {
             );
         }
         const current = program.currentDraftVersion;
+        const persisted = this.inputFromVersion(current, program.internalName);
         const next = {
-          ...this.inputFromVersion(current, program.internalName),
+          ...persisted,
           ...input,
-        } as ProgramCreateInput & { changeSummary?: string };
-        await this.assertAssetReferences(transaction, organizationId, next.visualTheme);
+          persistedStampPolicy: persisted.persistedStampPolicy,
+          changeSummary: input.changeSummary ?? current.changeSummary ?? undefined,
+        } as CanonicalMutableProgramInput;
+        const organization = await transaction.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { selectedPlan: true },
+        });
+        const plan = toPlan(organization.selectedPlan);
+        if (!programEntitlement(plan, "canUseProMode") && next.editingMode === "pro")
+          throw new AppError(
+            "PROGRAM_PRO_MODE_UNAVAILABLE",
+            "Pro Mode requires Growth or Scale.",
+            HttpStatus.FORBIDDEN,
+            { recommendedPlan: "growth" },
+          );
+        if (next.rewards.length > 1 && !programEntitlement(plan, "canUseMultipleRewards"))
+          throw new AppError(
+            "PROGRAM_MULTIPLE_REWARDS_UNAVAILABLE",
+            "Multiple rewards require Growth or Scale.",
+            HttpStatus.FORBIDDEN,
+            { recommendedPlan: "growth" },
+          );
+        if (
+          next.rewards.some((reward) => reward.thresholdStampCount < next.requiredStampCount) &&
+          !programEntitlement(plan, "canUseMilestoneRewards")
+        )
+          throw new AppError(
+            "PROGRAM_MILESTONES_UNAVAILABLE",
+            "Milestone rewards require Growth or Scale.",
+            HttpStatus.FORBIDDEN,
+            { recommendedPlan: "growth" },
+          );
+        if (
+          ["PATH", "RING"].includes(next.visualTheme.layoutType) &&
+          !programEntitlement(plan, "canUseAdvancedLayouts")
+        )
+          throw new AppError(
+            "PROGRAM_ADVANCED_LAYOUT_UNAVAILABLE",
+            "Advanced layouts require Growth or Scale.",
+            HttpStatus.FORBIDDEN,
+            { recommendedPlan: "growth" },
+          );
+        await this.assertAssetReferences(
+          transaction,
+          organizationId,
+          next.visualTheme,
+          next.rewards,
+        );
         await this.clearDraftChildren(transaction, current.id);
+        const selectedTemplate = templateFor(
+          next.templateCode ?? current.baseTemplateCode ?? undefined,
+          next.templateVersion ?? current.baseTemplateVersion ?? undefined,
+        );
         const assets = await this.ensureBuiltInAssets(
           transaction,
           organizationId,
           userId,
-          templateFor(next.templateCode ?? current.baseTemplateCode ?? undefined),
+          selectedTemplate,
         );
         const versionData = this.versionCreateData(
           next,
           assets,
           next.locationIds ?? current.locations.map((item) => item.locationId),
           userId,
+          selectedTemplate,
         );
         await transaction.loyaltyProgramVersion.update({
           where: { id: current.id },
@@ -515,10 +1024,15 @@ export class ProgramsService {
         });
         const updated = await transaction.loyaltyProgram.update({
           where: { id: programId },
-          data: { internalName: next.internalName, revision: { increment: 1 } },
+          data: {
+            internalName: next.internalName,
+            revision: { increment: 1 },
+            ...(program.currentPublishedVersionId ? {} : { status: "DRAFT" as const }),
+          },
           include: { currentDraftVersion: { include: includeVersion } },
         });
-        await this.audit.record(
+        await this.audit.recordInTransaction(
+          transaction,
           {
             organizationId,
             actorUserId: userId,
@@ -538,53 +1052,85 @@ export class ProgramsService {
     userId: string,
     organizationId: string,
     programId: string,
-    _request: WafloRequest,
+    request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.edit");
-    return withOrganizationInvariantLock(
-      this.prisma.client,
-      organizationId,
-      async (transaction) => {
-        const program = await transaction.loyaltyProgram.findFirst({
-          where: { id: programId, organizationId },
-          include: {
-            currentPublishedVersion: { include: includeVersion },
-            currentDraftVersion: true,
-          },
-        });
-        if (!program)
-          throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
-        if (program.currentDraftVersion) return program;
-        if (!program.currentPublishedVersion)
-          throw new AppError(
-            "PROGRAM_DRAFT_REQUIRED",
-            "Program has no published version to copy.",
-            HttpStatus.CONFLICT,
+    try {
+      return await withOrganizationInvariantLock(
+        this.prisma.client,
+        organizationId,
+        async (transaction) => {
+          const program = await transaction.loyaltyProgram.findFirst({
+            where: { id: programId, organizationId },
+            include: {
+              currentPublishedVersion: { include: includeVersion },
+              currentDraftVersion: true,
+            },
+          });
+          if (!program)
+            throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
+          if (program.currentDraftVersion) return program;
+          if (!program.currentPublishedVersion)
+            throw new AppError(
+              "PROGRAM_DRAFT_REQUIRED",
+              "Program has no published version to copy.",
+              HttpStatus.CONFLICT,
+            );
+          const source = program.currentPublishedVersion;
+          const data = await this.cloneVersionData(transaction, source.id, userId);
+          const version = await transaction.loyaltyProgramVersion.create({
+            data: {
+              ...data,
+              programId,
+              organizationId,
+              versionNumber: program.latestVersionNumber + 1,
+              createdByUserId: userId,
+              status: "DRAFT",
+              publishedAt: null,
+              supersededAt: null,
+            } as never,
+          });
+          const updated = await transaction.loyaltyProgram.update({
+            where: { id: programId },
+            data: { currentDraftVersionId: version.id, latestVersionNumber: { increment: 1 } },
+            include: {
+              currentDraftVersion: { include: includeVersion },
+              currentPublishedVersion: { include: includeVersion },
+            },
+          });
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "program.version_created",
+              targetType: "loyalty_program_version",
+              targetId: version.id,
+              metadata: {
+                programId,
+                versionNumber: version.versionNumber,
+                sourceVersionId: source.id,
+              },
+            },
+            request,
           );
-        const source = program.currentPublishedVersion;
-        const data = await this.cloneVersionData(transaction, source.id, userId);
-        const version = await transaction.loyaltyProgramVersion.create({
-          data: {
-            ...data,
-            programId,
-            organizationId,
-            versionNumber: program.latestVersionNumber + 1,
-            createdByUserId: userId,
-            status: "DRAFT",
-            publishedAt: null,
-            supersededAt: null,
-          } as never,
-        });
-        return transaction.loyaltyProgram.update({
-          where: { id: programId },
-          data: { currentDraftVersionId: version.id, latestVersionNumber: { increment: 1 } },
+          return updated;
+        },
+      );
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (code === "P2002" || code === "CONCURRENT_MODIFICATION_RETRY") {
+        const replay = await this.prisma.client.loyaltyProgram.findFirst({
+          where: { id: programId, organizationId, currentDraftVersionId: { not: null } },
           include: {
             currentDraftVersion: { include: includeVersion },
             currentPublishedVersion: { include: includeVersion },
           },
         });
-      },
-    );
+        if (replay) return replay;
+      }
+      throw error;
+    }
   }
 
   async validate(userId: string, organizationId: string, programId: string, request: WafloRequest) {
@@ -596,8 +1142,42 @@ export class ProgramsService {
         const program = await transaction.loyaltyProgram.findFirst({
           where: { id: programId, organizationId },
           include: {
+            organization: { select: { selectedPlan: true } },
             currentDraftVersion: {
-              include: { ...includeVersion, locations: { include: { location: true } } },
+              include: {
+                translations: true,
+                stampRule: true,
+                rewards: {
+                  include: {
+                    translations: true,
+                    visualOverride: { include: { stampAsset: true } },
+                  },
+                },
+                locations: { include: { location: true } },
+                visualTheme: {
+                  include: {
+                    logoAsset: true,
+                    heroAsset: true,
+                    backgroundAsset: true,
+                    filledStampAsset: true,
+                    emptyStampAsset: true,
+                    defaultMilestoneAsset: true,
+                  },
+                },
+                testSessions: {
+                  where: { status: "COMPLETED" },
+                  select: {
+                    versionRevision: true,
+                    validationFingerprint: true,
+                  },
+                },
+                previews: {
+                  select: {
+                    previewType: true,
+                    versionRevision: true,
+                  },
+                },
+              },
             },
           },
         });
@@ -608,98 +1188,80 @@ export class ProgramsService {
             HttpStatus.CONFLICT,
           );
         const version = program.currentDraftVersion;
-        const errors: Array<{ code: string; path: string; message: string }> = [];
-        const warnings: Array<{ code: string; path: string; message: string }> = [];
-        if (
-          !version.stampRule ||
-          version.stampRule.requiredStampCount < 2 ||
-          version.stampRule.requiredStampCount > 30
-        )
-          errors.push({
-            code: "STAMP_GOAL_INVALID",
-            path: "stampRule.requiredStampCount",
-            message: "Stamp goal must be between 2 and 30.",
-          });
-        for (const locale of ["EN", "AR"] as const) {
-          const translation = version.translations.find((item) => item.locale === locale);
-          if (
-            !translation?.programName.trim() ||
-            !translation.shortDescription.trim() ||
-            !translation.rewardSummary.trim() ||
-            !translation.termsAndConditions.trim() ||
-            !translation.completionMessage.trim() ||
-            !translation.rewardUnlockedMessage.trim()
-          )
-            errors.push({
-              code: "TRANSLATION_REQUIRED",
-              path: `translations.${locale.toLowerCase()}`,
-              message: `${locale} customer content is required.`,
-            });
-        }
-        if (!version.rewards.length)
-          errors.push({
-            code: "REWARD_REQUIRED",
-            path: "rewards",
-            message: "Add at least one reward.",
-          });
-        if (
-          version.rewards.some(
-            (reward) =>
-              reward.thresholdStampCount < 1 ||
-              reward.thresholdStampCount > (version.stampRule?.requiredStampCount ?? 0),
-          )
-        )
-          errors.push({
-            code: "REWARD_AFTER_GOAL",
-            path: "rewards",
-            message: "Every reward threshold must be at or before the final stamp goal.",
-          });
-        if (version.rewards.some((reward) => reward.maximumRedemptionsPerEarned < 1))
-          errors.push({
-            code: "REWARD_ENTITLEMENT_INVALID",
-            path: "rewards",
-            message: "Each reward must allow at least one redemption per earned reward.",
-          });
-        if (
-          !version.locations.length ||
-          version.locations.some((item) => item.location.status !== "ACTIVE")
-        )
-          errors.push({
-            code: "LOCATION_REQUIRED",
-            path: "locations",
-            message: "Select at least one active location.",
-          });
-        if (!version.visualTheme)
-          errors.push({
-            code: "VISUAL_THEME_REQUIRED",
-            path: "visualTheme",
-            message: "Choose a visual theme.",
-          });
-        if (version.stampRule && version.stampRule.maximumStampsPerOperation > 5)
-          warnings.push({
-            code: "STAMP_OPERATION_LIMIT",
-            path: "stampRule.maximumStampsPerOperation",
-            message: "Large stamp batches may reduce the clarity of the customer journey.",
-          });
-        if (
-          version.visualTheme &&
-          version.visualTheme.layoutType === "RING" &&
-          version.stampRule &&
-          version.stampRule.requiredStampCount > 20
-        )
-          warnings.push({
-            code: "RING_DENSITY",
-            path: "visualTheme.layoutType",
-            message: "Ring layouts with more than 20 stamps may be dense on small screens.",
-          });
         const fingerprint = digest({
           versionId: version.id,
           revision: version.revision,
+        });
+        const visual = version.visualTheme;
+        const { errors, warnings } = validateProgramConfiguration({
+          plan: program.organization.selectedPlan,
+          goal: version.stampRule?.requiredStampCount ?? 0,
           translations: version.translations,
-          rule: version.stampRule,
-          rewards: version.rewards,
-          locations: version.locations,
-          visual: version.visualTheme,
+          rewards: version.rewards.map((reward) => ({
+            thresholdStampCount: reward.thresholdStampCount,
+            maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
+            stampAsset: reward.visualOverride?.stampAsset ?? null,
+          })),
+          locations: version.locations.map((location) => ({
+            status: location.location.status,
+          })),
+          visual: visual
+            ? {
+                backgroundColor: visual.backgroundColor,
+                foregroundColor: visual.foregroundColor,
+                accentColor: visual.accentColor,
+                layoutType: visual.layoutType,
+                stampSize: visual.stampSize,
+                stampSpacing: visual.stampSpacing,
+                applePreviewConfig: visual.applePreviewConfig,
+                googlePreviewConfig: visual.googlePreviewConfig,
+                assets: [
+                  {
+                    role: "filledStamp",
+                    expectedCategory: "STAMP_FILLED",
+                    asset: visual.filledStampAsset,
+                    required: true,
+                  },
+                  {
+                    role: "emptyStamp",
+                    expectedCategory: "STAMP_EMPTY",
+                    asset: visual.emptyStampAsset,
+                    required: true,
+                  },
+                  {
+                    role: "logo",
+                    expectedCategory: "LOGO",
+                    asset: visual.logoAsset,
+                    required: false,
+                  },
+                  {
+                    role: "hero",
+                    expectedCategory: "HERO",
+                    asset: visual.heroAsset,
+                    required: false,
+                  },
+                  {
+                    role: "background",
+                    expectedCategory: "BACKGROUND",
+                    asset: visual.backgroundAsset,
+                    required: false,
+                  },
+                  {
+                    role: "milestone",
+                    expectedCategory: "STAMP_MILESTONE",
+                    asset: visual.defaultMilestoneAsset,
+                    required: false,
+                  },
+                ],
+              }
+            : null,
+          expectedFingerprint: fingerprint,
+          renderFingerprint: version.renderFingerprint,
+          previewProfiles: version.previews
+            .filter((preview) => preview.versionRevision === version.revision)
+            .map((preview) => preview.previewType),
+          completedTestSessions: version.testSessions,
+          versionRevision: version.revision,
         });
         const status = errors.length
           ? "FAILED"
@@ -712,8 +1274,8 @@ export class ProgramsService {
             versionId: version.id,
             status,
             configurationFingerprint: fingerprint,
-            errors,
-            warnings,
+            errors: errors as unknown as Prisma.InputJsonValue,
+            warnings: warnings as unknown as Prisma.InputJsonValue,
             createdByUserId: userId,
           },
         });
@@ -733,19 +1295,26 @@ export class ProgramsService {
             where: { id: programId },
             data: { status: "VALIDATED" },
           });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: errors.length ? "program.validation_failed" : "program.validated",
+            targetType: "loyalty_program",
+            targetId: programId,
+            metadata: {
+              versionId: version.id,
+              revision: version.revision,
+              status,
+              errorCount: errors.length,
+              warningCount: warnings.length,
+            },
+          },
+          request,
+        );
         return { ...run, errors, warnings };
       },
-    );
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "program.validated",
-        targetType: "loyalty_program",
-        targetId: programId,
-        metadata: { status: result.status },
-      },
-      request,
     );
     return result;
   }
@@ -776,6 +1345,17 @@ export class ProgramsService {
         versionId: program.currentDraftVersion.id,
         createdByUserId: userId,
         syntheticDisplayName: "Waflo test customer",
+        versionRevision: program.currentDraftVersion.revision,
+        validationFingerprint: program.currentDraftVersion.validationFingerprint,
+      },
+      include: {
+        version: {
+          include: {
+            stampRule: true,
+            rewards: { include: { translations: true } },
+          },
+        },
+        events: true,
       },
     });
     await this.audit.record(
@@ -788,6 +1368,25 @@ export class ProgramsService {
       },
       request,
     );
+    return session;
+  }
+
+  async getTestSession(userId: string, organizationId: string, sessionId: string) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.test");
+    const session = await this.prisma.client.programTestSession.findFirst({
+      where: { id: sessionId, organizationId },
+      include: {
+        version: {
+          include: {
+            stampRule: true,
+            rewards: { include: { translations: true } },
+          },
+        },
+        events: { orderBy: { createdAt: "desc" }, take: 100 },
+      },
+    });
+    if (!session)
+      throw new AppError("TEST_SESSION_NOT_FOUND", "Test session not found.", HttpStatus.NOT_FOUND);
     return session;
   }
 
@@ -820,61 +1419,111 @@ export class ProgramsService {
         if (existing)
           return transaction.programTestSession.findUniqueOrThrow({
             where: { id: sessionId },
-            include: { events: { orderBy: { createdAt: "desc" }, take: 20 } },
+            include: {
+              version: {
+                include: {
+                  stampRule: true,
+                  rewards: { include: { translations: true } },
+                },
+              },
+              events: { orderBy: { createdAt: "desc" }, take: 100 },
+            },
           });
+        if (session.version.revision !== session.versionRevision)
+          throw new AppError(
+            "TEST_SESSION_STALE",
+            "This Test Mode session belongs to an older draft revision.",
+            HttpStatus.CONFLICT,
+          );
         const goal = session.version.stampRule?.requiredStampCount ?? 8;
-        const rawCount = session.currentStampCount + amount;
-        const cyclesCompleted = Math.floor(rawCount / goal);
-        const nextCount = rawCount % goal;
+        if (session.currentStampCount >= goal)
+          throw new AppError(
+            "TEST_REWARD_READY",
+            "Redeem the final reward before adding stamps to a new cycle.",
+            HttpStatus.CONFLICT,
+            { currentStampCount: session.currentStampCount, goal },
+          );
+        const previousAbsolute = absoluteTestPosition(
+          session.cycleCount,
+          session.currentStampCount,
+          goal,
+        );
+        const projection = projectTestStampAddition(session.currentStampCount, amount, goal);
+        const nextAbsolute = previousAbsolute + projection.appliedAmount;
+        const crossed = crossedRewardThresholds(
+          previousAbsolute,
+          projection.appliedAmount,
+          goal,
+          session.version.rewards,
+        );
         await transaction.programTestEvent.create({
           data: {
             sessionId,
             eventType: "TEST_STAMP_EARNED",
-            amount,
+            amount: projection.appliedAmount,
             idempotencyKey,
             createdByUserId: userId,
+            safeMetadata: {
+              previousAbsolute,
+              nextAbsolute,
+              cycle: session.cycleCount + 1,
+              requestedAmount: amount,
+              appliedAmount: projection.appliedAmount,
+              rewardReady: projection.rewardReady,
+            },
           },
         });
-        for (
-          let cycle = session.cycleCount + 1;
-          cycle <= session.cycleCount + cyclesCompleted;
-          cycle += 1
-        )
-          for (const reward of session.version.rewards.filter(
-            (item) => item.thresholdStampCount <= goal,
-          ))
-            await transaction.programTestEvent.create({
-              data: {
-                sessionId,
-                eventType: "TEST_REWARD_UNLOCKED",
-                amount: 1,
-                rewardDefinitionId: reward.id,
-                idempotencyKey: `${idempotencyKey}:${cycle}:${reward.id}`,
-                createdByUserId: userId,
-                safeMetadata: { cycle },
+        for (const threshold of crossed)
+          await transaction.programTestEvent.create({
+            data: {
+              sessionId,
+              eventType: "TEST_REWARD_UNLOCKED",
+              amount: 1,
+              rewardDefinitionId: threshold.rewardId,
+              idempotencyKey: `${idempotencyKey}:unlock:${threshold.cycle}:${threshold.rewardId}`,
+              createdByUserId: userId,
+              safeMetadata: {
+                cycle: threshold.cycle,
+                thresholdStampCount: threshold.thresholdStampCount,
+                absolutePosition: threshold.absolutePosition,
               },
-            });
-        return transaction.programTestSession.update({
+            },
+          });
+        const updated = await transaction.programTestSession.update({
           where: { id: sessionId },
           data: {
-            currentStampCount: nextCount,
-            ...(cyclesCompleted ? { cycleCount: { increment: cyclesCompleted } } : {}),
+            currentStampCount: projection.currentStampCount,
             status: "ACTIVE",
           },
-          include: { events: { orderBy: { createdAt: "desc" }, take: 20 } },
+          include: {
+            version: {
+              include: {
+                stampRule: true,
+                rewards: { include: { translations: true } },
+              },
+            },
+            events: { orderBy: { createdAt: "desc" }, take: 100 },
+          },
         });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "program.test_stamps_added",
+            targetType: "program_test_session",
+            targetId: sessionId,
+            metadata: {
+              requestedAmount: amount,
+              appliedAmount: projection.appliedAmount,
+              rewardReady: projection.rewardReady,
+              cycle: session.cycleCount + 1,
+            },
+          },
+          request,
+        );
+        return updated;
       },
-    );
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "program.test_stamps_added",
-        targetType: "program_test_session",
-        targetId: sessionId,
-        metadata: { amount },
-      },
-      request,
     );
     return result;
   }
@@ -885,7 +1534,7 @@ export class ProgramsService {
     sessionId: string,
     rewardId: string,
     idempotencyKey: string,
-    _request: WafloRequest,
+    request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.test");
     return withOrganizationInvariantLock(
@@ -894,7 +1543,7 @@ export class ProgramsService {
       async (transaction) => {
         const session = await transaction.programTestSession.findFirst({
           where: { id: sessionId, organizationId },
-          include: { version: { include: { rewards: true } } },
+          include: { version: { include: { rewards: true, stampRule: true } } },
         });
         const reward = session?.version.rewards.find((item) => item.id === rewardId);
         if (!session || !reward)
@@ -913,32 +1562,51 @@ export class ProgramsService {
           select: { createdAt: true },
         });
         const sinceReset = latestReset ? { createdAt: { gt: latestReset.createdAt } } : {};
-        const redeemed = await transaction.programTestEvent.count({
+        const rewardEvents = await transaction.programTestEvent.findMany({
           where: {
             sessionId,
             rewardDefinitionId: rewardId,
-            eventType: "TEST_REWARD_REDEEMED",
+            eventType: {
+              in: ["TEST_REWARD_UNLOCKED", "TEST_REWARD_RELOCKED", "TEST_REWARD_REDEEMED"],
+            },
             ...sinceReset,
           },
+          orderBy: { createdAt: "asc" },
         });
-        if (redeemed >= reward.maximumRedemptionsPerEarned)
-          throw new AppError(
-            "TEST_REWARD_ALREADY_REDEEMED",
-            "This synthetic reward has already been redeemed.",
-            HttpStatus.CONFLICT,
-          );
-        const unlocked = await transaction.programTestEvent.count({
-          where: {
-            sessionId,
-            rewardDefinitionId: rewardId,
-            eventType: "TEST_REWARD_UNLOCKED",
-            ...sinceReset,
-          },
-        });
-        if (unlocked <= redeemed)
+        const cycleCounts = new Map<
+          number,
+          { unlocked: number; relocked: number; redeemed: number }
+        >();
+        for (const rewardEvent of rewardEvents) {
+          const metadata =
+            rewardEvent.safeMetadata && typeof rewardEvent.safeMetadata === "object"
+              ? (rewardEvent.safeMetadata as { cycle?: unknown })
+              : null;
+          const cycle = typeof metadata?.cycle === "number" ? metadata.cycle : 1;
+          const counts = cycleCounts.get(cycle) ?? {
+            unlocked: 0,
+            relocked: 0,
+            redeemed: 0,
+          };
+          if (rewardEvent.eventType === "TEST_REWARD_UNLOCKED") counts.unlocked += 1;
+          if (rewardEvent.eventType === "TEST_REWARD_RELOCKED") counts.relocked += 1;
+          if (rewardEvent.eventType === "TEST_REWARD_REDEEMED") counts.redeemed += 1;
+          cycleCounts.set(cycle, counts);
+        }
+        const availableCycle = [...cycleCounts.entries()]
+          .sort(([left], [right]) => left - right)
+          .find(([, counts]) =>
+            canRedeemEarnedReward(
+              counts.unlocked,
+              counts.relocked,
+              counts.redeemed,
+              reward.maximumRedemptionsPerEarned,
+            ),
+          )?.[0];
+        if (!availableCycle)
           throw new AppError(
             "TEST_REWARD_NOT_UNLOCKED",
-            "Reach this reward threshold in Test Mode first.",
+            "Earn another unlock for this reward before redeeming it again.",
             HttpStatus.CONFLICT,
           );
         const event = await transaction.programTestEvent.create({
@@ -949,32 +1617,237 @@ export class ProgramsService {
             idempotencyKey,
             amount: 1,
             createdByUserId: userId,
+            safeMetadata: {
+              cycle: availableCycle,
+              finalReward:
+                reward.thresholdStampCount === (session.version.stampRule?.requiredStampCount ?? 8),
+            },
           },
         });
         const rewardIds = session.version.rewards.map((item) => item.id);
-        const redeemedRewardIds = await transaction.programTestEvent.findMany({
+        const redemptionEvents = await transaction.programTestEvent.findMany({
           where: {
             sessionId,
             eventType: "TEST_REWARD_REDEEMED",
             rewardDefinitionId: { in: rewardIds },
             ...sinceReset,
           },
-          distinct: ["rewardDefinitionId"],
-          select: { rewardDefinitionId: true },
+          select: { rewardDefinitionId: true, safeMetadata: true },
         });
-        if (session.cycleCount > 0 && redeemedRewardIds.length === rewardIds.length) {
-          await transaction.programTestSession.update({
-            where: { id: sessionId },
-            data: { status: "COMPLETED" },
-          });
+        const redeemedRewardIds = new Set(
+          redemptionEvents
+            .filter((redemption) => {
+              const metadata =
+                redemption.safeMetadata && typeof redemption.safeMetadata === "object"
+                  ? (redemption.safeMetadata as { cycle?: unknown })
+                  : null;
+              return metadata?.cycle === availableCycle;
+            })
+            .map((redemption) => redemption.rewardDefinitionId)
+            .filter((id): id is string => Boolean(id)),
+        );
+        const finalReward =
+          reward.thresholdStampCount === (session.version.stampRule?.requiredStampCount ?? 8);
+        const completedCycle =
+          redeemedRewardIds.size === rewardIds.length &&
+          session.version.revision === session.versionRevision &&
+          session.version.validationFingerprint === session.validationFingerprint;
+        if (completedCycle)
           await transaction.loyaltyProgramVersion.update({
             where: { id: session.versionId },
             data: { status: "TEST_READY", testReadyAt: new Date() },
           });
-        }
+        if (finalReward)
+          await transaction.programTestSession.update({
+            where: { id: sessionId },
+            data: {
+              currentStampCount: 0,
+              cycleCount: { increment: 1 },
+              status: completedCycle ? "COMPLETED" : "ACTIVE",
+            },
+          });
+        else if (completedCycle)
+          await transaction.programTestSession.update({
+            where: { id: sessionId },
+            data: { status: "COMPLETED" },
+          });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "program.test_reward_redeemed",
+            targetType: "program_test_session",
+            targetId: sessionId,
+            metadata: {
+              rewardId,
+              eventId: event.id,
+              cycle: availableCycle,
+              finalReward,
+              currentStampCount: finalReward ? 0 : session.currentStampCount,
+              cycleCount: finalReward ? session.cycleCount + 1 : session.cycleCount,
+              completedCycle,
+            },
+          },
+          request,
+        );
         return event;
       },
     );
+  }
+
+  async reverseTestStamp(
+    userId: string,
+    organizationId: string,
+    sessionId: string,
+    idempotencyKey: string,
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.test");
+    const result = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const session = await transaction.programTestSession.findFirst({
+          where: { id: sessionId, organizationId },
+          include: {
+            version: {
+              include: {
+                stampRule: true,
+                rewards: { include: { translations: true } },
+              },
+            },
+          },
+        });
+        if (!session)
+          throw new AppError(
+            "TEST_SESSION_NOT_FOUND",
+            "Test session not found.",
+            HttpStatus.NOT_FOUND,
+          );
+        const replay = await transaction.programTestEvent.findUnique({
+          where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+        });
+        if (replay)
+          return transaction.programTestSession.findUniqueOrThrow({
+            where: { id: sessionId },
+            include: {
+              version: {
+                include: {
+                  stampRule: true,
+                  rewards: { include: { translations: true } },
+                },
+              },
+              events: { orderBy: { createdAt: "desc" }, take: 100 },
+            },
+          });
+        const goal = session.version.stampRule?.requiredStampCount ?? 8;
+        if (session.currentStampCount === 0)
+          throw new AppError(
+            "TEST_STAMP_REVERSE_EMPTY",
+            "There is no synthetic stamp to reverse.",
+            HttpStatus.CONFLICT,
+          );
+        const currentAbsolute = absoluteTestPosition(
+          session.cycleCount,
+          session.currentStampCount,
+          goal,
+        );
+        const cycle = session.cycleCount + 1;
+        const positionInCycle = session.currentStampCount;
+        const affectedRewards = session.version.rewards.filter(
+          (reward) => reward.thresholdStampCount === positionInCycle,
+        );
+        const latestReset = await transaction.programTestEvent.findFirst({
+          where: { sessionId, eventType: "TEST_SESSION_RESET" },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true },
+        });
+        if (affectedRewards.length) {
+          const redemptions = await transaction.programTestEvent.findMany({
+            where: {
+              sessionId,
+              eventType: "TEST_REWARD_REDEEMED",
+              rewardDefinitionId: { in: affectedRewards.map((reward) => reward.id) },
+              ...(latestReset ? { createdAt: { gt: latestReset.createdAt } } : {}),
+            },
+            select: { safeMetadata: true },
+          });
+          const crossesRedeemedReward = redemptions.some((redemption) => {
+            const metadata =
+              redemption.safeMetadata && typeof redemption.safeMetadata === "object"
+                ? (redemption.safeMetadata as { cycle?: unknown })
+                : null;
+            return metadata?.cycle === cycle;
+          });
+          if (crossesRedeemedReward)
+            throw new AppError(
+              "TEST_STAMP_REVERSE_REDEEMED_REWARD",
+              "This stamp unlocked a reward that was already redeemed. Reset Test Mode instead.",
+              HttpStatus.CONFLICT,
+            );
+        }
+        const nextAbsolute = currentAbsolute - 1;
+        await transaction.programTestEvent.create({
+          data: {
+            sessionId,
+            eventType: "TEST_STAMP_REVERSED",
+            amount: 1,
+            idempotencyKey,
+            createdByUserId: userId,
+            safeMetadata: {
+              cycle,
+              positionInCycle,
+              previousAbsolute: currentAbsolute,
+              nextAbsolute,
+            },
+          },
+        });
+        for (const reward of affectedRewards)
+          await transaction.programTestEvent.create({
+            data: {
+              sessionId,
+              eventType: "TEST_REWARD_RELOCKED",
+              amount: 1,
+              rewardDefinitionId: reward.id,
+              idempotencyKey: `${idempotencyKey}:relock:${cycle}:${reward.id}`,
+              createdByUserId: userId,
+              safeMetadata: { cycle, thresholdStampCount: positionInCycle },
+            },
+          });
+        await transaction.loyaltyProgramVersion.update({
+          where: { id: session.versionId },
+          data: { status: "VALIDATED", testReadyAt: null },
+        });
+        return transaction.programTestSession.update({
+          where: { id: sessionId },
+          data: {
+            currentStampCount: session.currentStampCount - 1,
+            status: "ACTIVE",
+          },
+          include: {
+            version: {
+              include: {
+                stampRule: true,
+                rewards: { include: { translations: true } },
+              },
+            },
+            events: { orderBy: { createdAt: "desc" }, take: 100 },
+          },
+        });
+      },
+    );
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "program.test_stamp_reversed",
+        targetType: "program_test_session",
+        targetId: sessionId,
+      },
+      request,
+    );
+    return result;
   }
 
   async resetTestSession(
@@ -982,7 +1855,7 @@ export class ProgramsService {
     organizationId: string,
     sessionId: string,
     request: WafloRequest,
-    idempotencyKey = `reset:${sessionId}`,
+    idempotencyKey: string,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.test");
     const session = await withOrganizationInvariantLock(
@@ -1045,8 +1918,25 @@ export class ProgramsService {
     idempotencyKey: string,
     request: WafloRequest,
   ) {
-    await this.tenant.requireMembership(userId, organizationId, "programs.publish");
-    let replayed = false;
+    try {
+      await this.tenant.requireMembership(userId, organizationId, "programs.publish");
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (code === "ORGANIZATION_ACCESS_DENIED") {
+        const membership = await this.prisma.client.organizationMember.findUnique({
+          where: { organizationId_userId: { organizationId, userId } },
+          include: { organization: { select: { status: true } } },
+        });
+        if (membership?.status === "ACTIVE" && membership.organization.status !== "ACTIVE")
+          throw new AppError(
+            "PROGRAM_PUBLICATION_ORGANIZATION_UNAVAILABLE",
+            "This organization cannot publish programs in its current state.",
+            HttpStatus.CONFLICT,
+            { organizationStatus: membership.organization.status },
+          );
+      }
+      throw error;
+    }
     const result = await withOrganizationInvariantLock(
       this.prisma.client,
       organizationId,
@@ -1061,16 +1951,78 @@ export class ProgramsService {
               "This publish idempotency key belongs to another program.",
               HttpStatus.CONFLICT,
             );
-          replayed = true;
           return replay;
         }
         const program = await transaction.loyaltyProgram.findFirst({
           where: { id: programId, organizationId },
-          include: { currentDraftVersion: true },
+          include: {
+            organization: {
+              select: {
+                status: true,
+                selectedPlan: true,
+                billingProfile: true,
+              },
+            },
+            currentDraftVersion: {
+              include: {
+                stampRule: true,
+                rewards: {
+                  include: {
+                    visualOverride: {
+                      include: { stampAsset: { include: { variants: true } } },
+                    },
+                  },
+                },
+                locations: { include: { location: true } },
+                visualTheme: {
+                  include: {
+                    logoAsset: { include: { variants: true } },
+                    heroAsset: { include: { variants: true } },
+                    backgroundAsset: { include: { variants: true } },
+                    filledStampAsset: { include: { variants: true } },
+                    emptyStampAsset: { include: { variants: true } },
+                    defaultMilestoneAsset: { include: { variants: true } },
+                  },
+                },
+                validationRuns: { orderBy: { createdAt: "desc" }, take: 1 },
+                testSessions: {
+                  where: { status: "COMPLETED" },
+                  select: {
+                    id: true,
+                    versionRevision: true,
+                    validationFingerprint: true,
+                  },
+                },
+              },
+            },
+          },
         });
-        const version = program?.currentDraftVersion;
+        if (!program)
+          throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
+        const publicationState = decideProgramPublicationState({
+          programStatus: program.status,
+          hasCurrentPublishedVersion: program.currentPublishedVersionId !== null,
+        });
+        if (!publicationState.allowed)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_STATE_BLOCKED",
+            program.status === "ARCHIVED"
+              ? "Restore this program before publishing."
+              : program.status === "SUSPENDED"
+                ? "Publishing is unavailable for this program. Contact support for assistance."
+                : program.status === "SCHEDULED"
+                  ? "Scheduled publication is not available yet."
+                  : "This program cannot be published from its current operational state.",
+            HttpStatus.CONFLICT,
+            {
+              programStatus: program.status,
+              ...(publicationState.requiredAction
+                ? { requiredAction: publicationState.requiredAction }
+                : {}),
+            },
+          );
+        const version = program.currentDraftVersion;
         if (
-          !program ||
           version?.status !== "TEST_READY" ||
           !version.validationFingerprint ||
           !version.testReadyAt
@@ -1080,16 +2032,223 @@ export class ProgramsService {
             "Complete Test Mode after the latest validation before publishing.",
             HttpStatus.CONFLICT,
           );
-        const completedTest = await transaction.programTestSession.findFirst({
-          where: { organizationId, versionId: version.id, status: "COMPLETED" },
-          select: { id: true },
+        if (program.organization.status !== "ACTIVE")
+          throw new AppError(
+            "PROGRAM_PUBLICATION_ORGANIZATION_UNAVAILABLE",
+            "This organization cannot publish programs in its current state.",
+            HttpStatus.CONFLICT,
+            { organizationStatus: program.organization.status },
+          );
+        const billing = program.organization.billingProfile;
+        if (!billing)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_BILLING_BLOCKED",
+            "A current billing profile is required before publication.",
+            HttpStatus.CONFLICT,
+            { billingStatus: null },
+          );
+        const billingStatus = billing.subscriptionStatus
+          .toLocaleLowerCase("en-US")
+          .replaceAll("_", "_") as Parameters<typeof canPublishForBillingStatus>[0];
+        if (!canPublishForBillingStatus(billingStatus))
+          throw new AppError(
+            "PROGRAM_PUBLICATION_BILLING_BLOCKED",
+            "The current billing state does not allow publication.",
+            HttpStatus.CONFLICT,
+            { billingStatus },
+          );
+        const currentProgramUsage = await transaction.loyaltyProgram.count({
+          where: { organizationId, status: { not: "ARCHIVED" } },
         });
+        const currentPlan = toPlan(program.organization.selectedPlan);
+        const publicationLimit = canPublishWithinProgramLimit(currentPlan, currentProgramUsage);
+        if (!publicationLimit.allowed)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_PROGRAM_LIMIT_EXCEEDED",
+            "Reduce program usage or upgrade the plan before publishing.",
+            HttpStatus.CONFLICT,
+            {
+              currentPlan,
+              currentUsage: publicationLimit.currentUsage,
+              limit: publicationLimit.limit,
+              recommendedPlan: publicationLimit.recommendedPlan,
+            },
+          );
+        const stampGoal = version.stampRule?.requiredStampCount ?? 0;
+        const featureViolations = programPublicationFeatureViolations(currentPlan, {
+          editingMode: version.editingMode,
+          rewardThresholds: version.rewards.map((reward) => reward.thresholdStampCount),
+          requiredStampCount: stampGoal,
+          layoutType: version.visualTheme?.layoutType ?? "GRID",
+        });
+        if (featureViolations.length)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_PLAN_BLOCKED",
+            "The draft uses features that are unavailable on the current plan.",
+            HttpStatus.CONFLICT,
+            {
+              currentPlan,
+              recommendedPlan: currentPlan === "starter" ? "growth" : "scale",
+              violations: featureViolations,
+            },
+          );
+        const staleLocation = version.locations.find(
+          ({ location }) =>
+            location.organizationId !== organizationId || location.status !== "ACTIVE",
+        );
+        if (staleLocation)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_LOCATION_STALE",
+            "Every selected location must still belong to the organization and be active.",
+            HttpStatus.CONFLICT,
+            {
+              locationId: staleLocation.locationId,
+              locationStatus: staleLocation.location.status,
+            },
+          );
+        if (!version.locations.length)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_LOCATION_STALE",
+            "At least one active location is required before publication.",
+            HttpStatus.CONFLICT,
+            { locationId: null, locationStatus: null },
+          );
+        const visual = version.visualTheme;
+        if (!visual)
+          throw new AppError(
+            "PROGRAM_PUBLICATION_ASSET_STALE",
+            "The current draft has no visual theme.",
+            HttpStatus.CONFLICT,
+            { role: "visualTheme", reason: "MISSING" },
+          );
+        const publicationAssets: Array<{
+          asset: PublicationAsset | null;
+          role: string;
+          category: string;
+          variant: "STAMP_256" | "ORIGINAL_SAFE";
+          required: boolean;
+        }> = [
+          {
+            asset: visual.filledStampAsset,
+            role: "filledStamp",
+            category: "STAMP_FILLED",
+            variant: "STAMP_256",
+            required: true,
+          },
+          {
+            asset: visual.emptyStampAsset,
+            role: "emptyStamp",
+            category: "STAMP_EMPTY",
+            variant: "STAMP_256",
+            required: true,
+          },
+          {
+            asset: visual.defaultMilestoneAsset,
+            role: "defaultMilestone",
+            category: "STAMP_MILESTONE",
+            variant: "STAMP_256",
+            required: false,
+          },
+          {
+            asset: visual.logoAsset,
+            role: "logo",
+            category: "LOGO",
+            variant: "ORIGINAL_SAFE",
+            required: false,
+          },
+          {
+            asset: visual.heroAsset,
+            role: "hero",
+            category: "HERO",
+            variant: "ORIGINAL_SAFE",
+            required: false,
+          },
+          {
+            asset: visual.backgroundAsset,
+            role: "background",
+            category: "BACKGROUND",
+            variant: "ORIGINAL_SAFE",
+            required: false,
+          },
+          ...version.rewards.map((reward) => ({
+            asset: reward.visualOverride?.stampAsset ?? null,
+            role: `reward:${reward.id}`,
+            category: "STAMP_MILESTONE",
+            variant: "STAMP_256" as const,
+            required: false,
+          })),
+        ];
+        for (const selected of publicationAssets)
+          await this.assertPublicationAsset(
+            organizationId,
+            selected.asset,
+            selected.role,
+            selected.category,
+            selected.variant,
+            selected.required,
+          );
+        const expectedFingerprint = digest({ versionId: version.id, revision: version.revision });
+        const validation = version.validationRuns[0];
+        const validationErrors = Array.isArray(validation?.errors) ? validation.errors : [];
+        if (
+          !validation ||
+          validation.configurationFingerprint !== expectedFingerprint ||
+          version.validationFingerprint !== expectedFingerprint ||
+          !["PASSED", "VALID_WITH_WARNINGS"].includes(validation.status) ||
+          validationErrors.length > 0
+        )
+          throw new AppError(
+            "PROGRAM_PUBLICATION_VALIDATION_STALE",
+            "Run validation again for the current draft revision.",
+            HttpStatus.CONFLICT,
+            {
+              revision: version.revision,
+              expectedFingerprint,
+              validationStatus: validation?.status ?? null,
+            },
+          );
+        const completedTest = version.testSessions.find(
+          (session) =>
+            session.versionRevision === version.revision &&
+            session.validationFingerprint === expectedFingerprint,
+        );
         if (!completedTest)
           throw new AppError(
             "PROGRAM_TEST_REQUIRED",
             "Complete the synthetic customer journey before publishing.",
             HttpStatus.CONFLICT,
           );
+        const currentPreviews = await transaction.generatedProgramPreview.findMany({
+          where: {
+            organizationId,
+            versionId: version.id,
+            versionRevision: version.revision,
+            previewType: { in: [...requiredPublicationPreviews] },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        for (const previewType of requiredPublicationPreviews) {
+          const preview = currentPreviews.find((item) => item.previewType === previewType);
+          if (!preview)
+            throw new AppError(
+              "PROGRAM_PUBLICATION_PREVIEW_STALE",
+              "Generate every required preview for the current draft revision.",
+              HttpStatus.CONFLICT,
+              { profile: previewType, reason: "MISSING", revision: version.revision },
+            );
+          try {
+            const bytes = await this.objectStorage.get(preview.objectKey);
+            if (!preview.contentDigest || sha256Bytes(bytes) !== preview.contentDigest)
+              throw new Error("preview digest mismatch");
+          } catch {
+            throw new AppError(
+              "PROGRAM_PUBLICATION_PREVIEW_STALE",
+              "A required preview is missing or corrupted and must be regenerated.",
+              HttpStatus.CONFLICT,
+              { profile: previewType, reason: "CONTENT_INVALID", revision: version.revision },
+            );
+          }
+        }
         const now = new Date();
         const command = await transaction.programPublishCommand.create({
           data: {
@@ -1109,9 +2268,6 @@ export class ProgramsService {
             where: { id: program.currentPublishedVersionId },
             data: { status: "SUPERSEDED", supersededAt: now },
           });
-        const billing = await transaction.organizationBillingProfile.findUniqueOrThrow({
-          where: { organizationId },
-        });
         const shouldStartTrial =
           billing.subscriptionStatus === "PENDING_ACTIVATION" && billing.trialStart === null;
         const trialEnd = shouldStartTrial
@@ -1133,12 +2289,16 @@ export class ProgramsService {
           data: {
             currentPublishedVersionId: version.id,
             currentDraftVersionId: null,
-            status: "PUBLISHED",
-            publishedAt: now,
+            status: publicationState.resultingOperationalState,
+            publishedAt:
+              publicationState.publicationType === "FIRST_PUBLICATION"
+                ? now
+                : (program.publishedAt ?? now),
+            pausedAt: publicationState.preservePausedAt ? program.pausedAt : null,
             revision: { increment: 1 },
           },
         });
-        return transaction.programPublishCommand.update({
+        const completedCommand = await transaction.programPublishCommand.update({
           where: { id: command.id },
           data: {
             status: "COMPLETED",
@@ -1149,21 +2309,143 @@ export class ProgramsService {
             completedAt: new Date(),
           },
         });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "program.published",
+            targetType: "loyalty_program",
+            targetId: programId,
+            metadata: {
+              commandId: completedCommand.id,
+              versionId: version.id,
+              trialStarted: shouldStartTrial,
+              previousOperationalState: publicationState.previousOperationalState,
+              resultingOperationalState: publicationState.resultingOperationalState,
+              publicationType: publicationState.publicationType,
+              remainedPaused: publicationState.remainedPaused,
+            },
+          },
+          request,
+        );
+        if (program.currentPublishedVersionId)
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "program.version_superseded",
+              targetType: "loyalty_program_version",
+              targetId: program.currentPublishedVersionId,
+              metadata: {
+                commandId: completedCommand.id,
+                replacementVersionId: version.id,
+              },
+            },
+            request,
+          );
+        if (shouldStartTrial)
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "trial.started_by_program_publication",
+              targetType: "organization_billing_profile",
+              targetId: billing.id,
+              metadata: {
+                commandId: completedCommand.id,
+                programId,
+                versionId: version.id,
+                trialEnd: trialEnd?.toISOString() ?? null,
+              },
+            },
+            request,
+          );
+        return completedCommand;
       },
     );
-    if (!replayed)
-      await this.audit.record(
-        {
-          organizationId,
-          actorUserId: userId,
-          action: "program.published",
-          targetType: "loyalty_program",
-          targetId: programId,
-          metadata: { commandId: result.id, trialStarted: result.trialStarted },
-        },
-        request,
-      );
     return result;
+  }
+
+  private async assertPublicationAsset(
+    organizationId: string,
+    asset: PublicationAsset | null,
+    role: string,
+    expectedCategory: string,
+    requiredVariant: "STAMP_256" | "ORIGINAL_SAFE",
+    required: boolean,
+  ) {
+    if (!asset) {
+      if (!required) return;
+      throw new AppError(
+        "PROGRAM_PUBLICATION_ASSET_STALE",
+        `The selected ${role} asset is missing.`,
+        HttpStatus.CONFLICT,
+        { role, reason: "MISSING" },
+      );
+    }
+    const fail = (reason: string): never => {
+      throw new AppError(
+        "PROGRAM_PUBLICATION_ASSET_STALE",
+        `The selected ${role} asset is no longer publication-ready.`,
+        HttpStatus.CONFLICT,
+        { role, assetId: asset.id, reason },
+      );
+    };
+    if (asset.organizationId !== organizationId) fail("TENANT_MISMATCH");
+    if (asset.archivedAt || asset.processingStatus !== "READY") fail("NOT_READY");
+    if (asset.category !== expectedCategory) fail("CATEGORY_MISMATCH");
+    if (asset.source === "WAFLO_LIBRARY") {
+      const metadata =
+        asset.safeMetadata && typeof asset.safeMetadata === "object"
+          ? (asset.safeMetadata as {
+              inlineSvg?: unknown;
+              contentDigest?: unknown;
+              libraryCode?: unknown;
+              libraryVersion?: unknown;
+            })
+          : null;
+      if (
+        !metadata ||
+        typeof metadata?.inlineSvg !== "string" ||
+        metadata.contentDigest !== asset.sha256Digest ||
+        typeof metadata.libraryCode !== "string" ||
+        typeof metadata.libraryVersion !== "number"
+      )
+        fail("LIBRARY_METADATA_INVALID");
+      const validMetadata = metadata as {
+        inlineSvg: string;
+        contentDigest: string;
+        libraryCode: string;
+        libraryVersion: number;
+      };
+      const libraryCode = validMetadata.libraryCode;
+      const libraryVersion = validMetadata.libraryVersion;
+      const inlineSvg = validMetadata.inlineSvg;
+      const artwork = artworkFor(libraryCode, libraryVersion);
+      if (
+        !artwork ||
+        libraryArtworkDigest(artwork) !== asset.sha256Digest ||
+        canonicalArtworkBytes(artwork).toString("utf8") !==
+          canonicalArtworkBytes({ ...artwork, content: inlineSvg }).toString("utf8")
+      )
+        fail("LIBRARY_DIGEST_INVALID");
+      return;
+    }
+    if (asset.source !== "MERCHANT_UPLOAD") fail("SOURCE_INVALID");
+    const variant = asset.variants.find((item) => item.variantCode === requiredVariant);
+    if (!variant) fail("VARIANT_MISSING");
+    const selectedVariant = variant as PublicationAsset["variants"][number];
+    try {
+      const bytes = await this.objectStorage.get(selectedVariant.objectKey);
+      if (!selectedVariant.digest || sha256Bytes(bytes) !== selectedVariant.digest)
+        fail("OBJECT_DIGEST_INVALID");
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      fail("OBJECT_MISSING");
+    }
   }
 
   async transition(
@@ -1174,83 +2456,125 @@ export class ProgramsService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.manage_state");
-    const state =
-      action === "pause"
-        ? "PAUSED"
-        : action === "resume" || action === "restore"
-          ? "PUBLISHED"
-          : "ARCHIVED";
-    const program = await this.prisma.client.loyaltyProgram.findFirst({
-      where: { id: programId, organizationId },
-    });
-    if (!program)
-      throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
-    if (action === "pause" && program.status !== "PUBLISHED")
-      throw new AppError(
-        "PROGRAM_STATE_INVALID",
-        "Only published programs can be paused.",
-        HttpStatus.CONFLICT,
-      );
-    if (action === "resume" && program.status !== "PAUSED")
-      throw new AppError(
-        "PROGRAM_STATE_INVALID",
-        "Only paused programs can be resumed.",
-        HttpStatus.CONFLICT,
-      );
-    if (action === "archive" && !["PUBLISHED", "PAUSED"].includes(program.status))
-      throw new AppError(
-        "PROGRAM_STATE_INVALID",
-        "Only live programs can be archived.",
-        HttpStatus.CONFLICT,
-      );
-    if (action === "restore") {
-      if (program.status !== "ARCHIVED" || !program.currentPublishedVersionId)
-        throw new AppError(
-          "PROGRAM_STATE_INVALID",
-          "Only archived programs with a published version can be restored.",
-          HttpStatus.CONFLICT,
+    return withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const program = await transaction.loyaltyProgram.findFirst({
+          where: { id: programId, organizationId },
+          include: { currentDraftVersion: true },
+        });
+        if (!program)
+          throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
+        if (action === "pause" && program.status !== "PUBLISHED")
+          throw new AppError(
+            "PROGRAM_STATE_INVALID",
+            "Only published programs can be paused.",
+            HttpStatus.CONFLICT,
+          );
+        if (action === "resume" && program.status !== "PAUSED")
+          throw new AppError(
+            "PROGRAM_STATE_INVALID",
+            "Only paused programs can be resumed.",
+            HttpStatus.CONFLICT,
+          );
+        if (
+          action === "archive" &&
+          !["DRAFT", "VALIDATED", "TEST", "PUBLISHED", "PAUSED"].includes(program.status)
+        )
+          throw new AppError(
+            "PROGRAM_STATE_INVALID",
+            "Only editable or live programs can be archived.",
+            HttpStatus.CONFLICT,
+          );
+        let nextStatus: "DRAFT" | "VALIDATED" | "TEST" | "PUBLISHED" | "PAUSED" | "ARCHIVED";
+        if (action === "pause") nextStatus = "PAUSED";
+        else if (action === "resume") nextStatus = "PUBLISHED";
+        else if (action === "archive") nextStatus = "ARCHIVED";
+        else if (program.currentPublishedVersionId) nextStatus = "PUBLISHED";
+        else if (program.currentDraftVersion?.status === "VALIDATED") nextStatus = "VALIDATED";
+        else if (program.currentDraftVersion?.status === "TEST_READY") nextStatus = "TEST";
+        else nextStatus = "DRAFT";
+        if (action === "restore") {
+          if (
+            program.status !== "ARCHIVED" ||
+            (!program.currentPublishedVersionId && !program.currentDraftVersionId)
+          )
+            throw new AppError(
+              "PROGRAM_STATE_INVALID",
+              "Only archived programs with a preserved version can be restored.",
+              HttpStatus.CONFLICT,
+            );
+          const organization = await transaction.organization.findUniqueOrThrow({
+            where: { id: organizationId },
+            select: { selectedPlan: true },
+          });
+          const usage = await transaction.loyaltyProgram.count({
+            where: { organizationId, status: { not: "ARCHIVED" } },
+          });
+          const decision = canRestoreProgram(toPlan(organization.selectedPlan), usage);
+          if (!decision.allowed)
+            throw new AppError(
+              "PROGRAM_LIMIT_REACHED",
+              "Your plan cannot restore another active program.",
+              HttpStatus.CONFLICT,
+              { limit: decision.limit, currentUsage: decision.currentUsage },
+            );
+        }
+        const updated = await transaction.loyaltyProgram.update({
+          where: { id: programId },
+          data: {
+            status: nextStatus,
+            pausedAt:
+              action === "pause"
+                ? new Date()
+                : action === "resume" || action === "restore"
+                  ? null
+                  : program.pausedAt,
+            archivedAt:
+              action === "archive" ? new Date() : action === "restore" ? null : program.archivedAt,
+            revision: { increment: 1 },
+          },
+        });
+        const walletSyncJob = await this.queueProgramWalletStateSync(
+          transaction,
+          organizationId,
+          programId,
+          action,
+          updated.revision,
         );
-      const organization = await this.prisma.client.organization.findUniqueOrThrow({
-        where: { id: organizationId },
-        select: { selectedPlan: true },
-      });
-      const usage = await this.prisma.client.loyaltyProgram.count({
-        where: { organizationId, status: { not: "ARCHIVED" } },
-      });
-      const decision = canRestoreProgram(toPlan(organization.selectedPlan), usage);
-      if (!decision.allowed)
-        throw new AppError(
-          "PROGRAM_LIMIT_REACHED",
-          "Your plan cannot restore another active program.",
-          HttpStatus.CONFLICT,
-          { limit: decision.limit, currentUsage: decision.currentUsage },
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "program.wallet_sync_job_created",
+            targetType: "program_wallet_sync_job",
+            targetId: walletSyncJob.id,
+            metadata: { programId, programRevision: updated.revision, programAction: action },
+          },
+          request,
         );
-    }
-    const updated = await this.prisma.client.loyaltyProgram.update({
-      where: { id: programId },
-      data: {
-        status: state,
-        pausedAt:
-          action === "pause"
-            ? new Date()
-            : action === "resume" || action === "restore"
-              ? null
-              : program.pausedAt,
-        archivedAt:
-          action === "archive" ? new Date() : action === "restore" ? null : program.archivedAt,
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: `program.${action}d`,
+            targetType: "loyalty_program",
+            targetId: programId,
+            metadata: {
+              previousStatus: program.status,
+              nextStatus,
+              preservedDraftVersionId: program.currentDraftVersionId,
+              preservedPublishedVersionId: program.currentPublishedVersionId,
+            },
+          },
+          request,
+        );
+        return updated;
       },
-    });
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: `program.${action}d`,
-        targetType: "loyalty_program",
-        targetId: programId,
-      },
-      request,
     );
-    return updated;
   }
 
   async abandonDraft(
@@ -1274,88 +2598,148 @@ export class ProgramsService {
             "There is no editable draft to abandon.",
             HttpStatus.CONFLICT,
           );
+        if (!program.currentPublishedVersionId)
+          throw new AppError(
+            "PROGRAM_INITIAL_DRAFT_ARCHIVE_REQUIRED",
+            "Archive an unpublished program instead of abandoning its only draft.",
+            HttpStatus.CONFLICT,
+          );
         await transaction.loyaltyProgramVersion.update({
           where: { id: program.currentDraftVersion.id },
           data: { status: "ABANDONED", abandonedAt: new Date() },
         });
-        return transaction.loyaltyProgram.update({
+        const updated = await transaction.loyaltyProgram.update({
           where: { id: programId },
           data: { currentDraftVersionId: null },
         });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "program.draft_abandoned",
+            targetType: "loyalty_program",
+            targetId: programId,
+            metadata: { draftVersionId: program.currentDraftVersion.id },
+          },
+          request,
+        );
+        return updated;
       },
-    );
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "program.draft_abandoned",
-        targetType: "loyalty_program",
-        targetId: programId,
-      },
-      request,
     );
     return result;
+  }
+
+  private async queueProgramWalletStateSync(
+    transaction: Prisma.TransactionClient,
+    organizationId: string,
+    programId: string,
+    action: "pause" | "resume" | "archive" | "restore",
+    programRevision: number,
+  ) {
+    const reason =
+      action === "pause"
+        ? "PROGRAM_PAUSED"
+        : action === "resume" || action === "restore"
+          ? "PROGRAM_RESUMED"
+          : "PROGRAM_ARCHIVED";
+    const idempotencyKey = `program-wallet-sync:${programId}:r${programRevision}:${action}`;
+    return transaction.programWalletSyncJob.upsert({
+      where: { idempotencyKey },
+      create: {
+        organizationId,
+        programId,
+        action,
+        reason,
+        commandType: action === "archive" ? "INVALIDATE" : "UPDATE",
+        idempotencyKey,
+        batchSize: 500,
+      },
+      update: {},
+    });
   }
 
   private async ensureBuiltInAssets(
     transaction: Prisma.TransactionClient,
     organizationId: string,
     userId: string,
-    template: (typeof templates)[number],
+    template: ProgramTemplateDefinition,
   ) {
-    const make = async (key: string, category: "STAMP_FILLED" | "STAMP_EMPTY") => {
-      const content = artworkFor(key)?.content ?? "";
-      return transaction.merchantAsset.upsert({
-        where: { organizationId_sha256Digest: { organizationId, sha256Digest: digest(key) } },
-        update: {
-          fileSize: Buffer.byteLength(content),
-          safeMetadata: {
-            storage: "waflo-library",
-            inlineSvg: content,
-            libraryCode: key,
-            license: "Waflo-owned artwork",
+    const make = async (
+      reference: ProgramTemplateDefinition["artwork"]["filled"],
+      category: "STAMP_FILLED" | "STAMP_EMPTY" | "STAMP_MILESTONE",
+    ) => {
+      const artwork = artworkFor(reference);
+      if (!artwork)
+        throw new AppError(
+          "PROGRAM_LIBRARY_ARTWORK_NOT_FOUND",
+          "The selected template artwork version is unavailable.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          { ...reference },
+        );
+      const bytes = canonicalArtworkBytes(artwork);
+      const contentDigest = libraryArtworkDigest(artwork);
+      const existing = await transaction.merchantAsset.findUnique({
+        where: {
+          organizationId_sha256Digest_category: {
+            organizationId,
+            sha256Digest: contentDigest,
+            category,
           },
         },
-        create: {
+      });
+      if (existing) return existing;
+      return transaction.merchantAsset.create({
+        data: {
           organizationId,
           category,
           source: "WAFLO_LIBRARY",
-          originalObjectKey: `built-in/${key}.svg`,
-          originalFilename: `${key}.svg`,
+          originalObjectKey: `built-in/v${reference.version}/${contentDigest}.svg`,
+          originalFilename: `${reference.code}-v${reference.version}.svg`,
           mimeType: "image/svg+xml",
-          fileSize: Buffer.byteLength(content),
-          sha256Digest: digest(key),
+          fileSize: bytes.length,
+          sha256Digest: contentDigest,
           processingStatus: "READY",
           createdByUserId: userId,
           safeMetadata: {
             storage: "waflo-library",
-            inlineSvg: content,
-            libraryCode: key,
+            inlineSvg: bytes.toString("utf8"),
+            libraryCode: reference.code,
+            libraryVersion: reference.version,
+            librarySchemaVersion: LIBRARY_ARTWORK_SCHEMA_VERSION,
+            contentDigest,
             license: "Waflo-owned artwork",
           },
         },
       });
     };
-    const [filled, empty] = await Promise.all([
-      make(template.filled, "STAMP_FILLED"),
-      make(template.empty, "STAMP_EMPTY"),
+    const [filled, empty, milestone] = await Promise.all([
+      make(template.artwork.filled, "STAMP_FILLED"),
+      make(template.artwork.empty, "STAMP_EMPTY"),
+      make(template.artwork.milestone, "STAMP_MILESTONE"),
     ]);
-    return { filledId: filled.id, emptyId: empty.id };
+    return { filledId: filled.id, emptyId: empty.id, milestoneId: milestone.id };
   }
 
   private async assertAssetReferences(
     transaction: Prisma.TransactionClient,
     organizationId: string,
     visual: ProgramCreateInput["visualTheme"],
+    rewards: ProgramCreateInput["rewards"] = [],
   ) {
     const ids = [
-      visual.logoAssetId,
-      visual.heroAssetId,
-      visual.backgroundAssetId,
-      visual.filledStampAssetId,
-      visual.emptyStampAssetId,
-      visual.defaultMilestoneAssetId,
-    ].filter((value): value is string => Boolean(value));
+      ...new Set(
+        [
+          visual.logoAssetId,
+          visual.heroAssetId,
+          visual.backgroundAssetId,
+          visual.filledStampAssetId,
+          visual.emptyStampAssetId,
+          visual.defaultMilestoneAssetId,
+          ...rewards.map((reward) => reward.visualOverride?.stampAssetId),
+        ].filter((value): value is string => Boolean(value)),
+      ),
+    ];
     if (!ids.length) return;
     const assets = await transaction.merchantAsset.findMany({
       where: { id: { in: ids }, organizationId, archivedAt: null, processingStatus: "READY" },
@@ -1375,6 +2759,13 @@ export class ProgramsService {
       [visual.filledStampAssetId ?? undefined, ["STAMP_FILLED"]],
       [visual.emptyStampAssetId ?? undefined, ["STAMP_EMPTY"]],
       [visual.defaultMilestoneAssetId ?? undefined, ["STAMP_MILESTONE"]],
+      ...rewards.map(
+        (reward) =>
+          [reward.visualOverride?.stampAssetId ?? undefined, ["STAMP_MILESTONE"]] as [
+            string | undefined,
+            string[],
+          ],
+      ),
     ];
     for (const [id, categories] of expected)
       if (id && !categories.includes(categoryById.get(id) ?? ""))
@@ -1386,17 +2777,27 @@ export class ProgramsService {
   }
 
   private versionCreateData(
-    input: ProgramCreateInput,
-    assets: { filledId: string; emptyId: string },
+    input: ProgramCreateInput & { persistedStampPolicy?: PersistedStampPolicy },
+    assets: { filledId: string; emptyId: string; milestoneId: string },
     locationIds: string[],
     userId: string,
+    template: ProgramTemplateDefinition,
   ) {
     const visual = input.visualTheme;
+    const policy = input.persistedStampPolicy ?? {
+      defaultStampsPerAction: W2_STAMP_POLICY_DEFAULTS.defaultStampsPerAction,
+      maximumStampsPerOperation: W2_STAMP_POLICY_DEFAULTS.maximumStampsPerOperation,
+      maximumStampsPerCustomerPerDay: W2_STAMP_POLICY_DEFAULTS.maximumStampsPerCustomerPerDay,
+      minimumPurchaseAmountMinor: W2_STAMP_POLICY_DEFAULTS.minimumPurchaseAmountMinor,
+      minimumPurchaseCurrency: W2_STAMP_POLICY_DEFAULTS.minimumPurchaseCurrency,
+      resetBehaviorAfterReward: W2_STAMP_POLICY_DEFAULTS.resetBehaviorAfterFinalReward,
+    };
     return {
       status: "DRAFT" as const,
       editingMode: input.editingMode.toUpperCase() as "QUICK" | "PRO",
-      baseTemplateCode: input.templateCode ?? null,
-      configurationSchemaVersion: 1,
+      baseTemplateCode: template.code,
+      baseTemplateVersion: template.version,
+      configurationSchemaVersion: 2,
       createdByUserId: userId,
       translations: {
         create: (["en", "ar"] as const).map((locale) => {
@@ -1418,10 +2819,13 @@ export class ProgramsService {
       stampRule: {
         create: {
           requiredStampCount: input.requiredStampCount,
-          defaultStampsPerAction: 1,
-          maximumStampsPerOperation: 5,
+          defaultStampsPerAction: policy.defaultStampsPerAction,
+          maximumStampsPerOperation: policy.maximumStampsPerOperation,
+          maximumStampsPerCustomerPerDay: policy.maximumStampsPerCustomerPerDay,
+          minimumPurchaseAmountMinor: policy.minimumPurchaseAmountMinor,
+          minimumPurchaseCurrency: policy.minimumPurchaseCurrency,
           earningDescription: input.earningDescription,
-          resetBehaviorAfterReward: "RESET",
+          resetBehaviorAfterReward: policy.resetBehaviorAfterReward,
         },
       },
       rewards: {
@@ -1444,6 +2848,16 @@ export class ProgramsService {
               };
             }),
           },
+          ...(reward.visualOverride
+            ? {
+                visualOverride: {
+                  create: {
+                    stampAssetId: reward.visualOverride.stampAssetId ?? null,
+                    accentOverride: reward.visualOverride.accentOverride ?? null,
+                  },
+                },
+              }
+            : {}),
         })),
       },
       locations: { create: locationIds.map((locationId) => ({ locationId })) },
@@ -1459,9 +2873,10 @@ export class ProgramsService {
           ...(visual.logoAssetId ? { logoAssetId: visual.logoAssetId } : {}),
           ...(visual.heroAssetId ? { heroAssetId: visual.heroAssetId } : {}),
           ...(visual.backgroundAssetId ? { backgroundAssetId: visual.backgroundAssetId } : {}),
-          ...(visual.defaultMilestoneAssetId
-            ? { defaultMilestoneAssetId: visual.defaultMilestoneAssetId }
-            : {}),
+          defaultMilestoneAssetId:
+            visual.defaultMilestoneAssetId === undefined
+              ? assets.milestoneId
+              : visual.defaultMilestoneAssetId,
           layoutType: visual.layoutType,
           layoutConfiguration: visual.layoutConfiguration,
           stampSize: visual.stampSize,
@@ -1480,13 +2895,14 @@ export class ProgramsService {
   private inputFromVersion(
     version: NonNullable<Awaited<ReturnType<ProgramsService["get"]>>["currentDraftVersion"]>,
     internalName: string,
-  ): ProgramCreateInput {
+  ): CanonicalMutableProgramInput {
     const en = version.translations.find((item) => item.locale === "EN");
     const ar = version.translations.find((item) => item.locale === "AR");
     return {
       internalName,
       editingMode: version.editingMode.toLowerCase() as "quick" | "pro",
       templateCode: version.baseTemplateCode ?? undefined,
+      templateVersion: version.baseTemplateVersion ?? undefined,
       requiredStampCount: version.stampRule?.requiredStampCount ?? 8,
       earningDescription:
         version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
@@ -1523,6 +2939,12 @@ export class ProgramsService {
         validityDurationDays: reward.validityDurationDays,
         requiresManagerApproval: reward.requiresManagerApproval,
         maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
+        visualOverride: reward.visualOverride
+          ? {
+              stampAssetId: reward.visualOverride.stampAssetId,
+              accentOverride: reward.visualOverride.accentOverride,
+            }
+          : undefined,
         translations: {
           en: {
             name:
@@ -1530,6 +2952,9 @@ export class ProgramsService {
             description:
               reward.translations.find((item) => item.locale === "EN")?.description ??
               reward.internalName,
+            redemptionInstructions:
+              reward.translations.find((item) => item.locale === "EN")?.redemptionInstructions ??
+              undefined,
           },
           ar: {
             name:
@@ -1537,9 +2962,27 @@ export class ProgramsService {
             description:
               reward.translations.find((item) => item.locale === "AR")?.description ??
               reward.internalName,
+            redemptionInstructions:
+              reward.translations.find((item) => item.locale === "AR")?.redemptionInstructions ??
+              undefined,
           },
         },
       })),
+      persistedStampPolicy: {
+        defaultStampsPerAction:
+          version.stampRule?.defaultStampsPerAction ??
+          W2_STAMP_POLICY_DEFAULTS.defaultStampsPerAction,
+        maximumStampsPerOperation:
+          version.stampRule?.maximumStampsPerOperation ??
+          W2_STAMP_POLICY_DEFAULTS.maximumStampsPerOperation,
+        maximumStampsPerCustomerPerDay: version.stampRule?.maximumStampsPerCustomerPerDay ?? null,
+        minimumPurchaseAmountMinor: version.stampRule?.minimumPurchaseAmountMinor ?? null,
+        minimumPurchaseCurrency: version.stampRule?.minimumPurchaseCurrency ?? null,
+        resetBehaviorAfterReward:
+          version.stampRule?.resetBehaviorAfterReward ??
+          W2_STAMP_POLICY_DEFAULTS.resetBehaviorAfterFinalReward,
+      },
+      ...(version.changeSummary ? { changeSummary: version.changeSummary } : {}),
       visualTheme: (version.visualTheme
         ? {
             backgroundColor: version.visualTheme.backgroundColor,
@@ -1601,6 +3044,7 @@ export class ProgramsService {
     return {
       editingMode: source.editingMode,
       baseTemplateCode: source.baseTemplateCode,
+      baseTemplateVersion: source.baseTemplateVersion,
       configurationSchemaVersion: source.configurationSchemaVersion,
       stampRule: source.stampRule
         ? {
@@ -1647,6 +3091,16 @@ export class ProgramsService {
               redemptionInstructions: item.redemptionInstructions,
             })),
           },
+          ...(reward.visualOverride
+            ? {
+                visualOverride: {
+                  create: {
+                    stampAssetId: reward.visualOverride.stampAssetId,
+                    accentOverride: reward.visualOverride.accentOverride,
+                  },
+                },
+              }
+            : {}),
         })),
       },
       locations: {
@@ -1683,8 +3137,50 @@ export class ProgramsService {
             },
           }
         : undefined,
+      enrollmentPolicy: {
+        create: {
+          organizationId: source.organizationId,
+          emailCollectionMode: source.enrollmentPolicy?.emailCollectionMode ?? "OPTIONAL",
+          primaryCustomerLocale: source.enrollmentPolicy?.primaryCustomerLocale ?? "EN",
+          allowLocaleSelection: source.enrollmentPolicy?.allowLocaleSelection ?? true,
+          marketingConsentVisible: source.enrollmentPolicy?.marketingConsentVisible ?? false,
+          marketingConsentDefault: false,
+          customerTermsRequired: true,
+          transferWithoutEmailAllowed: source.enrollmentPolicy?.transferWithoutEmailAllowed ?? true,
+          enrollmentOpen: source.enrollmentPolicy?.enrollmentOpen ?? true,
+        },
+      },
       createdByUserId: userId,
     };
+  }
+
+  private async allocatePublicSlug(
+    transaction: Prisma.TransactionClient,
+    organizationId: string,
+    customerFacingName: string,
+  ): Promise<string> {
+    const rawBase = slugifyProgramName(customerFacingName, "program");
+    const base = reservedProgramSlugs.has(rawBase) ? `program-${rawBase}` : rawBase;
+    for (let suffix = 1; suffix <= 200; suffix += 1) {
+      const addition = suffix === 1 ? "" : `-${suffix}`;
+      const candidate = `${base.slice(0, 50 - addition.length).replace(/-+$/g, "")}${addition}`;
+      const [current, reserved] = await Promise.all([
+        transaction.loyaltyProgram.findFirst({
+          where: { organizationId, publicSlug: candidate },
+          select: { id: true },
+        }),
+        transaction.programPublicSlugHistory.findFirst({
+          where: { organizationId, slug: candidate, reservedUntil: { gt: new Date() } },
+          select: { id: true },
+        }),
+      ]);
+      if (!current && !reserved) return candidate;
+    }
+    throw new AppError(
+      "PROGRAM_PUBLIC_SLUG_UNAVAILABLE",
+      "Unable to allocate a public program URL.",
+      HttpStatus.CONFLICT,
+    );
   }
 }
 

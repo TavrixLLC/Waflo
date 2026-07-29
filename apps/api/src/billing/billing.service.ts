@@ -148,7 +148,7 @@ export class BillingService {
       const previousPlan = dbToPlan(organization.selectedPlan);
       if (planRank[plan] < planRank[previousPlan]) {
         const now = new Date();
-        const [locationUsage, activeSeatUsage, pendingSeatUsage] = await Promise.all([
+        const [locationUsage, activeSeatUsage, pendingSeatUsage, programUsage] = await Promise.all([
           transaction.location.count({ where: { organizationId, status: "ACTIVE" } }),
           transaction.organizationMember.count({
             where: {
@@ -165,6 +165,9 @@ export class BillingService {
               intendedRole: { in: ["MANAGER", "STAFF"] },
             },
           }),
+          transaction.loyaltyProgram.count({
+            where: { organizationId, status: { not: "ARCHIVED" } },
+          }),
         ]);
         const teamSeatUsage = activeSeatUsage + pendingSeatUsage;
         const locationLimit =
@@ -175,9 +178,11 @@ export class BillingService {
           plan === "scale"
             ? (this.environment.values.SCALE_TEAM_LIMIT ?? null)
             : planCatalog[plan].limits.teamSeats;
+        const programLimit = planCatalog[plan].limits.programs;
         if (
           (locationLimit !== null && locationUsage > locationLimit) ||
-          (teamSeatLimit !== null && teamSeatUsage > teamSeatLimit)
+          (teamSeatLimit !== null && teamSeatUsage > teamSeatLimit) ||
+          (programLimit !== null && programUsage > programLimit)
         ) {
           throw new AppError(
             "PLAN_DOWNGRADE_BLOCKED",
@@ -189,6 +194,8 @@ export class BillingService {
               locationLimit,
               teamSeatUsage,
               teamSeatLimit,
+              programUsage,
+              programLimit,
             },
           );
         }
@@ -201,18 +208,19 @@ export class BillingService {
         where: { organizationId },
         data: { selectedPlan },
       });
+      await this.audit.recordInTransaction(
+        transaction,
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "billing.selected_plan_changed",
+          targetType: "organization_billing_profile",
+          targetId: organizationId,
+          metadata: { selectedPlan },
+        },
+        request,
+      );
     });
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "billing.selected_plan_changed",
-        targetType: "organization_billing_profile",
-        targetId: organizationId,
-        metadata: { selectedPlan },
-      },
-      request,
-    );
     return { selectedPlan, subscriptionActivated: false, trialStarted: false };
   }
 
@@ -897,7 +905,7 @@ export class BillingService {
       data: { selectedPlan: planToDb(plan) },
     });
 
-    const [locationUsage, activeSeatUsage, pendingSeatUsage] = await Promise.all([
+    const [locationUsage, activeSeatUsage, pendingSeatUsage, programUsage] = await Promise.all([
       transaction.location.count({
         where: { organizationId: profile.organizationId, status: "ACTIVE" },
       }),
@@ -916,6 +924,12 @@ export class BillingService {
           intendedRole: { in: ["MANAGER", "STAFF"] },
         },
       }),
+      transaction.loyaltyProgram.count({
+        where: {
+          organizationId: profile.organizationId,
+          status: { not: "ARCHIVED" },
+        },
+      }),
     ]);
     const locationLimit =
       plan === "scale"
@@ -926,9 +940,11 @@ export class BillingService {
         ? (this.environment.values.SCALE_TEAM_LIMIT ?? null)
         : planCatalog[plan].limits.teamSeats;
     const teamSeatUsage = activeSeatUsage + pendingSeatUsage;
+    const programLimit = planCatalog[plan].limits.programs;
     const overLimit =
       (locationLimit !== null && locationUsage > locationLimit) ||
-      (teamSeatLimit !== null && teamSeatUsage > teamSeatLimit);
+      (teamSeatLimit !== null && teamSeatUsage > teamSeatLimit) ||
+      (programLimit !== null && programUsage > programLimit);
 
     await transaction.auditLog.create({
       data: {
@@ -949,6 +965,8 @@ export class BillingService {
           locationLimit,
           teamSeatUsage,
           teamSeatLimit,
+          programUsage,
+          programLimit,
           overLimitPolicy: overLimit
             ? "preserve_resources_and_block_new_capacity"
             : "within_entitlements",

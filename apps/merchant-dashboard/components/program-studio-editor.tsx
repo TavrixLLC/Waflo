@@ -1,0 +1,2401 @@
+"use client";
+
+import {
+  decideProgramPublicationState,
+  type ProgramOperationalStatus,
+  type ProgramPreviewPlatform,
+  type ProgramPublicationStateDecision,
+  programPlatformCapabilities,
+} from "@waflo/contracts";
+import {
+  Alert,
+  AlertDialog,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  FormField,
+  Modal,
+  Select,
+  TextArea,
+  TextInput,
+} from "@waflo/ui";
+import {
+  Archive,
+  ArrowLeft,
+  Check,
+  CircleAlert,
+  Clock3,
+  Copy,
+  Download,
+  Eye,
+  FlaskConical,
+  Gift,
+  History,
+  Pause,
+  Play,
+  Plus,
+  RefreshCcw,
+  RotateCcw,
+  Save,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  UploadCloud,
+  X,
+} from "lucide-react";
+import Image from "next/image";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch, ApiClientError } from "../lib/api-client";
+import { ProgramAssetPicker } from "./program-asset-uploader";
+import { ProgramEnrollmentSettings } from "./program-enrollment-settings";
+import {
+  apiDraft,
+  studioSections,
+  versionToDraft,
+  type AssetItem,
+  type LocationItem,
+  type PreviewProfile,
+  type ProgramDetail,
+  type ProgramDraftInput,
+  type ProgramVersion,
+  type RewardInput,
+  type StudioSection,
+  type TestSession,
+  type ValidationIssue,
+  type ValidationResult,
+} from "./program-studio-types";
+
+const sectionCopy: Record<StudioSection, { en: string; ar: string }> = {
+  overview: { en: "Overview", ar: "نظرة عامة" },
+  earning: { en: "Earning rules", ar: "قواعد الكسب" },
+  rewards: { en: "Rewards & milestones", ar: "المكافآت والمعالم" },
+  locations: { en: "Locations", ar: "المواقع" },
+  english: { en: "English content", ar: "المحتوى الإنجليزي" },
+  arabic: { en: "Arabic content", ar: "المحتوى العربي" },
+  visual: { en: "Visual identity", ar: "الهوية البصرية" },
+  artwork: { en: "Artwork", ar: "الرسومات" },
+  layout: { en: "Stamp layout", ar: "تخطيط الأختام" },
+  "customer-preview": { en: "Customer Web", ar: "ويب العميل" },
+  "apple-preview": { en: "Apple Wallet", ar: "Apple Wallet" },
+  "google-preview": { en: "Google Wallet", ar: "Google Wallet" },
+  policies: { en: "Policies", ar: "السياسات" },
+  validation: { en: "Validation", ar: "التحقق" },
+  "test-mode": { en: "Test Mode", ar: "وضع الاختبار" },
+  versions: { en: "Version history", ar: "سجل الإصدارات" },
+};
+
+type SaveState = "saved" | "unsaved" | "saving" | "failed" | "conflict";
+
+interface PreviewResult {
+  svg: string;
+  width: number;
+  height: number;
+  warnings: Array<{ code: string; message: string }>;
+  profile: PreviewProfile;
+}
+
+interface CursorPage<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+interface ConflictState {
+  localRevision: number;
+  serverRevision: number;
+  localDraft: ProgramDraftInput;
+}
+
+function statusLabel(state: SaveState, ar: boolean) {
+  const labels: Record<SaveState, [string, string]> = {
+    saved: ["Saved", "تم الحفظ"],
+    unsaved: ["Unsaved changes", "تغييرات غير محفوظة"],
+    saving: ["Saving…", "جارٍ الحفظ…"],
+    failed: ["Save failed", "فشل الحفظ"],
+    conflict: ["Edited elsewhere", "تم التحرير في مكان آخر"],
+  };
+  return labels[state][ar ? 1 : 0];
+}
+
+function sectionForIssue(issue: ValidationIssue): StudioSection {
+  if (issue.path.startsWith("content.en")) return "english";
+  if (issue.path.startsWith("content.ar")) return "arabic";
+  if (issue.path.startsWith("earning")) return "earning";
+  if (issue.path.startsWith("rewards")) return "rewards";
+  if (issue.path.startsWith("locations")) return "locations";
+  if (issue.path.startsWith("artwork")) return "artwork";
+  if (issue.path.startsWith("visual")) return "visual";
+  if (issue.path.startsWith("stampLayout")) return "layout";
+  if (issue.path.startsWith("apple")) return "apple-preview";
+  if (issue.path.startsWith("google")) return "google-preview";
+  if (issue.path.startsWith("test")) return "test-mode";
+  return "customer-preview";
+}
+
+function sectionForPublicationError(code: string): StudioSection {
+  if (code === "PROGRAM_PUBLICATION_LOCATION_STALE") return "locations";
+  if (code === "PROGRAM_PUBLICATION_ASSET_STALE") return "artwork";
+  if (code === "PROGRAM_PUBLICATION_PREVIEW_STALE") return "customer-preview";
+  if (code === "PROGRAM_PUBLICATION_VALIDATION_STALE" || code === "PROGRAM_TEST_REQUIRED")
+    return "validation";
+  return "overview";
+}
+
+function publicationStateGuidance(status: ProgramOperationalStatus, ar: boolean) {
+  if (status === "ARCHIVED")
+    return {
+      title: ar ? "البرنامج مؤرشف" : "Restore required before publishing",
+      message: ar
+        ? "استعد البرنامج أولاً، ثم راجع المسودة وانشرها."
+        : "Restore this program before publishing. Its preserved draft will remain available.",
+    };
+  if (status === "SUSPENDED")
+    return {
+      title: ar ? "النشر غير متاح" : "Publishing is unavailable",
+      message: ar
+        ? "لا يمكن نشر هذا البرنامج في حالته الحالية. تواصل مع الدعم للمساعدة."
+        : "This program cannot be published in its current state. Contact support for assistance.",
+    };
+  if (status === "SCHEDULED")
+    return {
+      title: ar ? "النشر المجدول غير متاح" : "Scheduled publishing is unavailable",
+      message: ar
+        ? "لا يمكن نشر البرنامج المجدول حتى يتم تنفيذ ميزة الجدولة."
+        : "This program cannot publish while scheduling is not implemented.",
+    };
+  return {
+    title: ar ? "حالة البرنامج تمنع النشر" : "Program state blocks publishing",
+    message: ar
+      ? "راجع حالة البرنامج قبل محاولة النشر."
+      : "Review the program operational state before publishing.",
+  };
+}
+
+function publishedStatePresentation(status: ProgramOperationalStatus, ar: boolean) {
+  if (status === "PAUSED")
+    return {
+      title: ar ? "الإصدار المنشور ما زال متوقفًا مؤقتًا" : "The published version remains paused",
+      message: ar
+        ? "هذا الإصدار غير مباشر للعملاء. استخدم الاستئناف بشكل صريح عندما تكون مستعدًا لإعادته للعمل."
+        : "This version is not live for customers. Use Resume explicitly when you are ready to make it live again.",
+    };
+  if (status === "ARCHIVED")
+    return {
+      title: ar ? "البرنامج مؤرشف" : "This program is archived",
+      message: ar
+        ? "استعد البرنامج قبل إنشاء إصدار جديد أو نشر المسودة المحفوظة."
+        : "Restore the program before creating or publishing another version.",
+    };
+  if (status === "SUSPENDED")
+    return {
+      title: ar ? "النشر غير متاح" : "Publishing is unavailable",
+      message: ar
+        ? "لا يمكن نشر هذا البرنامج في حالته الحالية. تواصل مع الدعم للمساعدة."
+        : "This program cannot be published in its current state. Contact support for assistance.",
+    };
+  if (status === "SCHEDULED")
+    return {
+      title: ar ? "البرنامج مجدول" : "This program is scheduled",
+      message: ar
+        ? "النشر المجدول غير متاح حتى يتم تنفيذ ميزة الجدولة."
+        : "Scheduled publishing remains unavailable until scheduling is implemented.",
+    };
+  return {
+    title: ar ? "الإصدار المنشور مباشر وآمن" : "The published version remains live",
+    message: ar
+      ? "أنشئ مسودة جديدة لتحرير الإصدار التالي دون تغيير البرنامج المباشر."
+      : "Create a new draft to edit the next version without changing the live program.",
+  };
+}
+
+function previewProfileForSection(section: StudioSection): PreviewProfile {
+  if (section === "apple-preview") return "APPLE_WALLET";
+  if (section === "google-preview") return "GOOGLE_WALLET";
+  return "CUSTOMER_WEB";
+}
+
+export function ProgramStudioEditor({
+  organizationId,
+  programId,
+  plan,
+  locations,
+  assets,
+  onAssetUploaded,
+  ar,
+  onClose,
+  onChanged,
+}: {
+  organizationId: string;
+  programId: string;
+  plan: "STARTER" | "GROWTH" | "SCALE";
+  locations: LocationItem[];
+  assets: AssetItem[];
+  onAssetUploaded: (asset: AssetItem) => void;
+  ar: boolean;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [detail, setDetail] = useState<ProgramDetail | null>(null);
+  const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
+  const [revision, setRevision] = useState(1);
+  const [activeSection, setActiveSection] = useState<StudioSection>("overview");
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewResult>>>({});
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [validation, setValidation] = useState<ValidationResult | null>(null);
+  const [testSession, setTestSession] = useState<TestSession | null>(null);
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [historicalVersion, setHistoricalVersion] = useState<ProgramVersion | null>(null);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<
+    "publish" | "pause" | "resume" | "archive" | "restore" | "abandon" | null
+  >(null);
+  const [working, setWorking] = useState(false);
+  const persistedRef = useRef("");
+  const initializedRef = useRef(false);
+
+  const load = useCallback(async () => {
+    const [program, history] = await Promise.all([
+      apiFetch<ProgramDetail>(`/v1/organizations/${organizationId}/programs/${programId}`),
+      apiFetch<CursorPage<ProgramVersion>>(
+        `/v1/organizations/${organizationId}/programs/${programId}/versions?limit=20`,
+      ),
+    ]);
+    program.versions = history.items;
+    setHistoryCursor(history.nextCursor);
+    setDetail(program);
+    if (program.currentDraftVersion) {
+      const next = versionToDraft(program, program.currentDraftVersion);
+      setDraft(next);
+      setRevision(program.currentDraftVersion.revision);
+      persistedRef.current = JSON.stringify(apiDraft(next));
+      setSaveState("saved");
+    } else {
+      setDraft(null);
+    }
+    initializedRef.current = true;
+  }, [organizationId, programId]);
+
+  async function loadMoreVersions() {
+    if (!historyCursor) return;
+    const page = await apiFetch<CursorPage<ProgramVersion>>(
+      `/v1/organizations/${organizationId}/programs/${programId}/versions?limit=20&cursor=${encodeURIComponent(historyCursor)}`,
+    );
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            versions: [
+              ...current.versions,
+              ...page.items.filter(
+                (item) => !current.versions.some((existing) => existing.id === item.id),
+              ),
+            ],
+          }
+        : current,
+    );
+    setHistoryCursor(page.nextCursor);
+  }
+
+  useEffect(() => {
+    void load().catch((caught) =>
+      setError(caught instanceof Error ? caught.message : "Unable to open Loyalty Studio."),
+    );
+  }, [load]);
+
+  useEffect(() => {
+    if (!draft || !initializedRef.current || conflict) return;
+    const serialized = JSON.stringify(apiDraft(draft));
+    if (serialized === persistedRef.current) return;
+    setSaveState("unsaved");
+    setPreviews({});
+    const timer = window.setTimeout(async () => {
+      setSaveState("saving");
+      try {
+        const updated = await apiFetch<{
+          currentDraftVersion: ProgramVersion;
+        }>(`/v1/organizations/${organizationId}/programs/${programId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ ...apiDraft(draft), revision }),
+        });
+        persistedRef.current = serialized;
+        setRevision(updated.currentDraftVersion.revision);
+        setDetail((current) =>
+          current ? { ...current, currentDraftVersion: updated.currentDraftVersion } : current,
+        );
+        setSaveState("saved");
+        setValidation(null);
+      } catch (caught) {
+        if (caught instanceof ApiClientError && caught.code === "STALE_PROGRAM_DRAFT") {
+          const serverRevision =
+            typeof caught.details?.expectedRevision === "number"
+              ? caught.details.expectedRevision
+              : revision + 1;
+          setConflict({ localRevision: revision, serverRevision, localDraft: draft });
+          setSaveState("conflict");
+        } else {
+          setSaveState("failed");
+          setError(caught instanceof Error ? caught.message : "Autosave failed.");
+        }
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [conflict, draft, organizationId, programId, revision]);
+
+  const generatePreviews = useCallback(async () => {
+    if (!draft || saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current)
+      return;
+    setPreviewLoading(true);
+    try {
+      const results: PreviewResult[] = [];
+      for (const profile of ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const) {
+        results.push(
+          await apiFetch<PreviewResult>(
+            `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${profile}&locale=${ar ? "AR" : "EN"}`,
+          ),
+        );
+      }
+      setPreviews(Object.fromEntries(results.map((item) => [item.profile, item])));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Preview generation failed.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [ar, draft, organizationId, programId, progress, saveState]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void generatePreviews(), 250);
+    return () => window.clearTimeout(timer);
+  }, [generatePreviews]);
+
+  async function reloadLatest() {
+    setConflict(null);
+    initializedRef.current = false;
+    await load();
+  }
+
+  function reapplyLocal() {
+    if (!conflict) return;
+    setDraft(conflict.localDraft);
+    setRevision(conflict.serverRevision);
+    setConflict(null);
+    setSaveState("unsaved");
+  }
+
+  async function copyLocal() {
+    if (!conflict) return;
+    await navigator.clipboard.writeText(JSON.stringify(apiDraft(conflict.localDraft), null, 2));
+  }
+
+  function exportLocal() {
+    if (!conflict) return;
+    const blob = new Blob([JSON.stringify(apiDraft(conflict.localDraft), null, 2)], {
+      type: "application/json",
+    });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `waflo-local-draft-rev-${conflict.localRevision}.json`;
+    link.click();
+    URL.revokeObjectURL(href);
+  }
+
+  async function validate() {
+    setWorking(true);
+    setError("");
+    try {
+      await generatePreviews();
+      const result = await apiFetch<ValidationResult>(
+        `/v1/organizations/${organizationId}/programs/${programId}/validate`,
+        { method: "POST" },
+      );
+      setValidation(result);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Validation failed.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function startTest() {
+    setWorking(true);
+    try {
+      const session = await apiFetch<TestSession>(
+        `/v1/organizations/${organizationId}/programs/${programId}/test-sessions`,
+        { method: "POST" },
+      );
+      setTestSession(session);
+      setProgress(0);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to start Test Mode.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function testCommand(
+    action:
+      | { kind: "add"; amount: number }
+      | { kind: "reverse" }
+      | { kind: "reset" }
+      | { kind: "redeem"; rewardId: string },
+  ) {
+    if (!testSession) return;
+    setWorking(true);
+    try {
+      const key = crypto.randomUUID();
+      const base = `/v1/organizations/${organizationId}/programs/test-sessions/${testSession.id}`;
+      if (action.kind === "add")
+        await apiFetch(`${base}/stamps`, {
+          method: "POST",
+          body: JSON.stringify({ amount: action.amount, idempotencyKey: key }),
+        });
+      if (action.kind === "reverse")
+        await apiFetch(`${base}/reverse`, {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: key }),
+        });
+      if (action.kind === "reset")
+        await apiFetch(`${base}/reset`, {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: key }),
+        });
+      if (action.kind === "redeem")
+        await apiFetch(`${base}/redeem/${action.rewardId}`, {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: key }),
+        });
+      const refreshed = await apiFetch<TestSession>(base);
+      setTestSession(refreshed);
+      setProgress(refreshed.currentStampCount);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Test Mode command failed.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function lifecycle(action: NonNullable<typeof confirmation>) {
+    setWorking(true);
+    setError("");
+    try {
+      if (action === "publish")
+        await apiFetch(`/v1/organizations/${organizationId}/programs/${programId}/publish`, {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+        });
+      else if (action === "abandon")
+        await apiFetch(`/v1/organizations/${organizationId}/programs/${programId}/draft/abandon`, {
+          method: "POST",
+        });
+      else
+        await apiFetch(`/v1/organizations/${organizationId}/programs/${programId}/${action}`, {
+          method: "POST",
+        });
+      setConfirmation(null);
+      await load();
+      await onChanged();
+    } catch (caught) {
+      if (caught instanceof ApiClientError)
+        setActiveSection(sectionForPublicationError(caught.code));
+      if (
+        ar &&
+        caught instanceof ApiClientError &&
+        caught.code === "PROGRAM_PUBLICATION_STATE_BLOCKED" &&
+        typeof caught.details?.programStatus === "string"
+      )
+        setError(
+          publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, true)
+            .message,
+        );
+      else setError(caught instanceof Error ? caught.message : "Lifecycle action failed.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function createDraft() {
+    setWorking(true);
+    try {
+      await apiFetch(`/v1/organizations/${organizationId}/programs/${programId}/draft`, {
+        method: "POST",
+      });
+      await load();
+      await onChanged();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to create a draft.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function viewHistorical(versionId: string) {
+    const version = await apiFetch<ProgramVersion>(
+      `/v1/organizations/${organizationId}/programs/${programId}/versions/${versionId}`,
+    );
+    setHistoricalVersion(version);
+  }
+
+  const setupComplete = Boolean(
+    draft?.internalName.trim() &&
+      draft.locationIds.length &&
+      draft.translations.en.programName.trim() &&
+      draft.translations.ar.programName.trim() &&
+      draft.rewards.length,
+  );
+  const currentVersion = detail?.currentDraftVersion;
+  const validated = ["VALIDATED", "TEST_READY"].includes(currentVersion?.status ?? "");
+  const testReady = currentVersion?.status === "TEST_READY";
+  const selectedProfile = previewProfileForSection(activeSection);
+  const selectedPreview = previews[selectedProfile];
+
+  if (!detail) {
+    return (
+      <Card className="studio-loading">
+        <Clock3 /> {ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}
+      </Card>
+    );
+  }
+
+  if (!draft || !currentVersion) {
+    const statePresentation = publishedStatePresentation(detail.status, ar);
+    return (
+      <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
+        <div className="studio-toolbar">
+          <Button variant="secondary" onClick={onClose}>
+            <ArrowLeft size={16} /> {ar ? "البرامج" : "Programs"}
+          </Button>
+          <div>
+            <span className="dashboard-card__label">LOYALTY STUDIO</span>
+            <h1>{detail.internalName}</h1>
+          </div>
+        </div>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        <Card className="studio-live-only">
+          <ShieldCheck size={36} />
+          <h2>{statePresentation.title}</h2>
+          <p>{statePresentation.message}</p>
+          {detail.status !== "ARCHIVED" ? (
+            <Button onClick={() => void createDraft()} loading={working}>
+              <Plus size={16} /> {ar ? "إنشاء مسودة من المنشور" : "Create draft from published"}
+            </Button>
+          ) : null}
+        </Card>
+        <ProgramEnrollmentSettings
+          organizationId={organizationId}
+          programId={programId}
+          ar={ar}
+          onChanged={load}
+        />
+        <VersionHistory
+          versions={detail.versions}
+          ar={ar}
+          onView={(id) => void viewHistorical(id)}
+          onLoadMore={historyCursor ? () => void loadMoreVersions() : undefined}
+        />
+        <HistoricalModal
+          version={historicalVersion}
+          onClose={() => setHistoricalVersion(null)}
+          ar={ar}
+        />
+        <div className="studio-lifecycle-actions">
+          {detail.status === "PUBLISHED" ? (
+            <Button variant="secondary" onClick={() => setConfirmation("pause")}>
+              <Pause size={16} /> {ar ? "إيقاف مؤقت" : "Pause"}
+            </Button>
+          ) : null}
+          {detail.status === "PAUSED" ? (
+            <Button variant="secondary" onClick={() => setConfirmation("resume")}>
+              <Play size={16} /> {ar ? "استئناف" : "Resume"}
+            </Button>
+          ) : null}
+          {detail.status !== "ARCHIVED" ? (
+            <Button variant="secondary" onClick={() => setConfirmation("archive")}>
+              <Archive size={16} /> {ar ? "أرشفة" : "Archive"}
+            </Button>
+          ) : null}
+          {detail.status === "ARCHIVED" ? (
+            <Button variant="secondary" onClick={() => setConfirmation("restore")}>
+              <RotateCcw size={16} /> {ar ? "استعادة" : "Restore"}
+            </Button>
+          ) : null}
+        </div>
+        <AlertDialog
+          open={Boolean(confirmation)}
+          title={
+            confirmation ? `${confirmation[0]?.toUpperCase()}${confirmation.slice(1)} program` : ""
+          }
+          description={`Confirm the ${confirmation ?? ""} lifecycle action.`}
+          confirmLabel={working ? "Working…" : "Confirm"}
+          cancelLabel="Cancel"
+          danger={confirmation === "archive"}
+          onClose={() => setConfirmation(null)}
+          onConfirm={() => {
+            if (confirmation) void lifecycle(confirmation);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
+      <div className="studio-toolbar">
+        <Button variant="secondary" onClick={onClose}>
+          <ArrowLeft size={16} /> {ar ? "البرامج" : "Programs"}
+        </Button>
+        <div className="studio-toolbar__title">
+          <span className="dashboard-card__label">
+            LOYALTY STUDIO · v{currentVersion.versionNumber}
+          </span>
+          <h1>{draft.internalName}</h1>
+          {detail.currentPublishedVersion ? (
+            <small>
+              {detail.status === "PAUSED"
+                ? ar
+                  ? "التغييرات غير المنشورة معزولة عن الإصدار المنشور المتوقف مؤقتًا."
+                  : "Unpublished changes are isolated from the paused published version."
+                : ar
+                  ? "التغييرات غير المنشورة معزولة عن الإصدار المباشر."
+                  : "Unpublished changes are isolated from the live version."}
+            </small>
+          ) : null}
+        </div>
+        <div className={`studio-save-state studio-save-state--${saveState}`} role="status">
+          {saveState === "saving" ? (
+            <RefreshCcw className="studio-spin" size={16} />
+          ) : (
+            <Save size={16} />
+          )}
+          <span>{statusLabel(saveState, ar)}</span>
+          <small>rev {revision}</small>
+        </div>
+      </div>
+      {error ? <Alert tone="danger" title={error} /> : null}
+
+      <LifecycleChecklist
+        setupComplete={setupComplete}
+        validated={validated}
+        testReady={testReady}
+        published={Boolean(detail.currentPublishedVersion)}
+        ar={ar}
+        publicationDecision={decideProgramPublicationState({
+          programStatus: detail.status,
+          hasCurrentPublishedVersion: detail.currentPublishedVersion !== null,
+        })}
+        onSection={setActiveSection}
+        onPublish={() => setConfirmation("publish")}
+        onRestore={() => setConfirmation("restore")}
+      />
+
+      <ProgramEnrollmentSettings
+        organizationId={organizationId}
+        programId={programId}
+        ar={ar}
+        onChanged={load}
+      />
+
+      <div className="studio-workspace">
+        <nav className="studio-section-nav" aria-label={ar ? "أقسام الاستوديو" : "Studio sections"}>
+          {studioSections.map((section, index) => (
+            <button
+              type="button"
+              key={section}
+              className={activeSection === section ? "studio-section-nav__active" : ""}
+              onClick={() => setActiveSection(section)}
+              aria-current={activeSection === section ? "page" : undefined}
+            >
+              <span>{index + 1}</span>
+              {sectionCopy[section][ar ? "ar" : "en"]}
+            </button>
+          ))}
+        </nav>
+
+        <main className="studio-editor-panel">
+          <div className="studio-panel-heading">
+            <div>
+              <span className="dashboard-card__label">
+                {activeSection === "test-mode"
+                  ? "SYNTHETIC CUSTOMER ONLY"
+                  : `SECTION ${studioSections.indexOf(activeSection) + 1}`}
+              </span>
+              <h2>{sectionCopy[activeSection][ar ? "ar" : "en"]}</h2>
+            </div>
+            {draft.editingMode === "pro" ? <Badge tone="brand">PRO</Badge> : <Badge>QUICK</Badge>}
+          </div>
+          <StudioSectionContent
+            section={activeSection}
+            draft={draft}
+            setDraft={setDraft}
+            locations={locations}
+            assets={assets}
+            organizationId={organizationId}
+            onAssetUploaded={onAssetUploaded}
+            plan={plan}
+            ar={ar}
+            validation={validation}
+            onValidate={() => void validate()}
+            validating={working}
+            onIssue={(issue) => setActiveSection(sectionForIssue(issue))}
+            testSession={testSession}
+            onStartTest={() => void startTest()}
+            onTestCommand={(command) => void testCommand(command)}
+            detail={detail}
+            onViewVersion={(id) => void viewHistorical(id)}
+            onLoadMoreVersions={historyCursor ? () => void loadMoreVersions() : undefined}
+            onAbandon={() => setConfirmation("abandon")}
+          />
+        </main>
+
+        <aside className="studio-preview-panel">
+          <div className="studio-preview-header">
+            <div>
+              <span className="dashboard-card__label">
+                {ar ? "معاينة محفوظة" : "PERSISTED PREVIEW"}
+              </span>
+              <h3>
+                {selectedProfile === "CUSTOMER_WEB"
+                  ? "Customer Web"
+                  : selectedProfile === "APPLE_WALLET"
+                    ? "Apple Wallet"
+                    : "Google Wallet"}
+              </h3>
+            </div>
+            <Eye size={20} />
+          </div>
+          <div className="studio-preview-tabs" role="tablist">
+            {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
+              <button
+                type="button"
+                role="tab"
+                key={profile}
+                aria-selected={selectedProfile === profile}
+                onClick={() =>
+                  setActiveSection(
+                    profile === "APPLE_WALLET"
+                      ? "apple-preview"
+                      : profile === "GOOGLE_WALLET"
+                        ? "google-preview"
+                        : "customer-preview",
+                  )
+                }
+              >
+                <strong>
+                  {profile === "CUSTOMER_WEB"
+                    ? "Web"
+                    : profile === "APPLE_WALLET"
+                      ? "Apple"
+                      : "Google"}
+                </strong>
+                <small>
+                  {selectedProfile === profile ? (ar ? "محدد" : "Selected") : ar ? "فتح" : "Open"}
+                </small>
+              </button>
+            ))}
+          </div>
+          <FormField label={ar ? "تقدم المعاينة" : "Preview progress"}>
+            <input
+              type="range"
+              min={0}
+              max={draft.requiredStampCount}
+              value={progress}
+              onChange={(event) => setProgress(Number(event.target.value))}
+            />
+          </FormField>
+          <div
+            className={`studio-device-frame studio-device-frame--${selectedProfile.toLowerCase()}`}
+          >
+            {selectedPreview ? (
+              <Image
+                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(selectedPreview.svg)}`}
+                alt={`${selectedProfile} preview`}
+                width={selectedPreview.width}
+                height={selectedPreview.height}
+                unoptimized
+              />
+            ) : (
+              <div className="studio-preview-loading">
+                {previewLoading ? <RefreshCcw className="studio-spin" /> : <UploadCloud />}
+                <span>
+                  {previewLoading
+                    ? ar
+                      ? "جارٍ التوليد…"
+                      : "Generating…"
+                    : ar
+                      ? "احفظ لعرض المعاينة"
+                      : "Save to preview"}
+                </span>
+              </div>
+            )}
+          </div>
+          {selectedPreview?.warnings.map((warning) => (
+            <Alert key={warning.code} tone="warning" title={warning.message} />
+          ))}
+        </aside>
+      </div>
+
+      <div className="studio-lifecycle-actions">
+        {detail.status === "PUBLISHED" ? (
+          <Button variant="secondary" onClick={() => setConfirmation("pause")}>
+            <Pause size={16} /> {ar ? "إيقاف مؤقت" : "Pause"}
+          </Button>
+        ) : null}
+        {detail.status === "PAUSED" ? (
+          <Button variant="secondary" onClick={() => setConfirmation("resume")}>
+            <Play size={16} /> {ar ? "استئناف" : "Resume"}
+          </Button>
+        ) : null}
+        {detail.status !== "ARCHIVED" ? (
+          <Button variant="secondary" onClick={() => setConfirmation("archive")}>
+            <Archive size={16} /> {ar ? "أرشفة" : "Archive"}
+          </Button>
+        ) : null}
+        {detail.status === "ARCHIVED" ? (
+          <Button variant="secondary" onClick={() => setConfirmation("restore")}>
+            <RotateCcw size={16} /> {ar ? "استعادة" : "Restore"}
+          </Button>
+        ) : null}
+      </div>
+
+      <ConflictModal
+        conflict={conflict}
+        ar={ar}
+        onCopy={() => void copyLocal()}
+        onExport={exportLocal}
+        onReload={() => void reloadLatest()}
+        onReapply={reapplyLocal}
+      />
+      <HistoricalModal
+        version={historicalVersion}
+        onClose={() => setHistoricalVersion(null)}
+        ar={ar}
+      />
+      <AlertDialog
+        open={Boolean(confirmation)}
+        title={
+          confirmation
+            ? ar
+              ? {
+                  publish: "نشر البرنامج",
+                  pause: "إيقاف البرنامج مؤقتًا",
+                  resume: "استئناف البرنامج",
+                  archive: "أرشفة البرنامج",
+                  restore: "استعادة البرنامج",
+                  abandon: "التخلي عن المسودة",
+                }[confirmation]
+              : `${confirmation[0]?.toUpperCase()}${confirmation.slice(1)} program`
+            : ""
+        }
+        description={
+          confirmation === "publish"
+            ? detail.status === "PAUSED" && detail.currentPublishedVersion
+              ? ar
+                ? "سيُنشر الإصدار الجديد، لكن البرنامج سيظل متوقفًا مؤقتًا. استخدم الاستئناف بشكل منفصل عندما تكون مستعدًا لإعادته للعمل."
+                : "The new version will be published, but the program will remain paused. Use Resume separately when you are ready to make it live."
+              : ar
+                ? "يستبدل النشر الإصدار الحالي فقط بعد إكمال التحقق ووضع الاختبار."
+                : "Publishing replaces the live version only after validation and Test Mode completion."
+            : confirmation === "abandon"
+              ? "The editable draft will be marked abandoned. The published version remains live."
+              : confirmation === "archive" && !detail.currentPublishedVersion
+                ? "Archive this unpublished program safely. Its current draft and version history will be preserved for restoration."
+                : confirmation === "restore" && !detail.currentPublishedVersion
+                  ? "Restore this unpublished program to its preserved draft state."
+                  : `Confirm the ${confirmation ?? ""} lifecycle action.`
+        }
+        confirmLabel={working ? "Working…" : "Confirm"}
+        cancelLabel="Cancel"
+        danger={confirmation === "archive" || confirmation === "abandon"}
+        onClose={() => setConfirmation(null)}
+        onConfirm={() => {
+          if (confirmation) void lifecycle(confirmation);
+        }}
+      />
+    </div>
+  );
+}
+
+function LifecycleChecklist({
+  setupComplete,
+  validated,
+  testReady,
+  published,
+  ar,
+  publicationDecision,
+  onSection,
+  onPublish,
+  onRestore,
+}: {
+  setupComplete: boolean;
+  validated: boolean;
+  testReady: boolean;
+  published: boolean;
+  ar: boolean;
+  publicationDecision: ProgramPublicationStateDecision;
+  onSection: (section: StudioSection) => void;
+  onPublish: () => void;
+  onRestore: () => void;
+}) {
+  const steps = [
+    {
+      label: ar ? "إكمال الإعداد" : "Complete setup",
+      complete: setupComplete,
+      section: "overview" as const,
+    },
+    { label: ar ? "التحقق" : "Validate", complete: validated, section: "validation" as const },
+    {
+      label: ar ? "إكمال وضع الاختبار" : "Complete Test Mode",
+      complete: testReady,
+      section: "test-mode" as const,
+    },
+    { label: ar ? "النشر" : "Publish", complete: published, section: "versions" as const },
+  ];
+  const blockedGuidance = publicationDecision.allowed
+    ? null
+    : publicationStateGuidance(publicationDecision.previousOperationalState, ar);
+  return (
+    <Card className="studio-lifecycle">
+      {steps.map((step, index) => (
+        <button
+          type="button"
+          key={step.label}
+          className={step.complete ? "studio-lifecycle__complete" : ""}
+          onClick={() => onSection(step.section)}
+        >
+          <span>{step.complete ? <Check size={16} /> : index + 1}</span>
+          <strong>{step.label}</strong>
+          <small>{step.complete ? (ar ? "مكتمل" : "Complete") : ar ? "مطلوب" : "Required"}</small>
+        </button>
+      ))}
+      {blockedGuidance ? (
+        <details className="studio-publication-state-guidance" open>
+          <summary>
+            <CircleAlert size={18} />
+            <strong>{blockedGuidance.title}</strong>
+          </summary>
+          <small>{blockedGuidance.message}</small>
+          {"requiredAction" in publicationDecision &&
+          publicationDecision.requiredAction === "RESTORE_PROGRAM" ? (
+            <Button variant="secondary" onClick={onRestore}>
+              <RotateCcw size={16} /> {ar ? "استعادة البرنامج" : "Restore program"}
+            </Button>
+          ) : null}
+        </details>
+      ) : null}
+      <Button
+        onClick={onPublish}
+        disabled={!testReady || !publicationDecision.allowed}
+        title={
+          !publicationDecision.allowed
+            ? blockedGuidance?.message
+            : !testReady
+              ? "Complete validation and Test Mode first."
+              : undefined
+        }
+      >
+        <Gift size={16} /> {ar ? "نشر البرنامج" : "Publish program"}
+      </Button>
+    </Card>
+  );
+}
+
+function StudioSectionContent({
+  section,
+  draft,
+  setDraft,
+  locations,
+  assets,
+  organizationId,
+  onAssetUploaded,
+  plan,
+  ar,
+  validation,
+  onValidate,
+  validating,
+  onIssue,
+  testSession,
+  onStartTest,
+  onTestCommand,
+  detail,
+  onViewVersion,
+  onLoadMoreVersions,
+  onAbandon,
+}: {
+  section: StudioSection;
+  draft: ProgramDraftInput;
+  setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
+  locations: LocationItem[];
+  assets: AssetItem[];
+  organizationId: string;
+  onAssetUploaded: (asset: AssetItem) => void;
+  plan: "STARTER" | "GROWTH" | "SCALE";
+  ar: boolean;
+  validation: ValidationResult | null;
+  onValidate: () => void;
+  validating: boolean;
+  onIssue: (issue: ValidationIssue) => void;
+  testSession: TestSession | null;
+  onStartTest: () => void;
+  onTestCommand: (
+    command:
+      | { kind: "add"; amount: number }
+      | { kind: "reverse" }
+      | { kind: "reset" }
+      | { kind: "redeem"; rewardId: string },
+  ) => void;
+  detail: ProgramDetail;
+  onViewVersion: (versionId: string) => void;
+  onLoadMoreVersions?: (() => void) | undefined;
+  onAbandon: () => void;
+}) {
+  const update = (transform: (current: ProgramDraftInput) => ProgramDraftInput) =>
+    setDraft((current) => (current ? transform(current) : current));
+  if (section === "overview")
+    return (
+      <div className="studio-section-content">
+        <FormField label={ar ? "الاسم الداخلي" : "Internal name"} required>
+          <TextInput
+            value={draft.internalName}
+            onChange={(event) =>
+              update((current) => ({ ...current, internalName: event.target.value }))
+            }
+          />
+        </FormField>
+        <FormField label={ar ? "وضع التحرير" : "Editing mode"}>
+          <Select
+            value={draft.editingMode}
+            onChange={(event) => {
+              const mode = event.target.value as "quick" | "pro";
+              if (mode === "pro" && plan === "STARTER") return;
+              update((current) => ({ ...current, editingMode: mode }));
+            }}
+          >
+            <option value="quick">Quick Mode</option>
+            <option value="pro" disabled={plan === "STARTER"}>
+              Pro Mode {plan === "STARTER" ? "· Growth required" : ""}
+            </option>
+          </Select>
+        </FormField>
+        {plan === "STARTER" ? (
+          <Alert
+            tone="info"
+            title={
+              ar ? "قيود Starter مفعلة على الخادم" : "Starter restrictions are enforced by the API"
+            }
+          >
+            {ar
+              ? "يتطلب Pro والمكافآت المتعددة وتخطيطات Path/Ring خطة Growth أو Scale."
+              : "Pro, multiple rewards, milestones, Path, and Ring require Growth or Scale."}
+          </Alert>
+        ) : null}
+        <FormField label={ar ? "ملخص التغيير" : "Change summary"}>
+          <TextInput
+            value={draft.changeSummary ?? ""}
+            onChange={(event) =>
+              update((current) => ({ ...current, changeSummary: event.target.value }))
+            }
+            placeholder="What changed in this version?"
+          />
+        </FormField>
+      </div>
+    );
+
+  if (section === "earning")
+    return (
+      <div className="studio-section-content">
+        <FormField label={ar ? "عدد الأختام المطلوبة" : "Required stamp count"}>
+          <input
+            type="range"
+            min={2}
+            max={30}
+            value={draft.requiredStampCount}
+            onChange={(event) => {
+              const goal = Number(event.target.value);
+              update((current) => ({
+                ...current,
+                requiredStampCount: goal,
+                rewards: current.rewards.map((reward, index) =>
+                  index === current.rewards.length - 1 && reward.thresholdStampCount > goal
+                    ? { ...reward, thresholdStampCount: goal }
+                    : reward,
+                ),
+              }));
+            }}
+          />
+          <strong>
+            {draft.requiredStampCount} {ar ? "أختام" : "stamps"}
+          </strong>
+        </FormField>
+        <FormField label={ar ? "وصف طريقة الكسب" : "Earning description"}>
+          <TextInput
+            value={draft.earningDescription}
+            onChange={(event) =>
+              update((current) => ({ ...current, earningDescription: event.target.value }))
+            }
+          />
+        </FormField>
+        <Alert tone="info" title={ar ? "سياسة W2 الثابتة" : "Stable W2 policy"}>
+          {ar
+            ? "ختم واحد افتراضياً، وبحد أقصى 5 أختام للعملية، من دون حد يومي أو حد أدنى للشراء. التنفيذ القابل للتهيئة مؤجل صراحةً إلى W4."
+            : "W2 uses 1 stamp by default, a maximum of 5 per operation, no daily cap, no minimum purchase, and reset after the final reward. Configurable execution is explicitly deferred to W4."}
+        </Alert>
+        <Alert tone="info" title={ar ? "حد العملية" : "Operation limit"}>
+          {ar
+            ? "وضع الاختبار يضيف من 1 إلى 5 أختام في كل أمر."
+            : "Test Mode accepts 1–5 synthetic stamps per command."}
+        </Alert>
+      </div>
+    );
+
+  if (section === "rewards")
+    return (
+      <RewardsEditor
+        draft={draft}
+        update={update}
+        assets={assets}
+        organizationId={organizationId}
+        onAssetUploaded={onAssetUploaded}
+        plan={plan}
+        ar={ar}
+      />
+    );
+
+  if (section === "locations")
+    return (
+      <div className="studio-section-content">
+        <p>
+          {ar
+            ? "اختر موقعاً نشطاً واحداً أو أكثر."
+            : "Select one or more active locations explicitly."}
+        </p>
+        <div className="studio-check-grid">
+          {locations.map((location) => (
+            <Checkbox
+              key={location.id}
+              label={`${location.name}${location.status !== "ACTIVE" ? ` · ${location.status}` : ""}`}
+              disabled={location.status !== "ACTIVE"}
+              checked={draft.locationIds.includes(location.id)}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  locationIds: event.target.checked
+                    ? [...current.locationIds, location.id]
+                    : current.locationIds.filter((id) => id !== location.id),
+                }))
+              }
+            />
+          ))}
+        </div>
+      </div>
+    );
+
+  if (section === "english" || section === "arabic")
+    return (
+      <TranslationEditor
+        locale={section === "english" ? "en" : "ar"}
+        value={draft.translations[section === "english" ? "en" : "ar"]}
+        update={(key, value) =>
+          update((current) => {
+            const locale = section === "english" ? "en" : "ar";
+            return {
+              ...current,
+              translations: {
+                ...current.translations,
+                [locale]: { ...current.translations[locale], [key]: value },
+              },
+            };
+          })
+        }
+      />
+    );
+
+  if (section === "visual")
+    return (
+      <div className="studio-section-content">
+        <div className="studio-color-grid">
+          {(
+            [
+              ["backgroundColor", ar ? "الخلفية" : "Background"],
+              ["foregroundColor", ar ? "النص" : "Foreground"],
+              ["accentColor", ar ? "التمييز" : "Accent"],
+              ["secondaryColor", ar ? "الثانوي" : "Secondary"],
+              ["mutedColor", ar ? "الهادئ" : "Muted"],
+            ] as const
+          ).map(([key, label]) => (
+            <FormField key={key} label={label}>
+              <div className="studio-color-input">
+                <input
+                  type="color"
+                  value={draft.visualTheme[key]}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      visualTheme: { ...current.visualTheme, [key]: event.target.value },
+                    }))
+                  }
+                />
+                <TextInput
+                  value={draft.visualTheme[key]}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      visualTheme: { ...current.visualTheme, [key]: event.target.value },
+                    }))
+                  }
+                />
+              </div>
+            </FormField>
+          ))}
+        </div>
+        <FormField label={ar ? "نمط ويب العميل" : "Customer Web style"}>
+          <Select
+            value={draft.visualTheme.customerWebVariant}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                visualTheme: {
+                  ...current.visualTheme,
+                  customerWebVariant: event.target.value as "CARD" | "MINIMAL" | "HERO",
+                },
+              }))
+            }
+          >
+            <option value="CARD">Card</option>
+            <option value="MINIMAL">Minimal</option>
+            <option value="HERO">Hero</option>
+          </Select>
+        </FormField>
+      </div>
+    );
+
+  if (section === "artwork")
+    return (
+      <div className="studio-section-content">
+        {(
+          [
+            ["LOGO", "logoAssetId", ar ? "الشعار" : "Logo"],
+            ["HERO", "heroAssetId", ar ? "صورة البطل" : "Hero"],
+            ["BACKGROUND", "backgroundAssetId", ar ? "الخلفية" : "Background"],
+            ["STAMP_FILLED", "filledStampAssetId", ar ? "الختم الممتلئ" : "Filled stamp"],
+            ["STAMP_EMPTY", "emptyStampAssetId", ar ? "الختم الفارغ" : "Empty stamp"],
+            ["STAMP_MILESTONE", "defaultMilestoneAssetId", ar ? "ختم المعلم" : "Milestone stamp"],
+          ] as const
+        ).map(([category, key, label]) => (
+          <div key={key}>
+            <ProgramAssetPicker
+              organizationId={organizationId}
+              category={category}
+              label={label}
+              assets={assets}
+              selectedId={draft.visualTheme[key]}
+              onSelected={(assetId) =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: {
+                    ...current.visualTheme,
+                    [key]: assetId,
+                  },
+                }))
+              }
+              onUploaded={onAssetUploaded}
+              ar={ar}
+            />
+            {key === "backgroundAssetId" ? (
+              <p className="field-help">
+                Customer Web:{" "}
+                {programPlatformCapabilities.CUSTOMER_WEB.backgroundArtwork.explanation} Apple:{" "}
+                {programPlatformCapabilities.APPLE_WALLET.backgroundArtwork.explanation} Google:{" "}
+                {programPlatformCapabilities.GOOGLE_WALLET.backgroundArtwork.explanation}
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    );
+
+  if (section === "layout")
+    return <LayoutEditor draft={draft} update={update} plan={plan} ar={ar} />;
+
+  if (["customer-preview", "apple-preview", "google-preview"].includes(section))
+    return <PreviewSettings section={section} draft={draft} update={update} ar={ar} />;
+
+  if (section === "policies")
+    return (
+      <div className="studio-section-content">
+        <Alert
+          tone="info"
+          title={ar ? "المكافآت وصفية فقط في W2" : "Rewards remain descriptive in W2"}
+        >
+          {ar
+            ? "لا توجد تسوية مالية أو إصدار بطاقة حقيقية."
+            : "There is no financial settlement or real wallet pass issuance."}
+        </Alert>
+        <Alert tone="info" title={ar ? "قرار التنفيذ في W4" : "Execution decision: W4"}>
+          {ar
+            ? "تعرض هذه الشاشة القيم الثابتة فقط. محرك الأهلية وحدود العميل والمشتريات سيُنفذ في W4، وليس في W3."
+            : "This screen exposes stable defaults only. Customer/day eligibility and purchase-threshold execution belong to W4, not W3."}
+        </Alert>
+        <FormField label="English terms">
+          <TextArea
+            value={draft.translations.en.termsAndConditions}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                translations: {
+                  ...current.translations,
+                  en: { ...current.translations.en, termsAndConditions: event.target.value },
+                },
+              }))
+            }
+          />
+        </FormField>
+        <FormField label="الشروط العربية">
+          <TextArea
+            dir="rtl"
+            value={draft.translations.ar.termsAndConditions}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                translations: {
+                  ...current.translations,
+                  ar: { ...current.translations.ar, termsAndConditions: event.target.value },
+                },
+              }))
+            }
+          />
+        </FormField>
+      </div>
+    );
+
+  if (section === "validation")
+    return (
+      <ValidationPanel
+        result={validation}
+        onValidate={onValidate}
+        validating={validating}
+        onIssue={onIssue}
+        ar={ar}
+      />
+    );
+
+  if (section === "test-mode")
+    return (
+      <TestModePanel
+        session={testSession}
+        onStart={onStartTest}
+        onCommand={onTestCommand}
+        working={validating}
+        ar={ar}
+      />
+    );
+
+  return (
+    <div className="studio-section-content">
+      <VersionHistory
+        versions={detail.versions}
+        ar={ar}
+        onView={onViewVersion}
+        onLoadMore={onLoadMoreVersions}
+      />
+      {detail.currentPublishedVersion ? (
+        <Button variant="danger" onClick={onAbandon}>
+          <Trash2 size={16} /> {ar ? "التخلي عن المسودة" : "Abandon draft"}
+        </Button>
+      ) : (
+        <Alert tone="info" title={ar ? "المسودة الأولى محفوظة" : "Initial draft is preserved"}>
+          {ar
+            ? "استخدم إجراء الأرشفة الآمن لإخفاء البرنامج غير المنشور مع الاحتفاظ بالمسودة وسجل الإصدارات."
+            : "Use the safe Archive action to hide this unpublished program while preserving its draft and version history."}
+        </Alert>
+      )}
+    </div>
+  );
+}
+
+function TranslationEditor({
+  locale,
+  value,
+  update,
+}: {
+  locale: "en" | "ar";
+  value: ProgramDraftInput["translations"]["en"];
+  update: (key: keyof ProgramDraftInput["translations"]["en"], value: string) => void;
+}) {
+  const rtl = locale === "ar";
+  return (
+    <div className="studio-section-content" dir={rtl ? "rtl" : "ltr"}>
+      <div className="studio-form-grid">
+        <FormField label={rtl ? "اسم البرنامج" : "Program name"}>
+          <TextInput
+            value={value.programName}
+            onChange={(event) => update("programName", event.target.value)}
+          />
+        </FormField>
+        <FormField label={rtl ? "ملخص المكافأة" : "Reward summary"}>
+          <TextInput
+            value={value.rewardSummary}
+            onChange={(event) => update("rewardSummary", event.target.value)}
+          />
+        </FormField>
+      </div>
+      <FormField label={rtl ? "الوصف القصير" : "Short description"}>
+        <TextInput
+          value={value.shortDescription}
+          onChange={(event) => update("shortDescription", event.target.value)}
+        />
+      </FormField>
+      <FormField label={rtl ? "الوصف الكامل" : "Full description"}>
+        <TextArea
+          value={value.fullDescription ?? ""}
+          onChange={(event) => update("fullDescription", event.target.value)}
+        />
+      </FormField>
+      <FormField label={rtl ? "تعليمات الانضمام" : "Join instructions"}>
+        <TextArea
+          value={value.joinInstructions ?? ""}
+          onChange={(event) => update("joinInstructions", event.target.value)}
+        />
+      </FormField>
+      <FormField label={rtl ? "الشروط والأحكام" : "Terms and conditions"}>
+        <TextArea
+          value={value.termsAndConditions}
+          onChange={(event) => update("termsAndConditions", event.target.value)}
+        />
+      </FormField>
+      <div className="studio-form-grid">
+        <FormField label={rtl ? "رسالة الإكمال" : "Completion message"}>
+          <TextInput
+            value={value.completionMessage}
+            onChange={(event) => update("completionMessage", event.target.value)}
+          />
+        </FormField>
+        <FormField label={rtl ? "رسالة فتح المكافأة" : "Reward unlocked message"}>
+          <TextInput
+            value={value.rewardUnlockedMessage}
+            onChange={(event) => update("rewardUnlockedMessage", event.target.value)}
+          />
+        </FormField>
+      </div>
+      <FormField label={rtl ? "رسالة الإيقاف" : "Paused message"}>
+        <TextInput
+          value={value.pausedMessage ?? ""}
+          onChange={(event) => update("pausedMessage", event.target.value)}
+        />
+      </FormField>
+    </div>
+  );
+}
+
+function RewardsEditor({
+  draft,
+  update,
+  assets,
+  organizationId,
+  onAssetUploaded,
+  plan,
+  ar,
+}: {
+  draft: ProgramDraftInput;
+  update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
+  assets: AssetItem[];
+  organizationId: string;
+  onAssetUploaded: (asset: AssetItem) => void;
+  plan: "STARTER" | "GROWTH" | "SCALE";
+  ar: boolean;
+}) {
+  function updateReward(clientId: string, transform: (reward: RewardInput) => RewardInput) {
+    update((current) => ({
+      ...current,
+      rewards: current.rewards.map((reward) =>
+        reward.clientId === clientId ? transform(reward) : reward,
+      ),
+    }));
+  }
+  function addReward() {
+    if (plan === "STARTER" || draft.editingMode !== "pro") return;
+    const threshold = Math.max(2, draft.requiredStampCount - 2);
+    update((current) => ({
+      ...current,
+      rewards: [
+        ...current.rewards,
+        {
+          clientId: crypto.randomUUID(),
+          thresholdStampCount: threshold,
+          rewardType: "TEXT_REWARD" as const,
+          internalName: `Milestone ${current.rewards.length + 1}`,
+          sortOrder: current.rewards.length,
+          requiresManagerApproval: false,
+          maximumRedemptionsPerEarned: 1,
+          translations: {
+            en: { name: "Milestone reward", description: "Milestone reward" },
+            ar: { name: "مكافأة مرحلية", description: "مكافأة مرحلية" },
+          },
+        },
+      ].sort((left, right) => left.thresholdStampCount - right.thresholdStampCount),
+    }));
+  }
+  return (
+    <div className="studio-section-content">
+      <div className="studio-section-heading">
+        <div>
+          <h3>{ar ? "مكافآت وصفية ومعالم" : "Descriptive rewards and milestones"}</h3>
+          <p>
+            {ar
+              ? "يجب أن تكون العتبات فريدة وأن توجد مكافأة نهائية عند الهدف."
+              : "Thresholds must be unique and one final reward must sit at the goal."}
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={addReward}
+          disabled={plan === "STARTER" || draft.editingMode !== "pro"}
+          title={plan === "STARTER" ? "Growth or Scale required." : undefined}
+        >
+          <Plus size={16} /> {ar ? "إضافة معلم" : "Add milestone"}
+        </Button>
+      </div>
+      {draft.rewards.map((reward, index) => (
+        <Card className="studio-reward-card" key={reward.clientId}>
+          <div className="studio-section-heading">
+            <div>
+              <Badge
+                tone={reward.thresholdStampCount === draft.requiredStampCount ? "success" : "brand"}
+              >
+                {reward.thresholdStampCount === draft.requiredStampCount ? "FINAL" : "MILESTONE"}
+              </Badge>
+              <h4>{reward.internalName}</h4>
+            </div>
+            {draft.rewards.length > 1 ? (
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  update((current) => ({
+                    ...current,
+                    rewards: current.rewards.filter((item) => item.clientId !== reward.clientId),
+                  }))
+                }
+              >
+                <X size={16} /> {ar ? "إزالة" : "Remove"}
+              </Button>
+            ) : null}
+          </div>
+          <div className="studio-form-grid">
+            <FormField label={ar ? "العتبة" : "Threshold"}>
+              <TextInput
+                type="number"
+                min={2}
+                max={draft.requiredStampCount}
+                value={reward.thresholdStampCount}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    thresholdStampCount: Number(event.target.value),
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label={ar ? "الاسم الداخلي" : "Internal name"}>
+              <TextInput
+                value={reward.internalName}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    internalName: event.target.value,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label={ar ? "الصلاحية بالأيام" : "Validity days"}>
+              <TextInput
+                type="number"
+                min={1}
+                max={3650}
+                value={reward.validityDurationDays ?? ""}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    validityDurationDays: event.target.value ? Number(event.target.value) : null,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label={ar ? "الاسترداد لكل كسب" : "Redemptions per earned reward"}>
+              <TextInput
+                type="number"
+                min={1}
+                max={10}
+                value={reward.maximumRedemptionsPerEarned}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    maximumRedemptionsPerEarned: Number(event.target.value),
+                  }))
+                }
+              />
+            </FormField>
+          </div>
+          <Checkbox
+            label={ar ? "يتطلب موافقة المدير" : "Requires manager approval"}
+            checked={reward.requiresManagerApproval}
+            onChange={(event) =>
+              updateReward(reward.clientId, (current) => ({
+                ...current,
+                requiresManagerApproval: event.target.checked,
+              }))
+            }
+          />
+          <div className="studio-form-grid">
+            <FormField label="English reward">
+              <TextInput
+                value={reward.translations.en.name}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    translations: {
+                      ...current.translations,
+                      en: {
+                        ...current.translations.en,
+                        name: event.target.value,
+                        description: event.target.value,
+                      },
+                    },
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="المكافأة العربية">
+              <TextInput
+                dir="rtl"
+                value={reward.translations.ar.name}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    translations: {
+                      ...current.translations,
+                      ar: {
+                        ...current.translations.ar,
+                        name: event.target.value,
+                        description: event.target.value,
+                      },
+                    },
+                  }))
+                }
+              />
+            </FormField>
+          </div>
+          <div className="studio-form-grid">
+            <FormField label="English redemption instructions">
+              <TextArea
+                value={reward.translations.en.redemptionInstructions ?? ""}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    translations: {
+                      ...current.translations,
+                      en: {
+                        ...current.translations.en,
+                        redemptionInstructions: event.target.value,
+                      },
+                    },
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="تعليمات الاسترداد العربية">
+              <TextArea
+                dir="rtl"
+                value={reward.translations.ar.redemptionInstructions ?? ""}
+                onChange={(event) =>
+                  updateReward(reward.clientId, (current) => ({
+                    ...current,
+                    translations: {
+                      ...current.translations,
+                      ar: {
+                        ...current.translations.ar,
+                        redemptionInstructions: event.target.value,
+                      },
+                    },
+                  }))
+                }
+              />
+            </FormField>
+          </div>
+          <ProgramAssetPicker
+            organizationId={organizationId}
+            category="STAMP_MILESTONE"
+            label={`${ar ? "رسم المعلم" : "Milestone artwork"} ${index + 1}`}
+            assets={assets}
+            selectedId={reward.visualOverride?.stampAssetId}
+            onSelected={(assetId) =>
+              updateReward(reward.clientId, (current) => ({
+                ...current,
+                visualOverride: {
+                  ...current.visualOverride,
+                  stampAssetId: assetId,
+                },
+              }))
+            }
+            onUploaded={onAssetUploaded}
+            ar={ar}
+          />
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function LayoutEditor({
+  draft,
+  update,
+  plan,
+  ar,
+}: {
+  draft: ProgramDraftInput;
+  update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
+  plan: "STARTER" | "GROWTH" | "SCALE";
+  ar: boolean;
+}) {
+  return (
+    <div className="studio-section-content">
+      <div className="studio-layout-grid">
+        {(["ROW", "GRID", "PATH", "RING"] as const).map((layout) => {
+          const locked = plan === "STARTER" && ["PATH", "RING"].includes(layout);
+          return (
+            <button
+              type="button"
+              key={layout}
+              disabled={locked}
+              className={
+                draft.visualTheme.layoutType === layout ? "studio-layout-option--selected" : ""
+              }
+              onClick={() =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: { ...current.visualTheme, layoutType: layout },
+                }))
+              }
+            >
+              <strong>{layout}</strong>
+              <small>
+                {locked ? "Growth required" : ar ? "تخطيط متجاوب" : "Responsive layout"}
+              </small>
+            </button>
+          );
+        })}
+      </div>
+      <div className="studio-form-grid">
+        <FormField label={ar ? "حجم الختم" : "Stamp size"}>
+          <input
+            type="range"
+            min={24}
+            max={96}
+            value={draft.visualTheme.stampSize}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                visualTheme: { ...current.visualTheme, stampSize: Number(event.target.value) },
+              }))
+            }
+          />
+        </FormField>
+        <FormField label={ar ? "تباعد الأختام" : "Stamp spacing"}>
+          <input
+            type="range"
+            min={0}
+            max={32}
+            value={draft.visualTheme.stampSpacing}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                visualTheme: { ...current.visualTheme, stampSpacing: Number(event.target.value) },
+              }))
+            }
+          />
+        </FormField>
+        {["GRID", "PATH"].includes(draft.visualTheme.layoutType) ? (
+          <FormField label={ar ? "الأعمدة" : "Columns"}>
+            <TextInput
+              type="number"
+              min={draft.visualTheme.layoutType === "PATH" ? 3 : 2}
+              max={6}
+              value={draft.visualTheme.layoutConfiguration.columns ?? 4}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: {
+                    ...current.visualTheme,
+                    layoutConfiguration: {
+                      ...current.visualTheme.layoutConfiguration,
+                      columns: Number(event.target.value),
+                    },
+                  },
+                }))
+              }
+            />
+          </FormField>
+        ) : null}
+        {draft.visualTheme.layoutType === "RING" ? (
+          <FormField label={ar ? "زاوية البداية" : "Start angle"}>
+            <TextInput
+              type="number"
+              min={-180}
+              max={180}
+              value={draft.visualTheme.layoutConfiguration.startAngle ?? -90}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: {
+                    ...current.visualTheme,
+                    layoutConfiguration: {
+                      ...current.visualTheme.layoutConfiguration,
+                      startAngle: Number(event.target.value),
+                    },
+                  },
+                }))
+              }
+            />
+          </FormField>
+        ) : null}
+      </div>
+      <div className="studio-check-grid">
+        <Checkbox
+          label={ar ? "عرض ملصق التقدم" : "Show progress label"}
+          checked={draft.visualTheme.progressLabelVisible}
+          onChange={(event) =>
+            update((current) => ({
+              ...current,
+              visualTheme: {
+                ...current.visualTheme,
+                progressLabelVisible: event.target.checked,
+              },
+            }))
+          }
+        />
+        <Checkbox
+          label={ar ? "عرض ملصق المكافأة" : "Show reward label"}
+          checked={draft.visualTheme.rewardLabelVisible}
+          onChange={(event) =>
+            update((current) => ({
+              ...current,
+              visualTheme: {
+                ...current.visualTheme,
+                rewardLabelVisible: event.target.checked,
+              },
+            }))
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function PreviewSettings({
+  section,
+  draft,
+  update,
+  ar,
+}: {
+  section: StudioSection;
+  draft: ProgramDraftInput;
+  update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
+  ar: boolean;
+}) {
+  if (section === "apple-preview")
+    return (
+      <div className="studio-section-content">
+        <Alert tone="info" title="Preview only">
+          {ar ? "لا يتم إصدار بطاقة Apple Wallet حقيقية." : "No Apple Wallet pass is issued in W2."}
+        </Alert>
+        <CapabilitySummary platform="APPLE_WALLET" />
+        {(
+          [
+            ["headerLabel", "Header label"],
+            ["headerValue", "Header value"],
+            ["secondaryLabel", "Secondary label"],
+            ["barcodeLabel", "Barcode label"],
+          ] as const
+        ).map(([key, label]) => (
+          <FormField key={key} label={label}>
+            <TextInput
+              value={draft.visualTheme.applePreviewConfig[key]}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: {
+                    ...current.visualTheme,
+                    applePreviewConfig: {
+                      ...current.visualTheme.applePreviewConfig,
+                      [key]: event.target.value,
+                    },
+                  },
+                }))
+              }
+            />
+          </FormField>
+        ))}
+        <Checkbox
+          label="Show back-content indication"
+          checked={draft.visualTheme.applePreviewConfig.showBackContent}
+          onChange={(event) =>
+            update((current) => ({
+              ...current,
+              visualTheme: {
+                ...current.visualTheme,
+                applePreviewConfig: {
+                  ...current.visualTheme.applePreviewConfig,
+                  showBackContent: event.target.checked,
+                },
+              },
+            }))
+          }
+        />
+      </div>
+    );
+  if (section === "google-preview")
+    return (
+      <div className="studio-section-content">
+        <Alert tone="info" title="Preview only">
+          {ar
+            ? "لا يتم إنشاء كائن Google Wallet حقيقي."
+            : "No Google Wallet object is created in W2."}
+        </Alert>
+        <CapabilitySummary platform="GOOGLE_WALLET" />
+        {(
+          [
+            ["title", "Title"],
+            ["subtitle", "Subtitle"],
+            ["detailsLabel", "Details label"],
+            ["barcodeLabel", "Barcode label"],
+          ] as const
+        ).map(([key, label]) => (
+          <FormField key={key} label={label}>
+            <TextInput
+              value={draft.visualTheme.googlePreviewConfig[key]}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: {
+                    ...current.visualTheme,
+                    googlePreviewConfig: {
+                      ...current.visualTheme.googlePreviewConfig,
+                      [key]: event.target.value,
+                    },
+                  },
+                }))
+              }
+            />
+          </FormField>
+        ))}
+      </div>
+    );
+  return (
+    <div className="studio-section-content">
+      <CapabilitySummary platform="CUSTOMER_WEB" />
+      <h3>{ar ? "تكوين بطاقة العميل" : "Customer-facing card composition"}</h3>
+      <p>
+        {ar
+          ? "تتضمن المعاينة الهوية والمحتوى المحلي والأختام والمكافأة والشروط."
+          : "The preview includes identity, localized content, stamps, reward, and terms."}
+      </p>
+      <FormField label={ar ? "نمط البطاقة" : "Card style"}>
+        <Select
+          value={draft.visualTheme.customerWebVariant}
+          onChange={(event) =>
+            update((current) => ({
+              ...current,
+              visualTheme: {
+                ...current.visualTheme,
+                customerWebVariant: event.target.value as "CARD" | "MINIMAL" | "HERO",
+              },
+            }))
+          }
+        >
+          <option value="CARD">Card</option>
+          <option value="MINIMAL">Minimal</option>
+          <option value="HERO">Hero</option>
+        </Select>
+      </FormField>
+    </div>
+  );
+}
+
+function CapabilitySummary({ platform }: { platform: ProgramPreviewPlatform }) {
+  return (
+    <details className="studio-capability-summary">
+      <summary>Platform capability matrix</summary>
+      <dl>
+        {Object.entries(programPlatformCapabilities[platform]).map(([feature, capability]) => (
+          <div key={feature}>
+            <dt>{feature}</dt>
+            <dd>
+              <Badge tone={capability.support === "UNSUPPORTED" ? "warning" : "neutral"}>
+                {capability.support}
+              </Badge>{" "}
+              {capability.explanation}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function ValidationPanel({
+  result,
+  onValidate,
+  validating,
+  onIssue,
+  ar,
+}: {
+  result: ValidationResult | null;
+  onValidate: () => void;
+  validating: boolean;
+  onIssue: (issue: ValidationIssue) => void;
+  ar: boolean;
+}) {
+  return (
+    <div className="studio-section-content">
+      <div className="studio-section-heading">
+        <div>
+          <h3>{ar ? "محرك تحقق كامل" : "Complete validation engine"}</h3>
+          <p>
+            {ar
+              ? "راجع الأخطاء والتحذيرات حسب القسم والمنصة."
+              : "Review typed errors and warnings by section and platform."}
+          </p>
+        </div>
+        <Button onClick={onValidate} loading={validating}>
+          <ShieldCheck size={16} /> {ar ? "تشغيل التحقق" : "Run validation"}
+        </Button>
+      </div>
+      {!result ? (
+        <Alert tone="info" title={ar ? "لم يتم التحقق بعد" : "Not validated yet"} />
+      ) : (
+        <>
+          <Alert
+            tone={result.errors.length ? "danger" : result.warnings.length ? "warning" : "success"}
+            title={`${result.status} · ${result.errors.length} errors · ${result.warnings.length} warnings`}
+          />
+          <div className="studio-validation-list">
+            {[...result.errors, ...result.warnings].map((item) => (
+              <button type="button" key={`${item.code}-${item.path}`} onClick={() => onIssue(item)}>
+                {item.severity === "error" ? <CircleAlert size={18} /> : <Sparkles size={18} />}
+                <span>
+                  <strong>{item.code}</strong>
+                  <small>
+                    {item.platform} · {item.path}
+                  </small>
+                  <p>{item.message}</p>
+                  <em>{item.suggestedAction}</em>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TestModePanel({
+  session,
+  onStart,
+  onCommand,
+  working,
+  ar,
+}: {
+  session: TestSession | null;
+  onStart: () => void;
+  onCommand: (
+    command:
+      | { kind: "add"; amount: number }
+      | { kind: "reverse" }
+      | { kind: "reset" }
+      | { kind: "redeem"; rewardId: string },
+  ) => void;
+  working: boolean;
+  ar: boolean;
+}) {
+  if (!session)
+    return (
+      <div className="studio-section-content">
+        <FlaskConical size={34} />
+        <h3>{ar ? "عميل اصطناعي فقط" : "Synthetic customer only"}</h3>
+        <p>
+          {ar
+            ? "لا يتم إنشاء عميل أو عضوية أو بطاقة حقيقية."
+            : "No real customer, membership, QR, or wallet pass is created."}
+        </p>
+        <Button onClick={onStart} loading={working}>
+          {ar ? "بدء وضع الاختبار" : "Start Test Mode"}
+        </Button>
+      </div>
+    );
+  const goal = session.version.stampRule?.requiredStampCount ?? 8;
+  const rewardReady = session.currentStampCount >= goal;
+  const unlocks = session.events.filter((event) => event.eventType === "TEST_REWARD_UNLOCKED");
+  const relocks = session.events.filter((event) => event.eventType === "TEST_REWARD_RELOCKED");
+  const redemptions = session.events.filter((event) => event.eventType === "TEST_REWARD_REDEEMED");
+  return (
+    <div className="studio-section-content">
+      <div className="test-mode-meter">
+        <div>
+          <span>
+            {session.currentStampCount}/{goal}
+          </span>
+          <small>{ar ? "الأختام الحالية" : "current stamps"}</small>
+        </div>
+        <div>
+          <span>{session.cycleCount}</span>
+          <small>{ar ? "الدورات المكتملة" : "completed cycles"}</small>
+        </div>
+        <Badge tone={session.status === "COMPLETED" ? "success" : "brand"}>{session.status}</Badge>
+      </div>
+      <div className="dashboard-actions">
+        <Button
+          onClick={() => onCommand({ kind: "add", amount: 1 })}
+          disabled={working || rewardReady}
+        >
+          +1 stamp
+        </Button>
+        <Button
+          onClick={() => onCommand({ kind: "add", amount: 5 })}
+          disabled={working || rewardReady}
+        >
+          +5 stamps
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => onCommand({ kind: "reverse" })}
+          disabled={working}
+        >
+          <RotateCcw size={16} /> {ar ? "عكس آخر ختم" : "Reverse latest stamp"}
+        </Button>
+        <Button variant="secondary" onClick={() => onCommand({ kind: "reset" })} disabled={working}>
+          {ar ? "إعادة ضبط" : "Reset"}
+        </Button>
+      </div>
+      {rewardReady ? (
+        <Alert tone="success" title={ar ? "المكافأة جاهزة" : "Reward ready"}>
+          {ar
+            ? "اكتملت كل الخانات. استرد المكافأة النهائية لبدء دورة جديدة من الصفر."
+            : "Every slot is filled. Redeem the final reward to reset the grid and begin a new cycle."}
+        </Alert>
+      ) : null}
+      <div className="studio-test-rewards">
+        {session.version.rewards.map((reward) => {
+          const earned =
+            unlocks.filter((event) => event.rewardDefinitionId === reward.id).length -
+            relocks.filter((event) => event.rewardDefinitionId === reward.id).length;
+          const redeemed = redemptions.filter(
+            (event) => event.rewardDefinitionId === reward.id,
+          ).length;
+          const name =
+            reward.translations.find((translation) => translation.locale === (ar ? "AR" : "EN"))
+              ?.name ?? reward.internalName;
+          return (
+            <Card key={reward.id}>
+              <Badge tone={earned > redeemed ? "success" : "neutral"}>
+                STAMP {reward.thresholdStampCount}
+              </Badge>
+              <h4>{name}</h4>
+              <p>
+                {earned} earned · {redeemed} redeemed
+              </p>
+              <Button
+                variant="secondary"
+                disabled={earned <= redeemed || working}
+                onClick={() => onCommand({ kind: "redeem", rewardId: reward.id })}
+              >
+                {ar ? "استرداد اصطناعي" : "Synthetic redeem"}
+              </Button>
+            </Card>
+          );
+        })}
+      </div>
+      <div className="studio-event-log">
+        <h4>{ar ? "سجل الأحداث الملحق فقط" : "Append-only event log"}</h4>
+        {session.events.slice(0, 20).map((event) => (
+          <div key={event.id}>
+            <code>{event.eventType}</code>
+            <small>{event.safeMetadata?.cycle ? `cycle ${event.safeMetadata.cycle}` : ""}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VersionHistory({
+  versions,
+  ar,
+  onView,
+  onLoadMore,
+}: {
+  versions: ProgramVersion[];
+  ar: boolean;
+  onView: (versionId: string) => void;
+  onLoadMore?: (() => void) | undefined;
+}) {
+  return (
+    <Card className="studio-version-history">
+      <div className="studio-section-heading">
+        <div>
+          <span className="dashboard-card__label">IMMUTABLE HISTORY</span>
+          <h3>{ar ? "سجل الإصدارات" : "Version history"}</h3>
+        </div>
+        <History size={20} />
+      </div>
+      {versions.map((version) => (
+        <button type="button" key={version.id} onClick={() => onView(version.id)}>
+          <span>
+            <strong>v{version.versionNumber}</strong>
+            <small>{version.changeSummary || (ar ? "بدون ملخص" : "No change summary")}</small>
+          </span>
+          <Badge
+            tone={
+              version.status === "PUBLISHED"
+                ? "success"
+                : version.status === "SUPERSEDED"
+                  ? "neutral"
+                  : "brand"
+            }
+          >
+            {version.status}
+          </Badge>
+        </button>
+      ))}
+      {onLoadMore ? (
+        <Button variant="secondary" onClick={onLoadMore}>
+          {ar ? "تحميل المزيد من الإصدارات" : "Load more versions"}
+        </Button>
+      ) : null}
+    </Card>
+  );
+}
+
+function HistoricalModal({
+  version,
+  onClose,
+  ar,
+}: {
+  version: ProgramVersion | null;
+  onClose: () => void;
+  ar: boolean;
+}) {
+  return (
+    <Modal
+      open={Boolean(version)}
+      title={ar ? "إصدار تاريخي غير قابل للتغيير" : "Immutable historical version"}
+      onClose={onClose}
+    >
+      {version ? (
+        <div className="historical-version">
+          <div className="studio-section-heading">
+            <h3>v{version.versionNumber}</h3>
+            <Badge tone={version.status === "PUBLISHED" ? "success" : "neutral"}>
+              {version.status}
+            </Badge>
+          </div>
+          <dl className="quick-review-list">
+            <div>
+              <dt>Mode</dt>
+              <dd>{version.editingMode}</dd>
+            </div>
+            <div>
+              <dt>Revision</dt>
+              <dd>{version.revision}</dd>
+            </div>
+            <div>
+              <dt>Goal</dt>
+              <dd>{version.stampRule?.requiredStampCount ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Rewards</dt>
+              <dd>{version.rewards.length}</dd>
+            </div>
+            <div>
+              <dt>Locations</dt>
+              <dd>{version.locations.length}</dd>
+            </div>
+            <div>
+              <dt>Published</dt>
+              <dd>{version.publishedAt ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Superseded</dt>
+              <dd>{version.supersededAt ?? "—"}</dd>
+            </div>
+          </dl>
+          <Alert tone="info" title={ar ? "عرض فقط" : "Read only"}>
+            {ar ? "لا يمكن تعديل هذا الإصدار التاريخي." : "Historical versions cannot be edited."}
+          </Alert>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function ConflictModal({
+  conflict,
+  ar,
+  onCopy,
+  onExport,
+  onReload,
+  onReapply,
+}: {
+  conflict: ConflictState | null;
+  ar: boolean;
+  onCopy: () => void;
+  onExport: () => void;
+  onReload: () => void;
+  onReapply: () => void;
+}) {
+  return (
+    <Modal
+      open={Boolean(conflict)}
+      title={ar ? "تم التحرير في مكان آخر" : "Edited elsewhere"}
+      onClose={() => undefined}
+    >
+      {conflict ? (
+        <div className="studio-conflict">
+          <Alert
+            tone="warning"
+            title={ar ? "تم الاحتفاظ بتعديلاتك المحلية" : "Your local edits are preserved"}
+          >
+            {ar
+              ? `مراجعتك المحلية ${conflict.localRevision}، وأحدث مراجعة على الخادم ${conflict.serverRevision}.`
+              : `Local revision ${conflict.localRevision}; server revision ${conflict.serverRevision}.`}
+          </Alert>
+          <p>
+            {ar
+              ? "راجع الاختلافات أو انسخ القيم المحلية قبل إعادة التحميل أو إعادة التطبيق."
+              : "Review, copy, or export local values before deliberately reloading or reapplying."}
+          </p>
+          <details>
+            <summary>{ar ? "عرض القيم المحلية" : "Show local values"}</summary>
+            <pre>{JSON.stringify(apiDraft(conflict.localDraft), null, 2)}</pre>
+          </details>
+          <div className="dashboard-actions">
+            <Button variant="secondary" onClick={onCopy}>
+              <Copy size={16} /> {ar ? "نسخ" : "Copy local"}
+            </Button>
+            <Button variant="secondary" onClick={onExport}>
+              <Download size={16} /> {ar ? "تصدير" : "Export JSON"}
+            </Button>
+            <Button variant="secondary" onClick={onReload}>
+              <RefreshCcw size={16} /> {ar ? "تحميل الأحدث" : "Reload latest"}
+            </Button>
+            <Button onClick={onReapply}>
+              <UploadCloud size={16} /> {ar ? "إعادة التطبيق عمداً" : "Reapply deliberately"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}

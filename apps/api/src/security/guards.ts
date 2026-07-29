@@ -8,13 +8,15 @@ import {
 import { Reflector } from "@nestjs/core";
 import { hashOpaqueToken, isSessionActive, safeTokenEquals } from "@waflo/auth";
 import { AppError } from "../common/app-error.js";
-import { IS_PUBLIC, RATE_LIMIT, SKIP_CSRF } from "../common/decorators.js";
+import { CUSTOMER_CSRF, IS_PUBLIC, RATE_LIMIT, SKIP_CSRF } from "../common/decorators.js";
 import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { RateLimitService } from "./rate-limit.service.js";
+import { CustomerCardService } from "../customer/customer-card.service.js";
+import { CustomerSecurityService } from "../customer/customer-security.service.js";
 
 @Injectable()
 export class SessionGuard implements CanActivate {
@@ -88,6 +90,11 @@ export class CsrfGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<WafloRequest>();
     if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
+    const customerCsrf = this.reflector.getAllAndOverride<boolean | "optional">(CUSTOMER_CSRF, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (customerCsrf) return true;
     const skip = this.reflector.getAllAndOverride<boolean>(SKIP_CSRF, [
       context.getHandler(),
       context.getClass(),
@@ -120,6 +127,83 @@ export class CsrfGuard implements CanActivate {
       );
     }
     return true;
+  }
+}
+
+@Injectable()
+export class CustomerCsrfGuard implements CanActivate {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly environment: EnvironmentService,
+    private readonly cards: CustomerCardService,
+    private readonly security: CustomerSecurityService,
+    private readonly audit: AuditService,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const protectedMutation = this.reflector.getAllAndOverride<boolean | "optional">(
+      CUSTOMER_CSRF,
+      [context.getHandler(), context.getClass()],
+    );
+    if (!protectedMutation) return true;
+    const request = context.switchToHttp().getRequest<WafloRequest>();
+    if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
+    const rawSessionToken = request.cookies[this.environment.values.CUSTOMER_COOKIE_NAME];
+    if (protectedMutation === "optional" && !rawSessionToken) return true;
+    const developmentOverride =
+      request.query &&
+      typeof request.query === "object" &&
+      "tenant" in request.query &&
+      typeof request.query.tenant === "string"
+        ? request.query.tenant
+        : undefined;
+    const session = await this.cards.requireSession(request, developmentOverride);
+    const csrfCookie = request.cookies[this.environment.customerCsrfCookieName];
+    const csrfHeader = request.headers["x-csrf-token"];
+    const origin = request.headers.origin;
+    const expectedOrigins = this.expectedOrigins(
+      session.session.membership.organization.merchantSlug,
+    );
+    const validOrigin = typeof origin === "string" && expectedOrigins.includes(origin);
+    const expectedToken = rawSessionToken ? this.security.customerCsrfToken(rawSessionToken) : "";
+    const validToken =
+      typeof csrfCookie === "string" &&
+      typeof csrfHeader === "string" &&
+      safeTokenEquals(csrfCookie, csrfHeader) &&
+      safeTokenEquals(expectedToken, csrfHeader);
+    if (!validOrigin || !validToken) {
+      await this.audit.security(
+        {
+          organizationId: session.session.organizationId,
+          eventType: "customer_csrf.rejected",
+          severity: "MEDIUM",
+          metadata: { originPresent: Boolean(origin), validOrigin, validToken },
+        },
+        request,
+      );
+      throw new AppError(
+        "CUSTOMER_CSRF_INVALID",
+        "This customer request could not be verified. Refresh the page and try again.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return true;
+  }
+
+  private expectedOrigins(merchantSlug: string): string[] {
+    const base = new URL(this.environment.values.CUSTOMER_WEB_URL);
+    const merchant = new URL(base);
+    merchant.hostname = `${merchantSlug}.${base.hostname}`;
+    if (this.environment.values.NODE_ENV === "production") {
+      return [merchant.origin];
+    }
+    const developmentOrigins = [base.origin, merchant.origin];
+    for (const hostname of [`${merchantSlug}.localhost`, `${merchantSlug}.lvh.me`]) {
+      const local = new URL(base);
+      local.hostname = hostname;
+      developmentOrigins.push(local.origin);
+    }
+    return [...new Set(developmentOrigins)];
   }
 }
 

@@ -47,7 +47,7 @@ describe("W2 stamp visual engine", () => {
       label: "<script>alert(1)</script>",
     });
     expect(rendered.svg).not.toContain("<script>");
-    expect(rendered.svg).toContain("&lt;script&gt;");
+    expect(rendered.svg).not.toContain("alert(1)");
   });
 
   it("renders separate safe filled and empty artwork", () => {
@@ -86,5 +86,81 @@ describe("W2 stamp visual engine", () => {
         filledArtwork: { kind: "svg", trusted: true, content: "<script>alert(1)</script>" },
       }),
     ).toThrow("Unsafe artwork");
+  });
+
+  it("keeps stamps free of implicit checkmarks and numbers", () => {
+    const rendered = renderStampSvg({
+      goal: 6,
+      progress: 3,
+      layout: "GRID",
+      filledColor: "#6B3F2A",
+      emptyColor: "#E7B56B",
+      accentColor: "#222222",
+    });
+    expect(rendered.svg).not.toContain("<text");
+    expect(rendered.svg).not.toContain("✓");
+    expect(rendered.svg).not.toMatch(/>1<\/text>|>2<\/text>|>3<\/text>/);
+  });
+
+  it("ignores milestone artwork and uses only FILLED and EMPTY visual states", () => {
+    const milestone = {
+      kind: "svg" as const,
+      trusted: true as const,
+      content:
+        '<svg xmlns="http://www.w3.org/2000/svg"><path id="reward-star" d="M50 2l12 32h34L69 54l11 34-30-20-30 20 11-34L4 34h34z"/></svg>',
+    };
+    const rendered = renderStampSvg({
+      goal: 8,
+      progress: 5,
+      layout: "PATH",
+      layoutConfiguration: { columns: 4, serpentine: true },
+      filledColor: "#6B3F2A",
+      emptyColor: "#E7B56B",
+      accentColor: "#222222",
+      milestones: [{ position: 4, artwork: milestone }],
+    });
+    expect(rendered.svg).not.toContain("data-milestone");
+    expect(rendered.svg).not.toContain(Buffer.from(milestone.content, "utf8").toString("base64"));
+    expect(rendered.svg).toContain('data-visual-state="FILLED"');
+    expect(rendered.svg).toContain('data-visual-state="EMPTY"');
+    expect(rendered.svg).not.toContain("<text");
+  });
+
+  it.each([
+    { progress: 0, filled: 0, rewardReady: false },
+    { progress: 5, filled: 5, rewardReady: false },
+    { progress: 8, filled: 8, rewardReady: true },
+  ])("renders the locked two-state grid at progress $progress", (state) => {
+    const rendered = renderStampSvg({
+      goal: 8,
+      progress: state.progress,
+      layout: "GRID",
+      filledColor: "#6B3F2A",
+      emptyColor: "#E7B56B",
+      accentColor: "#222222",
+      rewardReady: state.rewardReady,
+    });
+    expect(rendered.positions.filter((position) => position.filled)).toHaveLength(state.filled);
+    expect(rendered.svg).toContain(`data-reward-ready="${String(state.rewardReady)}"`);
+    expect(rendered.svg).not.toContain("data-milestone");
+    expect(rendered.svg).not.toContain("<text");
+  });
+
+  it("renders Arabic labels only when explicitly enabled", () => {
+    const rendered = renderStampSvg({
+      goal: 4,
+      progress: 2,
+      layout: "ROW",
+      filledColor: "#6B3F2A",
+      emptyColor: "#E7B56B",
+      accentColor: "#222222",
+      progressLabelVisible: true,
+      rewardLabelVisible: true,
+      label: "ختمان من أربعة",
+      rewardLabel: "المكافأة التالية",
+    });
+    expect(rendered.svg).toContain("ختمان من أربعة");
+    expect(rendered.svg).toContain("المكافأة التالية");
+    expect(rendered.svg).toContain("Noto Sans Arabic");
   });
 });

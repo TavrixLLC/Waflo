@@ -1,19 +1,37 @@
-import { createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
+import { parse as parseDotenv } from "dotenv";
 
 const root = path.resolve(import.meta.dirname, "..");
+const localEnvironment = parseDotenv(readFileSync(path.join(root, ".env"), "utf8"));
+process.env.DATABASE_URL ??= localEnvironment.DATABASE_URL;
 const project = process.argv[2] ?? "chromium";
 const runLabel = `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 6)}`;
-if (project !== "chromium" && project !== "accessibility") {
+const supportedProjects = new Set([
+  "chromium",
+  "accessibility",
+  "w3",
+  "w3-accessibility",
+  "w3-evidence",
+  "w3-provider-disabled",
+]);
+if (!supportedProjects.has(project)) {
   throw new Error(`Unsupported Playwright project: ${project}`);
 }
+const isW3 = project.startsWith("w3");
+const providerDisabled = project === "w3-provider-disabled";
 
-const logDirectory = path.join(root, "artifacts", "handoff-round-3", "raw-test-output");
+const logDirectory = path.join(
+  root,
+  "artifacts",
+  isW3 ? "handoff-w3-round-1" : "handoff-w2-round-5",
+  "raw-test-output",
+);
 await mkdir(logDirectory, { recursive: true });
 
 const commands = [
@@ -53,12 +71,22 @@ const commands = [
   {
     name: "customer",
     port: 3002,
-    readyUrl: "http://127.0.0.1:3002/?tenant=today",
+    readyUrl: "http://127.0.0.1:3002/privacy",
     cwd: path.join(root, "apps", "customer-web"),
     entry: path.join(root, "apps", "customer-web", "node_modules", "next", "dist", "bin", "next"),
     args: ["start", "-p", "3002"],
   },
 ];
+if (isW3) {
+  commands.push({
+    name: "wallet-worker",
+    port: null,
+    readyUrl: null,
+    cwd: path.join(root, "apps", "wallet-worker"),
+    entry: path.join(root, "apps", "wallet-worker", "dist", "main.js"),
+    args: [],
+  });
+}
 
 for (const command of commands) {
   if (!existsSync(command.entry)) {
@@ -78,6 +106,14 @@ function spawnServer(command) {
     env: {
       ...process.env,
       RATE_LIMIT_NAMESPACE: `playwright-${project}-${randomUUID()}`,
+      ...(isW3
+        ? {
+            APPLE_WALLET_MODE: providerDisabled ? "DISABLED" : "TEST_ADAPTER",
+            GOOGLE_WALLET_MODE: providerDisabled ? "DISABLED" : "TEST_ADAPTER",
+            GOOGLE_WALLET_ISSUER_ID: "test-issuer",
+            REDIS_URL: "redis://127.0.0.1:6379",
+          }
+        : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -89,6 +125,13 @@ function spawnServer(command) {
 }
 
 async function waitForReady(command, child) {
+  if (!command.readyUrl) {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    if (child.exitCode !== null) {
+      throw new Error(`${command.name} exited before readiness with code ${child.exitCode}.`);
+    }
+    return;
+  }
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
@@ -148,7 +191,8 @@ async function cleanup() {
   await Promise.all(children.map(stopChild));
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    const states = await Promise.all(commands.map((command) => portIsOpen(command.port)));
+    const portCommands = commands.filter((command) => command.port !== null);
+    const states = await Promise.all(portCommands.map((command) => portIsOpen(command.port)));
     if (states.every((open) => !open)) {
       process.stdout.write(`Playwright ${project} cleanup: all managed ports closed.\n`);
       return;
@@ -157,7 +201,7 @@ async function cleanup() {
   }
   const openPorts = [];
   for (const command of commands) {
-    if (await portIsOpen(command.port)) openPorts.push(command.port);
+    if (command.port !== null && (await portIsOpen(command.port))) openPorts.push(command.port);
   }
   throw new Error(`Managed server cleanup left open ports: ${openPorts.join(", ")}.`);
 }

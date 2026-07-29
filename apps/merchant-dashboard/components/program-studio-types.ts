@@ -1,0 +1,509 @@
+import {
+  findProgramTemplate,
+  type ProgramOperationalStatus,
+  type ProgramTemplateArtworkReference,
+  type ProgramTemplateDefinition,
+} from "@waflo/contracts";
+
+export type EditingMode = "quick" | "pro";
+export type StampLayout = "ROW" | "GRID" | "PATH" | "RING";
+export type PreviewProfile = "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET";
+export type AssetCategory =
+  | "LOGO"
+  | "HERO"
+  | "BACKGROUND"
+  | "STAMP_FILLED"
+  | "STAMP_EMPTY"
+  | "STAMP_MILESTONE"
+  | "GENERAL";
+
+export interface ProgramTranslationInput {
+  programName: string;
+  shortDescription: string;
+  fullDescription?: string | undefined;
+  rewardSummary: string;
+  joinInstructions?: string | undefined;
+  termsAndConditions: string;
+  completionMessage: string;
+  rewardUnlockedMessage: string;
+  pausedMessage?: string | undefined;
+}
+
+export interface RewardInput {
+  clientId: string;
+  thresholdStampCount: number;
+  rewardType: "TEXT_REWARD" | "FREE_ITEM" | "DISCOUNT_DESCRIPTION" | "CUSTOM";
+  internalName: string;
+  sortOrder: number;
+  validityDurationDays?: number | null | undefined;
+  requiresManagerApproval: boolean;
+  maximumRedemptionsPerEarned: number;
+  visualOverride?:
+    | {
+        stampAssetId?: string | null | undefined;
+        accentOverride?: string | null | undefined;
+      }
+    | undefined;
+  translations: {
+    en: { name: string; description: string; redemptionInstructions?: string | undefined };
+    ar: { name: string; description: string; redemptionInstructions?: string | undefined };
+  };
+}
+
+export interface ProgramDraftInput {
+  internalName: string;
+  editingMode: EditingMode;
+  templateCode?: string | undefined;
+  templateVersion?: number | undefined;
+  requiredStampCount: number;
+  translations: {
+    en: ProgramTranslationInput;
+    ar: ProgramTranslationInput;
+  };
+  earningDescription: string;
+  rewards: RewardInput[];
+  locationIds: string[];
+  visualTheme: {
+    backgroundColor: string;
+    foregroundColor: string;
+    accentColor: string;
+    secondaryColor: string;
+    mutedColor: string;
+    filledStampAssetId?: string | undefined;
+    emptyStampAssetId?: string | undefined;
+    logoAssetId?: string | null | undefined;
+    heroAssetId?: string | null | undefined;
+    backgroundAssetId?: string | null | undefined;
+    defaultMilestoneAssetId?: string | null | undefined;
+    layoutType: StampLayout;
+    layoutConfiguration: {
+      columns?: number | undefined;
+      maxPerRow?: number | undefined;
+      serpentine?: boolean | undefined;
+      startAngle?: number | undefined;
+    };
+    stampSize: number;
+    stampSpacing: number;
+    borderRadius: number;
+    progressLabelVisible: boolean;
+    rewardLabelVisible: boolean;
+    customerWebVariant: "CARD" | "MINIMAL" | "HERO";
+    applePreviewConfig: {
+      headerLabel: string;
+      headerValue: string;
+      secondaryLabel: string;
+      barcodeLabel: string;
+      showBackContent: boolean;
+    };
+    googlePreviewConfig: {
+      title: string;
+      subtitle: string;
+      detailsLabel: string;
+      barcodeLabel: string;
+    };
+  };
+  changeSummary?: string | undefined;
+}
+
+export interface ProgramItem {
+  id: string;
+  internalName: string;
+  status: ProgramOperationalStatus;
+  currentDraftVersion: {
+    id: string;
+    versionNumber: number;
+    revision: number;
+    status: string;
+    editingMode: "QUICK" | "PRO";
+  } | null;
+  currentPublishedVersion: {
+    id: string;
+    versionNumber: number;
+    status: string;
+    publishedAt?: string | null;
+  } | null;
+  _count?: { versions: number };
+}
+
+interface ServerTranslation {
+  locale: "EN" | "AR";
+  programName: string;
+  shortDescription: string;
+  fullDescription?: string | null;
+  rewardSummary: string;
+  joinInstructions?: string | null;
+  termsAndConditions: string;
+  completionMessage: string;
+  rewardUnlockedMessage: string;
+  pausedMessage?: string | null;
+}
+
+interface ServerReward {
+  id: string;
+  thresholdStampCount: number;
+  rewardType: RewardInput["rewardType"];
+  internalName: string;
+  sortOrder: number;
+  validityDurationDays?: number | null;
+  requiresManagerApproval: boolean;
+  maximumRedemptionsPerEarned: number;
+  translations: Array<{
+    locale: "EN" | "AR";
+    name: string;
+    description: string;
+    redemptionInstructions?: string | null;
+  }>;
+  visualOverride?: {
+    stampAssetId?: string | null;
+    accentOverride?: string | null;
+  } | null;
+}
+
+export interface ProgramVersion {
+  id: string;
+  versionNumber: number;
+  status: string;
+  editingMode: "QUICK" | "PRO";
+  baseTemplateCode?: string | null;
+  baseTemplateVersion?: number | null;
+  revision: number;
+  changeSummary?: string | null;
+  validatedAt?: string | null;
+  testReadyAt?: string | null;
+  publishedAt?: string | null;
+  supersededAt?: string | null;
+  abandonedAt?: string | null;
+  validationFingerprint?: string | null;
+  translations: ServerTranslation[];
+  stampRule: {
+    requiredStampCount: number;
+    earningDescription: string;
+  } | null;
+  rewards: ServerReward[];
+  locations: Array<{
+    locationId: string;
+    location?: { id: string; name: string; status: string };
+  }>;
+  visualTheme: {
+    backgroundColor: string;
+    foregroundColor: string;
+    accentColor: string;
+    secondaryColor: string;
+    mutedColor: string;
+    filledStampAssetId: string;
+    emptyStampAssetId: string;
+    logoAssetId?: string | null;
+    heroAssetId?: string | null;
+    backgroundAssetId?: string | null;
+    defaultMilestoneAssetId?: string | null;
+    layoutType: StampLayout;
+    layoutConfiguration?: Record<string, unknown>;
+    stampSize: number;
+    stampSpacing: number;
+    borderRadius: number;
+    progressLabelVisible: boolean;
+    rewardLabelVisible: boolean;
+    customerWebVariant: "CARD" | "MINIMAL" | "HERO";
+    applePreviewConfig?: Record<string, unknown>;
+    googlePreviewConfig?: Record<string, unknown>;
+  } | null;
+}
+
+export interface ProgramDetail
+  extends Omit<ProgramItem, "currentDraftVersion" | "currentPublishedVersion"> {
+  currentDraftVersion: ProgramVersion | null;
+  currentPublishedVersion: ProgramVersion | null;
+  versions: ProgramVersion[];
+}
+
+type TemplateArtworkPreview = ProgramTemplateArtworkReference & { previewUrl: string };
+
+export interface TemplateItem extends Omit<ProgramTemplateDefinition, "artwork"> {
+  artwork: {
+    filled: TemplateArtworkPreview;
+    empty: TemplateArtworkPreview;
+    milestone: TemplateArtworkPreview;
+  };
+}
+
+export interface LocationItem {
+  id: string;
+  name: string;
+  status: string;
+}
+
+export interface AssetItem {
+  id: string;
+  category: AssetCategory;
+  source: "WAFLO_LIBRARY" | "MERCHANT_UPLOAD";
+  originalFilename: string;
+  processingStatus: string;
+  contentUrl: string;
+  width?: number | null;
+  height?: number | null;
+  uploadDisposition?: "CREATED" | "REPLAYED" | "RESTORED" | "REPAIRED";
+}
+
+export interface ValidationIssue {
+  code: string;
+  severity: "error" | "warning";
+  path: string;
+  platform: string;
+  message: string;
+  suggestedAction: string;
+}
+
+export interface ValidationResult {
+  status: "PASSED" | "VALID_WITH_WARNINGS" | "FAILED";
+  configurationFingerprint: string;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+}
+
+export interface TestEvent {
+  id: string;
+  eventType: string;
+  rewardDefinitionId?: string | null;
+  safeMetadata?: { cycle?: number } | null;
+  createdAt: string;
+}
+
+export interface TestSession {
+  id: string;
+  status: "ACTIVE" | "RESET" | "COMPLETED";
+  currentStampCount: number;
+  cycleCount: number;
+  version: {
+    stampRule: { requiredStampCount: number } | null;
+    rewards: Array<{
+      id: string;
+      internalName: string;
+      thresholdStampCount: number;
+      translations: Array<{ locale: "EN" | "AR"; name: string }>;
+    }>;
+  };
+  events: TestEvent[];
+}
+
+export const studioSections = [
+  "overview",
+  "earning",
+  "rewards",
+  "locations",
+  "english",
+  "arabic",
+  "visual",
+  "artwork",
+  "layout",
+  "customer-preview",
+  "apple-preview",
+  "google-preview",
+  "policies",
+  "validation",
+  "test-mode",
+  "versions",
+] as const;
+
+export type StudioSection = (typeof studioSections)[number];
+
+function translation(version: ProgramVersion, locale: "EN" | "AR"): ServerTranslation | undefined {
+  return version.translations.find((item) => item.locale === locale);
+}
+
+function rewardTranslation(reward: ServerReward, locale: "EN" | "AR") {
+  return reward.translations.find((item) => item.locale === locale);
+}
+
+function stringConfig(value: Record<string, unknown>, key: string, fallback: string): string {
+  return typeof value[key] === "string" ? (value[key] as string) : fallback;
+}
+
+function booleanConfig(value: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  return typeof value[key] === "boolean" ? (value[key] as boolean) : fallback;
+}
+
+export function versionToDraft(program: ProgramDetail, version: ProgramVersion): ProgramDraftInput {
+  const en = translation(version, "EN");
+  const ar = translation(version, "AR");
+  const visual = version.visualTheme;
+  const apple = visual?.applePreviewConfig ?? {};
+  const google = visual?.googlePreviewConfig ?? {};
+  return {
+    internalName: program.internalName,
+    editingMode: version.editingMode.toLowerCase() as EditingMode,
+    templateCode: version.baseTemplateCode ?? undefined,
+    templateVersion: version.baseTemplateVersion ?? undefined,
+    requiredStampCount: version.stampRule?.requiredStampCount ?? 8,
+    earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
+    locationIds: version.locations.map((item) => item.locationId),
+    translations: {
+      en: {
+        programName: en?.programName ?? program.internalName,
+        shortDescription: en?.shortDescription ?? "",
+        fullDescription: en?.fullDescription ?? undefined,
+        rewardSummary: en?.rewardSummary ?? "",
+        joinInstructions: en?.joinInstructions ?? undefined,
+        termsAndConditions: en?.termsAndConditions ?? "",
+        completionMessage: en?.completionMessage ?? "",
+        rewardUnlockedMessage: en?.rewardUnlockedMessage ?? "",
+        pausedMessage: en?.pausedMessage ?? undefined,
+      },
+      ar: {
+        programName: ar?.programName ?? program.internalName,
+        shortDescription: ar?.shortDescription ?? "",
+        fullDescription: ar?.fullDescription ?? undefined,
+        rewardSummary: ar?.rewardSummary ?? "",
+        joinInstructions: ar?.joinInstructions ?? undefined,
+        termsAndConditions: ar?.termsAndConditions ?? "",
+        completionMessage: ar?.completionMessage ?? "",
+        rewardUnlockedMessage: ar?.rewardUnlockedMessage ?? "",
+        pausedMessage: ar?.pausedMessage ?? undefined,
+      },
+    },
+    rewards: version.rewards.map((reward) => ({
+      clientId: reward.id,
+      thresholdStampCount: reward.thresholdStampCount,
+      rewardType: reward.rewardType,
+      internalName: reward.internalName,
+      sortOrder: reward.sortOrder,
+      validityDurationDays: reward.validityDurationDays,
+      requiresManagerApproval: reward.requiresManagerApproval,
+      maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
+      visualOverride: reward.visualOverride
+        ? {
+            stampAssetId: reward.visualOverride.stampAssetId,
+            accentOverride: reward.visualOverride.accentOverride,
+          }
+        : undefined,
+      translations: {
+        en: {
+          name: rewardTranslation(reward, "EN")?.name ?? reward.internalName,
+          description: rewardTranslation(reward, "EN")?.description ?? reward.internalName,
+          redemptionInstructions:
+            rewardTranslation(reward, "EN")?.redemptionInstructions ?? undefined,
+        },
+        ar: {
+          name: rewardTranslation(reward, "AR")?.name ?? reward.internalName,
+          description: rewardTranslation(reward, "AR")?.description ?? reward.internalName,
+          redemptionInstructions:
+            rewardTranslation(reward, "AR")?.redemptionInstructions ?? undefined,
+        },
+      },
+    })),
+    visualTheme: {
+      backgroundColor: visual?.backgroundColor ?? "#F7F4EE",
+      foregroundColor: visual?.foregroundColor ?? "#222222",
+      accentColor: visual?.accentColor ?? "#E4572E",
+      secondaryColor: visual?.secondaryColor ?? "#F3A712",
+      mutedColor: visual?.mutedColor ?? "#6B7280",
+      filledStampAssetId: visual?.filledStampAssetId,
+      emptyStampAssetId: visual?.emptyStampAssetId,
+      logoAssetId: visual?.logoAssetId,
+      heroAssetId: visual?.heroAssetId,
+      backgroundAssetId: visual?.backgroundAssetId,
+      defaultMilestoneAssetId: visual?.defaultMilestoneAssetId,
+      layoutType: visual?.layoutType ?? "GRID",
+      layoutConfiguration: (visual?.layoutConfiguration ??
+        {}) as ProgramDraftInput["visualTheme"]["layoutConfiguration"],
+      stampSize: visual?.stampSize ?? 48,
+      stampSpacing: visual?.stampSpacing ?? 8,
+      borderRadius: visual?.borderRadius ?? 18,
+      progressLabelVisible: visual?.progressLabelVisible ?? true,
+      rewardLabelVisible: visual?.rewardLabelVisible ?? true,
+      customerWebVariant: visual?.customerWebVariant ?? "CARD",
+      applePreviewConfig: {
+        headerLabel: stringConfig(apple, "headerLabel", "REWARDS"),
+        headerValue: stringConfig(apple, "headerValue", program.internalName),
+        secondaryLabel: stringConfig(apple, "secondaryLabel", "NEXT REWARD"),
+        barcodeLabel: stringConfig(apple, "barcodeLabel", "Preview barcode"),
+        showBackContent: booleanConfig(apple, "showBackContent", true),
+      },
+      googlePreviewConfig: {
+        title: stringConfig(google, "title", en?.programName ?? program.internalName),
+        subtitle: stringConfig(google, "subtitle", en?.shortDescription ?? ""),
+        detailsLabel: stringConfig(google, "detailsLabel", "Reward progress"),
+        barcodeLabel: stringConfig(google, "barcodeLabel", "Preview barcode"),
+      },
+    },
+    changeSummary: version.changeSummary ?? undefined,
+  };
+}
+
+function resolveTemplate(template: string | ProgramTemplateDefinition): ProgramTemplateDefinition {
+  const resolved = typeof template === "string" ? findProgramTemplate(template) : template;
+  if (!resolved) throw new Error(`Program template ${template} is not available.`);
+  return resolved;
+}
+
+export const templateReplacementFields = [
+  "stamp goal and earning rule",
+  "English and Arabic customer copy",
+  "reward definitions",
+  "colors and stamp artwork",
+  "layout and platform preview defaults",
+] as const;
+
+export function createQuickDraft(
+  templateInput: string | ProgramTemplateDefinition,
+  mode: EditingMode = "quick",
+): ProgramDraftInput {
+  const template = resolveTemplate(templateInput);
+  const templateRewards = [...(mode === "pro" ? template.milestones : []), template.finalReward];
+  return {
+    internalName: "",
+    editingMode: mode,
+    templateCode: template.code,
+    templateVersion: template.version,
+    requiredStampCount: template.recommendedStampGoal,
+    earningDescription: template.earningDescription,
+    locationIds: [],
+    translations: structuredClone(template.copy),
+    rewards: templateRewards.map((reward, index) => ({
+      clientId: crypto.randomUUID(),
+      thresholdStampCount: reward.thresholdStampCount,
+      rewardType: reward.rewardType,
+      internalName: reward.internalName,
+      sortOrder: index,
+      validityDurationDays: reward.validityDurationDays,
+      requiresManagerApproval: reward.requiresManagerApproval,
+      maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
+      translations: structuredClone(reward.translations),
+    })),
+    visualTheme: {
+      backgroundColor: template.colors.background,
+      foregroundColor: template.colors.foreground,
+      accentColor: template.colors.accent,
+      secondaryColor: template.colors.secondary,
+      mutedColor: template.colors.muted,
+      layoutType: template.layout.type,
+      layoutConfiguration: structuredClone(template.layout.configuration),
+      stampSize: template.layout.stampSize,
+      stampSpacing: template.layout.stampSpacing,
+      borderRadius: 18,
+      progressLabelVisible: true,
+      rewardLabelVisible: true,
+      customerWebVariant: template.customerWeb.variant,
+      applePreviewConfig: structuredClone(template.apple),
+      googlePreviewConfig: structuredClone(template.google),
+    },
+  };
+}
+
+export function applyTemplateToDraft(
+  template: ProgramTemplateDefinition,
+  current: ProgramDraftInput,
+): ProgramDraftInput {
+  const replacement = createQuickDraft(template, current.editingMode);
+  return {
+    ...replacement,
+    internalName: current.internalName,
+    locationIds: [...current.locationIds],
+  };
+}
+
+export function apiDraft(input: ProgramDraftInput) {
+  return {
+    ...input,
+    rewards: input.rewards.map(({ clientId: _clientId, ...reward }) => reward),
+  };
+}

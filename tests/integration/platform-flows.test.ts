@@ -13,6 +13,10 @@ import { OrganizationsService } from "../../apps/api/src/organizations/organizat
 import { HostResolutionService } from "../../apps/api/src/public/host-resolution.service";
 import { TeamService } from "../../apps/api/src/team/team.service";
 import { TenantService } from "../../apps/api/src/tenancy/tenant.service";
+import {
+  decideProgramPublicationState,
+  type ProgramOperationalStatus,
+} from "../../packages/contracts/src/index";
 
 interface CapturedNotification {
   to: string;
@@ -372,6 +376,57 @@ describe.sequential("Waflo W1 service and database integration", () => {
     ).rejects.toMatchObject({
       code: "PLAN_DOWNGRADE_BLOCKED",
       details: { requestedPlan: "starter", locationUsage: 2, locationLimit: 1 },
+    });
+    expect(
+      await prisma.client.organization.findUniqueOrThrow({
+        where: { id: downgradeOrganization.id },
+      }),
+    ).toMatchObject({ selectedPlan: "GROWTH" });
+  });
+
+  it("counts every non-archived program when guarding a plan downgrade", async () => {
+    const downgradeOrganization = await organizations.create(
+      ownerId,
+      {
+        name: `Program Downgrade Guard ${runId}`,
+        merchantSlug: `program-downgrade-${runId}`,
+        defaultLocale: "en",
+        timezone: "Asia/Baghdad",
+        selectedPlan: "growth",
+      },
+      request,
+    );
+    await prisma.client.loyaltyProgram.createMany({
+      data: [
+        {
+          organizationId: downgradeOrganization.id,
+          internalName: "Active program A",
+          createdByUserId: ownerId,
+        },
+        {
+          organizationId: downgradeOrganization.id,
+          internalName: "Active program B",
+          createdByUserId: ownerId,
+          status: "VALIDATED",
+        },
+        {
+          organizationId: downgradeOrganization.id,
+          internalName: "Archived program",
+          createdByUserId: ownerId,
+          status: "ARCHIVED",
+          archivedAt: new Date(),
+        },
+      ],
+    });
+    await expect(
+      billing.selectPlan(ownerId, downgradeOrganization.id, "starter", request),
+    ).rejects.toMatchObject({
+      code: "PLAN_DOWNGRADE_BLOCKED",
+      details: {
+        requestedPlan: "starter",
+        programUsage: 2,
+        programLimit: 1,
+      },
     });
     expect(
       await prisma.client.organization.findUniqueOrThrow({
@@ -808,5 +863,47 @@ describe.sequential("Waflo W1 service and database integration", () => {
     const updated = await auth.updateMe(ownerId, { preferredLocale: "ar" });
     expect(updated.preferredLocale).toBe("AR");
     expect((await auth.me(ownerId)).preferredLocale).toBe("AR");
+  });
+
+  it("keeps the centralized publication policy exhaustive with the database status enum", async () => {
+    const statuses = await prisma.client.$queryRaw<Array<{ status: ProgramOperationalStatus }>>`
+      SELECT unnest(enum_range(NULL::"LoyaltyProgramStatus"))::text AS status
+    `;
+    expect(statuses.map(({ status }) => status).sort()).toEqual(
+      [
+        "DRAFT",
+        "VALIDATED",
+        "TEST",
+        "SCHEDULED",
+        "PUBLISHED",
+        "PAUSED",
+        "ARCHIVED",
+        "SUSPENDED",
+      ].sort(),
+    );
+
+    const allowedFirst = statuses
+      .filter(
+        ({ status }) =>
+          decideProgramPublicationState({
+            programStatus: status,
+            hasCurrentPublishedVersion: false,
+          }).allowed,
+      )
+      .map(({ status }) => status)
+      .sort();
+    const allowedReplacement = statuses
+      .filter(
+        ({ status }) =>
+          decideProgramPublicationState({
+            programStatus: status,
+            hasCurrentPublishedVersion: true,
+          }).allowed,
+      )
+      .map(({ status }) => status)
+      .sort();
+
+    expect(allowedFirst).toEqual(["DRAFT", "TEST", "VALIDATED"]);
+    expect(allowedReplacement).toEqual(["PAUSED", "PUBLISHED"]);
   });
 });

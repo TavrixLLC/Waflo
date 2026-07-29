@@ -1,45 +1,103 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+  S3ServiceException,
+} from "@aws-sdk/client-s3";
 
 export interface ObjectStorage {
   put(objectKey: string, bytes: Buffer, contentType: string): Promise<void>;
+  putImmutable(objectKey: string, bytes: Buffer, contentType: string): Promise<"STORED" | "EXISTS">;
   get(objectKey: string): Promise<Buffer>;
-  signedReadUrl(objectKey: string, expiresInSeconds: number): string;
+  delete(objectKey: string): Promise<void>;
+  ensureReady(): Promise<void>;
 }
 
-export class LocalObjectStorage implements ObjectStorage {
-  constructor(
-    private readonly root = join(process.cwd(), "tmp", "waflo-object-storage"),
-    private readonly signingSecret = process.env.WAFLO_OBJECT_SIGNING_SECRET ??
-      "local-development-only",
-  ) {}
+export const OBJECT_STORAGE = Symbol("OBJECT_STORAGE");
 
-  async put(objectKey: string, bytes: Buffer) {
-    const target = join(this.root, objectKey.replace(/^[/\\]+/, ""));
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, bytes, { flag: "w" });
+export interface S3ObjectStorageOptions {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle: boolean;
+}
+
+export class S3ObjectStorage implements ObjectStorage {
+  private readonly client: S3Client;
+
+  constructor(private readonly options: S3ObjectStorageOptions) {
+    this.client = new S3Client({
+      endpoint: options.endpoint,
+      region: options.region,
+      forcePathStyle: options.forcePathStyle,
+      credentials: {
+        accessKeyId: options.accessKeyId,
+        secretAccessKey: options.secretAccessKey,
+      },
+    });
   }
 
-  get(objectKey: string) {
-    return readFile(join(this.root, objectKey.replace(/^[/\\]+/, "")));
+  async ensureReady(): Promise<void> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.options.bucket }));
+    } catch {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.options.bucket }));
+      await this.client.send(new HeadBucketCommand({ Bucket: this.options.bucket }));
+    }
   }
 
-  signedReadUrl(objectKey: string, expiresInSeconds: number) {
-    const expires = Math.floor(Date.now() / 1000) + Math.max(1, Math.min(expiresInSeconds, 3600));
-    const payload = `${objectKey}:${expires}`;
-    const signature = createHmac("sha256", this.signingSecret).update(payload).digest("hex");
-    return `/v1/object-storage/read?key=${encodeURIComponent(objectKey)}&expires=${expires}&signature=${signature}`;
+  async put(objectKey: string, bytes: Buffer, contentType: string): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.options.bucket,
+        Key: objectKey,
+        Body: bytes,
+        ContentType: contentType,
+        CacheControl: "private, no-store",
+      }),
+    );
   }
 
-  verifySignature(objectKey: string, expires: number, signature: string) {
-    if (expires < Math.floor(Date.now() / 1000)) return false;
-    const expected = createHmac("sha256", this.signingSecret)
-      .update(`${objectKey}:${expires}`)
-      .digest("hex");
-    return (
-      expected.length === signature.length &&
-      timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
+  async putImmutable(
+    objectKey: string,
+    bytes: Buffer,
+    contentType: string,
+  ): Promise<"STORED" | "EXISTS"> {
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.options.bucket,
+          Key: objectKey,
+          Body: bytes,
+          ContentType: contentType,
+          CacheControl: "private, immutable, max-age=31536000",
+          IfNoneMatch: "*",
+        }),
+      );
+      return "STORED";
+    } catch (error) {
+      if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 412)
+        return "EXISTS";
+      throw error;
+    }
+  }
+
+  async get(objectKey: string): Promise<Buffer> {
+    const response = await this.client.send(
+      new GetObjectCommand({ Bucket: this.options.bucket, Key: objectKey }),
+    );
+    if (!response.Body) throw new Error("Object storage returned an empty body.");
+    return Buffer.from(await response.Body.transformToByteArray());
+  }
+
+  async delete(objectKey: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.options.bucket, Key: objectKey }),
     );
   }
 }

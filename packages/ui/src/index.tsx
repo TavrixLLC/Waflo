@@ -303,9 +303,13 @@ export function Modal({
       className="wf-dialog"
       onCancel={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
       }}
-      onClose={onClose}
+      onClose={(event) => {
+        event.stopPropagation();
+        onClose();
+      }}
     >
       <div className="wf-dialog__header">
         <h2>{title}</h2>

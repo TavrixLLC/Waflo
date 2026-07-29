@@ -11,6 +11,12 @@ export class EnvironmentService {
       .filter(Boolean);
   }
 
+  get customerCsrfCookieName(): string {
+    return this.values.NODE_ENV === "production"
+      ? "__Host-waflo_customer_csrf"
+      : "waflo_customer_csrf";
+  }
+
   get stripeConfigured(): boolean {
     return Boolean(
       this.values.STRIPE_SECRET_KEY &&

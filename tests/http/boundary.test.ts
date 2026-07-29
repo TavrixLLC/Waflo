@@ -179,6 +179,84 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(sessionCookie).toContain("Path=/");
   });
 
+  it("accepts multipart images through private object storage and serves real variants", async () => {
+    const csrfState = await csrf();
+    const boundary = `waflo-http-${randomUUID()}`;
+    const metadata = JSON.stringify({
+      category: "STAMP_FILLED",
+      crop: { x: 0, y: 0, width: 1, height: 1, zoom: 1 },
+    });
+    const image = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAPoAAAD6AG1e1JrAAAARklEQVRYhe3XwQ0AMAhC0U7EOuyfuIfdor28g3cTET5nmv05xwLjBCXCeMNlRMOKK4wijheQDCQrKA0sX8VkVLMqp3mugwtMYqCIQ8Mt0gAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const multipart = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n\r\n${metadata}\r\n`,
+      ),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="stamp.png"\r\nContent-Type: image/png\r\n\r\n`,
+      ),
+      image,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const upload = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/assets`,
+      headers: {
+        ...mutationHeaders(csrfState, owner),
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: multipart,
+    });
+    expect(upload.statusCode).toBe(201);
+    const asset = upload.json().data as {
+      id: string;
+      safeMetadata: { metadataStripped: boolean; rawUploadStored: boolean; storage: string };
+      variants: Array<{
+        variantCode: string;
+        objectKey: string;
+        width: number;
+        height: number;
+      }>;
+    };
+    expect(asset.safeMetadata).toMatchObject({
+      metadataStripped: true,
+      rawUploadStored: false,
+      storage: "private-object-storage",
+    });
+    expect(asset.variants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variantCode: "ORIGINAL_SAFE" }),
+        expect.objectContaining({ variantCode: "STAMP_256", width: 256, height: 256 }),
+        expect.objectContaining({ variantCode: "THUMBNAIL_96", width: 96, height: 96 }),
+      ]),
+    );
+
+    const anonymous = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organizationId}/assets/${asset.id}/content?variant=THUMBNAIL_96`,
+    });
+    expect(anonymous.statusCode).toBe(401);
+    const content = await app.inject({
+      method: "GET",
+      url: `/v1/organizations/${organizationId}/assets/${asset.id}/content?variant=THUMBNAIL_96`,
+      headers: { cookie: owner.sessionCookie },
+    });
+    expect(content.statusCode).toBe(200);
+    expect(content.headers["content-type"]).toContain("image/png");
+    expect(content.rawPayload.length).toBeGreaterThan(100);
+
+    const storedVariant = asset.variants.find((variant) => variant.variantCode === "THUMBNAIL_96");
+    expect(storedVariant?.objectKey).toMatch(
+      new RegExp(`^organizations/${organizationId}/assets/`),
+    );
+    const anonymousObject = await fetch(
+      `http://127.0.0.1:9000/waflo-private/${storedVariant?.objectKey}`,
+    );
+    expect(anonymousObject.status).toBe(403);
+  });
+
   it("accepts valid CSRF state and rejects missing, invalid, absent-origin, and disallowed-origin state", async () => {
     const good = await csrf();
     const success = await app.inject({
