@@ -25,6 +25,7 @@ import {
   CsrfGuard,
   CustomerCsrfGuard,
   SessionGuard,
+  StaffDeviceSignatureGuard,
 } from "./security/guards.js";
 import { RateLimitService } from "./security/rate-limit.service.js";
 import { InvitationsController, TeamController } from "./team/team.controller.js";
@@ -50,6 +51,15 @@ import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
 import { AppleUpdateController } from "./wallet/apple-update.controller.js";
 import { AppleUpdateService } from "./wallet/apple-update.service.js";
 import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.controller.js";
+import {
+  MerchantStaffDeviceController,
+  StaffDevicePairingController,
+} from "./staff-devices/staff-device.controller.js";
+import { StaffDeviceService } from "./staff-devices/staff-device.service.js";
+import { StaffOperationsController } from "./loyalty/staff-operations.controller.js";
+import { LoyaltyOperationService } from "./loyalty/loyalty-operation.service.js";
+import { MerchantOperationsController } from "./operations/merchant-operations.controller.js";
+import { MerchantOperationsService } from "./operations/merchant-operations.service.js";
 
 @Module({
   controllers: [
@@ -72,6 +82,10 @@ import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.cont
     WalletController,
     AppleUpdateController,
     PublicWalletAssetsController,
+    MerchantStaffDeviceController,
+    StaffDevicePairingController,
+    StaffOperationsController,
+    MerchantOperationsController,
   ],
   providers: [
     EnvironmentService,
@@ -94,6 +108,9 @@ import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.cont
     WalletProviderRegistry,
     WalletService,
     AppleUpdateService,
+    StaffDeviceService,
+    LoyaltyOperationService,
+    MerchantOperationsService,
     {
       provide: OBJECT_STORAGE,
       inject: [EnvironmentService],
@@ -119,6 +136,7 @@ import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.cont
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: CustomerCsrfGuard },
+    { provide: APP_GUARD, useClass: StaffDeviceSignatureGuard },
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
     { provide: APP_FILTER, useClass: ErrorEnvelopeFilter },
   ],

@@ -254,11 +254,26 @@ export class AuthService {
       },
       request,
     );
-    await this.notifications.send({
-      to: user.email,
-      locale: localeFromDb(user.preferredLocale),
-      kind: "new_login",
-    });
+    try {
+      await this.notifications.send({
+        to: user.email,
+        locale: localeFromDb(user.preferredLocale),
+        kind: "new_login",
+      });
+    } catch {
+      await this.audit
+        .record(
+          {
+            actorUserId: user.id,
+            action: "notification.delivery_failed",
+            targetType: "user",
+            targetId: user.id,
+            metadata: { kind: "new_login" },
+          },
+          request,
+        )
+        .catch(() => undefined);
+    }
     return session;
   }
 

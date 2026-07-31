@@ -1,0 +1,8 @@
+{
+  "test": "cross-merchant customer session rotation",
+  "requestOrigin": "http://alnahr.lvh.me:3002",
+  "sessionMerchant": "today",
+  "responseStatus": 403,
+  "errorCode": "CUSTOMER_CSRF_INVALID",
+  "csrfTokenRedacted": true
+}

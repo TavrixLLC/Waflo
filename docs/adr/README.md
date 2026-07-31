@@ -1,5 +1,9 @@
 # Architecture Decision Records
 
+W4 continues with ADRs 0032-0043: authoritative ledger, derived projection, hash chain, reset and
+daily-cap semantics, timezone pinning, device key binding, approval, reversals, erasure retention,
+Wallet coalescing, and the Flutter boundary.
+
 | ADR | Decision |
 | --- | --- |
 | [0001](0001-monorepo-and-application-boundaries.md) | Monorepo and application boundaries |

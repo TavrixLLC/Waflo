@@ -1,10 +1,12 @@
-import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, relative, resolve, sep } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 
 const root = process.cwd();
-const output = resolve(process.argv[2] ?? "artifacts/waflo-portable-source.zip");
+const outputArgument = process.argv.slice(2).find((argument) => argument !== "--");
+const output = resolve(outputArgument ?? "artifacts/waflo-portable-source.zip");
 const forbiddenDirectories = new Set([
   ".git",
   ".next",
@@ -20,6 +22,7 @@ const forbiddenDirectories = new Set([
   "postgres-data",
   "redis-data",
   "test-results",
+  "tmp",
 ]);
 const forbiddenFileNames = new Set([".env", ".DS_Store"]);
 const forbiddenExtensions = new Set([
@@ -41,6 +44,7 @@ function includedFile(name) {
   if (forbiddenExtensions.has(extension)) return false;
   if (/service[-_.]?account.*\.json$/iu.test(name)) return false;
   if (name.endsWith(".log") || name.endsWith(".tmp")) return false;
+  if (name.endsWith(".tsbuildinfo")) return false;
   return true;
 }
 
@@ -84,7 +88,14 @@ const listPath = resolve(temporary, "files.txt");
 try {
   await writeFile(listPath, `${files.join("\n")}\n`, "utf8");
   await run("tar", ["-a", "-cf", output, "-C", root, "-T", listPath]);
-  process.stdout.write(`Created ${output}\nIncluded ${files.length} source files.\n`);
+  const archiveHash = createHash("sha256")
+    .update(await readFile(output))
+    .digest("hex");
+  const checksumPath = `${output}.sha256`;
+  await writeFile(checksumPath, `${archiveHash}  ${basename(output)}\n`, "utf8");
+  process.stdout.write(
+    `Created ${output}\nIncluded ${files.length} source files.\nSHA-256: ${archiveHash}\nChecksum: ${checksumPath}\n`,
+  );
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import { queueWalletPassStateChange, type Prisma } from "@waflo/database";
+import type { Prisma } from "@waflo/database";
 import type {
   WalletMembershipInput,
   WalletProgramInput,
@@ -8,6 +8,7 @@ import type {
 } from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
+import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { CustomerCardService } from "../customer/customer-card.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
@@ -135,42 +136,96 @@ export class WalletService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.manage_state");
-    const passes = await this.prisma.client.walletPassInstance.findMany({
-      where: { organizationId, membership: { programId } },
-      select: {
-        id: true,
-        membershipId: true,
-        provider: true,
-        updateTag: true,
+    const job = await withProgramLifecycleInvariantLock(
+      this.prisma.client,
+      organizationId,
+      programId,
+      async (transaction) => {
+        const program = await transaction.loyaltyProgram.findFirst({
+          where: { id: programId, organizationId },
+          select: { id: true },
+        });
+        if (!program) {
+          throw new AppError("PROGRAM_NOT_FOUND", "Program not found.", HttpStatus.NOT_FOUND);
+        }
+        const compatible = await transaction.programWalletSyncJob.findFirst({
+          where: {
+            organizationId,
+            programId,
+            action: "reconcile",
+            status: { in: ["PENDING", "PROCESSING", "FAILED"] },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (compatible) return compatible;
+        const runNumber =
+          (await transaction.programWalletSyncJob.count({
+            where: { organizationId, programId, action: "reconcile" },
+          })) + 1;
+        const idempotencyKey = `program-wallet-reconcile:${programId}:run${runNumber}`;
+        const created = await transaction.programWalletSyncJob.upsert({
+          where: { idempotencyKey },
+          create: {
+            organizationId,
+            programId,
+            action: "reconcile",
+            reason: "RECONCILIATION",
+            commandType: "RECONCILE",
+            idempotencyKey,
+            batchSize: 500,
+          },
+          update: {},
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "wallet.program_reconciliation_job_created",
+            targetType: "program_wallet_sync_job",
+            targetId: created.id,
+            metadata: { programId, runNumber },
+          },
+          request,
+        );
+        return created;
       },
-      take: 500,
-    });
-    let queued = 0;
-    for (const pass of passes) {
-      const result = await this.prisma.client.$transaction((transaction) =>
-        queueWalletPassStateChange(transaction, {
-          walletPassInstanceId: pass.id,
-          commandType: "RECONCILE",
-          reason: "RECONCILIATION",
-          eventKey: `manual-reconcile:u${pass.updateTag}`,
-        }),
-      );
-      if (!result.replayed) {
-        queued += 1;
-      }
-    }
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "wallet.program_template_reconciled",
-        targetType: "loyalty_program",
-        targetId: programId,
-        metadata: { queued },
-      },
-      request,
     );
-    return { queued };
+    return this.safeSyncJob(job);
+  }
+
+  async reconciliationStatus(
+    userId: string,
+    organizationId: string,
+    programId: string,
+    jobId: string,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.view");
+    const job = await this.prisma.client.programWalletSyncJob.findFirst({
+      where: { id: jobId, organizationId, programId },
+    });
+    if (!job) {
+      throw new AppError(
+        "PROGRAM_WALLET_SYNC_JOB_NOT_FOUND",
+        "Wallet synchronization job not found.",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return this.safeSyncJob(job);
+  }
+
+  private safeSyncJob(job: {
+    id: string;
+    status: string;
+    processedCount: number;
+    safeErrorCode: string | null;
+  }) {
+    return {
+      jobId: job.id,
+      status: job.status,
+      processedCount: job.processedCount,
+      safeErrorCode: job.safeErrorCode,
+    };
   }
 
   async customerApplePass(request: WafloRequest, developmentOverride?: string): Promise<Buffer> {

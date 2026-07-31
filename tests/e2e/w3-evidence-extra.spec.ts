@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 
-const screenshotDirectory = "artifacts/handoff-w3-round-1/screenshots";
+const screenshotDirectory = "artifacts/handoff-w3-round-2/screenshots";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 async function connectPrisma() {
@@ -35,17 +35,22 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
 }) => {
   test.setTimeout(90_000);
   const prisma = await connectPrisma();
+  let evidenceProgramId: string | undefined;
   try {
     const program = await prisma.loyaltyProgram.findFirstOrThrow({
       where: {
         organizationId,
         internalName: { startsWith: "W3 Browser Circle" },
-        status: "PUBLISHED",
         currentPublishedVersionId: { not: null },
         latestVersionNumber: 1,
       },
       orderBy: { createdAt: "desc" },
       include: { currentPublishedVersion: true },
+    });
+    evidenceProgramId = program.id;
+    await prisma.loyaltyProgram.update({
+      where: { id: program.id },
+      data: { status: "PUBLISHED", archivedAt: null },
     });
     const originalVersionId = program.currentPublishedVersionId as string;
     const replacementVersionNumber = (program.currentPublishedVersion?.versionNumber ?? 1) + 1;
@@ -160,6 +165,12 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
       }),
     ).resolves.toEqual({ enrollmentProgramVersionId: replacementVersionId });
   } finally {
+    if (evidenceProgramId) {
+      await prisma.loyaltyProgram.update({
+        where: { id: evidenceProgramId },
+        data: { status: "ARCHIVED", archivedAt: new Date() },
+      });
+    }
     await prisma.$disconnect();
   }
 });

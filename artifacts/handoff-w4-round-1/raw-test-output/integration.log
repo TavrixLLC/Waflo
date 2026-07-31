@@ -1,0 +1,86 @@
+$ pnpm test:prepare && vitest run --config vitest.config.ts --project integration
+$ turbo run build --filter=./packages/*
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/database, @waflo/i18n, @waflo/loyalty-ledger, @waflo/loyalty-policy, @waflo/operational-analytics, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/staff-device-security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google
+   • Running build in 20 packages
+   • Remote caching disabled
+
+@waflo/loyalty-policy:build: cache hit, replaying logs 2e4e6075d83d254b
+@waflo/loyalty-policy:build: $ tsc -p tsconfig.json
+@waflo/staff-device-security:build: cache hit, replaying logs 168ad7779c650b78
+@waflo/operational-analytics:build: cache hit, replaying logs 96972016f82238c6
+@waflo/staff-device-security:build: $ tsc -p tsconfig.json
+@waflo/operational-analytics:build: $ tsc -p tsconfig.json
+@waflo/customer-security:build: cache hit, replaying logs c56b8ab23bcd4e5e
+@waflo/customer-security:build: $ tsc -p tsconfig.json
+@waflo/brand:build: cache hit, replaying logs 5b0f4ba01952ebcf
+@waflo/brand:build: $ tsc -p tsconfig.json
+@waflo/stamp-engine:build: cache hit, replaying logs 160fcba20b638fa8
+@waflo/stamp-engine:build: $ tsc -p tsconfig.json
+@waflo/security:build: cache hit, replaying logs 6701a3194513e6f9
+@waflo/qr-core:build: cache hit, replaying logs 9f276302c527c81b
+@waflo/security:build: $ tsc -p tsconfig.json
+@waflo/config:build: cache hit, replaying logs 81bf33a5282e7069
+@waflo/auth:build: cache hit, replaying logs ad43b5cd75153419
+@waflo/auth:build: $ tsc -p tsconfig.json
+@waflo/qr-core:build: $ tsc -p tsconfig.json
+@waflo/config:build: $ tsc -p tsconfig.json
+@waflo/loyalty-ledger:build: cache hit, replaying logs b9014bdfad8f9295
+@waflo/loyalty-ledger:build: $ tsc -p tsconfig.json
+@waflo/wallet-core:build: cache hit, replaying logs 69fb2152c9d14589
+@waflo/contracts:build: cache hit, replaying logs 99a54fc0ba7f091b
+@waflo/wallet-core:build: $ tsc -p tsconfig.json
+@waflo/contracts:build: $ tsc -p tsconfig.json
+@waflo/wallet-google:build: cache hit, replaying logs b59a3f671bb9954d
+@waflo/wallet-google:build: $ tsc -p tsconfig.json
+@waflo/wallet-apple:build: cache hit, replaying logs cc7b422ff7e37b3e
+@waflo/wallet-apple:build: $ tsc -p tsconfig.json
+@waflo/permissions:build: cache hit, replaying logs 048bd0e093fdce02
+@waflo/permissions:build: $ tsc -p tsconfig.json
+@waflo/i18n:build: cache hit, replaying logs 9b9fe5c2766a9d9f
+@waflo/i18n:build: $ tsc -p tsconfig.json
+@waflo/billing:build: cache hit, replaying logs 8731e411123f7522
+@waflo/billing:build: $ tsc -p tsconfig.json
+@waflo/ui:build: cache hit, replaying logs 3021e793d13add00
+@waflo/ui:build: $ tsc -p tsconfig.json
+@waflo/database:build: cache hit, replaying logs 315cdc279b84796d
+@waflo/database:build: $ pnpm generate && tsc -p tsconfig.json
+@waflo/database:build: $ prisma generate
+@waflo/database:build: ◇ injected env (3) from ..\..\.env // tip: ⌘ enable debugging { debug: true }
+@waflo/database:build: Loaded Prisma config from prisma.config.ts.
+@waflo/database:build: 
+@waflo/database:build: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:build: 
+@waflo/database:build: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 851ms
+@waflo/database:build: 
+
+ Tasks:    20 successful, 20 total
+Cached:    20 cached, 20 total
+  Time:    126ms >>> FULL TURBO
+
+
+ RUN  v4.1.10 C:/Users/3ma/Documents/WAFLO
+
+(node:11072) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:26580) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"0de10bc5-6afe-42b2-87e3-0c2631b80601","provider":"APPLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"b96c190c-0016-460c-bf30-8bf31c354954","provider":"GOOGLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"913aa9c7-a8eb-4624-9418-cd27644f7c7c","provider":"GOOGLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"d1974b84-6b3b-4a82-b624-841fab27d77c","provider":"GOOGLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"f1b47851-5b14-4c77-a8e9-3973c24b42c8","provider":"GOOGLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_failed","commandId":"96c56959-db4c-423a-994c-defcd4278649","provider":"GOOGLE","commandType":"ISSUE"}
+(node:12116) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:16612) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  6 passed (6)
+      Tests  57 passed (57)
+   Start at  16:31:47
+   Duration  29.51s (transform 1.85s, setup 0ms, import 13.78s, tests 13.53s, environment 1ms)
+
+
+exit_code=0

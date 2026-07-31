@@ -104,6 +104,15 @@ importers:
       '@waflo/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@waflo/loyalty-ledger':
+        specifier: workspace:*
+        version: link:../../packages/loyalty-ledger
+      '@waflo/loyalty-policy':
+        specifier: workspace:*
+        version: link:../../packages/loyalty-policy
+      '@waflo/operational-analytics':
+        specifier: workspace:*
+        version: link:../../packages/operational-analytics
       '@waflo/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -113,6 +122,9 @@ importers:
       '@waflo/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@waflo/staff-device-security':
+        specifier: workspace:*
+        version: link:../../packages/staff-device-security
       '@waflo/stamp-engine':
         specifier: workspace:*
         version: link:../../packages/stamp-engine
@@ -313,6 +325,40 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
+  apps/operational-worker:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1095.0
+        version: 3.1095.0
+      '@waflo/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@waflo/customer-security':
+        specifier: workspace:*
+        version: link:../../packages/customer-security
+      '@waflo/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@waflo/loyalty-ledger':
+        specifier: workspace:*
+        version: link:../../packages/loyalty-ledger
+      '@waflo/loyalty-policy':
+        specifier: workspace:*
+        version: link:../../packages/loyalty-policy
+      '@waflo/operational-analytics':
+        specifier: workspace:*
+        version: link:../../packages/operational-analytics
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+      tsx:
+        specifier: 4.23.1
+        version: 4.23.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   apps/wallet-worker:
     dependencies:
       '@aws-sdk/client-s3':
@@ -428,6 +474,21 @@ importers:
       '@waflo/auth':
         specifier: workspace:*
         version: link:../auth
+      '@waflo/config':
+        specifier: workspace:*
+        version: link:../config
+      '@waflo/customer-security':
+        specifier: workspace:*
+        version: link:../customer-security
+      '@waflo/loyalty-ledger':
+        specifier: workspace:*
+        version: link:../loyalty-ledger
+      '@waflo/loyalty-policy':
+        specifier: workspace:*
+        version: link:../loyalty-policy
+      '@waflo/staff-device-security':
+        specifier: workspace:*
+        version: link:../staff-device-security
       dotenv:
         specifier: 17.4.2
         version: 17.4.2
@@ -457,6 +518,30 @@ importers:
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/loyalty-ledger:
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/loyalty-policy:
+    devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/operational-analytics:
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -499,6 +584,15 @@ importers:
         specifier: 10.68.0
         version: 10.68.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))
     devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/staff-device-security:
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
       typescript:
         specifier: 5.9.3
         version: 5.9.3

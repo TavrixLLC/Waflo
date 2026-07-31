@@ -43,7 +43,7 @@ describe("W2 Round 4 publication and policy decisions", () => {
     ).toEqual(["PRO_MODE", "MULTIPLE_REWARDS", "MILESTONE_REWARDS", "ADVANCED_LAYOUT"]);
   });
 
-  it("locks W2 defaults while assigning configurable execution to W4", () => {
+  it("preserves W2 defaults while confirming W4 operational execution is implemented", () => {
     expect(W2_STAMP_POLICY_DEFAULTS).toEqual({
       defaultStampsPerAction: 1,
       maximumStampsPerOperation: 5,
@@ -52,9 +52,9 @@ describe("W2 Round 4 publication and policy decisions", () => {
       minimumPurchaseCurrency: null,
       resetBehaviorAfterFinalReward: "RESET",
     });
-    expect(W4_STAMP_POLICY_EXECUTION_BACKLOG.status).toBe("DEFERRED_TO_W4");
+    expect(W4_STAMP_POLICY_EXECUTION_BACKLOG.status).toBe("IMPLEMENTED_IN_W4");
     expect(W4_STAMP_POLICY_EXECUTION_BACKLOG.unavailableDuringW3EnrollmentAndWalletPreview).toBe(
-      true,
+      false,
     );
   });
 });

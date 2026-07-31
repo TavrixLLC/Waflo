@@ -59,3 +59,19 @@ export function parseCheckoutIdempotencyKey(value: unknown): string {
   }
   return value;
 }
+
+export function parseOperationCommandId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value !== value.trim() ||
+    value.length > 255 ||
+    !uuidSchema.safeParse(value).success
+  ) {
+    throw new AppError(
+      "OPERATION_COMMAND_ID_INVALID",
+      "A UUID operation command ID is required.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  return value;
+}

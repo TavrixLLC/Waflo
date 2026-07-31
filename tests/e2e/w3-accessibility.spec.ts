@@ -21,11 +21,15 @@ test("W3 public enrollment, RTL, privacy, transfer, and unavailable states are a
     where: {
       organizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       internalName: { startsWith: "W3 Browser Circle" },
-      status: "PUBLISHED",
+      currentPublishedVersionId: { not: null },
     },
     orderBy: { createdAt: "desc" },
   });
   try {
+    await prisma.loyaltyProgram.update({
+      where: { id: program.id },
+      data: { status: "PUBLISHED", archivedAt: null },
+    });
     for (const url of [
       "http://localhost:3002/?tenant=today",
       `http://localhost:3002/join/${program.publicSlug}?tenant=today`,
@@ -41,6 +45,10 @@ test("W3 public enrollment, RTL, privacy, transfer, and unavailable states are a
         .not.toBe("BODY");
     }
   } finally {
+    await prisma.loyaltyProgram.update({
+      where: { id: program.id },
+      data: { status: "ARCHIVED", archivedAt: new Date() },
+    });
     await prisma.$disconnect();
   }
 });

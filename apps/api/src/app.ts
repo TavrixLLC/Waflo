@@ -48,6 +48,14 @@ export async function createApiApplication(
                 "password",
                 "*.password",
                 "*.token",
+                "req.headers['x-waflo-signature']",
+                "req.headers['x-waflo-nonce']",
+                "req.headers['x-waflo-body-sha256']",
+                "*.qrPayload",
+                "*.pairingToken",
+                "*.refreshToken",
+                "*.signature",
+                "*.nonce",
               ],
               censor: "[REDACTED]",
             },
@@ -99,7 +107,20 @@ export async function createApiApplication(
     origin: [...environment.allowedOrigins],
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["content-type", "x-csrf-token", "x-request-id", "x-idempotency-key"],
+    allowedHeaders: [
+      "content-type",
+      "authorization",
+      "x-csrf-token",
+      "x-request-id",
+      "x-idempotency-key",
+      "x-waflo-device-id",
+      "x-waflo-device-session-id",
+      "x-waflo-request-id",
+      "x-waflo-timestamp",
+      "x-waflo-nonce",
+      "x-waflo-body-sha256",
+      "x-waflo-signature",
+    ],
     exposedHeaders: ["x-request-id"],
   });
 
@@ -114,7 +135,7 @@ export async function createApiApplication(
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Waflo Platform API")
     .setDescription(
-      "Authoritative Waflo Phase W1 API for merchant web and future employee clients.",
+      "Authoritative Waflo W4 API for merchant administration and signed Staff devices.",
     )
     .setVersion("1.0")
     .addCookieAuth(environment.values.COOKIE_NAME)

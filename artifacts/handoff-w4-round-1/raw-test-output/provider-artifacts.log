@@ -1,0 +1,4 @@
+$ pnpm --filter @waflo/api build && tsx --tsconfig apps/api/tsconfig.json scripts/generate-w4-provider-artifacts.mjs
+$ nest build
+
+exit_code=0

@@ -4,10 +4,13 @@ import type { TransferRequestInput } from "@waflo/contracts";
 import { decodeQrImage } from "@waflo/qr-core";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
 import { walletCommandIdempotencyKey } from "@waflo/wallet-core";
-import { queueWalletPassStateChange } from "@waflo/database";
+import { lockApplePassUpdateSequence, queueWalletPassStateChange } from "@waflo/database";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
-import { withInvariantLock } from "../common/organization-transaction.js";
+import {
+  withInvariantLock,
+  withProgramLifecycleInvariantLock,
+} from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -381,9 +384,20 @@ export class TransferService {
     if (resolved.status !== "active") {
       throw new AppError("TRANSFER_NOT_FOUND", "Transfer not found.", HttpStatus.NOT_FOUND);
     }
-    const result = await withInvariantLock(
+    const lockTarget = await this.prisma.client.membershipTransferCommand.findFirst({
+      where: {
+        publicTransferId: transferPublicId,
+        organizationId: resolved.organization.id,
+      },
+      select: { membershipId: true, membership: { select: { programId: true } } },
+    });
+    if (!lockTarget) {
+      throw new AppError("TRANSFER_NOT_FOUND", "Transfer not found.", HttpStatus.NOT_FOUND);
+    }
+    const result = await withProgramLifecycleInvariantLock(
       this.prisma.client,
-      `transfer-public:${transferPublicId}`,
+      resolved.organization.id,
+      lockTarget.membership.programId,
       async (lookupTransaction) => {
         const lookup = await lookupTransaction.membershipTransferCommand.findFirst({
           where: {
@@ -557,6 +571,9 @@ export class TransferService {
             },
             update: {},
           });
+          if (membership.walletPassInstances.some((pass) => pass.provider === "APPLE")) {
+            await lockApplePassUpdateSequence(transaction);
+          }
           for (const oldPass of membership.walletPassInstances) {
             const newPassId = randomUUID();
             const providerIdentity =
@@ -691,6 +708,7 @@ export class TransferService {
           };
         })(lookupTransaction);
       },
+      [`membership:${lockTarget.membershipId}`, `transfer-public:${transferPublicId}`],
     );
     if (result.completionEmail && result.locale && result.organizationName && result.programName) {
       try {

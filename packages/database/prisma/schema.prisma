@@ -312,6 +312,165 @@ enum MembershipTransferActorType {
   SUPPORT
 }
 
+enum LoyaltyLedgerEventType {
+  STAMP_ISSUED
+  STAMP_REVERSED
+  MILESTONE_REWARD_UNLOCKED
+  FINAL_REWARD_UNLOCKED
+  REWARD_REDEEMED
+  REWARD_REDEMPTION_REVERSED
+  REWARD_EXPIRED
+  CYCLE_RESET
+  CYCLE_RESET_REVERSED
+  MANUAL_STAMP_ADJUSTMENT
+  MEMBERSHIP_SUSPENDED
+  MEMBERSHIP_RESTORED
+  MEMBERSHIP_REVOKED
+  PROJECTION_REBUILT
+}
+
+enum LoyaltyOperationType {
+  ISSUE_STAMP
+  REDEEM_REWARD
+  REVERSE_STAMP
+  REVERSE_REDEMPTION
+  MANUAL_ADJUSTMENT
+  SUSPEND_MEMBERSHIP
+  RESTORE_MEMBERSHIP
+  REVOKE_MEMBERSHIP
+  EXPIRE_REWARD
+}
+
+enum LoyaltyOperationStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RewardEntitlementStatus {
+  AVAILABLE
+  PARTIALLY_REDEEMED
+  REDEEMED
+  EXPIRED
+  VOIDED
+}
+
+enum RewardRedemptionStatus {
+  COMPLETED
+  REVERSED
+}
+
+enum StaffDevicePlatform {
+  IOS
+  ANDROID
+  TEST_CLIENT
+}
+
+enum StaffDeviceStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+  COMPROMISED
+}
+
+enum DevicePairingStatus {
+  PENDING
+  CLAIMED
+  COMPLETED
+  EXPIRED
+  CANCELED
+}
+
+enum OperationalRiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum OperationalRiskStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+enum OperationalExportType {
+  MEMBERSHIP_SUMMARY
+  LEDGER_OPERATIONS
+  REWARD_REDEMPTIONS
+  LOCATION_PERFORMANCE
+  STAFF_PERFORMANCE
+  RISK_SIGNALS
+  AGGREGATE_ANALYTICS
+}
+
+enum ExportCommandStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+  DEAD_LETTER
+}
+
+enum CustomerPrivacyRequestType {
+  EXPORT
+  ERASURE
+}
+
+enum CustomerPrivacyRequestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELED
+  DEAD_LETTER
+}
+
+enum RewardExpiryCommandStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum OperationalAnalyticsSourceKind {
+  ENROLLMENT
+  LEDGER
+  RISK
+}
+
+enum OperationalAnalyticsJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum ProjectionRebuildStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ProjectionRebuildInitiator {
+  SYSTEM
+  OWNER
+  MANAGER
+}
+
+enum ManagerApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  CONSUMED
+}
+
 model User {
   id                         String                   @id @default(uuid()) @db.Uuid
   displayName                String                   @db.VarChar(100)
@@ -470,6 +629,7 @@ model OrganizationMember {
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   user           User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  staffDeviceSessions StaffDeviceSession[]
 
   @@unique([organizationId, userId])
   @@index([userId, status])
@@ -517,6 +677,7 @@ model Location {
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   auditLogs      AuditLog[]
   programLocations ProgramLocation[]
+  staffDeviceSessions StaffDeviceSession[]
 
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
@@ -722,6 +883,10 @@ model LoyaltyProgramVersion {
   changeSummary       String?                   @map("change_summary") @db.VarChar(240)
   validationFingerprint String?                 @map("validation_fingerprint") @db.Char(64)
   renderFingerprint   String?                   @map("render_fingerprint") @db.Char(64)
+  operationalTimezone String                    @default("Asia/Baghdad") @map("operational_timezone") @db.VarChar(64)
+  staffOwnReversalWindowSeconds Int             @default(120) @map("staff_own_reversal_window_seconds")
+  managerReversalWindowMinutes Int              @default(1440) @map("manager_reversal_window_minutes")
+  managerOverrideAllowed Boolean                @default(true) @map("manager_override_allowed")
   program             LoyaltyProgram            @relation("ProgramVersions", fields: [programId], references: [id], onDelete: Restrict)
   organization        Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   createdBy           User                      @relation("VersionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
@@ -779,7 +944,7 @@ model StampRule {
   minimumPurchaseAmountMinor Int?                 @map("minimum_purchase_amount_minor")
   minimumPurchaseCurrency    String?               @map("minimum_purchase_currency") @db.Char(3)
   earningDescription         String                @map("earning_description") @db.VarChar(240)
-  resetBehaviorAfterReward   String                @default("RESET") @map("reset_behavior_after_reward") @db.VarChar(20)
+  resetBehaviorAfterReward   String                @default("RESET") @map("reset_behavior_after_reward") @db.VarChar(64)
   createdAt                  DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                  DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
   version                    LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
@@ -803,6 +968,8 @@ model RewardDefinition {
   translations              RewardTranslation[]
   visualOverride           RewardVisualOverride?
   testEvents                ProgramTestEvent[]
+  entitlements              RewardEntitlement[]
+  redemptions               RewardRedemption[]
 
   @@unique([versionId, thresholdStampCount])
   @@index([versionId, sortOrder])
@@ -1094,6 +1261,7 @@ model Customer {
   consents        CustomerConsent[]
   memberships     Membership[]
   enrollmentCommands EnrollmentCommand[]
+  privacyRequests    CustomerPrivacyRequest[]
 
   @@index([organizationId, status, createdAt(sort: Desc)])
   @@map("customers")
@@ -1172,6 +1340,7 @@ model Membership {
   transferCommands           MembershipTransferCommand[]
   transferEvents             MembershipTransferEvent[]
   publicWalletAssets         PublicWalletAsset[]
+  rewardEntitlements         RewardEntitlement[]
 
   @@index([organizationId, programId, status, enrolledAt(sort: Desc)])
   @@index([customerId, status])
@@ -1183,8 +1352,11 @@ model MembershipProgressProjection {
   organizationId        String       @map("organization_id") @db.Uuid
   currentCycleStampCount Int         @default(0) @map("current_cycle_stamp_count")
   completedCycleCount   Int          @default(0) @map("completed_cycle_count")
+  currentCycleNumber    Int          @default(1) @map("current_cycle_number")
   rewardReady           Boolean      @default(false) @map("reward_ready")
   projectionVersion     Int          @default(0) @map("projection_version")
+  lastLedgerSequence    Int          @default(0) @map("last_ledger_sequence")
+  projectionFingerprint String?      @map("projection_fingerprint") @db.Char(64)
   lastSourceEventId     String?      @map("last_source_event_id") @db.Uuid
   updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -1311,6 +1483,7 @@ model WalletPassInstance {
   status                          WalletPassStatus @default(PENDING)
   providerState                   Json?            @map("provider_state") @db.JsonB
   updateTag                       Int              @default(1) @map("update_tag")
+  appleUpdateSequence             BigInt?          @map("apple_update_sequence")
   lastRenderedProjectionVersion   Int              @default(0) @map("last_rendered_projection_version")
   lastProviderSyncAt              DateTime?        @map("last_provider_sync_at") @db.Timestamptz(6)
   lastProviderErrorCode           String?          @map("last_provider_error_code") @db.VarChar(120)
@@ -1328,6 +1501,7 @@ model WalletPassInstance {
   @@unique([membershipCredentialId, provider])
   @@index([organizationId, membershipId, status])
   @@index([provider, status, updatedAt])
+  @@index([provider, appleUpdateSequence])
   @@map("wallet_pass_instances")
 }
 
@@ -1476,4 +1650,526 @@ model PublicWalletAsset {
   @@unique([organizationId, contentDigest, assetType])
   @@index([publicToken, revokedAt])
   @@map("public_wallet_assets")
+}
+
+model LoyaltyOperationCommand {
+  id                      String                  @id @default(uuid()) @db.Uuid
+  publicId                String                  @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId          String                  @map("organization_id") @db.Uuid
+  membershipId            String                  @map("membership_id") @db.Uuid
+  operationType           LoyaltyOperationType    @map("operation_type")
+  idempotencyKey          String                  @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint      String                  @map("request_fingerprint") @db.Char(64)
+  status                  LoyaltyOperationStatus  @default(PROCESSING)
+  actorMemberId           String?                 @map("actor_member_id") @db.Uuid
+  actorDeviceId           String?                 @map("actor_device_id") @db.Uuid
+  locationId              String?                 @map("location_id") @db.Uuid
+  resultLedgerEntryIds    Json                    @default("[]") @map("result_ledger_entry_ids") @db.JsonB
+  resultProjectionVersion Int?                    @map("result_projection_version")
+  resultPayload           Json?                   @map("result_payload") @db.JsonB
+  safeFailureCode         String?                 @map("safe_failure_code") @db.VarChar(120)
+  leaseOwner              String?                 @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt          DateTime?               @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount            Int                     @default(0) @map("attempt_count")
+  createdAt               DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt             DateTime?               @map("completed_at") @db.Timestamptz(6)
+  ledgerEntries           LoyaltyLedgerEntry[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([membershipId, createdAt(sort: Desc)])
+  @@index([organizationId, status, createdAt])
+  @@map("loyalty_operation_commands")
+}
+
+model LoyaltyLedgerEntry {
+  id                           String                 @id @default(uuid()) @db.Uuid
+  publicId                     String                 @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId               String                 @map("organization_id") @db.Uuid
+  membershipId                 String                 @map("membership_id") @db.Uuid
+  customerId                   String                 @map("customer_id") @db.Uuid
+  programId                    String                 @map("program_id") @db.Uuid
+  programVersionId             String                 @map("program_version_id") @db.Uuid
+  locationId                   String?                @map("location_id") @db.Uuid
+  staffOrganizationMemberId    String?                @map("staff_organization_member_id") @db.Uuid
+  staffDeviceId                String?                @map("staff_device_id") @db.Uuid
+  eventType                    LoyaltyLedgerEventType @map("event_type")
+  membershipSequence           Int                    @map("membership_sequence")
+  cycleNumber                  Int                    @map("cycle_number")
+  stampDelta                   Int                    @default(0) @map("stamp_delta")
+  rewardEntitlementId          String?                @map("reward_entitlement_id") @db.Uuid
+  rewardRedemptionId           String?                @map("reward_redemption_id") @db.Uuid
+  reversalOfEntryId            String?                @map("reversal_of_entry_id") @db.Uuid
+  operationCommandId           String                 @map("operation_command_id") @db.Uuid
+  purchaseAmountMinor          Int?                   @map("purchase_amount_minor")
+  purchaseCurrency             String?                @map("purchase_currency") @db.Char(3)
+  merchantTransactionReference String?                @map("merchant_transaction_reference") @db.VarChar(160)
+  merchantTransactionReferenceKeyVersion Int?          @map("merchant_transaction_reference_key_version")
+  merchantTransactionReferenceNormalizationVersion Int? @map("merchant_transaction_reference_normalization_version")
+  operationalTimezone          String                 @map("operational_timezone") @db.VarChar(64)
+  operationalLocalDate         DateTime               @map("operational_local_date") @db.Date
+  occurredAt                   DateTime               @map("occurred_at") @db.Timestamptz(6)
+  recordedAt                   DateTime               @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  safeMetadata                 Json?                  @map("safe_metadata") @db.JsonB
+  ledgerHashVersion            Int                    @default(1) @map("ledger_hash_version")
+  previousEntryHash            String                 @map("previous_entry_hash") @db.Char(64)
+  entryHash                    String                 @map("entry_hash") @db.Char(64)
+  createdAt                    DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  operationCommand             LoyaltyOperationCommand @relation(fields: [operationCommandId], references: [id], onDelete: Restrict)
+
+  @@unique([membershipId, membershipSequence])
+  @@index([organizationId, recordedAt(sort: Desc)])
+  @@index([membershipId, membershipSequence(sort: Desc)])
+  @@index([membershipId, operationalLocalDate, eventType])
+  @@index([operationCommandId])
+  @@index([reversalOfEntryId])
+  @@map("loyalty_ledger_entries")
+}
+
+model RewardEntitlement {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  publicId               String                  @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId         String                  @map("organization_id") @db.Uuid
+  membershipId           String                  @map("membership_id") @db.Uuid
+  programVersionId       String                  @map("program_version_id") @db.Uuid
+  rewardDefinitionId     String                  @map("reward_definition_id") @db.Uuid
+  cycleNumber            Int                     @map("cycle_number")
+  threshold              Int
+  status                 RewardEntitlementStatus @default(AVAILABLE)
+  maximumRedemptionCount Int                     @default(1) @map("maximum_redemption_count")
+  redemptionCount        Int                     @default(0) @map("redemption_count")
+  unlockedByLedgerEntryId String?                @unique @map("unlocked_by_ledger_entry_id") @db.Uuid
+  unlockedAt             DateTime                @map("unlocked_at") @db.Timestamptz(6)
+  expiresAt              DateTime?               @map("expires_at") @db.Timestamptz(6)
+  fullyRedeemedAt        DateTime?               @map("fully_redeemed_at") @db.Timestamptz(6)
+  voidedAt               DateTime?               @map("voided_at") @db.Timestamptz(6)
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  membership             Membership              @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  rewardDefinition       RewardDefinition        @relation(fields: [rewardDefinitionId], references: [id], onDelete: Restrict)
+  redemptions            RewardRedemption[]
+
+  @@unique([membershipId, cycleNumber, rewardDefinitionId])
+  @@index([organizationId, status, expiresAt])
+  @@index([membershipId, status, unlockedAt(sort: Desc)])
+  @@map("reward_entitlements")
+}
+
+model RewardExpiryCommand {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  publicId           String                    @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId     String                    @map("organization_id") @db.Uuid
+  programId          String                    @map("program_id") @db.Uuid
+  entitlementId      String                    @unique @map("entitlement_id") @db.Uuid
+  membershipId       String                    @map("membership_id") @db.Uuid
+  operationCommandId String?                   @unique @map("operation_command_id") @db.Uuid
+  idempotencyKey     String                    @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint String                    @map("request_fingerprint") @db.Char(64)
+  status             RewardExpiryCommandStatus @default(PENDING)
+  leaseOwner         String?                   @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt     DateTime?                 @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount       Int                       @default(0) @map("attempt_count")
+  safeFailureCode    String?                   @map("safe_failure_code") @db.VarChar(120)
+  nextAttemptAt      DateTime                  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt        DateTime?                 @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@index([membershipId, status, createdAt])
+  @@map("reward_expiry_commands")
+}
+
+model RewardRedemption {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  publicId               String                   @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId         String                   @map("organization_id") @db.Uuid
+  membershipId           String                   @map("membership_id") @db.Uuid
+  rewardEntitlementId    String                   @map("reward_entitlement_id") @db.Uuid
+  rewardDefinitionId     String                   @map("reward_definition_id") @db.Uuid
+  cycleNumber            Int                      @map("cycle_number")
+  entitlementSequence    Int                      @map("entitlement_sequence")
+  status                 RewardRedemptionStatus   @default(COMPLETED)
+  locationId             String                   @map("location_id") @db.Uuid
+  staffMemberId          String                   @map("staff_member_id") @db.Uuid
+  staffDeviceId          String?                  @map("staff_device_id") @db.Uuid
+  operationCommandId     String                   @unique @map("operation_command_id") @db.Uuid
+  redeemedAt             DateTime                 @map("redeemed_at") @db.Timestamptz(6)
+  reversedAt             DateTime?                @map("reversed_at") @db.Timestamptz(6)
+  reversalLedgerEntryId  String?                  @unique @map("reversal_ledger_entry_id") @db.Uuid
+  safeMetadata           Json?                    @map("safe_metadata") @db.JsonB
+  rewardEntitlement      RewardEntitlement        @relation(fields: [rewardEntitlementId], references: [id], onDelete: Restrict)
+  rewardDefinition       RewardDefinition         @relation(fields: [rewardDefinitionId], references: [id], onDelete: Restrict)
+
+  @@unique([rewardEntitlementId, entitlementSequence])
+  @@index([membershipId, redeemedAt(sort: Desc)])
+  @@index([organizationId, status, redeemedAt(sort: Desc)])
+  @@map("reward_redemptions")
+}
+
+model StaffLocationAssignment {
+  organizationId      String    @map("organization_id") @db.Uuid
+  organizationMemberId String   @map("organization_member_id") @db.Uuid
+  locationId          String    @map("location_id") @db.Uuid
+  earningAllowed      Boolean   @default(true) @map("earning_allowed")
+  redemptionAllowed   Boolean   @default(true) @map("redemption_allowed")
+  active              Boolean   @default(true)
+  assignedByUserId    String    @map("assigned_by_user_id") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  @@id([organizationMemberId, locationId])
+  @@index([organizationId, locationId, active])
+  @@map("staff_location_assignments")
+}
+
+model StaffDevice {
+  id                   String              @id @default(uuid()) @db.Uuid
+  publicId             String              @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId       String              @map("organization_id") @db.Uuid
+  organizationMemberId String              @map("organization_member_id") @db.Uuid
+  displayName          String              @map("display_name") @db.VarChar(120)
+  platform             StaffDevicePlatform
+  installationId       String              @unique @map("installation_id") @db.VarChar(160)
+  publicKey            String              @unique @map("public_key") @db.Text
+  keyAlgorithm         String              @default("Ed25519") @map("key_algorithm") @db.VarChar(32)
+  status               StaffDeviceStatus   @default(PENDING)
+  trustLevel           String              @default("PAIRED") @map("trust_level") @db.VarChar(32)
+  appVersion           String              @map("app_version") @db.VarChar(40)
+  osVersion            String?             @map("os_version") @db.VarChar(80)
+  model                String?             @db.VarChar(120)
+  pairedAt             DateTime?           @map("paired_at") @db.Timestamptz(6)
+  lastSeenAt           DateTime?           @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt            DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  revocationReason     String?             @map("revocation_reason") @db.VarChar(240)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions             StaffDeviceSession[]
+
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([organizationMemberId, status])
+  @@map("staff_devices")
+}
+
+model StaffDeviceLocation {
+  staffDeviceId       String   @map("staff_device_id") @db.Uuid
+  locationId          String   @map("location_id") @db.Uuid
+  earningAllowed      Boolean  @default(true) @map("earning_allowed")
+  redemptionAllowed   Boolean  @default(true) @map("redemption_allowed")
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([staffDeviceId, locationId])
+  @@index([locationId, active])
+  @@map("staff_device_locations")
+}
+
+model DevicePairingSession {
+  id                           String              @id @default(uuid()) @db.Uuid
+  publicId                     String              @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId               String              @map("organization_id") @db.Uuid
+  intendedStaffMemberId        String              @map("intended_staff_member_id") @db.Uuid
+  pairingTokenHash             String              @unique @map("pairing_token_hash") @db.Char(64)
+  requestedLocationAssignments Json                @map("requested_location_assignments") @db.JsonB
+  deviceLabelSuggestion        String?             @map("device_label_suggestion") @db.VarChar(120)
+  createdByUserId              String              @map("created_by_user_id") @db.Uuid
+  status                       DevicePairingStatus @default(PENDING)
+  expiresAt                    DateTime            @map("expires_at") @db.Timestamptz(6)
+  claimedAt                    DateTime?           @map("claimed_at") @db.Timestamptz(6)
+  completedAt                  DateTime?           @map("completed_at") @db.Timestamptz(6)
+  challengeHash                String?             @map("challenge_hash") @db.Char(64)
+  challengeExpiresAt           DateTime?           @map("challenge_expires_at") @db.Timestamptz(6)
+  claimedInstallationId        String?             @map("claimed_installation_id") @db.VarChar(160)
+  claimedPublicKey             String?             @map("claimed_public_key") @db.Text
+  claimedMetadata              Json?               @map("claimed_metadata") @db.JsonB
+  createdAt                    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status, expiresAt])
+  @@index([intendedStaffMemberId, status])
+  @@map("device_pairing_sessions")
+}
+
+model StaffDeviceSession {
+  id                   String    @id @default(uuid()) @db.Uuid
+  organizationId       String    @map("organization_id") @db.Uuid
+  staffDeviceId        String    @map("staff_device_id") @db.Uuid
+  organizationMemberId String    @map("organization_member_id") @db.Uuid
+  locationId           String    @map("location_id") @db.Uuid
+  tokenHash            String    @unique @map("token_hash") @db.Char(64)
+  refreshTokenHash     String?   @unique @map("refresh_token_hash") @db.Char(64)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastActiveAt         DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt            DateTime? @map("revoked_at") @db.Timestamptz(6)
+  rotationSource       String?   @unique @map("rotation_source") @db.VarChar(80)
+  appVersion           String    @map("app_version") @db.VarChar(40)
+  ipMetadataHash       String?   @map("ip_metadata_hash") @db.Char(64)
+  deviceMetadata       Json?     @map("device_metadata") @db.JsonB
+  staffDevice          StaffDevice @relation(fields: [staffDeviceId], references: [id], onDelete: Cascade)
+  organizationMember   OrganizationMember @relation(fields: [organizationMemberId], references: [id], onDelete: Restrict)
+  location             Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@index([staffDeviceId, revokedAt, expiresAt])
+  @@index([organizationId, lastActiveAt])
+  @@map("staff_device_sessions")
+}
+
+model DeviceRequestNonce {
+  staffDeviceId   String   @map("staff_device_id") @db.Uuid
+  nonce           String   @db.VarChar(128)
+  requestTimestamp DateTime @map("request_timestamp") @db.Timestamptz(6)
+  bodyDigest      String   @map("body_digest") @db.Char(64)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@id([staffDeviceId, nonce])
+  @@index([expiresAt])
+  @@map("device_request_nonces")
+}
+
+model ManagerApprovalChallenge {
+  id                     String                @id @default(uuid()) @db.Uuid
+  publicId               String                @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId         String                @map("organization_id") @db.Uuid
+  membershipId           String                @map("membership_id") @db.Uuid
+  rewardEntitlementId    String                @map("reward_entitlement_id") @db.Uuid
+  pendingOperationId     String?               @map("pending_operation_id") @db.Uuid
+  staffDeviceId          String                @map("staff_device_id") @db.Uuid
+  locationId             String                @map("location_id") @db.Uuid
+  requestFingerprint     String                @map("request_fingerprint") @db.Char(64)
+  status                 ManagerApprovalStatus @default(PENDING)
+  requestedByMemberId    String                @map("requested_by_member_id") @db.Uuid
+  approvedByUserId       String?               @map("approved_by_user_id") @db.Uuid
+  expiresAt              DateTime              @map("expires_at") @db.Timestamptz(6)
+  approvedAt             DateTime?             @map("approved_at") @db.Timestamptz(6)
+  rejectedAt             DateTime?             @map("rejected_at") @db.Timestamptz(6)
+  consumedAt             DateTime?             @map("consumed_at") @db.Timestamptz(6)
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status, expiresAt])
+  @@index([membershipId, rewardEntitlementId, status])
+  @@map("manager_approval_challenges")
+}
+
+model OperationalRiskSignal {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  publicId           String                  @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId     String                  @map("organization_id") @db.Uuid
+  programId          String?                 @map("program_id") @db.Uuid
+  membershipId       String?                 @map("membership_id") @db.Uuid
+  staffMemberId      String?                 @map("staff_member_id") @db.Uuid
+  staffDeviceId      String?                 @map("staff_device_id") @db.Uuid
+  locationId         String?                 @map("location_id") @db.Uuid
+  operationCommandId String?                 @map("operation_command_id") @db.Uuid
+  ruleCode           String                  @map("rule_code") @db.VarChar(120)
+  severity           OperationalRiskSeverity
+  status             OperationalRiskStatus   @default(OPEN)
+  score              Int
+  ruleVersion        String                  @default("w4r1-v1") @map("rule_version") @db.VarChar(40)
+  deduplicationKey   String?                 @map("deduplication_key") @db.Char(64)
+  deduplicationWindowStart DateTime?          @map("deduplication_window_start") @db.Timestamptz(6)
+  safeEvidence       Json?                   @map("safe_evidence") @db.JsonB
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  acknowledgedByUserId String?               @map("acknowledged_by_user_id") @db.Uuid
+  acknowledgedAt     DateTime?               @map("acknowledged_at") @db.Timestamptz(6)
+  resolvedByUserId   String?                 @map("resolved_by_user_id") @db.Uuid
+  resolutionNote     String?                 @map("resolution_note") @db.VarChar(500)
+  resolvedAt         DateTime?               @map("resolved_at") @db.Timestamptz(6)
+
+  @@index([organizationId, status, severity, createdAt(sort: Desc)])
+  @@index([membershipId, createdAt(sort: Desc)])
+  @@index([staffDeviceId, createdAt(sort: Desc)])
+  @@unique([organizationId, deduplicationKey])
+  @@map("operational_risk_signals")
+}
+
+model OperationalDailyAggregate {
+  id                   String   @id @default(uuid()) @db.Uuid
+  organizationId       String   @map("organization_id") @db.Uuid
+  programId            String   @map("program_id") @db.Uuid
+  programVersionId     String?  @map("program_version_id") @db.Uuid
+  locationId           String?  @map("location_id") @db.Uuid
+  staffMemberId        String?  @map("staff_member_id") @db.Uuid
+  localDate            DateTime @map("local_date") @db.Date
+  timezone             String   @db.VarChar(64)
+  enrollments          Int      @default(0)
+  activeMemberships    Int      @default(0) @map("active_memberships")
+  stampUnitsIssued     Int      @default(0) @map("stamp_units_issued")
+  stampOperations      Int      @default(0) @map("stamp_operations")
+  reversals            Int      @default(0)
+  rewardsUnlocked      Int      @default(0) @map("rewards_unlocked")
+  rewardsRedeemed      Int      @default(0) @map("rewards_redeemed")
+  redemptionReversals  Int      @default(0) @map("redemption_reversals")
+  uniqueActiveMembers  Int      @default(0) @map("unique_active_members")
+  completedCycles      Int      @default(0) @map("completed_cycles")
+  riskSignals          Int      @default(0) @map("risk_signals")
+  overrides            Int      @default(0)
+  walletAdoptions      Int      @default(0) @map("wallet_adoptions")
+  sourceSequence       Int      @default(0) @map("source_sequence")
+  aggregateKey         String   @unique @map("aggregate_key") @db.VarChar(255)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId, localDate(sort: Desc)])
+  @@index([programId, localDate(sort: Desc)])
+  @@map("operational_daily_aggregates")
+}
+
+model OperationalAnalyticsCheckpoint {
+  id                 String                         @id @default(uuid()) @db.Uuid
+  sourceKind         OperationalAnalyticsSourceKind @unique @map("source_kind")
+  cursorOccurredAt   DateTime?                      @map("cursor_occurred_at") @db.Timestamptz(6)
+  cursorSourceId     String?                        @map("cursor_source_id") @db.Uuid
+  status             OperationalAnalyticsJobStatus @default(PENDING)
+  leaseOwner         String?                        @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt     DateTime?                      @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount       Int                            @default(0) @map("attempt_count")
+  safeFailureCode    String?                        @map("safe_failure_code") @db.VarChar(120)
+  nextAttemptAt      DateTime                       @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  completedAt        DateTime?                      @map("completed_at") @db.Timestamptz(6)
+  updatedAt          DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt          DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@map("operational_analytics_checkpoints")
+}
+
+model OperationalAnalyticsContribution {
+  id             String                         @id @default(uuid()) @db.Uuid
+  sourceKind     OperationalAnalyticsSourceKind @map("source_kind")
+  sourceId       String                         @map("source_id") @db.Uuid
+  organizationId String                         @map("organization_id") @db.Uuid
+  aggregateKey   String                         @map("aggregate_key") @db.VarChar(255)
+  metrics        Json                           @db.JsonB
+  occurredAt     DateTime                       @map("occurred_at") @db.Timestamptz(6)
+  processedAt    DateTime                       @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@unique([sourceKind, sourceId])
+  @@index([organizationId, occurredAt])
+  @@index([aggregateKey])
+  @@map("operational_analytics_contributions")
+}
+
+model OperationalAnalyticsFact {
+  id               String                         @id @default(uuid()) @db.Uuid
+  sourceKind       OperationalAnalyticsSourceKind @map("source_kind")
+  sourceId         String                         @map("source_id") @db.Uuid
+  organizationId   String                         @map("organization_id") @db.Uuid
+  programId        String                         @map("program_id") @db.Uuid
+  programVersionId String?                        @map("program_version_id") @db.Uuid
+  membershipId     String?                        @map("membership_id") @db.Uuid
+  locationId       String?                        @map("location_id") @db.Uuid
+  staffMemberId    String?                        @map("staff_member_id") @db.Uuid
+  factType         String                         @map("fact_type") @db.VarChar(80)
+  value            Int                            @default(1)
+  localDate        DateTime                       @map("local_date") @db.Date
+  timezone         String                         @db.VarChar(64)
+  occurredAt       DateTime                       @map("occurred_at") @db.Timestamptz(6)
+  safeDimensions   Json?                          @map("safe_dimensions") @db.JsonB
+  createdAt        DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([sourceKind, sourceId])
+  @@index([organizationId, factType, localDate])
+  @@index([programId, programVersionId, localDate])
+  @@index([membershipId, occurredAt])
+  @@map("operational_analytics_facts")
+}
+
+model OperationalAnalyticsJob {
+  id                 String                         @id @default(uuid()) @db.Uuid
+  publicId           String                         @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId     String                         @map("organization_id") @db.Uuid
+  jobType            String                         @map("job_type") @db.VarChar(40)
+  fromDate           DateTime                       @map("from_date") @db.Date
+  toDate             DateTime                       @map("to_date") @db.Date
+  sourceKinds        Json                           @map("source_kinds") @db.JsonB
+  idempotencyKey     String                         @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint String                         @map("request_fingerprint") @db.Char(64)
+  status             OperationalAnalyticsJobStatus @default(PENDING)
+  leaseOwner         String?                        @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt     DateTime?                      @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount       Int                            @default(0) @map("attempt_count")
+  safeFailureCode    String?                        @map("safe_failure_code") @db.VarChar(120)
+  createdAt          DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt        DateTime?                      @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@map("operational_analytics_jobs")
+}
+
+model ExportCommand {
+  id                 String                @id @default(uuid()) @db.Uuid
+  publicId           String                @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId     String                @map("organization_id") @db.Uuid
+  requestedByUserId  String                @map("requested_by_user_id") @db.Uuid
+  exportType         OperationalExportType @map("export_type")
+  filters            Json                  @default("{}") @db.JsonB
+  filterFingerprint  String                @map("filter_fingerprint") @db.Char(64)
+  status             ExportCommandStatus   @default(PENDING)
+  objectKey          String?               @map("object_key") @db.VarChar(500)
+  rowCount           Int?                  @map("row_count")
+  expiresAt          DateTime?             @map("expires_at") @db.Timestamptz(6)
+  leaseOwner         String?               @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt     DateTime?             @map("lease_expires_at") @db.Timestamptz(6)
+  retryCount         Int                   @default(0) @map("retry_count")
+  safeFailureCode    String?               @map("safe_failure_code") @db.VarChar(120)
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt        DateTime?             @map("completed_at") @db.Timestamptz(6)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([status, leaseExpiresAt])
+  @@map("export_commands")
+}
+
+model CustomerPrivacyRequest {
+  id                   String                       @id @default(uuid()) @db.Uuid
+  publicId             String                       @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId       String                       @map("organization_id") @db.Uuid
+  customerId           String                       @map("customer_id") @db.Uuid
+  requestType          CustomerPrivacyRequestType   @map("request_type")
+  status               CustomerPrivacyRequestStatus @default(PENDING)
+  requestedByUserId    String                       @map("requested_by_user_id") @db.Uuid
+  idempotencyKey       String                       @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint   String                       @default("") @map("request_fingerprint") @db.Char(64)
+  confirmationMetadata Json?                        @map("confirmation_metadata") @db.JsonB
+  objectKey            String?                      @map("object_key") @db.VarChar(500)
+  completedAt          DateTime?                    @map("completed_at") @db.Timestamptz(6)
+  failureCode          String?                      @map("failure_code") @db.VarChar(120)
+  leaseOwner           String?                      @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt       DateTime?                    @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount         Int                          @default(0) @map("attempt_count")
+  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  customer             Customer                     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([customerId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@map("customer_privacy_requests")
+}
+
+model ProjectionRebuildCommand {
+  id                        String                     @id @default(uuid()) @db.Uuid
+  publicId                  String                     @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId            String                     @map("organization_id") @db.Uuid
+  membershipId              String                     @map("membership_id") @db.Uuid
+  idempotencyKey            String                     @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint        String                     @map("request_fingerprint") @db.Char(64)
+  expectedProjectionVersion Int                        @map("expected_projection_version")
+  status                    ProjectionRebuildStatus    @default(PENDING)
+  detectedDrift             Boolean?                   @map("detected_drift")
+  beforeFingerprint         String?                    @map("before_fingerprint") @db.Char(64)
+  afterFingerprint          String?                    @map("after_fingerprint") @db.Char(64)
+  initiatedBy               ProjectionRebuildInitiator @map("initiated_by")
+  initiatedByUserId         String?                    @map("initiated_by_user_id") @db.Uuid
+  safeFailureCode           String?                    @map("safe_failure_code") @db.VarChar(120)
+  leaseOwner                String?                    @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt            DateTime?                  @map("lease_expires_at") @db.Timestamptz(6)
+  attemptCount              Int                        @default(0) @map("attempt_count")
+  resultPayload             Json?                      @map("result_payload") @db.JsonB
+  createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt               DateTime?                  @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([membershipId, createdAt(sort: Desc)])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@map("projection_rebuild_commands")
 }

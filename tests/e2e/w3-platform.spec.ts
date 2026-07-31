@@ -8,14 +8,15 @@ import {
   test,
 } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-w3-round-1/screenshots";
-const evidence = "artifacts/handoff-w3-round-1/evidence";
+const screenshots = "artifacts/handoff-w3-round-2/screenshots";
+const evidence = "artifacts/handoff-w3-round-2/evidence";
 const runId = randomUUID().slice(0, 8);
 const programName = `W3 Browser Circle ${runId}`;
 const programSlug = `w3-browser-${runId}`;
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 let programId = "";
 let versionId = "";
+let companionProgramId = "";
 let prisma: Awaited<ReturnType<typeof connectPrisma>>;
 
 async function connectPrisma() {
@@ -265,6 +266,7 @@ test.beforeAll(async () => {
       createdByUserId: owner.id,
     },
   });
+  companionProgramId = companion.id;
   const companionVersion = await prisma.loyaltyProgramVersion.create({
     data: {
       organizationId,
@@ -350,6 +352,10 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  await prisma.loyaltyProgram.updateMany({
+    where: { id: { in: [programId, companionProgramId].filter(Boolean) } },
+    data: { status: "ARCHIVED", archivedAt: new Date() },
+  });
   await prisma.$disconnect();
 });
 
@@ -374,11 +380,27 @@ test.describe
     test("renders public discovery, English enrollment, Arabic RTL, and consent validation", async ({
       page,
     }) => {
-      await page.goto("http://localhost:3002/?tenant=today");
+      await page.goto("http://localhost:3002/?tenant=today&lang=en");
       await expect(page.getByRole("heading", { name: "Choose your loyalty card" })).toBeVisible();
       await screenshot(page, "03-program-chooser");
+      await page.locator(".program-choice").first().click();
+      expect(new URL(page.url()).searchParams.get("lang")).toBe("en");
+      expect(new URL(page.url()).searchParams.get("tenant")).toBe("today");
+      await expect(page.locator("main")).toHaveAttribute("dir", "ltr");
 
-      await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today`);
+      await page.goto("http://localhost:3002/?tenant=today&lang=ar");
+      await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
+      await screenshot(page, "03b-program-chooser-arabic");
+      await page.locator(".program-choice").first().click();
+      expect(new URL(page.url()).searchParams.get("lang")).toBe("ar");
+      expect(new URL(page.url()).searchParams.get("tenant")).toBe("today");
+      await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
+      await page.locator(".customer-header a").first().click();
+      expect(new URL(page.url()).searchParams.get("lang")).toBe("ar");
+      expect(new URL(page.url()).searchParams.get("tenant")).toBe("today");
+      await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
+
+      await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today&lang=en`);
       await expect(page.getByRole("heading", { name: programName })).toBeVisible();
       await screenshot(page, "04-english-join-page");
 
@@ -410,7 +432,7 @@ test.describe
         await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
         await screenshot(page, "03a-single-program-root-arabic");
 
-        await page.goto("http://today.lvh.me:3002/?lang=en");
+        await page.goto("http://today.localhost:3002/?lang=en");
         await expect(page).toHaveURL(new RegExp(`/join/${programSlug}\\?lang=en$`));
         await expect(page.locator("main")).toHaveAttribute("dir", "ltr");
       } finally {

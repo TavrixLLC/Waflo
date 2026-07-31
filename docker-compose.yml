@@ -31,6 +31,14 @@ services:
 
   mailpit:
     image: axllent/mailpit:v1.27.9
+    command:
+      [
+        "--smtp",
+        "0.0.0.0:1025",
+        "--listen",
+        "0.0.0.0:8025",
+        "--smtp-disable-rdns",
+      ]
     ports:
       - "1025:1025"
       - "8025:8025"

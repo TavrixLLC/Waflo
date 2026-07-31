@@ -1,0 +1,52 @@
+
+Running 6 tests using 1 worker
+
+  x  1 [w4] › tests\e2e\w4-platform.spec.ts:196:9 › Waflo W4 real loyalty operations › Owner reviews customers, pinned progress, ledger details, rewards, and projection integrity (1.5m)
+  -  2 [w4] › tests\e2e\w4-platform.spec.ts:239:9 › Waflo W4 real loyalty operations › Owner manages devices, manager approvals, risk review, analytics, and exports
+  -  3 [w4] › tests\e2e\w4-platform.spec.ts:300:9 › Waflo W4 real loyalty operations › Owner completes privacy export and ledger-preserving customer erasure
+  -  4 [w4] › tests\e2e\w4-platform.spec.ts:343:9 › Waflo W4 real loyalty operations › Test Mode visibly enforces daily cap, purchase threshold, and currency
+  -  5 [w4] › tests\e2e\w4-platform.spec.ts:379:9 › Waflo W4 real loyalty operations › Signed Staff Test Client visibly proves wrong-location blocking
+  -  6 [w4] › tests\e2e\w4-platform.spec.ts:552:9 › Waflo W4 real loyalty operations › Arabic RTL and Staff denial remain enforced
+
+
+  1) [w4] › tests\e2e\w4-platform.spec.ts:196:9 › Waflo W4 real loyalty operations › Owner reviews customers, pinned progress, ledger details, rewards, and projection integrity 
+
+    Test timeout of 90000ms exceeded.
+
+    Error: page.waitForEvent: Test timeout of 90000ms exceeded.
+    =========================== logs ===========================
+    waiting for event "dialog"
+    ============================================================
+
+      229 |       await page.getByRole("button", { name: "Close" }).last().click();
+      230 |
+    > 231 |       const projectionDialog = page.waitForEvent("dialog");
+          |                                     ^
+      232 |       await page.getByRole("button", { name: "Verify projection" }).click();
+      233 |       const projectionResult = await projectionDialog;
+      234 |       expect(projectionResult.message()).toContain("Ledger and projection match");
+        at C:\Users\3ma\Documents\WAFLO\tests\e2e\w4-platform.spec.ts:231:37
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\w4-platform-Waflo-W4-real--a090a-ds-and-projection-integrity-w4\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results\w4-platform-Waflo-W4-real--a090a-ds-and-projection-integrity-w4\video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\w4-platform-Waflo-W4-real--a090a-ds-and-projection-integrity-w4\error-context.md
+
+    Error Context: test-results\w4-platform-Waflo-W4-real--a090a-ds-and-projection-integrity-w4\error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\w4-platform-Waflo-W4-real--a090a-ds-and-projection-integrity-w4\trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results\w4-platform-Waflo-W4-real--a090a-ds-and-projection-integrity-w4\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [w4] › tests\e2e\w4-platform.spec.ts:196:9 › Waflo W4 real loyalty operations › Owner reviews customers, pinned progress, ledger details, rewards, and projection integrity 
+  5 did not run

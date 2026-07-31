@@ -1,0 +1,6 @@
+
+Running 1 test using 1 worker
+
+  ok 1 [w3-accessibility] › tests\e2e\w3-accessibility.spec.ts:15:5 › W3 public enrollment, RTL, privacy, transfer, and unavailable states are accessible (3.7s)
+
+  1 passed (4.3s)

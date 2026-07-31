@@ -1,0 +1,74 @@
+$ turbo run typecheck
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/api, @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/customer-web, @waflo/database, @waflo/i18n, @waflo/loyalty-ledger, @waflo/loyalty-policy, @waflo/marketing-web, @waflo/merchant-dashboard, @waflo/operational-analytics, @waflo/operational-worker, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/staff-device-security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google, @waflo/wallet-worker
+   • Running typecheck in 26 packages
+   • Remote caching disabled
+
+@waflo/loyalty-ledger:typecheck: cache miss, executing 170077c5f17c264f
+@waflo/security:typecheck: cache miss, executing d0153992ef578b27
+@waflo/auth:typecheck: cache miss, executing 9b14ccaf65802a87
+@waflo/staff-device-security:typecheck: cache miss, executing 54f323db81d3a8e4
+@waflo/contracts:typecheck: cache miss, executing fb9323553799fd65
+@waflo/brand:typecheck: cache miss, executing 57936979ba9bced9
+@waflo/qr-core:typecheck: cache miss, executing 77e724797ec745e6
+@waflo/customer-security:typecheck: cache miss, executing db67e936605a05cc
+@waflo/stamp-engine:typecheck: cache miss, executing 6824e32c08b24165
+@waflo/config:typecheck: cache miss, executing 4a9b042694c94d2d
+@waflo/loyalty-ledger:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/security:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/auth:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/staff-device-security:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/contracts:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/brand:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/customer-security:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/qr-core:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/stamp-engine:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/config:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/operational-analytics:typecheck: cache miss, executing 13e4ab9b641e6fa6
+@waflo/loyalty-policy:typecheck: cache miss, executing 54f75ad3996daa02
+@waflo/wallet-core:typecheck: cache miss, executing 18681bd8c35e7905
+@waflo/operational-analytics:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/loyalty-policy:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/permissions:typecheck: cache miss, executing a7a7063b90aeaef2
+@waflo/billing:typecheck: cache miss, executing b6dcf697dac633ac
+@waflo/i18n:typecheck: cache miss, executing 2758307983552a9f
+@waflo/wallet-core:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/permissions:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/i18n:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/billing:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/database:typecheck: cache miss, executing afd5ccf676fb14de
+@waflo/wallet-google:typecheck: cache miss, executing 3070620e9e6aae5f
+@waflo/wallet-apple:typecheck: cache miss, executing 386aa1e252a13118
+@waflo/database:typecheck: $ pnpm generate && tsc -p tsconfig.json --noEmit
+@waflo/wallet-google:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/wallet-apple:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/ui:typecheck: cache miss, executing 410fffba54ea87ff
+@waflo/database:typecheck: $ prisma generate
+@waflo/ui:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/database:typecheck: ◇ injected env (3) from ..\..\.env // tip: ◈ encrypted .env [www.dotenvx.com]
+@waflo/database:typecheck: Loaded Prisma config from prisma.config.ts.
+@waflo/database:typecheck: 
+@waflo/database:typecheck: Prisma schema loaded from prisma\schema.prisma.
+@waflo/customer-web:typecheck: cache miss, executing 6503b4d40354a023
+@waflo/merchant-dashboard:typecheck: cache miss, executing 11e7cf7c97c0b031
+@waflo/marketing-web:typecheck: cache miss, executing b80d4efa80c6be31
+@waflo/database:typecheck: 
+@waflo/database:typecheck: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 506ms
+@waflo/database:typecheck: 
+@waflo/customer-web:typecheck: $ tsc --noEmit
+@waflo/merchant-dashboard:typecheck: $ tsc --noEmit
+@waflo/marketing-web:typecheck: $ tsc --noEmit
+@waflo/api:typecheck: cache miss, executing 954382870b12af33
+@waflo/wallet-worker:typecheck: cache miss, executing 2ad96d41a2584ce8
+@waflo/operational-worker:typecheck: cache miss, executing 0edae1dfb87e75e2
+@waflo/api:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/wallet-worker:typecheck: $ tsc -p tsconfig.json --noEmit
+@waflo/operational-worker:typecheck: $ tsc -p tsconfig.json --noEmit
+
+ Tasks:    26 successful, 26 total
+Cached:    0 cached, 26 total
+  Time:    19.651s 
+
+
+exit_code=0

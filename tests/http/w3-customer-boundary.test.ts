@@ -61,6 +61,7 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     process.env.APPLE_WALLET_MODE = "TEST_ADAPTER";
     process.env.GOOGLE_WALLET_MODE = "TEST_ADAPTER";
     process.env.GOOGLE_WALLET_ISSUER_ID = "w3-test-issuer";
+    process.env.RATE_LIMIT_NAMESPACE = `w3-http-${runId}`;
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);

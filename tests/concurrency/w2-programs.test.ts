@@ -762,11 +762,19 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
     const program = await createProgram(context);
     const session = await createSession(context, program);
     const rewardId = program.currentDraftVersion.rewards[0]?.id as string;
+    await programs.addTestStamps(
+      context.ownerId,
+      context.organizationId,
+      session.id,
+      5,
+      randomUUID(),
+      request,
+    );
     const filled = await programs.addTestStamps(
       context.ownerId,
       context.organizationId,
       session.id,
-      8,
+      3,
       randomUUID(),
       request,
     );
@@ -800,7 +808,9 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
       cycleCount: 1,
       status: "COMPLETED",
     });
-    expect(reset.events.filter((event) => event.eventType === "TEST_STAMP_EARNED")).toHaveLength(1);
+    const earnedEvents = reset.events.filter((event) => event.eventType === "TEST_STAMP_EARNED");
+    expect(earnedEvents).toHaveLength(2);
+    expect(earnedEvents.reduce((total, event) => total + (event.amount ?? 0), 0)).toBe(8);
     expect(reset.events.filter((event) => event.eventType === "TEST_REWARD_REDEEMED")).toHaveLength(
       1,
     );

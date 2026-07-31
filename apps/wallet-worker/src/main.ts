@@ -14,6 +14,7 @@ import {
 } from "@waflo/customer-security";
 import {
   createPrismaClient,
+  lockApplePassUpdateSequence,
   queueWalletPassStateChange,
   type Prisma,
   type PrismaClient,
@@ -417,12 +418,13 @@ export class WalletWorker {
         where: {
           organizationId: job.organizationId,
           membership: { programId: job.programId },
-          membershipCredential: { status: "ACTIVE" },
-          createdAt: { lte: job.snapshotAt },
+          ...(job.action === "reconcile"
+            ? {}
+            : { membershipCredential: { status: "ACTIVE" as const } }),
           ...(job.cursorCreatedAt && job.cursorPassInstanceId
             ? {
                 OR: [
-                  { createdAt: { gt: job.cursorCreatedAt, lte: job.snapshotAt } },
+                  { createdAt: { gt: job.cursorCreatedAt } },
                   {
                     createdAt: job.cursorCreatedAt,
                     id: { gt: job.cursorPassInstanceId },
@@ -430,9 +432,11 @@ export class WalletWorker {
                 ],
               }
             : {}),
-          ...(job.action === "restore" ? {} : { status: { not: "INVALIDATED" } }),
+          ...(job.action === "restore" || job.action === "reconcile"
+            ? {}
+            : { status: { not: "INVALIDATED" as const } }),
         },
-        select: { id: true, createdAt: true },
+        select: { id: true, provider: true, createdAt: true },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         take: job.batchSize,
       });
@@ -464,31 +468,42 @@ export class WalletWorker {
       let newlyQueued = 0;
       const lastPass = passes.at(-1);
       if (!lastPass) throw new Error("Program Wallet sync page unexpectedly became empty.");
-      await this.prisma.$transaction(async (transaction) => {
-        for (const pass of passes) {
-          const queued = await queueWalletPassStateChange(transaction, {
-            walletPassInstanceId: pass.id,
-            commandType: job.commandType === "INVALIDATE" ? "INVALIDATE" : "UPDATE",
-            reason: job.reason,
-            eventKey: `program-sync:${job.id}`,
-            safePayload: { programSyncJobId: job.id, programAction: job.action },
+      await this.prisma.$transaction(
+        async (transaction) => {
+          if (passes.some((pass) => pass.provider === "APPLE")) {
+            await lockApplePassUpdateSequence(transaction);
+          }
+          for (const pass of passes) {
+            const queued = await queueWalletPassStateChange(transaction, {
+              walletPassInstanceId: pass.id,
+              commandType:
+                job.commandType === "INVALIDATE"
+                  ? "INVALIDATE"
+                  : job.commandType === "RECONCILE"
+                    ? "RECONCILE"
+                    : "UPDATE",
+              reason: job.reason,
+              eventKey: `program-sync:${job.id}`,
+              safePayload: { programSyncJobId: job.id, programAction: job.action },
+            });
+            if (!queued.replayed) newlyQueued += 1;
+          }
+          await transaction.programWalletSyncJob.update({
+            where: { id: job.id },
+            data: {
+              status: "PENDING",
+              cursorPassInstanceId: lastPass.id,
+              cursorCreatedAt: lastPass.createdAt,
+              processedCount: { increment: newlyQueued },
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              nextAttemptAt: new Date(),
+              safeErrorCode: null,
+            },
           });
-          if (!queued.replayed) newlyQueued += 1;
-        }
-        await transaction.programWalletSyncJob.update({
-          where: { id: job.id },
-          data: {
-            status: "PENDING",
-            cursorPassInstanceId: lastPass.id,
-            cursorCreatedAt: lastPass.createdAt,
-            processedCount: { increment: newlyQueued },
-            leaseOwner: null,
-            leaseExpiresAt: null,
-            nextAttemptAt: new Date(),
-            safeErrorCode: null,
-          },
-        });
-      });
+        },
+        { timeout: 60_000 },
+      );
       return {
         jobId: job.id,
         scanned: passes.length,
@@ -818,7 +833,11 @@ export class WalletWorker {
   }
 
   private async queueApplePush(pass: PassRecord, source: WalletCommand) {
-    const idempotencyKey = `wallet:apple:push:${pass.id}:u${pass.updateTag}`;
+    if (pass.appleUpdateSequence === null) {
+      throw new Error("Apple pass is missing its global update sequence.");
+    }
+    const sequence = pass.appleUpdateSequence.toString();
+    const idempotencyKey = `wallet:apple:push:${pass.id}:s${sequence}`;
     await this.prisma.walletCommand.upsert({
       where: { idempotencyKey },
       create: {
@@ -831,7 +850,10 @@ export class WalletWorker {
         payloadFingerprint: createHash("sha256")
           .update(`${idempotencyKey}:${source.id}`)
           .digest("hex"),
-        safePayload: { updateTag: pass.updateTag, sourceCommandType: source.commandType },
+        safePayload: {
+          appleUpdateSequence: sequence,
+          sourceCommandType: source.commandType,
+        },
       },
       update: {},
     });

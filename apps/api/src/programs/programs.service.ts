@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import {
   canCreateProgram,
@@ -12,27 +13,36 @@ import {
   findProgramTemplate,
   type ProgramCreateInput,
   type ProgramTemplateDefinition,
+  type ProgramTestRedeemInput,
+  type ProgramTestReverseInput,
+  type ProgramTestStampInput,
   type ProgramUpdateInput,
   W2_STAMP_POLICY_DEFAULTS,
 } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
+import {
+  evaluateStampPolicy,
+  LoyaltyPolicyError,
+  operationalLocalDate,
+  type StampPolicyDecision,
+} from "@waflo/loyalty-policy";
+import { slugifyProgramName } from "@waflo/qr-core";
+import { renderStampSvg, type StampOutputProfile } from "@waflo/stamp-engine";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
-import {
-  withOrganizationCacheLock,
-  withOrganizationInvariantLock,
-} from "../common/organization-transaction.js";
 import {
   decodeNumberCursor,
   decodeTimestampCursor,
   encodeCursor,
 } from "../common/cursor-pagination.js";
+import {
+  withOrganizationCacheLock,
+  withOrganizationInvariantLock,
+  withProgramLifecycleInvariantLock,
+} from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
-import { createHash } from "node:crypto";
-import { renderStampSvg, type StampOutputProfile } from "@waflo/stamp-engine";
-import { slugifyProgramName } from "@waflo/qr-core";
 import {
   artworkFor,
   canonicalArtworkBytes,
@@ -1200,8 +1210,22 @@ export class ProgramsService {
           rewards: version.rewards.map((reward) => ({
             thresholdStampCount: reward.thresholdStampCount,
             maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
+            validityDurationDays: reward.validityDurationDays,
             stampAsset: reward.visualOverride?.stampAsset ?? null,
           })),
+          operationalPolicy: {
+            operationalTimezone: version.operationalTimezone,
+            maximumStampsPerOperation: version.stampRule?.maximumStampsPerOperation ?? 0,
+            maximumStampsPerCustomerPerDay:
+              version.stampRule?.maximumStampsPerCustomerPerDay ?? null,
+            minimumPurchaseAmountMinor: version.stampRule?.minimumPurchaseAmountMinor ?? null,
+            minimumPurchaseCurrency: version.stampRule?.minimumPurchaseCurrency ?? null,
+            staffOwnReversalWindowSeconds: version.staffOwnReversalWindowSeconds,
+            managerReversalWindowMinutes: version.managerReversalWindowMinutes,
+            managerOverrideAllowed: version.managerOverrideAllowed,
+            resetBehaviorAfterReward:
+              version.stampRule?.resetBehaviorAfterReward ?? "RESET_ON_FINAL_REWARD_REDEMPTION",
+          },
           locations: version.locations.map((location) => ({
             status: location.location.status,
           })),
@@ -1394,11 +1418,27 @@ export class ProgramsService {
     userId: string,
     organizationId: string,
     sessionId: string,
-    amount: number,
-    idempotencyKey: string,
-    request: WafloRequest,
+    input: ProgramTestStampInput | number,
+    requestOrIdempotencyKey: WafloRequest | string,
+    legacyRequest?: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.test");
+    const commandInput: ProgramTestStampInput =
+      typeof input === "number"
+        ? {
+            amount: input,
+            idempotencyKey:
+              typeof requestOrIdempotencyKey === "string" ? requestOrIdempotencyKey : randomUUID(),
+            managerApproved: false,
+          }
+        : input;
+    const request = (
+      typeof input === "number" ? legacyRequest : requestOrIdempotencyKey
+    ) as WafloRequest;
+    // Keep the service compatible with pre-W4 Test Mode callers. HTTP clients
+    // still supply a validated key, while direct legacy callers receive a fresh
+    // command identity instead of failing inside Prisma's compound unique key.
+    const idempotencyKey = commandInput.idempotencyKey ?? randomUUID();
     const result = await withOrganizationInvariantLock(
       this.prisma.client,
       organizationId,
@@ -1414,7 +1454,12 @@ export class ProgramsService {
             HttpStatus.NOT_FOUND,
           );
         const existing = await transaction.programTestEvent.findUnique({
-          where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+          where: {
+            sessionId_idempotencyKey: {
+              sessionId,
+              idempotencyKey,
+            },
+          },
         });
         if (existing)
           return transaction.programTestSession.findUniqueOrThrow({
@@ -1443,12 +1488,74 @@ export class ProgramsService {
             HttpStatus.CONFLICT,
             { currentStampCount: session.currentStampCount, goal },
           );
+        const simulatedAt = commandInput.simulatedOccurredAt
+          ? new Date(commandInput.simulatedOccurredAt)
+          : new Date();
+        const localDate = operationalLocalDate(simulatedAt, session.version.operationalTimezone);
+        const issuedEvents = await transaction.programTestEvent.findMany({
+          where: { sessionId, eventType: "TEST_STAMP_EARNED" },
+          select: { amount: true, safeMetadata: true },
+        });
+        const grossPositiveStampsIssuedToday = issuedEvents.reduce((total, event) => {
+          const metadata =
+            event.safeMetadata &&
+            typeof event.safeMetadata === "object" &&
+            !Array.isArray(event.safeMetadata)
+              ? (event.safeMetadata as { operationalLocalDate?: unknown })
+              : null;
+          return metadata?.operationalLocalDate === localDate ? total + (event.amount ?? 0) : total;
+        }, 0);
+        let decision: StampPolicyDecision;
+        try {
+          decision = evaluateStampPolicy(
+            {
+              requiredStampCount: goal,
+              maximumStampsPerOperation: session.version.stampRule?.maximumStampsPerOperation ?? 5,
+              maximumStampsPerCustomerPerDay:
+                session.version.stampRule?.maximumStampsPerCustomerPerDay ?? null,
+              minimumPurchaseAmountMinor:
+                session.version.stampRule?.minimumPurchaseAmountMinor ?? null,
+              minimumPurchaseCurrency: session.version.stampRule?.minimumPurchaseCurrency ?? null,
+              operationalTimezone: session.version.operationalTimezone,
+              resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
+            },
+            {
+              requestedStamps: commandInput.amount,
+              currentCycleStampCount: session.currentStampCount,
+              rewardReady: session.currentStampCount >= goal,
+              grossPositiveStampsIssuedToday,
+              ...(commandInput.purchaseAmountMinor !== undefined
+                ? { purchaseAmountMinor: commandInput.purchaseAmountMinor }
+                : {}),
+              ...(commandInput.purchaseCurrency !== undefined
+                ? { purchaseCurrency: commandInput.purchaseCurrency }
+                : {}),
+              managerOverride: commandInput.managerApproved
+                ? {
+                    dailyCap: true,
+                    purchasePolicy: true,
+                    reason: commandInput.managerReason ?? "Synthetic manager approval.",
+                    permitted: session.version.managerOverrideAllowed,
+                  }
+                : null,
+            },
+          );
+        } catch (error) {
+          if (error instanceof LoyaltyPolicyError) {
+            throw new AppError(error.code, error.message, HttpStatus.CONFLICT);
+          }
+          throw error;
+        }
         const previousAbsolute = absoluteTestPosition(
           session.cycleCount,
           session.currentStampCount,
           goal,
         );
-        const projection = projectTestStampAddition(session.currentStampCount, amount, goal);
+        const projection = projectTestStampAddition(
+          session.currentStampCount,
+          decision.nextCycleStampCount - session.currentStampCount,
+          goal,
+        );
         const nextAbsolute = previousAbsolute + projection.appliedAmount;
         const crossed = crossedRewardThresholds(
           previousAbsolute,
@@ -1467,9 +1574,17 @@ export class ProgramsService {
               previousAbsolute,
               nextAbsolute,
               cycle: session.cycleCount + 1,
-              requestedAmount: amount,
+              requestedAmount: commandInput.amount,
               appliedAmount: projection.appliedAmount,
               rewardReady: projection.rewardReady,
+              operationalTimezone: session.version.operationalTimezone,
+              operationalLocalDate: localDate,
+              simulatedOccurredAt: simulatedAt.toISOString(),
+              purchaseAmountMinor: commandInput.purchaseAmountMinor ?? null,
+              purchaseCurrency: commandInput.purchaseCurrency ?? null,
+              managerApproved: commandInput.managerApproved,
+              dailyCapOverridden: decision.dailyCapOverridden,
+              purchasePolicyOverridden: decision.purchasePolicyOverridden,
             },
           },
         });
@@ -1514,7 +1629,7 @@ export class ProgramsService {
             targetType: "program_test_session",
             targetId: sessionId,
             metadata: {
-              requestedAmount: amount,
+              requestedAmount: commandInput.amount,
               appliedAmount: projection.appliedAmount,
               rewardReady: projection.rewardReady,
               cycle: session.cycleCount + 1,
@@ -1533,10 +1648,12 @@ export class ProgramsService {
     organizationId: string,
     sessionId: string,
     rewardId: string,
-    idempotencyKey: string,
+    input: ProgramTestRedeemInput | string,
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.test");
+    const commandInput: ProgramTestRedeemInput =
+      typeof input === "string" ? { idempotencyKey: input, managerApproved: false } : input;
     return withOrganizationInvariantLock(
       this.prisma.client,
       organizationId,
@@ -1553,7 +1670,12 @@ export class ProgramsService {
             HttpStatus.NOT_FOUND,
           );
         const existing = await transaction.programTestEvent.findUnique({
-          where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+          where: {
+            sessionId_idempotencyKey: {
+              sessionId,
+              idempotencyKey: commandInput.idempotencyKey,
+            },
+          },
         });
         if (existing) return existing;
         const latestReset = await transaction.programTestEvent.findFirst({
@@ -1609,18 +1731,26 @@ export class ProgramsService {
             "Earn another unlock for this reward before redeeming it again.",
             HttpStatus.CONFLICT,
           );
+        if (reward.requiresManagerApproval && !commandInput.managerApproved) {
+          throw new AppError(
+            "TEST_MANAGER_APPROVAL_REQUIRED",
+            "Synthetic manager approval is required for this reward.",
+            HttpStatus.CONFLICT,
+          );
+        }
         const event = await transaction.programTestEvent.create({
           data: {
             sessionId,
             rewardDefinitionId: rewardId,
             eventType: "TEST_REWARD_REDEEMED",
-            idempotencyKey,
+            idempotencyKey: commandInput.idempotencyKey,
             amount: 1,
             createdByUserId: userId,
             safeMetadata: {
               cycle: availableCycle,
               finalReward:
                 reward.thresholdStampCount === (session.version.stampRule?.requiredStampCount ?? 8),
+              managerApproved: commandInput.managerApproved,
             },
           },
         });
@@ -1700,10 +1830,12 @@ export class ProgramsService {
     userId: string,
     organizationId: string,
     sessionId: string,
-    idempotencyKey: string,
+    input: ProgramTestReverseInput | string,
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.test");
+    const commandInput: ProgramTestReverseInput =
+      typeof input === "string" ? { idempotencyKey: input, managerActor: false } : input;
     const result = await withOrganizationInvariantLock(
       this.prisma.client,
       organizationId,
@@ -1726,7 +1858,12 @@ export class ProgramsService {
             HttpStatus.NOT_FOUND,
           );
         const replay = await transaction.programTestEvent.findUnique({
-          where: { sessionId_idempotencyKey: { sessionId, idempotencyKey } },
+          where: {
+            sessionId_idempotencyKey: {
+              sessionId,
+              idempotencyKey: commandInput.idempotencyKey,
+            },
+          },
         });
         if (replay)
           return transaction.programTestSession.findUniqueOrThrow({
@@ -1748,6 +1885,36 @@ export class ProgramsService {
             "There is no synthetic stamp to reverse.",
             HttpStatus.CONFLICT,
           );
+        const latestStamp = await transaction.programTestEvent.findFirst({
+          where: { sessionId, eventType: "TEST_STAMP_EARNED" },
+          orderBy: { createdAt: "desc" },
+        });
+        const simulatedAt = commandInput.simulatedOccurredAt
+          ? new Date(commandInput.simulatedOccurredAt)
+          : new Date();
+        const latestStampMetadata =
+          latestStamp?.safeMetadata &&
+          typeof latestStamp.safeMetadata === "object" &&
+          !Array.isArray(latestStamp.safeMetadata)
+            ? (latestStamp.safeMetadata as { simulatedOccurredAt?: unknown })
+            : null;
+        const latestStampOccurredAt =
+          typeof latestStampMetadata?.simulatedOccurredAt === "string"
+            ? new Date(latestStampMetadata.simulatedOccurredAt)
+            : latestStamp?.createdAt;
+        const reversalWindowMs = commandInput.managerActor
+          ? session.version.managerReversalWindowMinutes * 60_000
+          : session.version.staffOwnReversalWindowSeconds * 1_000;
+        const elapsedMs = latestStampOccurredAt
+          ? simulatedAt.getTime() - latestStampOccurredAt.getTime()
+          : Number.POSITIVE_INFINITY;
+        if (!latestStampOccurredAt || elapsedMs < 0 || elapsedMs > reversalWindowMs) {
+          throw new AppError(
+            "TEST_REVERSAL_WINDOW_EXPIRED",
+            "The synthetic reversal window has expired.",
+            HttpStatus.CONFLICT,
+          );
+        }
         const currentAbsolute = absoluteTestPosition(
           session.cycleCount,
           session.currentStampCount,
@@ -1793,13 +1960,15 @@ export class ProgramsService {
             sessionId,
             eventType: "TEST_STAMP_REVERSED",
             amount: 1,
-            idempotencyKey,
+            idempotencyKey: commandInput.idempotencyKey,
             createdByUserId: userId,
             safeMetadata: {
               cycle,
               positionInCycle,
               previousAbsolute: currentAbsolute,
               nextAbsolute,
+              simulatedOccurredAt: simulatedAt.toISOString(),
+              actor: commandInput.managerActor ? "MANAGER" : "STAFF",
             },
           },
         });
@@ -1810,7 +1979,7 @@ export class ProgramsService {
               eventType: "TEST_REWARD_RELOCKED",
               amount: 1,
               rewardDefinitionId: reward.id,
-              idempotencyKey: `${idempotencyKey}:relock:${cycle}:${reward.id}`,
+              idempotencyKey: `${commandInput.idempotencyKey}:relock:${cycle}:${reward.id}`,
               createdByUserId: userId,
               safeMetadata: { cycle, thresholdStampCount: positionInCycle },
             },
@@ -2456,9 +2625,10 @@ export class ProgramsService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.manage_state");
-    return withOrganizationInvariantLock(
+    return withProgramLifecycleInvariantLock(
       this.prisma.client,
       organizationId,
+      programId,
       async (transaction) => {
         const program = await transaction.loyaltyProgram.findFirst({
           where: { id: programId, organizationId },
@@ -2794,6 +2964,10 @@ export class ProgramsService {
     };
     return {
       status: "DRAFT" as const,
+      operationalTimezone: input.operationalTimezone,
+      staffOwnReversalWindowSeconds: input.staffOwnReversalWindowSeconds,
+      managerReversalWindowMinutes: input.managerReversalWindowMinutes,
+      managerOverrideAllowed: input.managerOverrideAllowed,
       editingMode: input.editingMode.toUpperCase() as "QUICK" | "PRO",
       baseTemplateCode: template.code,
       baseTemplateVersion: template.version,
@@ -2820,12 +2994,12 @@ export class ProgramsService {
         create: {
           requiredStampCount: input.requiredStampCount,
           defaultStampsPerAction: policy.defaultStampsPerAction,
-          maximumStampsPerOperation: policy.maximumStampsPerOperation,
-          maximumStampsPerCustomerPerDay: policy.maximumStampsPerCustomerPerDay,
-          minimumPurchaseAmountMinor: policy.minimumPurchaseAmountMinor,
-          minimumPurchaseCurrency: policy.minimumPurchaseCurrency,
+          maximumStampsPerOperation: input.maximumStampsPerOperation,
+          maximumStampsPerCustomerPerDay: input.maximumStampsPerCustomerPerDay,
+          minimumPurchaseAmountMinor: input.minimumPurchaseAmountMinor,
+          minimumPurchaseCurrency: input.minimumPurchaseCurrency,
           earningDescription: input.earningDescription,
-          resetBehaviorAfterReward: policy.resetBehaviorAfterReward,
+          resetBehaviorAfterReward: input.resetBehaviorAfterReward,
         },
       },
       rewards: {
@@ -2904,6 +3078,17 @@ export class ProgramsService {
       templateCode: version.baseTemplateCode ?? undefined,
       templateVersion: version.baseTemplateVersion ?? undefined,
       requiredStampCount: version.stampRule?.requiredStampCount ?? 8,
+      operationalTimezone: version.operationalTimezone,
+      maximumStampsPerOperation:
+        version.stampRule?.maximumStampsPerOperation ??
+        W2_STAMP_POLICY_DEFAULTS.maximumStampsPerOperation,
+      maximumStampsPerCustomerPerDay: version.stampRule?.maximumStampsPerCustomerPerDay ?? null,
+      minimumPurchaseAmountMinor: version.stampRule?.minimumPurchaseAmountMinor ?? null,
+      minimumPurchaseCurrency: version.stampRule?.minimumPurchaseCurrency ?? null,
+      staffOwnReversalWindowSeconds: version.staffOwnReversalWindowSeconds,
+      managerReversalWindowMinutes: version.managerReversalWindowMinutes,
+      managerOverrideAllowed: version.managerOverrideAllowed,
+      resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
       earningDescription:
         version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
       locationIds: version.locations.map((item) => item.locationId),
@@ -3046,6 +3231,10 @@ export class ProgramsService {
       baseTemplateCode: source.baseTemplateCode,
       baseTemplateVersion: source.baseTemplateVersion,
       configurationSchemaVersion: source.configurationSchemaVersion,
+      operationalTimezone: source.operationalTimezone,
+      staffOwnReversalWindowSeconds: source.staffOwnReversalWindowSeconds,
+      managerReversalWindowMinutes: source.managerReversalWindowMinutes,
+      managerOverrideAllowed: source.managerOverrideAllowed,
       stampRule: source.stampRule
         ? {
             create: {
@@ -3056,7 +3245,7 @@ export class ProgramsService {
               minimumPurchaseAmountMinor: source.stampRule.minimumPurchaseAmountMinor,
               minimumPurchaseCurrency: source.stampRule.minimumPurchaseCurrency,
               earningDescription: source.stampRule.earningDescription,
-              resetBehaviorAfterReward: source.stampRule.resetBehaviorAfterReward,
+              resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
             },
           }
         : undefined,

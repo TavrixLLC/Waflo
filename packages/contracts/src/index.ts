@@ -6,6 +6,7 @@ export * from "./program-publication-state.js";
 export * from "./program-template-catalog.js";
 export * from "./w4-policy-backlog.js";
 export * from "./w3.js";
+export * from "./w4.js";
 
 export const locales = ["en", "ar"] as const;
 export type Locale = (typeof locales)[number];
@@ -315,6 +316,23 @@ const programInputSchema = z
     templateCode: z.string().trim().max(80).optional(),
     templateVersion: z.number().int().min(1).max(10_000).optional(),
     requiredStampCount: z.number().int().min(2).max(30).default(8),
+    operationalTimezone: timezoneSchema.default("Asia/Baghdad"),
+    maximumStampsPerOperation: z.number().int().min(1).max(30).default(5),
+    maximumStampsPerCustomerPerDay: z.number().int().min(1).max(1000).nullable().default(null),
+    minimumPurchaseAmountMinor: z.number().int().min(0).max(2_147_483_647).nullable().default(null),
+    minimumPurchaseCurrency: z
+      .string()
+      .trim()
+      .length(3)
+      .transform((value) => value.toUpperCase())
+      .nullable()
+      .default(null),
+    staffOwnReversalWindowSeconds: z.number().int().min(15).max(900).default(120),
+    managerReversalWindowMinutes: z.number().int().min(1).max(10080).default(1440),
+    managerOverrideAllowed: z.boolean().default(true),
+    resetBehaviorAfterReward: z
+      .literal("RESET_ON_FINAL_REWARD_REDEMPTION")
+      .default("RESET_ON_FINAL_REWARD_REDEMPTION"),
     translations: z.object({ en: translationInputSchema, ar: translationInputSchema }),
     earningDescription: z
       .string()
@@ -344,6 +362,23 @@ function validateProgramInput(value: z.infer<typeof programInputSchema>, context
       message: "Quick Mode supports one final reward.",
     });
   }
+  if ((value.minimumPurchaseAmountMinor === null) !== (value.minimumPurchaseCurrency === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["minimumPurchaseCurrency"],
+      message: "Minimum purchase amount and currency must be enabled together.",
+    });
+  }
+  if (
+    value.maximumStampsPerCustomerPerDay !== null &&
+    value.operationalTimezone.trim().length === 0
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["operationalTimezone"],
+      message: "An operational timezone is required for daily limits.",
+    });
+  }
 }
 
 export const programCreateSchema = programInputSchema.superRefine(validateProgramInput);
@@ -358,8 +393,25 @@ export const programUpdateSchema = programInputSchema
 
 export const programTestStampSchema = z
   .object({
-    amount: z.number().int().min(1).max(5).default(1),
+    amount: z.number().int().min(1).max(30).default(1),
     idempotencyKey: z.uuid(),
+    purchaseAmountMinor: z.number().int().min(0).max(2_147_483_647).optional(),
+    purchaseCurrency: z
+      .string()
+      .trim()
+      .length(3)
+      .transform((value) => value.toUpperCase())
+      .optional(),
+    managerApproved: z.boolean().default(false),
+    managerReason: z.string().trim().min(3).max(240).optional(),
+    simulatedOccurredAt: z.iso.datetime().optional(),
+  })
+  .strict();
+
+export const programTestRedeemSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
+    managerApproved: z.boolean().default(false),
   })
   .strict();
 
@@ -378,8 +430,14 @@ export const programTestResetSchema = z
 export const programTestReverseSchema = z
   .object({
     idempotencyKey: z.uuid(),
+    managerActor: z.boolean().default(false),
+    simulatedOccurredAt: z.iso.datetime().optional(),
   })
   .strict();
+
+export type ProgramTestStampInput = z.infer<typeof programTestStampSchema>;
+export type ProgramTestRedeemInput = z.infer<typeof programTestRedeemSchema>;
+export type ProgramTestReverseInput = z.infer<typeof programTestReverseSchema>;
 
 export type ProgramCreateInput = z.infer<typeof programCreateSchema>;
 export type ProgramUpdateInput = z.infer<typeof programUpdateSchema>;

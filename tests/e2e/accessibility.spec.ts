@@ -114,12 +114,9 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
   await loginAsSeedOwner(page);
 
   const organizationSwitcher = page.locator(".wf-org-switcher select");
-  const growthOrganization = await organizationSwitcher
-    .locator("option")
-    .nth(1)
-    .getAttribute("value");
-  expect(growthOrganization).toBeTruthy();
-  await organizationSwitcher.selectOption(growthOrganization as string);
+  const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await organizationSwitcher.selectOption(growthOrganizationId);
+  await expect(organizationSwitcher).toHaveValue(growthOrganizationId);
   await page.goto("http://localhost:3001/en/dashboard/programs");
   await page.getByRole("button", { name: "Create program" }).click();
   await page.getByRole("radio", { name: /Pro Mode/ }).check();
@@ -291,7 +288,7 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
   );
   const storedProgram = await database.loyaltyProgram.findFirstOrThrow({
     where: {
-      organizationId: growthOrganization as string,
+      organizationId: growthOrganizationId,
       internalName: { startsWith: programName },
     },
   });

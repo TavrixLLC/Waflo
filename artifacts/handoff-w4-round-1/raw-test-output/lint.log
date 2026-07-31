@@ -1,0 +1,4 @@
+$ biome lint .
+Checked 306 files in 191ms. No fixes applied.
+
+exit_code=0

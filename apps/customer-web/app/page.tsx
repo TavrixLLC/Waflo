@@ -20,21 +20,28 @@ export default async function MerchantProgramsPage({
     directHost.includes(".localhost") || directHost.includes(".lvh.me")
       ? directHost
       : (requestHeaders.get("x-forwarded-host") ?? directHost);
-  const suffix = query.tenant ? `?tenant=${encodeURIComponent(query.tenant)}` : "";
+  const localHost =
+    directHost.includes("localhost") ||
+    directHost.includes("127.0.0.1") ||
+    directHost.includes(".lvh.me");
+  const tenant = localHost ? query.tenant : undefined;
   const result = await fetchCustomerApi<{
     status: string;
     merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
     programs: PublicProgram[];
-  }>("/v1/public/merchant-programs", host, query.tenant);
+  }>("/v1/public/merchant-programs", host, tenant);
   const locale = localeForRequest(query.lang, result.merchant?.defaultLocale);
   const ar = locale === "ar";
+  const linkParams = new URLSearchParams({ lang: locale });
+  if (tenant) linkParams.set("tenant", tenant);
+  const suffix = `?${linkParams.toString()}`;
 
   if (result.status === "active" && result.merchant && result.programs.length === 1) {
     const program = result.programs[0];
     if (!program) throw new Error("Single-program discovery result is unavailable.");
     const params = new URLSearchParams();
-    if (query.tenant) params.set("tenant", query.tenant);
-    if (query.lang) params.set("lang", locale);
+    if (tenant) params.set("tenant", tenant);
+    params.set("lang", locale);
     const queryString = params.toString();
     redirect(`/join/${program.slug}${queryString ? `?${queryString}` : ""}`);
   }
@@ -56,7 +63,7 @@ export default async function MerchantProgramsPage({
 
   return (
     <main className="customer-page" lang={locale} dir={ar ? "rtl" : "ltr"}>
-      <CustomerHeader locale={locale} {...(query.tenant ? { tenant: query.tenant } : {})} />
+      <CustomerHeader locale={locale} {...(tenant ? { tenant } : {})} />
       <section className="customer-hero customer-hero--compact">
         <Badge tone="brand">{ar ? "مدعوم من Waflo" : "Powered by Waflo"}</Badge>
         <span className="customer-merchant-mark" aria-hidden="true">
@@ -120,11 +127,15 @@ export default async function MerchantProgramsPage({
 
 export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant?: string }) {
   const nextLocale = locale === "ar" ? "en" : "ar";
-  const params = new URLSearchParams({ lang: nextLocale });
-  if (tenant) params.set("tenant", tenant);
+  const homeParams = new URLSearchParams({ lang: locale });
+  const languageParams = new URLSearchParams({ lang: nextLocale });
+  if (tenant) {
+    homeParams.set("tenant", tenant);
+    languageParams.set("tenant", tenant);
+  }
   return (
     <header className="customer-header">
-      <Link href="/">
+      <Link href={`/?${homeParams.toString()}`}>
         <Image
           className="customer-logo"
           src="/brand/waflo-logo-primary-horizontal.svg"
@@ -134,7 +145,7 @@ export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant
           priority
         />
       </Link>
-      <Link className="customer-language" href={`/?${params.toString()}`}>
+      <Link className="customer-language" href={`/?${languageParams.toString()}`}>
         {locale === "ar" ? "English" : "العربية"}
       </Link>
     </header>

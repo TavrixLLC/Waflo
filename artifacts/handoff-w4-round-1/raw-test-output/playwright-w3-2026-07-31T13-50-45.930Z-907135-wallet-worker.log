@@ -1,0 +1,17 @@
+{"level":"info","component":"wallet-worker","event":"ready","providers":[{"provider":"APPLE","mode":"TEST_ADAPTER","status":"HEALTHY"},{"provider":"GOOGLE","mode":"TEST_ADAPTER","status":"HEALTHY"}]}
+{"level":"info","component":"wallet-worker","event":"commands_queued","count":4}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"7ea20681-d037-4477-a590-03a4d6446143","provider":"APPLE","commandType":"ENSURE_TEMPLATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"5d2c4cdc-29be-4629-a3fc-d546d34ea0bb","provider":"APPLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"9203e250-4ec6-4bf6-96c9-50152af4c8c2","provider":"GOOGLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"f276b2ea-ed80-4f40-a1ee-ffff9fe675f9","provider":"GOOGLE","commandType":"ENSURE_TEMPLATE"}
+{"level":"info","component":"wallet-worker","event":"commands_queued","count":4}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"0f28f774-ebe2-47ae-a724-9520d204cae7","provider":"GOOGLE","commandType":"INVALIDATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"61bbeb21-848b-45fa-a0d8-1e15abce68d0","provider":"APPLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"6d206ad3-2e0e-4022-b2a9-c9c9e2e9cf20","provider":"APPLE","commandType":"INVALIDATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"fe297884-ac03-4564-93d5-9ff5b4a16a8f","provider":"GOOGLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"commands_queued","count":5}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"33e7ef1b-3310-4730-bfb3-2dd27b917bf7","provider":"APPLE","commandType":"APPLE_PUSH"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"8ea09eac-2b4b-4b30-880a-04350c1a8335","provider":"APPLE","commandType":"INVALIDATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"c02c54ca-9648-4b64-80b0-cdb46f68920b","provider":"APPLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"6dc5b7d8-e010-4206-a7bb-a8371e5891e2","provider":"GOOGLE","commandType":"INVALIDATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"74ddb10e-9d56-4fc8-a2c6-a39b3d97ea24","provider":"GOOGLE","commandType":"ISSUE"}

@@ -75,5 +75,5 @@ if (violations.length) {
   throw new Error(`Secret scan failed:\n${violations.join("\n")}`);
 }
 process.stdout.write(
-  `W3 secret scan passed.\nInspected source files: ${inspectedFiles}\nViolations: 0\n`,
+  `${process.argv[2] ?? "W3"} secret scan passed.\nInspected source files: ${inspectedFiles}\nViolations: 0\n`,
 );

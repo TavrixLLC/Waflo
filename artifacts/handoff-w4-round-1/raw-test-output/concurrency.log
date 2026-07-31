@@ -1,0 +1,88 @@
+$ pnpm test:prepare && vitest run --config vitest.config.ts --project concurrency
+$ turbo run build --filter=./packages/*
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/database, @waflo/i18n, @waflo/loyalty-ledger, @waflo/loyalty-policy, @waflo/operational-analytics, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/staff-device-security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google
+   • Running build in 20 packages
+   • Remote caching disabled
+
+@waflo/contracts:build: cache hit, replaying logs 99a54fc0ba7f091b
+@waflo/contracts:build: $ tsc -p tsconfig.json
+@waflo/staff-device-security:build: cache hit, replaying logs 168ad7779c650b78
+@waflo/staff-device-security:build: $ tsc -p tsconfig.json
+@waflo/loyalty-policy:build: cache hit, replaying logs 2e4e6075d83d254b
+@waflo/loyalty-policy:build: $ tsc -p tsconfig.json
+@waflo/stamp-engine:build: cache hit, replaying logs 160fcba20b638fa8
+@waflo/stamp-engine:build: $ tsc -p tsconfig.json
+@waflo/config:build: cache hit, replaying logs 81bf33a5282e7069
+@waflo/config:build: $ tsc -p tsconfig.json
+@waflo/customer-security:build: cache hit, replaying logs c56b8ab23bcd4e5e
+@waflo/customer-security:build: $ tsc -p tsconfig.json
+@waflo/loyalty-ledger:build: cache hit, replaying logs b9014bdfad8f9295
+@waflo/loyalty-ledger:build: $ tsc -p tsconfig.json
+@waflo/auth:build: cache hit, replaying logs ad43b5cd75153419
+@waflo/auth:build: $ tsc -p tsconfig.json
+@waflo/brand:build: cache hit, replaying logs 5b0f4ba01952ebcf
+@waflo/brand:build: $ tsc -p tsconfig.json
+@waflo/security:build: cache hit, replaying logs 6701a3194513e6f9
+@waflo/security:build: $ tsc -p tsconfig.json
+@waflo/operational-analytics:build: cache hit, replaying logs 96972016f82238c6
+@waflo/operational-analytics:build: $ tsc -p tsconfig.json
+@waflo/qr-core:build: cache hit, replaying logs 9f276302c527c81b
+@waflo/qr-core:build: $ tsc -p tsconfig.json
+@waflo/billing:build: cache hit, replaying logs 8731e411123f7522
+@waflo/billing:build: $ tsc -p tsconfig.json
+@waflo/permissions:build: cache hit, replaying logs 048bd0e093fdce02
+@waflo/permissions:build: $ tsc -p tsconfig.json
+@waflo/i18n:build: cache hit, replaying logs 9b9fe5c2766a9d9f
+@waflo/i18n:build: $ tsc -p tsconfig.json
+@waflo/wallet-core:build: cache hit, replaying logs 69fb2152c9d14589
+@waflo/wallet-core:build: $ tsc -p tsconfig.json
+@waflo/wallet-google:build: cache hit, replaying logs b59a3f671bb9954d
+@waflo/ui:build: cache hit, replaying logs 3021e793d13add00
+@waflo/wallet-google:build: $ tsc -p tsconfig.json
+@waflo/wallet-apple:build: cache hit, replaying logs cc7b422ff7e37b3e
+@waflo/wallet-apple:build: $ tsc -p tsconfig.json
+@waflo/ui:build: $ tsc -p tsconfig.json
+@waflo/database:build: cache hit, replaying logs 315cdc279b84796d
+@waflo/database:build: $ pnpm generate && tsc -p tsconfig.json
+@waflo/database:build: $ prisma generate
+@waflo/database:build: ◇ injected env (3) from ..\..\.env // tip: ⌘ enable debugging { debug: true }
+@waflo/database:build: Loaded Prisma config from prisma.config.ts.
+@waflo/database:build: 
+@waflo/database:build: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:build: 
+@waflo/database:build: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 851ms
+@waflo/database:build: 
+
+ Tasks:    20 successful, 20 total
+Cached:    20 cached, 20 total
+  Time:    125ms >>> FULL TURBO
+
+
+ RUN  v4.1.10 C:/Users/3ma/Documents/WAFLO
+
+(node:14676) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"59585371-a483-4821-a7ff-74bdcbfeef1c","provider":"APPLE","commandType":"ISSUE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"13f47b28-82e8-4ef5-9160-809aebd15bcd","provider":"APPLE","commandType":"UPDATE"}
+{"level":"info","component":"wallet-worker","event":"command_failed","commandId":"eacf2eda-eb57-433a-af13-639c54a4f303","provider":"APPLE","commandType":"UPDATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"eacf2eda-eb57-433a-af13-639c54a4f303","provider":"APPLE","commandType":"UPDATE"}
+{"level":"info","component":"wallet-worker","event":"command_failed","commandId":"07e22157-790f-49fc-b023-0d0ca4d633ba","provider":"APPLE","commandType":"INVALIDATE"}
+{"level":"info","component":"wallet-worker","event":"command_completed","commandId":"f8c5e33f-288e-4e83-8895-00f3edeb171b","provider":"GOOGLE","commandType":"ISSUE"}
+(node:19212) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:26172) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:10000) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:13908) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  8 passed (8)
+      Tests  87 passed (87)
+   Start at  16:32:59
+   Duration  71.99s (transform 1.86s, setup 0ms, import 17.98s, tests 51.48s, environment 1ms)
+
+
+exit_code=0

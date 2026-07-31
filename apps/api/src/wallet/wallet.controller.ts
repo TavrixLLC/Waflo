@@ -42,6 +42,21 @@ export class WalletController {
     );
   }
 
+  @Get("v1/organizations/:organizationId/programs/:programId/wallet-sync/:jobId")
+  reconciliationStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("programId") programId: string,
+    @Param("jobId") jobId: string,
+  ) {
+    return this.wallets.reconciliationStatus(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(programId),
+      parseUuid(jobId),
+    );
+  }
+
   @Get("v1/customer/wallet/apple/pass")
   @Public()
   @RateLimit(20)

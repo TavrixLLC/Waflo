@@ -46,14 +46,12 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, ApiClientError } from "../lib/api-client";
+import { ApiClientError, apiFetch } from "../lib/api-client";
 import { ProgramAssetPicker } from "./program-asset-uploader";
 import { ProgramEnrollmentSettings } from "./program-enrollment-settings";
 import {
-  apiDraft,
-  studioSections,
-  versionToDraft,
   type AssetItem,
+  apiDraft,
   type LocationItem,
   type PreviewProfile,
   type ProgramDetail,
@@ -61,9 +59,11 @@ import {
   type ProgramVersion,
   type RewardInput,
   type StudioSection,
+  studioSections,
   type TestSession,
   type ValidationIssue,
   type ValidationResult,
+  versionToDraft,
 } from "./program-studio-types";
 
 const sectionCopy: Record<StudioSection, { en: string; ar: string }> = {
@@ -118,6 +118,7 @@ function statusLabel(state: SaveState, ar: boolean) {
 }
 
 function sectionForIssue(issue: ValidationIssue): StudioSection {
+  if (issue.path.startsWith("policies")) return "policies";
   if (issue.path.startsWith("content.en")) return "english";
   if (issue.path.startsWith("content.ar")) return "arabic";
   if (issue.path.startsWith("earning")) return "earning";
@@ -438,10 +439,18 @@ export function ProgramStudioEditor({
 
   async function testCommand(
     action:
-      | { kind: "add"; amount: number }
-      | { kind: "reverse" }
+      | {
+          kind: "add";
+          amount: number;
+          purchaseAmountMinor?: number;
+          purchaseCurrency?: string;
+          managerApproved?: boolean;
+          managerReason?: string;
+          simulatedOccurredAt?: string;
+        }
+      | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
       | { kind: "reset" }
-      | { kind: "redeem"; rewardId: string },
+      | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
   ) {
     if (!testSession) return;
     setWorking(true);
@@ -451,12 +460,24 @@ export function ProgramStudioEditor({
       if (action.kind === "add")
         await apiFetch(`${base}/stamps`, {
           method: "POST",
-          body: JSON.stringify({ amount: action.amount, idempotencyKey: key }),
+          body: JSON.stringify({
+            amount: action.amount,
+            idempotencyKey: key,
+            purchaseAmountMinor: action.purchaseAmountMinor,
+            purchaseCurrency: action.purchaseCurrency,
+            managerApproved: action.managerApproved,
+            managerReason: action.managerReason,
+            simulatedOccurredAt: action.simulatedOccurredAt,
+          }),
         });
       if (action.kind === "reverse")
         await apiFetch(`${base}/reverse`, {
           method: "POST",
-          body: JSON.stringify({ idempotencyKey: key }),
+          body: JSON.stringify({
+            idempotencyKey: key,
+            managerActor: action.managerActor,
+            simulatedOccurredAt: action.simulatedOccurredAt,
+          }),
         });
       if (action.kind === "reset")
         await apiFetch(`${base}/reset`, {
@@ -466,7 +487,10 @@ export function ProgramStudioEditor({
       if (action.kind === "redeem")
         await apiFetch(`${base}/redeem/${action.rewardId}`, {
           method: "POST",
-          body: JSON.stringify({ idempotencyKey: key }),
+          body: JSON.stringify({
+            idempotencyKey: key,
+            managerApproved: action.managerApproved,
+          }),
         });
       const refreshed = await apiFetch<TestSession>(base);
       setTestSession(refreshed);
@@ -1042,10 +1066,18 @@ function StudioSectionContent({
   onStartTest: () => void;
   onTestCommand: (
     command:
-      | { kind: "add"; amount: number }
-      | { kind: "reverse" }
+      | {
+          kind: "add";
+          amount: number;
+          purchaseAmountMinor?: number;
+          purchaseCurrency?: string;
+          managerApproved?: boolean;
+          managerReason?: string;
+          simulatedOccurredAt?: string;
+        }
+      | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
       | { kind: "reset" }
-      | { kind: "redeem"; rewardId: string },
+      | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
   ) => void;
   detail: ProgramDetail;
   onViewVersion: (versionId: string) => void;
@@ -1138,15 +1170,15 @@ function StudioSectionContent({
             }
           />
         </FormField>
-        <Alert tone="info" title={ar ? "سياسة W2 الثابتة" : "Stable W2 policy"}>
+        <Alert tone="info" title={ar ? "سياسة عمليات W4" : "W4 operations policy"}>
           {ar
-            ? "ختم واحد افتراضياً، وبحد أقصى 5 أختام للعملية، من دون حد يومي أو حد أدنى للشراء. التنفيذ القابل للتهيئة مؤجل صراحةً إلى W4."
-            : "W2 uses 1 stamp by default, a maximum of 5 per operation, no daily cap, no minimum purchase, and reset after the final reward. Configurable execution is explicitly deferred to W4."}
+            ? "تُطبّق حدود العملية واليوم وسياسة الشراء من إصدار البرنامج المثبت للعضوية."
+            : "Operation limits, gross daily caps, purchase policy, and reset semantics come from the Membership's pinned Program Version."}
         </Alert>
-        <Alert tone="info" title={ar ? "حد العملية" : "Operation limit"}>
+        <Alert tone="info" title={ar ? "محاكاة آمنة" : "Safe simulation"}>
           {ar
-            ? "وضع الاختبار يضيف من 1 إلى 5 أختام في كل أمر."
-            : "Test Mode accepts 1–5 synthetic stamps per command."}
+            ? "يدعم وضع الاختبار حدود اليوم والشراء والعملة وموافقة المدير ووقت العكس الاصطناعي."
+            : "Test Mode simulates daily caps, purchase/currency checks, manager approval, and reversal time without creating a Customer or production ledger entry."}
         </Alert>
       </div>
     );
@@ -1324,52 +1356,7 @@ function StudioSectionContent({
     return <PreviewSettings section={section} draft={draft} update={update} ar={ar} />;
 
   if (section === "policies")
-    return (
-      <div className="studio-section-content">
-        <Alert
-          tone="info"
-          title={ar ? "المكافآت وصفية فقط في W2" : "Rewards remain descriptive in W2"}
-        >
-          {ar
-            ? "لا توجد تسوية مالية أو إصدار بطاقة حقيقية."
-            : "There is no financial settlement or real wallet pass issuance."}
-        </Alert>
-        <Alert tone="info" title={ar ? "قرار التنفيذ في W4" : "Execution decision: W4"}>
-          {ar
-            ? "تعرض هذه الشاشة القيم الثابتة فقط. محرك الأهلية وحدود العميل والمشتريات سيُنفذ في W4، وليس في W3."
-            : "This screen exposes stable defaults only. Customer/day eligibility and purchase-threshold execution belong to W4, not W3."}
-        </Alert>
-        <FormField label="English terms">
-          <TextArea
-            value={draft.translations.en.termsAndConditions}
-            onChange={(event) =>
-              update((current) => ({
-                ...current,
-                translations: {
-                  ...current.translations,
-                  en: { ...current.translations.en, termsAndConditions: event.target.value },
-                },
-              }))
-            }
-          />
-        </FormField>
-        <FormField label="الشروط العربية">
-          <TextArea
-            dir="rtl"
-            value={draft.translations.ar.termsAndConditions}
-            onChange={(event) =>
-              update((current) => ({
-                ...current,
-                translations: {
-                  ...current.translations,
-                  ar: { ...current.translations.ar, termsAndConditions: event.target.value },
-                },
-              }))
-            }
-          />
-        </FormField>
-      </div>
-    );
+    return <OperationsPolicyEditor draft={draft} update={update} ar={ar} />;
 
   if (section === "validation")
     return (
@@ -1748,6 +1735,214 @@ function RewardsEditor({
   );
 }
 
+function OperationsPolicyEditor({
+  draft,
+  update,
+  ar,
+}: {
+  draft: ProgramDraftInput;
+  update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
+  ar: boolean;
+}) {
+  return (
+    <div className="studio-section-content">
+      <Alert tone="info" title={ar ? "سياسة تشغيل مرتبطة بالإصدار" : "Versioned operations policy"}>
+        {ar
+          ? "تُطبق هذه القيم على العضويات المسجلة في هذا الإصدار. لا تتغير اقتصاديات العضويات الحالية عند نشر إصدار جديد."
+          : "These values apply to memberships enrolled in this version. Publishing a new version does not change existing membership economics."}
+      </Alert>
+      <FormField label={ar ? "المنطقة الزمنية التشغيلية" : "Operational timezone"} required>
+        <TextInput
+          value={draft.operationalTimezone}
+          onChange={(event) =>
+            update((current) => ({ ...current, operationalTimezone: event.target.value }))
+          }
+          placeholder="Asia/Baghdad"
+        />
+        <span className="field-help">
+          {ar
+            ? "تحدد حدود اليوم والتقارير وتواريخ انتهاء المكافآت."
+            : "Controls daily limits, reporting days, and reward expiry dates."}
+        </span>
+      </FormField>
+      <FormField label={ar ? "الحد الأقصى للأختام لكل عملية" : "Maximum stamps per operation"}>
+        <TextInput
+          type="number"
+          min={1}
+          max={30}
+          value={draft.maximumStampsPerOperation}
+          onChange={(event) =>
+            update((current) => ({
+              ...current,
+              maximumStampsPerOperation: Number(event.target.value),
+            }))
+          }
+        />
+      </FormField>
+      <Checkbox
+        checked={draft.maximumStampsPerCustomerPerDay !== null}
+        onChange={(event) =>
+          update((current) => ({
+            ...current,
+            maximumStampsPerCustomerPerDay: event.target.checked
+              ? Math.max(current.maximumStampsPerOperation, 5)
+              : null,
+          }))
+        }
+        label={ar ? "تفعيل حد يومي لكل عضوية" : "Enable a daily membership limit"}
+      />
+      {draft.maximumStampsPerCustomerPerDay !== null ? (
+        <FormField label={ar ? "الحد اليومي للأختام" : "Maximum stamps per membership per day"}>
+          <TextInput
+            type="number"
+            min={1}
+            max={1000}
+            value={draft.maximumStampsPerCustomerPerDay}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                maximumStampsPerCustomerPerDay: Number(event.target.value),
+              }))
+            }
+          />
+          <span className="field-help">
+            {ar
+              ? "يُحسب إجمالي الأختام المصدرة؛ لا تعيد عمليات العكس الحد المتاح."
+              : "Counts gross issued stamps; reversals do not restore allowance."}
+          </span>
+        </FormField>
+      ) : null}
+      <Checkbox
+        checked={draft.minimumPurchaseAmountMinor !== null}
+        onChange={(event) =>
+          update((current) => ({
+            ...current,
+            minimumPurchaseAmountMinor: event.target.checked ? 0 : null,
+            minimumPurchaseCurrency: event.target.checked ? "IQD" : null,
+          }))
+        }
+        label={ar ? "تفعيل حد أدنى للشراء" : "Enable minimum purchase"}
+      />
+      {draft.minimumPurchaseAmountMinor !== null ? (
+        <div className="studio-form-grid">
+          <FormField
+            label={ar ? "الحد الأدنى للشراء (الوحدة الصغرى)" : "Minimum purchase (minor units)"}
+          >
+            <TextInput
+              type="number"
+              min={0}
+              step={1}
+              value={draft.minimumPurchaseAmountMinor}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  minimumPurchaseAmountMinor: Number(event.target.value),
+                }))
+              }
+            />
+          </FormField>
+          <FormField label={ar ? "عملة الشراء" : "Purchase currency"}>
+            <TextInput
+              value={draft.minimumPurchaseCurrency ?? ""}
+              maxLength={3}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  minimumPurchaseCurrency: event.target.value.toUpperCase(),
+                }))
+              }
+              placeholder="IQD"
+            />
+          </FormField>
+        </div>
+      ) : null}
+      <div className="studio-form-grid">
+        <FormField label={ar ? "نافذة عكس الموظف (ثوانٍ)" : "Staff own-reversal window (seconds)"}>
+          <TextInput
+            type="number"
+            min={15}
+            max={900}
+            value={draft.staffOwnReversalWindowSeconds}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                staffOwnReversalWindowSeconds: Number(event.target.value),
+              }))
+            }
+          />
+        </FormField>
+        <FormField label={ar ? "نافذة عكس المدير (دقائق)" : "Manager reversal window (minutes)"}>
+          <TextInput
+            type="number"
+            min={1}
+            max={10080}
+            value={draft.managerReversalWindowMinutes}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                managerReversalWindowMinutes: Number(event.target.value),
+              }))
+            }
+          />
+        </FormField>
+      </div>
+      <Checkbox
+        checked={draft.managerOverrideAllowed}
+        onChange={(event) =>
+          update((current) => ({
+            ...current,
+            managerOverrideAllowed: event.target.checked,
+          }))
+        }
+        label={
+          ar ? "السماح بتجاوز المدير مع سبب وتدقيق" : "Allow manager override with reason and audit"
+        }
+      />
+      <FormField label={ar ? "سلوك إعادة الضبط النهائي" : "Final reward reset behavior"}>
+        <TextInput
+          value={
+            ar ? "إعادة الضبط بعد استرداد المكافأة النهائية" : "Reset after final reward redemption"
+          }
+          disabled
+        />
+        <span className="field-help">
+          {ar
+            ? "مقفل عند الإطلاق. تبقى الأختام ممتلئة حتى نجاح الاسترداد."
+            : "Locked for launch. Stamps remain filled until redemption succeeds."}
+        </span>
+      </FormField>
+      <FormField label={ar ? "الشروط العربية" : "English terms"}>
+        <TextArea
+          dir={ar ? "rtl" : undefined}
+          value={
+            ar ? draft.translations.ar.termsAndConditions : draft.translations.en.termsAndConditions
+          }
+          onChange={(event) =>
+            update((current) => ({
+              ...current,
+              translations: ar
+                ? {
+                    ...current.translations,
+                    ar: {
+                      ...current.translations.ar,
+                      termsAndConditions: event.target.value,
+                    },
+                  }
+                : {
+                    ...current.translations,
+                    en: {
+                      ...current.translations.en,
+                      termsAndConditions: event.target.value,
+                    },
+                  },
+            }))
+          }
+        />
+      </FormField>
+    </div>
+  );
+}
+
 function LayoutEditor({
   draft,
   update,
@@ -2112,14 +2307,27 @@ function TestModePanel({
   onStart: () => void;
   onCommand: (
     command:
-      | { kind: "add"; amount: number }
-      | { kind: "reverse" }
+      | {
+          kind: "add";
+          amount: number;
+          purchaseAmountMinor?: number;
+          purchaseCurrency?: string;
+          managerApproved?: boolean;
+          managerReason?: string;
+          simulatedOccurredAt?: string;
+        }
+      | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
       | { kind: "reset" }
-      | { kind: "redeem"; rewardId: string },
+      | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
   ) => void;
   working: boolean;
   ar: boolean;
 }) {
+  const [testPurchaseAmount, setTestPurchaseAmount] = useState("");
+  const [testPurchaseCurrency, setTestPurchaseCurrency] = useState("IQD");
+  const [testManagerApproved, setTestManagerApproved] = useState(false);
+  const [testManagerActor, setTestManagerActor] = useState(false);
+  const [testOccurredAt, setTestOccurredAt] = useState("");
   if (!session)
     return (
       <div className="studio-section-content">
@@ -2140,6 +2348,13 @@ function TestModePanel({
   const unlocks = session.events.filter((event) => event.eventType === "TEST_REWARD_UNLOCKED");
   const relocks = session.events.filter((event) => event.eventType === "TEST_REWARD_RELOCKED");
   const redemptions = session.events.filter((event) => event.eventType === "TEST_REWARD_REDEEMED");
+  const syntheticOperation = {
+    ...(testPurchaseAmount ? { purchaseAmountMinor: Number.parseInt(testPurchaseAmount, 10) } : {}),
+    ...(testPurchaseCurrency ? { purchaseCurrency: testPurchaseCurrency } : {}),
+    managerApproved: testManagerApproved,
+    ...(testManagerApproved ? { managerReason: "Synthetic Test Mode manager approval." } : {}),
+    ...(testOccurredAt ? { simulatedOccurredAt: new Date(testOccurredAt).toISOString() } : {}),
+  };
   return (
     <div className="studio-section-content">
       <div className="test-mode-meter">
@@ -2157,20 +2372,28 @@ function TestModePanel({
       </div>
       <div className="dashboard-actions">
         <Button
-          onClick={() => onCommand({ kind: "add", amount: 1 })}
+          onClick={() => onCommand({ kind: "add", amount: 1, ...syntheticOperation })}
           disabled={working || rewardReady}
         >
           +1 stamp
         </Button>
         <Button
-          onClick={() => onCommand({ kind: "add", amount: 5 })}
+          onClick={() => onCommand({ kind: "add", amount: 5, ...syntheticOperation })}
           disabled={working || rewardReady}
         >
           +5 stamps
         </Button>
         <Button
           variant="secondary"
-          onClick={() => onCommand({ kind: "reverse" })}
+          onClick={() =>
+            onCommand({
+              kind: "reverse",
+              managerActor: testManagerActor,
+              ...(testOccurredAt
+                ? { simulatedOccurredAt: new Date(testOccurredAt).toISOString() }
+                : {}),
+            })
+          }
           disabled={working}
         >
           <RotateCcw size={16} /> {ar ? "عكس آخر ختم" : "Reverse latest stamp"}
@@ -2179,6 +2402,54 @@ function TestModePanel({
           {ar ? "إعادة ضبط" : "Reset"}
         </Button>
       </div>
+      <div className="studio-field-grid">
+        <FormField label={ar ? "قيمة الشراء بوحدات صغرى" : "Purchase amount (minor units)"}>
+          <TextInput
+            inputMode="numeric"
+            value={testPurchaseAmount}
+            onChange={(event) => setTestPurchaseAmount(event.target.value.replace(/\D/g, ""))}
+          />
+        </FormField>
+        <FormField label={ar ? "عملة الشراء" : "Purchase currency"}>
+          <TextInput
+            maxLength={3}
+            value={testPurchaseCurrency}
+            onChange={(event) => setTestPurchaseCurrency(event.target.value.toUpperCase())}
+          />
+        </FormField>
+        <FormField label={ar ? "الوقت الاصطناعي" : "Synthetic time"}>
+          <TextInput
+            type="datetime-local"
+            value={testOccurredAt}
+            onChange={(event) => setTestOccurredAt(event.target.value)}
+          />
+        </FormField>
+      </div>
+      <label className="studio-checkbox-row">
+        <input
+          type="checkbox"
+          checked={testManagerApproved}
+          onChange={(event) => setTestManagerApproved(event.target.checked)}
+        />
+        <span>{ar ? "محاكاة موافقة المدير" : "Simulate manager approval"}</span>
+      </label>
+      <label className="studio-checkbox-row">
+        <input
+          type="checkbox"
+          checked={testManagerActor}
+          onChange={(event) => setTestManagerActor(event.target.checked)}
+        />
+        <span>{ar ? "استخدام نافذة عكس المدير" : "Use manager reversal window"}</span>
+      </label>
+      <Alert tone="info" title={ar ? "سياسة العمليات المثبتة" : "Pinned operations policy"}>
+        {session.version.operationalTimezone} · {ar ? "حد العملية" : "operation max"}{" "}
+        {session.version.stampRule?.maximumStampsPerOperation ?? 5} ·{" "}
+        {ar ? "الحد اليومي" : "daily cap"}{" "}
+        {session.version.stampRule?.maximumStampsPerCustomerPerDay ?? "—"} ·{" "}
+        {ar ? "الحد الأدنى للشراء" : "minimum purchase"}{" "}
+        {session.version.stampRule?.minimumPurchaseAmountMinor ?? "—"}{" "}
+        {session.version.stampRule?.minimumPurchaseCurrency ?? ""}
+      </Alert>
       {rewardReady ? (
         <Alert tone="success" title={ar ? "المكافأة جاهزة" : "Reward ready"}>
           {ar
@@ -2209,7 +2480,13 @@ function TestModePanel({
               <Button
                 variant="secondary"
                 disabled={earned <= redeemed || working}
-                onClick={() => onCommand({ kind: "redeem", rewardId: reward.id })}
+                onClick={() =>
+                  onCommand({
+                    kind: "redeem",
+                    rewardId: reward.id,
+                    managerApproved: testManagerApproved,
+                  })
+                }
               >
                 {ar ? "استرداد اصطناعي" : "Synthetic redeem"}
               </Button>

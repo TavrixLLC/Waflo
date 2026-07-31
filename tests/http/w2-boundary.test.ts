@@ -144,7 +144,7 @@ function programPayload(
     rewardType: "FREE_ITEM" as const,
     internalName: "Final reward",
     sortOrder: mode === "pro" ? 1 : 0,
-    validityDurationDays: 30,
+    validityDurationDays: null,
     requiresManagerApproval: false,
     maximumRedemptionsPerEarned: 1,
     translations: {
@@ -587,7 +587,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
       maximumStampsPerCustomerPerDay: null,
       minimumPurchaseAmountMinor: null,
       minimumPurchaseCurrency: null,
-      resetBehaviorAfterReward: "RESET",
+      resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
     });
     expect(preserved.visualTheme.defaultMilestoneAssetId).toBeTruthy();
     expect(preserved.visualTheme.applePreviewConfig).toMatchObject({
@@ -664,7 +664,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
       payload: {},
     });
     expect(validationPass.statusCode).toBe(201);
-    expect(data<{ errors: unknown[] }>(validationPass).errors).toHaveLength(0);
+    expect(data<{ errors: unknown[] }>(validationPass).errors).toEqual([]);
 
     const reversibleSessionResponse = await app.inject({
       method: "POST",

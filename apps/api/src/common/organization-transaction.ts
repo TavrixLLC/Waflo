@@ -21,16 +21,24 @@ export async function withInvariantLock<T>(
   lockKey: string,
   operation: (transaction: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
+  return withOrderedInvariantLocks(client, [lockKey], operation);
+}
+
+export async function withOrderedInvariantLocks<T>(
+  client: PrismaClient,
+  lockKeys: readonly string[],
+  operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
   for (let attempt = 1; attempt <= MAX_SERIALIZATION_ATTEMPTS; attempt += 1) {
     try {
       return await client.$transaction(
         async (transaction) => {
-          // One transaction-scoped advisory lock serializes every capacity and
-          // single-use or capacity invariant sharing the same domain key.
-          await transaction.$queryRaw`
-            SELECT 1::int AS locked
-            FROM pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
-          `;
+          for (const lockKey of lockKeys) {
+            await transaction.$queryRaw`
+              SELECT 1::int AS locked
+              FROM pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
+            `;
+          }
           return operation(transaction);
         },
         { isolationLevel: "Serializable" },
@@ -51,6 +59,27 @@ export async function withInvariantLock<T>(
     "CONCURRENT_MODIFICATION_RETRY",
     "The organization changed at the same time. Please retry.",
     HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * W3 lock order:
+ * 1. organization invariant
+ * 2. program lifecycle
+ * 3. membership/credential or command-specific invariant
+ * 4. provider/pass invariant (acquired by the wallet orchestrator)
+ */
+export function withProgramLifecycleInvariantLock<T>(
+  client: PrismaClient,
+  organizationId: string,
+  programId: string,
+  operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+  downstreamLockKeys: readonly string[] = [],
+): Promise<T> {
+  return withOrderedInvariantLocks(
+    client,
+    [`organization:${organizationId}`, `program-lifecycle:${programId}`, ...downstreamLockKeys],
+    operation,
   );
 }
 

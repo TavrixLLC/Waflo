@@ -4,7 +4,7 @@ import { basename, resolve } from "node:path";
 import sharp from "../apps/api/node_modules/sharp/dist/index.mjs";
 
 const root = process.cwd();
-const handoffDirectory = resolve(root, "artifacts/handoff-w3-round-1");
+const handoffDirectory = resolve(root, "artifacts/handoff-w3-round-2");
 const screenshotDirectory = resolve(handoffDirectory, "screenshots");
 const contactSheet = resolve(screenshotDirectory, "00-contact-sheet.png");
 const manifest = resolve(handoffDirectory, "SCREENSHOT-MANIFEST.md");
@@ -13,6 +13,7 @@ const coverage = [
   ["Merchant enrollment settings", "01-merchant-enrollment-settings.png"],
   ["Public URL and Enrollment QR", "02-public-url-and-enrollment-qr.png"],
   ["Multiple-program chooser", "03-program-chooser.png"],
+  ["Multiple-program chooser, Arabic", "03b-program-chooser-arabic.png"],
   ["Single-program root, Arabic canonical route", "03a-single-program-root-arabic.png"],
   ["English join page with selected empty artwork", "04-english-join-page.png"],
   ["Arabic RTL join page with selected empty artwork", "05-arabic-rtl-join-page.png"],
@@ -79,7 +80,7 @@ const composites = [
     input: Buffer.from(`
       <svg width="${width}" height="${titleHeight}">
         <text x="0" y="34" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#2b1914">
-          Waflo W3 repair round 1 browser evidence
+          Waflo W3 repair round 2 browser evidence
         </text>
         <text x="0" y="65" font-family="Arial, sans-serif" font-size="18" fill="#6b4a3d">
           Enrollment, private card, Wallet readiness, transfer, lifecycle, RTL, and accessibility

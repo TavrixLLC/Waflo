@@ -1,0 +1,59 @@
+
+Running 7 tests using 1 worker
+
+  ok 1 [w3] › tests\e2e\w3-platform.spec.ts:364:9 › W3 customer enrollment and Wallet browser evidence › shows merchant enrollment controls, canonical URL, QR, and truthful provider health (3.0s)
+  ok 2 [w3] › tests\e2e\w3-platform.spec.ts:380:9 › W3 customer enrollment and Wallet browser evidence › renders public discovery, English enrollment, Arabic RTL, and consent validation (1.8s)
+  ok 3 [w3] › tests\e2e\w3-platform.spec.ts:417:9 › W3 customer enrollment and Wallet browser evidence › routes a single published Program directly in English, Arabic, and merchant-host forms (993ms)
+  x  4 [w3] › tests\e2e\w3-platform.spec.ts:450:9 › W3 customer enrollment and Wallet browser evidence › enrolls name-only, displays an opaque 0/8 card, and reaches both Test Adapters (32.2s)
+  -  5 [w3] › tests\e2e\w3-platform.spec.ts:512:9 › W3 customer enrollment and Wallet browser evidence › completes the warned no-email transfer exactly once
+  -  6 [w3] › tests\e2e\w3-platform.spec.ts:528:9 › W3 customer enrollment and Wallet browser evidence › uses a fragment email confirmation, scrubs it, and leaves the old session transferred
+  -  7 [w3] › tests\e2e\w3-platform.spec.ts:566:9 › W3 customer enrollment and Wallet browser evidence › shows paused, archived, suspended, and provider-disabled truthfully
+
+
+  1) [w3] › tests\e2e\w3-platform.spec.ts:450:9 › W3 customer enrollment and Wallet browser evidence › enrolls name-only, displays an opaque 0/8 card, and reaches both Test Adapters 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('link', { name: 'Add to Apple Wallet' })
+    Expected: visible
+    Timeout: 30000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 30000ms
+      - waiting for getByRole('link', { name: 'Add to Apple Wallet' })
+
+
+      456 |       await screenshot(page, "08-customer-card-0-of-8-membership-qr");
+      457 |
+    > 458 |       await expect(page.getByRole("link", { name: "Add to Apple Wallet" })).toBeVisible({
+          |                                                                             ^
+      459 |         timeout: 30_000,
+      460 |       });
+      461 |       await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
+        at C:\Users\3ma\Documents\WAFLO\tests\e2e\w3-platform.spec.ts:458:77
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results\w3-platform-W3-customer-en-a4cb2--reaches-both-Test-Adapters-w3\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results\w3-platform-W3-customer-en-a4cb2--reaches-both-Test-Adapters-w3\video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results\w3-platform-W3-customer-en-a4cb2--reaches-both-Test-Adapters-w3\error-context.md
+
+    Error Context: test-results\w3-platform-W3-customer-en-a4cb2--reaches-both-Test-Adapters-w3\error-context.md
+
+    attachment #5: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\w3-platform-W3-customer-en-a4cb2--reaches-both-Test-Adapters-w3\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\w3-platform-W3-customer-en-a4cb2--reaches-both-Test-Adapters-w3\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [w3] › tests\e2e\w3-platform.spec.ts:450:9 › W3 customer enrollment and Wallet browser evidence › enrolls name-only, displays an opaque 0/8 card, and reaches both Test Adapters 
+  3 did not run
+  3 passed (39.4s)

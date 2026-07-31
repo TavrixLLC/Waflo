@@ -1,0 +1,11 @@
+◇ injected env (3) from ..\..\.env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma\schema.prisma.
+Datasource "db": PostgreSQL database "waflo", schema "public" at "localhost:5432"
+
+24 migrations found in prisma/migrations
+
+Database schema is up to date!
+
+exit_code=0

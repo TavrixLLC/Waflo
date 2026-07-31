@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
-const archive = resolve(process.argv[2] ?? "");
-if (!process.argv[2]) throw new Error("Provide the portable archive path.");
+const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
+const archive = resolve(archiveArgument ?? "");
+if (!archiveArgument) throw new Error("Provide the portable archive path.");
 
 const listing = await new Promise((resolvePromise, reject) => {
   const child = spawn("tar", ["-tf", archive], {
@@ -25,6 +26,8 @@ const forbiddenDirectoryNames = new Set([
   ".git",
   ".next",
   ".pnpm-store",
+  ".turbo",
+  "coverage",
   "dist",
   "docker-volumes",
   "minio-data",
@@ -33,6 +36,7 @@ const forbiddenDirectoryNames = new Set([
   "postgres-data",
   "redis-data",
   "test-results",
+  "tmp",
 ]);
 const forbiddenExtensions = new Set([
   ".cer",
@@ -59,6 +63,8 @@ for (const entry of entries) {
   const extension = name.slice(name.lastIndexOf(".")).toLocaleLowerCase();
   if (forbiddenExtensions.has(extension)) violations.push(entry);
   if (/service[-_.]?account.*\.json$/iu.test(name)) violations.push(entry);
+  if (name.endsWith(".tsbuildinfo")) violations.push(entry);
+  if (name.endsWith(".log") || name.endsWith(".tmp")) violations.push(entry);
 }
 if (violations.length) {
   throw new Error(

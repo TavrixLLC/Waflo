@@ -1,0 +1,67 @@
+checked_at=2026-07-31T14:20:30.440Z
+archive=C:\Users\3ma\Documents\WAFLO\artifacts\handoff-w4-round-1\waflo-w4-round-1-portable-source.zip
+
+## archive inspection
+cwd=C:\Users\3ma\Documents\WAFLO
+Archive inspection passed.
+Entries: 594
+Forbidden entries: 0
+exit_code=0
+
+## archive extraction
+cwd=C:\Users\3ma\Documents\WAFLO
+exit_code=0
+required_root_files=PASS
+
+## frozen install from extracted archive
+cwd=C:\Users\3ma\AppData\Local\Temp\waflo-w4-archive-verification-8BhKec
+Scope: all 27 workspace projects
+✓ Lockfile passes supply-chain policies (verified 2h ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +650
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 650, reused 612, downloaded 0, added 0
+Progress: resolved 650, reused 647, downloaded 0, added 133
+Progress: resolved 650, reused 648, downloaded 0, added 314
+Progress: resolved 650, reused 648, downloaded 0, added 509
+Progress: resolved 650, reused 648, downloaded 0, added 609
+Progress: resolved 650, reused 648, downloaded 0, added 640
+Progress: resolved 650, reused 648, downloaded 0, added 646
+Progress: resolved 650, reused 648, downloaded 0, added 648
+Progress: resolved 650, reused 648, downloaded 0, added 649
+Progress: resolved 650, reused 648, downloaded 0, added 650, done
+
+devDependencies:
++ @axe-core/playwright 4.12.1
++ @biomejs/biome 2.5.5
++ @playwright/test 1.62.0
++ @types/node 26.1.1
++ @types/react 19.2.17
++ @types/react-dom 19.2.3
++ @types/supertest 7.2.1
++ @waflo/stamp-engine 1.0.0 <- packages\stamp-engine
++ dotenv 17.4.2
++ fflate 0.8.2
++ sharp 0.35.3
++ supertest 7.2.2
++ tsx 4.23.1
++ turbo 2.10.7
++ typescript 5.9.3
++ vitest 4.1.10
+Done in 11s using pnpm v11.9.0
+exit_code=0
+
+## format check from extracted archive
+cwd=C:\Users\3ma\AppData\Local\Temp\waflo-w4-archive-verification-8BhKec
+$ biome format .
+Checked 291 files in 584ms. No fixes applied.
+exit_code=0
+
+## lint from extracted archive
+cwd=C:\Users\3ma\AppData\Local\Temp\waflo-w4-archive-verification-8BhKec
+$ biome lint .
+Checked 306 files in 237ms. No fixes applied.
+exit_code=0
+archive_verification=PASS
+temporary_extraction_removed=C:\Users\3ma\AppData\Local\Temp\waflo-w4-archive-verification-8BhKec

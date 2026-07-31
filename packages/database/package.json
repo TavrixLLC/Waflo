@@ -27,6 +27,11 @@
     "@prisma/adapter-pg": "7.9.0",
     "@prisma/client": "7.9.0",
     "@waflo/auth": "workspace:*",
+    "@waflo/config": "workspace:*",
+    "@waflo/customer-security": "workspace:*",
+    "@waflo/loyalty-ledger": "workspace:*",
+    "@waflo/loyalty-policy": "workspace:*",
+    "@waflo/staff-device-security": "workspace:*",
     "dotenv": "17.4.2",
     "pg": "8.22.0"
   },

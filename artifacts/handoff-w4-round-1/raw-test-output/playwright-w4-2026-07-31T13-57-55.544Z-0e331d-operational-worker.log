@@ -1,0 +1,8 @@
+{"level":"info","component":"operational-worker","event":"ready"}
+{"level":"info","component":"operational-worker","event":"batch_processed","rewardsExpired":0,"analyticsRows":1,"exportsProcessed":0,"privacyRequestsProcessed":0,"integrityFindings":0,"cleanupItems":0}
+{"level":"info","component":"operational-worker","event":"batch_processed","rewardsExpired":0,"analyticsRows":0,"exportsProcessed":0,"privacyRequestsProcessed":1,"integrityFindings":0,"cleanupItems":0}
+(node:26596) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{"level":"info","component":"operational-worker","event":"batch_processed","rewardsExpired":0,"analyticsRows":0,"exportsProcessed":0,"privacyRequestsProcessed":1,"integrityFindings":0,"cleanupItems":0}
+{"level":"info","component":"operational-worker","event":"batch_processed","rewardsExpired":0,"analyticsRows":1,"exportsProcessed":0,"privacyRequestsProcessed":0,"integrityFindings":0,"cleanupItems":0}
+{"level":"info","component":"operational-worker","event":"batch_processed","rewardsExpired":0,"analyticsRows":1,"exportsProcessed":0,"privacyRequestsProcessed":0,"integrityFindings":0,"cleanupItems":0}

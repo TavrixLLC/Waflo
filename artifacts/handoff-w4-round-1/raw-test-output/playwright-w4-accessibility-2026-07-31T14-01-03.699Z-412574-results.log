@@ -1,0 +1,7 @@
+
+Running 2 tests using 1 worker
+
+  ok 1 [w4-accessibility] › tests\e2e\w4-accessibility.spec.ts:28:5 › W4 operational dashboard screens and dialogs have no serious accessibility violations (7.6s)
+  ok 2 [w4-accessibility] › tests\e2e\w4-accessibility.spec.ts:60:5 › W4 Arabic RTL operations and Staff permission denial are accessible (8.0s)
+
+  2 passed (16.4s)

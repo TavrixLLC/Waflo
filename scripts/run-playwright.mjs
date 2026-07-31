@@ -9,8 +9,11 @@ import { parse as parseDotenv } from "dotenv";
 
 const root = path.resolve(import.meta.dirname, "..");
 const localEnvironment = parseDotenv(readFileSync(path.join(root, ".env"), "utf8"));
-process.env.DATABASE_URL ??= localEnvironment.DATABASE_URL;
+for (const [key, value] of Object.entries(localEnvironment)) {
+  process.env[key] ??= value;
+}
 const project = process.argv[2] ?? "chromium";
+const playwrightArguments = process.argv.slice(3);
 const runLabel = `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 6)}`;
 const supportedProjects = new Set([
   "chromium",
@@ -19,19 +22,18 @@ const supportedProjects = new Set([
   "w3-accessibility",
   "w3-evidence",
   "w3-provider-disabled",
+  "w4",
+  "w4-accessibility",
 ]);
 if (!supportedProjects.has(project)) {
   throw new Error(`Unsupported Playwright project: ${project}`);
 }
 const isW3 = project.startsWith("w3");
+const isW4 = project.startsWith("w4");
+const usesWalletOperations = isW3 || isW4;
 const providerDisabled = project === "w3-provider-disabled";
 
-const logDirectory = path.join(
-  root,
-  "artifacts",
-  isW3 ? "handoff-w3-round-1" : "handoff-w2-round-5",
-  "raw-test-output",
-);
+const logDirectory = path.join(root, "artifacts", "handoff-w4-round-1", "raw-test-output");
 await mkdir(logDirectory, { recursive: true });
 
 const commands = [
@@ -77,13 +79,23 @@ const commands = [
     args: ["start", "-p", "3002"],
   },
 ];
-if (isW3) {
+if (usesWalletOperations) {
   commands.push({
     name: "wallet-worker",
     port: null,
     readyUrl: null,
     cwd: path.join(root, "apps", "wallet-worker"),
     entry: path.join(root, "apps", "wallet-worker", "dist", "main.js"),
+    args: [],
+  });
+}
+if (isW4) {
+  commands.push({
+    name: "operational-worker",
+    port: null,
+    readyUrl: null,
+    cwd: path.join(root, "apps", "operational-worker"),
+    entry: path.join(root, "apps", "operational-worker", "dist", "main.js"),
     args: [],
   });
 }
@@ -106,7 +118,7 @@ function spawnServer(command) {
     env: {
       ...process.env,
       RATE_LIMIT_NAMESPACE: `playwright-${project}-${randomUUID()}`,
-      ...(isW3
+      ...(usesWalletOperations
         ? {
             APPLE_WALLET_MODE: providerDisabled ? "DISABLED" : "TEST_ADAPTER",
             GOOGLE_WALLET_MODE: providerDisabled ? "DISABLED" : "TEST_ADAPTER",
@@ -139,7 +151,10 @@ async function waitForReady(command, child) {
     }
     try {
       const response = await fetch(command.readyUrl, { redirect: "manual" });
-      if (response.status < 500) return;
+      if (child.exitCode !== null) {
+        throw new Error(`${command.name} exited before readiness with code ${child.exitCode}.`);
+      }
+      if (response.status === 200) return;
     } catch {
       // The server has not started listening yet.
     }
@@ -188,6 +203,7 @@ async function stopChild(entry) {
 async function cleanup() {
   if (cleanupStarted) return;
   cleanupStarted = true;
+  if (children.length === 0) return;
   await Promise.all(children.map(stopChild));
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -215,16 +231,27 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 let exitCode = 1;
 try {
   for (const command of commands) {
+    if (command.port !== null && (await portIsOpen(command.port))) {
+      throw new Error(
+        `Port ${command.port} is already in use before Playwright starts (${command.name}).`,
+      );
+    }
+  }
+  for (const command of commands) {
     const child = spawnServer(command);
     await waitForReady(command, child);
   }
   const playwrightCli = path.join(root, "node_modules", "@playwright", "test", "cli.js");
-  const runner = spawn(process.execPath, [playwrightCli, "test", `--project=${project}`], {
-    cwd: root,
-    env: { ...process.env, WAFLO_MANAGED_SERVERS: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
+  const runner = spawn(
+    process.execPath,
+    [playwrightCli, "test", `--project=${project}`, ...playwrightArguments],
+    {
+      cwd: root,
+      env: { ...process.env, WAFLO_MANAGED_SERVERS: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
   const runnerLog = createWriteStream(
     path.join(logDirectory, `playwright-${project}-${runLabel}-results.log`),
   );

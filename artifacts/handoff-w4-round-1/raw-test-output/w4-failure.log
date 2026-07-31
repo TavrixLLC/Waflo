@@ -1,0 +1,79 @@
+$ pnpm test:prepare && vitest run --config vitest.config.ts --project failure
+$ turbo run build --filter=./packages/*
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/database, @waflo/i18n, @waflo/loyalty-ledger, @waflo/loyalty-policy, @waflo/operational-analytics, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/staff-device-security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google
+   • Running build in 20 packages
+   • Remote caching disabled
+
+@waflo/auth:build: cache miss, executing 473f7b5af03d7976
+@waflo/qr-core:build: cache miss, executing 2da4f7c47e344585
+@waflo/security:build: cache miss, executing d6c5020da8815f08
+@waflo/loyalty-ledger:build: cache miss, executing 84221aafab9bda9e
+@waflo/loyalty-policy:build: cache miss, executing efed3ad77eefca83
+@waflo/contracts:build: cache miss, executing ca3fa1f103bc84a2
+@waflo/brand:build: cache miss, executing 0bf7eb7b6caf453a
+@waflo/config:build: cache miss, executing c96f22d1d5f6d223
+@waflo/staff-device-security:build: cache miss, executing 93ca85860e2b169d
+@waflo/operational-analytics:build: cache miss, executing 47898b3a2abccc9d
+@waflo/auth:build: $ tsc -p tsconfig.json
+@waflo/qr-core:build: $ tsc -p tsconfig.json
+@waflo/security:build: $ tsc -p tsconfig.json
+@waflo/loyalty-ledger:build: $ tsc -p tsconfig.json
+@waflo/loyalty-policy:build: $ tsc -p tsconfig.json
+@waflo/contracts:build: $ tsc -p tsconfig.json
+@waflo/brand:build: $ tsc -p tsconfig.json
+@waflo/config:build: $ tsc -p tsconfig.json
+@waflo/staff-device-security:build: $ tsc -p tsconfig.json
+@waflo/operational-analytics:build: $ tsc -p tsconfig.json
+@waflo/stamp-engine:build: cache miss, executing 38f2f57da529a93f
+@waflo/customer-security:build: cache miss, executing 5c00fbb643e4f639
+@waflo/stamp-engine:build: $ tsc -p tsconfig.json
+@waflo/customer-security:build: $ tsc -p tsconfig.json
+@waflo/i18n:build: cache miss, executing 832a68493aa79506
+@waflo/permissions:build: cache miss, executing 54db0fde74ce6bb0
+@waflo/billing:build: cache miss, executing 29917a474901a292
+@waflo/i18n:build: $ tsc -p tsconfig.json
+@waflo/permissions:build: $ tsc -p tsconfig.json
+@waflo/billing:build: $ tsc -p tsconfig.json
+@waflo/wallet-core:build: cache miss, executing 9c6a296a5133b8a9
+@waflo/database:build: cache miss, executing 4bfdc8469a961fec
+@waflo/wallet-core:build: $ tsc -p tsconfig.json
+@waflo/database:build: $ pnpm generate && tsc -p tsconfig.json
+@waflo/ui:build: cache miss, executing a3610efe21ba3171
+@waflo/database:build: $ prisma generate
+@waflo/ui:build: $ tsc -p tsconfig.json
+@waflo/wallet-google:build: cache miss, executing ef693735640cf570
+@waflo/wallet-apple:build: cache miss, executing 868a094aa7851793
+@waflo/wallet-google:build: $ tsc -p tsconfig.json
+@waflo/wallet-apple:build: $ tsc -p tsconfig.json
+@waflo/database:build: ◇ injected env (3) from ..\..\.env // tip: ⌁ auth for agents [www.vestauth.com]
+@waflo/database:build: Loaded Prisma config from prisma.config.ts.
+@waflo/database:build: 
+@waflo/database:build: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:build: 
+@waflo/database:build: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 611ms
+@waflo/database:build: 
+
+ Tasks:    20 successful, 20 total
+Cached:    0 cached, 20 total
+  Time:    13.081s 
+
+
+ RUN  v4.1.10 C:/Users/3ma/Documents/WAFLO
+
+(node:24588) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+{"level":"info","component":"operational-worker","event":"export_failed","exportPublicId":"9110d63a-fe4e-448a-a83f-529220b3b20b","failure":"EXPORT_BUILD_FAILED","diagnostic":"connect ECONNREFUSED 127.0.0.1:1"}
+{"level":"info","component":"operational-worker","event":"export_failed","exportPublicId":"9110d63a-fe4e-448a-a83f-529220b3b20b","failure":"EXPORT_BUILD_FAILED","diagnostic":"connect ECONNREFUSED 127.0.0.1:1"}
+{"level":"info","component":"operational-worker","event":"export_failed","exportPublicId":"9110d63a-fe4e-448a-a83f-529220b3b20b","failure":"EXPORT_BUILD_FAILED","diagnostic":"connect ECONNREFUSED 127.0.0.1:1"}
+{"level":"info","component":"operational-worker","event":"export_failed","exportPublicId":"9110d63a-fe4e-448a-a83f-529220b3b20b","failure":"EXPORT_BUILD_FAILED","diagnostic":"connect ECONNREFUSED 127.0.0.1:1"}
+{"level":"info","component":"operational-worker","event":"export_failed","exportPublicId":"8bb252b1-2892-495e-9b8a-0d34ea10de11","failure":"EXPORT_BUILD_FAILED","diagnostic":"connect ECONNREFUSED 127.0.0.1:1"}
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  17:14:57
+   Duration  5.17s (transform 869ms, setup 0ms, import 2.57s, tests 2.38s, environment 0ms)
+
+
+exit_code=0

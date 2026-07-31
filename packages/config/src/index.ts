@@ -62,6 +62,41 @@ export const environmentSchema = z
     TRANSFER_CHALLENGE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(5),
     TRANSFER_QR_MAX_BYTES: z.coerce.number().int().min(1024).max(10_000_000).default(2_097_152),
     TRANSFER_QR_MAX_PIXELS: z.coerce.number().int().min(10_000).max(40_000_000).default(12_000_000),
+    LEDGER_HASH_SECRET_V1: z
+      .string()
+      .min(32)
+      .default("6666666666666666666666666666666666666666666666666666666666666666"),
+    LEDGER_HASH_ACTIVE_VERSION: z.coerce.number().int().min(1).max(1).default(1),
+    MERCHANT_TRANSACTION_REFERENCE_HMAC_KEY_V1: z
+      .string()
+      .min(32)
+      .default("8888888888888888888888888888888888888888888888888888888888888888"),
+    MERCHANT_TRANSACTION_REFERENCE_ACTIVE_KEY_VERSION: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1)
+      .default(1),
+    DEVICE_SESSION_SECRET: z
+      .string()
+      .min(32)
+      .default("7777777777777777777777777777777777777777777777777777777777777777"),
+    DEVICE_PAIRING_TTL_MINUTES: z.coerce.number().int().min(2).max(30).default(10),
+    DEVICE_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+    DEVICE_REQUEST_MAX_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
+    DEVICE_NONCE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
+    STAFF_OWN_REVERSAL_WINDOW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
+    MANAGER_REVERSAL_WINDOW_MINUTES: z.coerce.number().int().min(1).max(10080).default(1440),
+    MANAGER_APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(5),
+    OPERATION_RATE_LIMIT_PER_DEVICE_MINUTE: z.coerce.number().int().min(1).max(1000).default(60),
+    OPERATION_RATE_LIMIT_PER_STAFF_HOUR: z.coerce.number().int().min(1).max(10000).default(600),
+    PROJECTION_INTEGRITY_SAMPLE_SIZE: z.coerce.number().int().min(1).max(10000).default(100),
+    REWARD_EXPIRY_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
+    ANALYTICS_BATCH_SIZE: z.coerce.number().int().min(1).max(10000).default(500),
+    EXPORT_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+    EXPORT_MAX_ROWS: z.coerce.number().int().min(1).max(1_000_000).default(100_000),
+    WALLET_UPDATE_COALESCE_SECONDS: z.coerce.number().int().min(0).max(300).default(5),
+    TEST_STAFF_CLIENT_ENABLED: z.stringbool().default(true),
     EMAIL_VERIFICATION_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
     PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
     INVITATION_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
@@ -132,7 +167,10 @@ export const environmentSchema = z
       value.CUSTOMER_SESSION_SECRET,
       value.MEMBERSHIP_CREDENTIAL_SECRET_V1,
       value.APPLE_PASS_AUTH_SECRET_V1,
-    ].some((secret) => /^([1-5])\1{63}$/.test(secret));
+      value.LEDGER_HASH_SECRET_V1,
+      value.MERCHANT_TRANSACTION_REFERENCE_HMAC_KEY_V1,
+      value.DEVICE_SESSION_SECRET,
+    ].some((secret) => /^([1-8])\1{63}$/.test(secret));
     if (unsafeW3Secrets) {
       context.addIssue({
         code: "custom",
@@ -145,6 +183,13 @@ export const environmentSchema = z
         code: "custom",
         path: ["APPLE_WALLET_MODE"],
         message: "Wallet test adapters cannot run in production.",
+      });
+    }
+    if (value.TEST_STAFF_CLIENT_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["TEST_STAFF_CLIENT_ENABLED"],
+        message: "The Staff Test Client cannot run in production.",
       });
     }
     if (

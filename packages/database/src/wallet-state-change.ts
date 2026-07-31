@@ -8,6 +8,13 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
 }
 
+export async function lockApplePassUpdateSequence(transaction: Prisma.TransactionClient) {
+  await transaction.$queryRaw`
+    SELECT 1::int AS locked
+    FROM pg_advisory_xact_lock(hashtextextended('apple-pass-update-sequence', 0))
+  `;
+}
+
 export async function queueWalletPassStateChange(
   transaction: Prisma.TransactionClient,
   input: {
@@ -18,6 +25,16 @@ export async function queueWalletPassStateChange(
     safePayload?: Readonly<Record<string, unknown>>;
   },
 ) {
+  const candidate = await transaction.walletPassInstance.findUniqueOrThrow({
+    where: { id: input.walletPassInstanceId },
+    select: { provider: true },
+  });
+  // The global Apple lock is intentionally acquired before the per-pass lock.
+  // Holding it until commit makes sequence allocation order equal commit order,
+  // preventing a later committed update from carrying an earlier sequence.
+  if (candidate.provider === "APPLE") {
+    await lockApplePassUpdateSequence(transaction);
+  }
   await transaction.$queryRaw`
     SELECT 1::int AS locked
     FROM pg_advisory_xact_lock(
@@ -32,6 +49,7 @@ export async function queueWalletPassStateChange(
       membershipId: true,
       provider: true,
       updateTag: true,
+      appleUpdateSequence: true,
     },
   });
   const idempotencyKey = [
@@ -59,15 +77,37 @@ export async function queueWalletPassStateChange(
         },
       },
     });
-    return { command: existing, replayed: true, updateTag: pass.updateTag };
+    return {
+      command: existing,
+      replayed: true,
+      updateTag: pass.updateTag,
+      appleUpdateSequence: pass.appleUpdateSequence,
+    };
   }
 
   const nextUpdateTag = pass.provider === "APPLE" ? pass.updateTag + 1 : pass.updateTag;
+  let nextAppleUpdateSequence: bigint | null = null;
+  if (pass.provider === "APPLE") {
+    const allocated = (
+      await transaction.$queryRaw<Array<{ sequence: bigint }>>`
+        SELECT nextval('apple_pass_update_sequence')::bigint AS sequence
+      `
+    )[0]?.sequence;
+    if (allocated === undefined) {
+      throw new Error("Apple update sequence allocation failed.");
+    }
+    nextAppleUpdateSequence = allocated;
+  }
   await transaction.walletPassInstance.update({
     where: { id: pass.id },
     data: {
       status: input.commandType === "INVALIDATE" ? "INVALIDATION_PENDING" : "UPDATE_PENDING",
-      ...(pass.provider === "APPLE" ? { updateTag: nextUpdateTag } : {}),
+      ...(pass.provider === "APPLE"
+        ? {
+            updateTag: nextUpdateTag,
+            appleUpdateSequence: nextAppleUpdateSequence,
+          }
+        : {}),
     },
   });
   const command = await transaction.walletCommand.create({
@@ -84,10 +124,14 @@ export async function queueWalletPassStateChange(
         reason: input.reason,
         eventKey: input.eventKey,
         updateTag: nextUpdateTag,
+        appleUpdateSequence: nextAppleUpdateSequence?.toString() ?? null,
       }),
       safePayload: {
         reason: input.reason,
         updateTag: nextUpdateTag,
+        ...(nextAppleUpdateSequence !== null
+          ? { appleUpdateSequence: nextAppleUpdateSequence.toString() }
+          : {}),
         ...(input.safePayload ?? {}),
       } as Prisma.InputJsonValue,
     },
@@ -104,8 +148,16 @@ export async function queueWalletPassStateChange(
         commandType: input.commandType,
         reason: input.reason,
         updateTag: nextUpdateTag,
+        ...(nextAppleUpdateSequence !== null
+          ? { appleUpdateSequence: nextAppleUpdateSequence.toString() }
+          : {}),
       },
     },
   });
-  return { command, replayed: false, updateTag: nextUpdateTag };
+  return {
+    command,
+    replayed: false,
+    updateTag: nextUpdateTag,
+    appleUpdateSequence: nextAppleUpdateSequence,
+  };
 }

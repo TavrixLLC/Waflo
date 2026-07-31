@@ -153,7 +153,7 @@ export class AppleUpdateService {
     passesUpdatedSince?: string,
   ) {
     this.assertPassType(passTypeIdentifier);
-    const since = passesUpdatedSince ? Number.parseInt(passesUpdatedSince, 10) : 0;
+    const since = this.parseUpdateSequence(passesUpdatedSince);
     const deviceHash = this.security.protectedIdentifierHash(
       "apple-device",
       deviceLibraryIdentifier,
@@ -164,25 +164,26 @@ export class AppleUpdateService {
         unregisteredAt: null,
         walletPassInstance: {
           provider: "APPLE",
-          updateTag: { gt: Number.isFinite(since) ? since : 0 },
+          appleUpdateSequence: { gt: since },
         },
       },
       include: {
         walletPassInstance: {
-          select: { providerIdentity: true, updateTag: true },
+          select: { providerIdentity: true, appleUpdateSequence: true },
         },
       },
-      orderBy: { walletPassInstance: { updateTag: "asc" } },
-      take: 500,
+      orderBy: { walletPassInstance: { appleUpdateSequence: "asc" } },
     });
     if (registrations.length === 0) return null;
+    const lastUpdated = registrations.at(-1)?.walletPassInstance.appleUpdateSequence;
+    if (lastUpdated === null || lastUpdated === undefined) {
+      throw new Error("Registered Apple pass is missing its global update sequence.");
+    }
     return {
       serialNumbers: registrations.map(
         (registration) => registration.walletPassInstance.providerIdentity,
       ),
-      lastUpdated: String(
-        Math.max(...registrations.map((registration) => registration.walletPassInstance.updateTag)),
-      ),
+      lastUpdated: lastUpdated.toString(),
     };
   }
 
@@ -270,6 +271,28 @@ export class AppleUpdateService {
         HttpStatus.NOT_FOUND,
       );
     }
+  }
+
+  private parseUpdateSequence(value: string | undefined): bigint {
+    // An absent tag is Apple's initial collection request. It starts before
+    // every issued sequence, so all registered passes are returned.
+    if (value === undefined || value === "") return 0n;
+    if (!/^\d+$/.test(value)) {
+      throw new AppError(
+        "APPLE_UPDATE_TAG_INVALID",
+        "Invalid Apple Wallet update tag.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const parsed = BigInt(value);
+    if (parsed > 9_223_372_036_854_775_807n) {
+      throw new AppError(
+        "APPLE_UPDATE_TAG_INVALID",
+        "Invalid Apple Wallet update tag.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return parsed;
   }
 
   private async authFailure(request: WafloRequest, organizationId?: string) {

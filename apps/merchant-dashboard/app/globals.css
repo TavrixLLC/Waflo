@@ -1029,6 +1029,23 @@ body {
   gap: 0.7rem;
 }
 
+.studio-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.8rem;
+}
+
+.studio-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--waflo-soft);
+  border: 1px solid var(--waflo-border);
+  border-radius: 12px;
+}
+
 .studio-validation-list button,
 .studio-event-log > div,
 .studio-test-rewards > div {

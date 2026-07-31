@@ -310,7 +310,9 @@ test.describe
       await page.getByRole("button", { name: "+5 stamps" }).click();
       await page.getByRole("button", { name: "Reverse latest stamp" }).click();
       await expect(page.getByText("TEST_STAMP_REVERSED")).toBeVisible();
-      await page.getByRole("button", { name: "+5 stamps" }).click();
+      for (let stamp = 0; stamp < 4; stamp += 1) {
+        await page.getByRole("button", { name: "+1 stamp" }).click();
+      }
       await expect(page.getByText("Reward ready", { exact: true })).toBeVisible();
       await page
         .locator(".studio-section-nav")
@@ -442,7 +444,9 @@ test.describe
         .click();
       await page.getByRole("button", { name: "Start Test Mode" }).click();
       await page.getByRole("button", { name: "+5 stamps" }).click();
-      await page.getByRole("button", { name: "+5 stamps" }).click();
+      for (let stamp = 0; stamp < 3; stamp += 1) {
+        await page.getByRole("button", { name: "+1 stamp" }).click();
+      }
       await page.getByRole("button", { name: "Synthetic redeem" }).click();
       await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Pause" }).click();
@@ -883,7 +887,7 @@ test.describe
 
       await page.goto(`http://localhost:3002/?tenant=${changedSlug}`);
       await expect(page).toHaveURL(
-        new RegExp(`/join/browser-studio-rewards\\?tenant=${changedSlug}$`),
+        new RegExp(`/join/browser-studio-rewards\\?tenant=${changedSlug}&lang=en$`),
       );
       await expect(
         page.getByRole("heading", { name: "Browser Studio Rewards", exact: true }),
@@ -959,38 +963,67 @@ test.describe
     test("explains Starter Pro restrictions and blocks a second active program", async ({
       page,
     }) => {
-      await page.context().clearCookies();
-      await login(page, "owner@waflo.local", "Waflo-Development-2026");
-      const switcher = page.locator(".wf-org-switcher select");
-      await switcher.selectOption({ label: "Today Coffee" });
-      await page.goto("/en/dashboard/programs");
-      await expect
-        .poll(
-          async () =>
-            (await page.locator(".program-list__card").count()) +
-            (await page.getByText("Create your first stamp program").count()),
-        )
-        .toBeGreaterThan(0);
+      const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
+      const database = createPrismaClient();
+      const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      await Promise.all([
+        database.organization.update({
+          where: { id: organizationId },
+          data: { selectedPlan: "STARTER" },
+        }),
+        database.organizationBillingProfile.update({
+          where: { organizationId },
+          data: { selectedPlan: "STARTER" },
+        }),
+      ]);
+      try {
+        await page.context().clearCookies();
+        await login(page, "owner@waflo.local", "Waflo-Development-2026");
+        const switcher = page.locator(".wf-org-switcher select");
+        await switcher.selectOption({ label: "Today Coffee" });
+        await page.goto("/en/dashboard/programs");
+        await expect
+          .poll(
+            async () =>
+              (await page.locator(".program-list__card").count()) +
+              (await page.getByText("Create your first stamp program").count()),
+          )
+          .toBeGreaterThan(0);
 
-      if ((await page.locator(".program-list__card").count()) === 0) {
+        if ((await page.locator(".program-list__card").count()) === 0) {
+          await page.getByRole("button", { name: "Create program" }).click();
+          const proMode = page.getByRole("radio", { name: /Pro Mode/ });
+          await proMode.click();
+          await expect(proMode).not.toBeChecked();
+          await expect(page.getByText("Pro Mode is available on Growth")).toBeVisible();
+          await finishQuickWizard(page, `Starter first ${runId}`);
+          await expect(page.getByText("The published version remains live")).toHaveCount(0);
+          await expect(
+            page.locator(".studio-toolbar").getByRole("heading", { level: 1 }),
+          ).toContainText("Starter first");
+          await page.getByRole("button", { name: "Programs" }).click();
+        }
+
         await page.getByRole("button", { name: "Create program" }).click();
-        const proMode = page.getByRole("radio", { name: /Pro Mode/ });
-        await proMode.click();
-        await expect(proMode).not.toBeChecked();
-        await expect(page.getByText("Pro Mode is available on Growth")).toBeVisible();
-        await finishQuickWizard(page, `Starter first ${runId}`);
-        await expect(page.getByText("The published version remains live")).toHaveCount(0);
+        await finishQuickWizard(page, `Starter blocked ${runId}`);
         await expect(
-          page.locator(".studio-toolbar").getByRole("heading", { level: 1 }),
-        ).toContainText("Starter first");
-        await page.getByRole("button", { name: "Programs" }).click();
+          page.getByText("Your plan has reached its active program limit."),
+        ).toBeVisible();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await screenshot(page, "32-starter-program-limit");
+      } finally {
+        await Promise.all([
+          database.organization.update({
+            where: { id: organizationId },
+            data: { selectedPlan: "SCALE" },
+          }),
+          database.organizationBillingProfile.update({
+            where: { organizationId },
+            data: { selectedPlan: "SCALE" },
+          }),
+        ]);
+        await database.$disconnect();
       }
-
-      await page.getByRole("button", { name: "Create program" }).click();
-      await finishQuickWizard(page, `Starter blocked ${runId}`);
-      await expect(page.getByText("Your plan has reached its active program limit.")).toBeVisible();
-      await expect(page.getByRole("dialog")).toBeVisible();
-      await screenshot(page, "32-starter-program-limit");
     });
 
     test("captures the Round 4 lifecycle, asset, PATCH, publication, and entitlement evidence", async ({
@@ -1181,7 +1214,9 @@ test.describe
           .click();
         await page.getByRole("button", { name: "Start Test Mode" }).click();
         await page.getByRole("button", { name: "+5 stamps" }).click();
-        await page.getByRole("button", { name: "+5 stamps" }).click();
+        for (let stamp = 0; stamp < 3; stamp += 1) {
+          await page.getByRole("button", { name: "+1 stamp" }).click();
+        }
         await page.getByRole("button", { name: "Synthetic redeem" }).click();
         await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
 

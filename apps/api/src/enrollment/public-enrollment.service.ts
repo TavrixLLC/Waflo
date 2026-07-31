@@ -7,7 +7,7 @@ import { googleLoyaltyObjectId } from "@waflo/wallet-google";
 import { walletCommandIdempotencyKey, type WalletProviderCode } from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
-import { withInvariantLock } from "../common/organization-transaction.js";
+import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
@@ -158,6 +158,17 @@ export class PublicEnrollmentService {
       );
     }
     const organizationId = resolved.organization.id;
+    const lockProgram = await this.prisma.client.loyaltyProgram.findFirst({
+      where: { organizationId, publicSlug: programSlug },
+      select: { id: true },
+    });
+    if (!lockProgram) {
+      throw new AppError(
+        "PROGRAM_NOT_ENROLLABLE",
+        "This program is not accepting enrollment.",
+        HttpStatus.CONFLICT,
+      );
+    }
     const email = input.email?.trim() ?? "";
     const requestFingerprint = sha256({
       programSlug,
@@ -168,9 +179,10 @@ export class PublicEnrollmentService {
       wafloPrivacyAccepted: input.wafloPrivacyAccepted,
       marketingEmailConsent: input.marketingEmailConsent,
     });
-    const result = await withInvariantLock(
+    const result = await withProgramLifecycleInvariantLock(
       this.prisma.client,
-      `enrollment:${organizationId}:${idempotencyKey}`,
+      organizationId,
+      lockProgram.id,
       async (transaction) => {
         const organization = await transaction.organization.findUnique({
           where: { id: organizationId },
@@ -217,7 +229,7 @@ export class PublicEnrollmentService {
           }
         }
         const program = await transaction.loyaltyProgram.findFirst({
-          where: { organizationId, publicSlug: programSlug },
+          where: { id: lockProgram.id, organizationId, publicSlug: programSlug },
           include: {
             currentPublishedVersion: { include: publicVersionInclude },
           },
@@ -474,6 +486,7 @@ export class PublicEnrollmentService {
           providerStates,
         };
       },
+      [`enrollment:${organizationId}:${idempotencyKey}`],
     );
     return result;
   }

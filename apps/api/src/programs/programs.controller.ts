@@ -3,6 +3,7 @@ import { AppError } from "../common/app-error.js";
 import {
   programCreateSchema,
   programPublishSchema,
+  programTestRedeemSchema,
   programTestReverseSchema,
   programTestResetSchema,
   programTestStampSchema,
@@ -233,8 +234,7 @@ export class ProgramsController {
       user.id,
       parseUuid(organizationId),
       parseUuid(sessionId),
-      input.amount,
-      input.idempotencyKey,
+      input,
       request,
     );
   }
@@ -248,13 +248,13 @@ export class ProgramsController {
     @Body() body: unknown,
     @Req() request: WafloRequest,
   ) {
-    const input = parseInput(programPublishSchema, body);
+    const input = parseInput(programTestRedeemSchema, body);
     return this.programs.redeemTestReward(
       user.id,
       parseUuid(organizationId),
       parseUuid(sessionId),
       parseUuid(rewardId),
-      input.idempotencyKey,
+      input,
       request,
     );
   }
@@ -272,7 +272,7 @@ export class ProgramsController {
       user.id,
       parseUuid(organizationId),
       parseUuid(sessionId),
-      input.idempotencyKey,
+      input,
       request,
     );
   }

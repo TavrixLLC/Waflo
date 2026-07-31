@@ -23,6 +23,17 @@ export interface WafloRequest extends FastifyRequest {
   currentUser?: AuthenticatedUser;
   currentSessionId?: string;
   currentSessionToken?: string;
+  staffDeviceContext?: {
+    organizationId: string;
+    organizationMemberId: string;
+    role: "OWNER" | "MANAGER" | "STAFF";
+    locationId: string;
+    deviceId: string;
+    devicePublicId: string;
+    deviceSessionId: string;
+    platform: "IOS" | "ANDROID" | "TEST_CLIENT";
+    requestId: string;
+  };
 }
 
 @Injectable()

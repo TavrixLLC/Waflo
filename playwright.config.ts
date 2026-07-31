@@ -49,6 +49,16 @@ export default defineConfig({
       testMatch: /w3-provider-disabled\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "w4",
+      testMatch: /w4-platform\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "w4-accessibility",
+      testMatch: /w4-accessibility\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: process.env.WAFLO_MANAGED_SERVERS
     ? undefined

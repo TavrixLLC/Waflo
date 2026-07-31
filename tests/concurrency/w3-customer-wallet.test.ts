@@ -20,6 +20,10 @@ import { createApiApplication } from "../../apps/api/src/app.js";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { CustomerSecurityService } from "../../apps/api/src/customer/customer-security.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
+import type { WafloRequest } from "../../apps/api/src/common/request-context.js";
+import { ProgramsService } from "../../apps/api/src/programs/programs.service.js";
+import { WalletService } from "../../apps/api/src/wallet/wallet.service.js";
+import { NotificationService } from "../../apps/api/src/notifications/notification.service.js";
 import { WalletWorker } from "../../apps/wallet-worker/src/main.js";
 import {
   createPublishedProgramVersion,
@@ -108,6 +112,7 @@ let membershipId = "";
 let applePassId = "";
 let appleSerial = "";
 let sessionCookie = "";
+const notificationLinks: Array<{ to: string; actionUrl: string }> = [];
 
 function data<T>(response: { json(): unknown }): T {
   return (response.json() as { data: T }).data;
@@ -137,6 +142,27 @@ async function bootstrapCsrf(currentCookie: string) {
     token: data<{ token: string }>(response).token,
     csrfCookie: cookie(response, environment.customerCsrfCookieName),
   };
+}
+
+async function drainProgramSyncJobs(programId: string) {
+  const worker = new WalletWorker(prisma.client, {} as never, environment.values);
+  const jobs = await prisma.client.programWalletSyncJob.findMany({
+    where: {
+      programId,
+      status: { notIn: ["COMPLETED", "DEAD_LETTER"] },
+    },
+    select: { id: true },
+  });
+  for (const job of jobs) {
+    for (let page = 0; page < 20; page += 1) {
+      const current = await prisma.client.programWalletSyncJob.findUniqueOrThrow({
+        where: { id: job.id },
+        select: { status: true },
+      });
+      if (current.status === "COMPLETED" || current.status === "DEAD_LETTER") break;
+      await worker.processOneProgramSyncJob(job.id);
+    }
+  }
 }
 
 async function prepareTransferRace(displayName: string) {
@@ -211,6 +237,75 @@ async function prepareTransferRace(displayName: string) {
   };
 }
 
+async function prepareEmailTransferRace(displayName: string) {
+  const email = `race-${randomUUID()}@customer.test`;
+  const enrollment = await app.inject({
+    method: "POST",
+    url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+    headers: {
+      host: fixture.merchantHost,
+      "content-type": "application/json",
+      "x-idempotency-key": `enroll:${randomUUID()}`,
+    },
+    payload: {
+      ...w3EnrollmentBase,
+      displayName,
+      email,
+      formStartedAt: Date.now() - 2_000,
+    },
+  });
+  expect(enrollment.statusCode).toBe(201);
+  const customerCookie = cookie(enrollment, environment.values.CUSTOMER_COOKIE_NAME);
+  const publicMembershipId = data<{ membership: { publicMembershipId: string } }>(enrollment)
+    .membership.publicMembershipId;
+  const membership = await prisma.client.membership.findUniqueOrThrow({
+    where: { publicMembershipId },
+    include: { credentials: true, walletPassInstances: true },
+  });
+  const card = await app.inject({
+    method: "GET",
+    url: "/v1/customer/card",
+    headers: { host: fixture.merchantHost, cookie: customerCookie },
+  });
+  const requested = await app.inject({
+    method: "POST",
+    url: "/v1/public/transfers/request",
+    headers: {
+      host: fixture.merchantHost,
+      "content-type": "application/json",
+      "x-idempotency-key": `transfer:${randomUUID()}`,
+    },
+    payload: {
+      qrPayload: data<{ membershipQr: { payload: string } }>(card).membershipQr.payload,
+      preferredLocale: "en",
+    },
+  });
+  expect(requested.statusCode).toBe(201);
+  const transfer = data<{ transferPublicId: string; method: string }>(requested);
+  expect(transfer.method).toBe("EMAIL_CONFIRMED");
+  const actionUrl = required(
+    notificationLinks.findLast((message) => message.to === email)?.actionUrl,
+    "Transfer confirmation URL",
+  );
+  const fragment = new URLSearchParams(new URL(actionUrl).hash.slice(1));
+  return {
+    membership,
+    confirm: () =>
+      app.inject({
+        method: "POST",
+        url: "/v1/public/transfers/confirm-email",
+        headers: {
+          host: fixture.merchantHost,
+          "content-type": "application/json",
+        },
+        payload: {
+          transferPublicId: fragment.get("transfer"),
+          token: fragment.get("token"),
+        },
+      }),
+  };
+}
+
 describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
   beforeAll(async () => {
     process.env.NODE_ENV = "test";
@@ -221,6 +316,20 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);
     security = app.get(CustomerSecurityService);
+    const notifications = app.get(NotificationService) as unknown as {
+      provider: { send(message: { to: string; html: string }): Promise<void> };
+    };
+    notifications.provider = {
+      async send(message) {
+        const href = /href="([^"]+)"/.exec(message.html)?.[1];
+        if (href) {
+          notificationLinks.push({
+            to: message.to,
+            actionUrl: href.replaceAll("&amp;", "&"),
+          });
+        }
+      },
+    };
     fixture = await createW3CustomerWalletFixture(prisma.client, "concurrency");
     const enrollment = await app.inject({
       method: "POST",
@@ -261,6 +370,11 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
 
   it("increments Apple update tags exactly once for a concurrent duplicate event", async () => {
     const eventKey = `duplicate:${randomUUID()}`;
+    const before = await prisma.client.walletPassInstance.findUniqueOrThrow({
+      where: { id: applePassId },
+      select: { appleUpdateSequence: true },
+    });
+    expect(before.appleUpdateSequence).not.toBeNull();
     const results = await Promise.all([
       prisma.client.$transaction((transaction) =>
         queueWalletPassStateChange(transaction, {
@@ -284,6 +398,9 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       where: { id: applePassId },
     });
     expect(passAfterFirstEvent.updateTag).toBe(2);
+    expect(passAfterFirstEvent.appleUpdateSequence).toBeGreaterThan(
+      required(before.appleUpdateSequence, "Initial Apple update sequence"),
+    );
     await prisma.client.$transaction((transaction) =>
       queueWalletPassStateChange(transaction, {
         walletPassInstanceId: applePassId,
@@ -300,10 +417,151 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     expect(
       await prisma.client.walletPassInstance.findUniqueOrThrow({
         where: { id: applePassId },
-        select: { updateTag: true },
+        select: { updateTag: true, appleUpdateSequence: true },
       }),
-    ).toEqual({ updateTag: 2 });
+    ).toEqual({
+      updateTag: 2,
+      appleUpdateSequence: passAfterFirstEvent.appleUpdateSequence,
+    });
   });
+
+  it("orders interleaved Apple updates globally without precision loss or cross-pass misses", async () => {
+    const enrollment = await app.inject({
+      method: "POST",
+      url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+      headers: {
+        host: fixture.merchantHost,
+        "content-type": "application/json",
+        "x-idempotency-key": `enroll:${randomUUID()}`,
+      },
+      payload: {
+        ...w3EnrollmentBase,
+        displayName: "Interleaved Apple Member",
+        formStartedAt: Date.now() - 2_000,
+      },
+    });
+    expect(enrollment.statusCode).toBe(201);
+    const publicMembershipId = data<{ membership: { publicMembershipId: string } }>(enrollment)
+      .membership.publicMembershipId;
+    const secondMembership = await prisma.client.membership.findUniqueOrThrow({
+      where: { publicMembershipId },
+      include: { walletPassInstances: true },
+    });
+    const secondPass = required(
+      secondMembership.walletPassInstances.find((pass) => pass.provider === "APPLE"),
+      "Second Apple pass",
+    );
+    await prisma.client.walletPassInstance.update({
+      where: { id: secondPass.id },
+      data: { status: "PENDING" },
+    });
+
+    const device = `global-${randomUUID().replaceAll("-", "")}`;
+    const passType = "pass.app.waflo.test-adapter";
+    for (const pass of [
+      { id: applePassId, serial: appleSerial },
+      { id: secondPass.id, serial: secondPass.providerIdentity },
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/apple-wallet/v1/devices/${device}/registrations/${passType}/${pass.serial}`,
+        headers: {
+          host: fixture.merchantHost,
+          authorization: `ApplePass ${security.appleAuthenticationToken(pass.id, pass.serial)}`,
+          "content-type": "application/json",
+        },
+        payload: { pushToken: `push-${pass.id.replaceAll("-", "")}` },
+      });
+      expect(response.statusCode).toBe(201);
+    }
+
+    const initial = await app.inject({
+      method: "GET",
+      url: `/v1/apple-wallet/v1/devices/${device}/registrations/${passType}`,
+      headers: { host: fixture.merchantHost },
+    });
+    expect(initial.statusCode).toBe(200);
+    const initialBody = initial.json<{
+      serialNumbers: string[];
+      lastUpdated: string;
+    }>();
+    expect(new Set(initialBody.serialNumbers)).toEqual(
+      new Set([appleSerial, secondPass.providerIdentity]),
+    );
+    expect(initialBody.lastUpdated).toMatch(/^\d+$/);
+
+    const updateA = await prisma.client.$transaction((transaction) =>
+      queueWalletPassStateChange(transaction, {
+        walletPassInstanceId: applePassId,
+        commandType: "UPDATE",
+        reason: "PROGRAM_PAUSED",
+        eventKey: `global-a:${randomUUID()}`,
+      }),
+    );
+    const pollA = await app.inject({
+      method: "GET",
+      url: `/v1/apple-wallet/v1/devices/${device}/registrations/${passType}?passesUpdatedSince=${initialBody.lastUpdated}`,
+      headers: { host: fixture.merchantHost },
+    });
+    expect(pollA.statusCode).toBe(200);
+    const pollABody = pollA.json<{ serialNumbers: string[]; lastUpdated: string }>();
+    expect(pollABody.serialNumbers).toEqual([appleSerial]);
+    expect(pollABody.lastUpdated).toBe(updateA.appleUpdateSequence?.toString());
+
+    const updateB = await prisma.client.$transaction((transaction) =>
+      queueWalletPassStateChange(transaction, {
+        walletPassInstanceId: secondPass.id,
+        commandType: "UPDATE",
+        reason: "PROGRAM_RESUMED",
+        eventKey: `global-b:${randomUUID()}`,
+      }),
+    );
+    const pollB = await app.inject({
+      method: "GET",
+      url: `/v1/apple-wallet/v1/devices/${device}/registrations/${passType}?passesUpdatedSince=${pollABody.lastUpdated}`,
+      headers: { host: fixture.merchantHost },
+    });
+    expect(pollB.statusCode).toBe(200);
+    const pollBBody = pollB.json<{ serialNumbers: string[]; lastUpdated: string }>();
+    expect(pollBBody.serialNumbers).toEqual([secondPass.providerIdentity]);
+    expect(pollBBody.serialNumbers).not.toContain(appleSerial);
+    expect(pollBBody.lastUpdated).toBe(updateB.appleUpdateSequence?.toString());
+
+    const concurrent = await Promise.all(
+      [
+        { id: applePassId, key: `global-concurrent-a:${randomUUID()}` },
+        { id: secondPass.id, key: `global-concurrent-b:${randomUUID()}` },
+      ].map((pass) =>
+        prisma.client.$transaction((transaction) =>
+          queueWalletPassStateChange(transaction, {
+            walletPassInstanceId: pass.id,
+            commandType: "UPDATE",
+            reason: "RECONCILIATION",
+            eventKey: pass.key,
+          }),
+        ),
+      ),
+    );
+    const concurrentSequences = concurrent.map((result) =>
+      required(result.appleUpdateSequence, "Concurrent Apple update sequence"),
+    );
+    expect(new Set(concurrentSequences.map(String)).size).toBe(2);
+    expect(
+      concurrentSequences.every(
+        (sequence) => sequence > required(updateB.appleUpdateSequence, "B sequence"),
+      ),
+    ).toBe(true);
+
+    for (const malformed of ["-1", "12x", "9223372036854775808"]) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/apple-wallet/v1/devices/${device}/registrations/${passType}?passesUpdatedSince=${malformed}`,
+        headers: { host: fixture.merchantHost },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toContain("APPLE_UPDATE_TAG_INVALID");
+    }
+  }, 120_000);
 
   it("registers one encrypted Apple device under concurrent requests and reactivates it safely", async () => {
     const device = `device-${randomUUID().replaceAll("-", "")}`;
@@ -312,6 +570,14 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       applePassId,
       appleSerial,
     )}`;
+    const auditCountBefore = await prisma.client.auditLog.count({
+      where: {
+        organizationId: fixture.organizationId,
+        action: "apple.pass_registered",
+        targetId: applePassId,
+      },
+    });
+    const deviceHash = security.protectedIdentifierHash("apple-device", device);
     const url = `/v1/apple-wallet/v1/devices/${device}/registrations/${passType}/${appleSerial}`;
     const [first, replay] = await Promise.all(
       ["push-token-aaaaaaaa", "push-token-bbbbbbbb"].map((pushToken) =>
@@ -329,7 +595,11 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     );
     expect([first.statusCode, replay.statusCode].sort()).toEqual([200, 201]);
     const registrations = await prisma.client.applePassRegistration.findMany({
-      where: { walletPassInstanceId: applePassId, unregisteredAt: null },
+      where: {
+        walletPassInstanceId: applePassId,
+        deviceLibraryIdentifierHash: deviceHash,
+        unregisteredAt: null,
+      },
     });
     expect(registrations).toHaveLength(1);
     const registration = required(registrations[0], "Apple registration");
@@ -352,7 +622,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
           targetId: applePassId,
         },
       }),
-    ).toBe(1);
+    ).toBe(auditCountBefore + 1);
 
     await prisma.client.$transaction((transaction) =>
       queueWalletPassStateChange(transaction, {
@@ -388,10 +658,254 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     expect(reregistered.statusCode).toBe(200);
     expect(
       await prisma.client.applePassRegistration.count({
-        where: { walletPassInstanceId: applePassId, unregisteredAt: null },
+        where: {
+          walletPassInstanceId: applePassId,
+          deviceLibraryIdentifierHash: deviceHash,
+          unregisteredAt: null,
+        },
       }),
     ).toBe(1);
   }, 120_000);
+
+  it("serializes lifecycle transitions with enrollment, transfer, and pass issuance", async () => {
+    const programs = app.get(ProgramsService);
+    const transitionRequest = {
+      requestId: `lifecycle-race-${randomUUID()}`,
+      headers: {},
+    } as WafloRequest;
+    const enroll = (displayName: string) =>
+      app.inject({
+        method: "POST",
+        url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+        headers: {
+          host: fixture.merchantHost,
+          "content-type": "application/json",
+          "x-idempotency-key": `enroll:${randomUUID()}`,
+        },
+        payload: {
+          ...w3EnrollmentBase,
+          displayName,
+          formStartedAt: Date.now() - 2_000,
+        },
+      });
+
+    const [, pauseEnrollment] = await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "pause",
+        transitionRequest,
+      ),
+      enroll("Pause Enrollment Race"),
+    ]);
+    expect([201, 409]).toContain(pauseEnrollment.statusCode);
+    expect(
+      await prisma.client.loyaltyProgram.findUniqueOrThrow({
+        where: { id: fixture.programId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: "PAUSED" });
+    await drainProgramSyncJobs(fixture.programId);
+    if (pauseEnrollment.statusCode === 201) {
+      const publicMembershipId = data<{ membership: { publicMembershipId: string } }>(
+        pauseEnrollment,
+      ).membership.publicMembershipId;
+      const racedMembership = await prisma.client.membership.findUniqueOrThrow({
+        where: { publicMembershipId },
+        include: { walletPassInstances: true },
+      });
+      expect(racedMembership.walletPassInstances.every((pass) => pass.status !== "ACTIVE")).toBe(
+        true,
+      );
+    }
+
+    await programs.transition(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      "resume",
+      transitionRequest,
+    );
+    await drainProgramSyncJobs(fixture.programId);
+    const [, archiveEnrollment] = await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "archive",
+        transitionRequest,
+      ),
+      enroll("Archive Enrollment Race"),
+    ]);
+    expect([201, 409]).toContain(archiveEnrollment.statusCode);
+    expect(
+      await prisma.client.loyaltyProgram.findUniqueOrThrow({
+        where: { id: fixture.programId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: "ARCHIVED" });
+    await drainProgramSyncJobs(fixture.programId);
+
+    const [, restoreEnrollment] = await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "restore",
+        transitionRequest,
+      ),
+      enroll("Restore Enrollment Race"),
+    ]);
+    expect([201, 409]).toContain(restoreEnrollment.statusCode);
+    expect(
+      await prisma.client.loyaltyProgram.findUniqueOrThrow({
+        where: { id: fixture.programId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: "PUBLISHED" });
+    await drainProgramSyncJobs(fixture.programId);
+
+    const pauseTransfer = await prepareTransferRace("Pause Transfer Race");
+    const [, pauseTransferResponse] = await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "pause",
+        transitionRequest,
+      ),
+      pauseTransfer.confirm(),
+    ]);
+    expect([201, 409]).toContain(pauseTransferResponse.statusCode);
+    await drainProgramSyncJobs(fixture.programId);
+    const afterPauseTransfer = await prisma.client.membership.findUniqueOrThrow({
+      where: { id: pauseTransfer.membership.id },
+      include: { credentials: true, walletPassInstances: true },
+    });
+    expect(
+      afterPauseTransfer.credentials.filter((credential) => credential.status === "ACTIVE"),
+    ).toHaveLength(1);
+    expect(afterPauseTransfer.walletPassInstances.every((pass) => pass.status !== "ACTIVE")).toBe(
+      true,
+    );
+
+    await programs.transition(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      "resume",
+      transitionRequest,
+    );
+    await drainProgramSyncJobs(fixture.programId);
+    const emailPauseTransfer = await prepareEmailTransferRace("Email Pause Transfer Race");
+    const [, emailPauseTransferResponse] = await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "pause",
+        transitionRequest,
+      ),
+      emailPauseTransfer.confirm(),
+    ]);
+    expect([201, 409]).toContain(emailPauseTransferResponse.statusCode);
+    await drainProgramSyncJobs(fixture.programId);
+    const afterEmailPauseTransfer = await prisma.client.membership.findUniqueOrThrow({
+      where: { id: emailPauseTransfer.membership.id },
+      include: { credentials: true, walletPassInstances: true },
+    });
+    expect(
+      afterEmailPauseTransfer.credentials.filter((credential) => credential.status === "ACTIVE"),
+    ).toHaveLength(1);
+    expect(
+      afterEmailPauseTransfer.walletPassInstances.every((pass) => pass.status !== "ACTIVE"),
+    ).toBe(true);
+    await programs.transition(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      "resume",
+      transitionRequest,
+    );
+    await drainProgramSyncJobs(fixture.programId);
+    const archiveTransfer = await prepareTransferRace("Archive Transfer Race");
+    const [, archiveTransferResponse] = await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "archive",
+        transitionRequest,
+      ),
+      archiveTransfer.confirm(),
+    ]);
+    expect([201, 409]).toContain(archiveTransferResponse.statusCode);
+    await drainProgramSyncJobs(fixture.programId);
+    const afterArchiveTransfer = await prisma.client.membership.findUniqueOrThrow({
+      where: { id: archiveTransfer.membership.id },
+      include: { credentials: true, walletPassInstances: true },
+    });
+    expect(
+      afterArchiveTransfer.credentials.filter((credential) => credential.status === "ACTIVE"),
+    ).toHaveLength(1);
+    expect(afterArchiveTransfer.walletPassInstances.every((pass) => pass.status !== "ACTIVE")).toBe(
+      true,
+    );
+
+    await programs.transition(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      "restore",
+      transitionRequest,
+    );
+    await drainProgramSyncJobs(fixture.programId);
+    const issuanceEnrollment = await enroll("Lifecycle Issue Race");
+    expect(issuanceEnrollment.statusCode).toBe(201);
+    const issuancePublicId = data<{ membership: { publicMembershipId: string } }>(
+      issuanceEnrollment,
+    ).membership.publicMembershipId;
+    const issuanceMembership = await prisma.client.membership.findUniqueOrThrow({
+      where: { publicMembershipId: issuancePublicId },
+      include: { walletCommands: true, walletPassInstances: true },
+    });
+    const issue = required(
+      issuanceMembership.walletCommands.find(
+        (command) => command.provider === "APPLE" && command.commandType === "ISSUE",
+      ),
+      "Lifecycle issue command",
+    );
+    const issueWorker = new WalletWorker(prisma.client, {} as never, environment.values);
+    await Promise.all([
+      programs.transition(
+        fixture.ownerId,
+        fixture.organizationId,
+        fixture.programId,
+        "pause",
+        transitionRequest,
+      ),
+      issueWorker.processCommandById(issue.id, 90),
+    ]);
+    await drainProgramSyncJobs(fixture.programId);
+    const finalIssuePass = await prisma.client.walletPassInstance.findUniqueOrThrow({
+      where: {
+        id: required(
+          issuanceMembership.walletPassInstances.find((pass) => pass.provider === "APPLE"),
+          "Lifecycle Apple pass",
+        ).id,
+      },
+    });
+    expect(finalIssuePass.status).not.toBe("ACTIVE");
+    await programs.transition(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      "resume",
+      transitionRequest,
+    );
+    await drainProgramSyncJobs(fixture.programId);
+  }, 180_000);
 
   it("recovers expired leases, retries temporary failures, and dead-letters permanent failures", async () => {
     const provider = new ControlledAppleProvider();
@@ -520,6 +1034,25 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       transferPublicId: string;
       challenge: string;
     }>(requested);
+    const transferDevice = `transfer-${randomUUID().replaceAll("-", "")}`;
+    const passType = "pass.app.waflo.test-adapter";
+    const registration = await app.inject({
+      method: "POST",
+      url: `/v1/apple-wallet/v1/devices/${transferDevice}/registrations/${passType}/${appleSerial}`,
+      headers: {
+        host: fixture.merchantHost,
+        authorization: `ApplePass ${security.appleAuthenticationToken(applePassId, appleSerial)}`,
+        "content-type": "application/json",
+      },
+      payload: { pushToken: `transfer-push-${randomUUID().replaceAll("-", "")}` },
+    });
+    expect(registration.statusCode).toBe(201);
+    const beforeTransferPoll = await app.inject({
+      method: "GET",
+      url: `/v1/apple-wallet/v1/devices/${transferDevice}/registrations/${passType}`,
+      headers: { host: fixture.merchantHost },
+    });
+    const beforeTransferTag = beforeTransferPoll.json<{ lastUpdated: string }>().lastUpdated;
     const browserCookie = cookie(requested, "waflo_transfer_browser");
     const confirm = () =>
       app.inject({
@@ -541,6 +1074,15 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       results.map((response) => response.statusCode),
       results.map((response) => response.body).join("\n"),
     ).toEqual([201, 201]);
+    const transferInvalidation = await app.inject({
+      method: "GET",
+      url: `/v1/apple-wallet/v1/devices/${transferDevice}/registrations/${passType}?passesUpdatedSince=${beforeTransferTag}`,
+      headers: { host: fixture.merchantHost },
+    });
+    expect(transferInvalidation.statusCode).toBe(200);
+    expect(transferInvalidation.json<{ serialNumbers: string[] }>().serialNumbers).toContain(
+      appleSerial,
+    );
     const membership = await prisma.client.membership.findUniqueOrThrow({
       where: { id: membershipId },
       include: {
@@ -641,7 +1183,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
   }, 120_000);
 
   it("resumes a stable-cursor lifecycle job across pages and replays a page without tag skips", async () => {
-    const count = 61;
+    const count = 501;
     const massProgram = await prisma.client.loyaltyProgram.create({
       data: {
         organizationId: fixture.organizationId,
@@ -767,6 +1309,16 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
         },
       }),
     ]);
+    const massDevice = `mass-device-${randomUUID().replaceAll("-", "")}`;
+    const massDeviceHash = security.protectedIdentifierHash("apple-device", massDevice);
+    await prisma.client.applePassRegistration.createMany({
+      data: [...passRows.map((pass) => pass.id), latePassId].map((walletPassInstanceId) => ({
+        walletPassInstanceId,
+        deviceLibraryIdentifierHash: massDeviceHash,
+        pushTokenEncrypted: "encrypted-test-fixture",
+        encryptionKeyVersion: 1,
+      })),
+    });
     const workerA = new WalletWorker(prisma.client, {} as never, environment.values);
     await workerA.processOneProgramSyncJob(job.id);
     const firstCheckpoint = await prisma.client.programWalletSyncJob.findUniqueOrThrow({
@@ -797,7 +1349,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       }),
     ).toBe(17);
 
-    for (let page = 0; page < 10; page += 1) {
+    for (let page = 0; page < 40; page += 1) {
       const current = await prisma.client.programWalletSyncJob.findUniqueOrThrow({
         where: { id: job.id },
       });
@@ -807,12 +1359,12 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     const completed = await prisma.client.programWalletSyncJob.findUniqueOrThrow({
       where: { id: job.id },
     });
-    expect(completed).toMatchObject({ status: "COMPLETED", processedCount: count });
+    expect(completed).toMatchObject({ status: "COMPLETED", processedCount: count + 1 });
     expect(
       await prisma.client.walletCommand.count({
         where: { idempotencyKey: { contains: `program-sync:${job.id}` } },
       }),
-    ).toBe(count);
+    ).toBe(count + 1);
     expect(
       await prisma.client.walletPassInstance.count({
         where: { id: { in: passRows.map((pass) => pass.id) }, updateTag: 2 },
@@ -828,7 +1380,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
         where: { id: latePassId },
         select: { status: true, updateTag: true },
       }),
-    ).toEqual({ status: "PENDING", updateTag: 1 });
+    ).toEqual({ status: "UPDATE_PENDING", updateTag: 2 });
     expect(
       await prisma.client.walletCommand.count({
         where: {
@@ -836,6 +1388,97 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
           idempotencyKey: { contains: `program-sync:${job.id}` },
         },
       }),
-    ).toBe(0);
-  }, 120_000);
+    ).toBe(1);
+    const allUpdatedSerials = await app.inject({
+      method: "GET",
+      url: `/v1/apple-wallet/v1/devices/${massDevice}/registrations/pass.app.waflo.test-adapter?passesUpdatedSince=0`,
+      headers: { host: fixture.merchantHost },
+    });
+    expect(allUpdatedSerials.statusCode).toBe(200);
+    const serialBody = allUpdatedSerials.json<{
+      serialNumbers: string[];
+      lastUpdated: string;
+    }>();
+    expect(serialBody.serialNumbers).toHaveLength(count + 1);
+    expect(new Set(serialBody.serialNumbers).size).toBe(count + 1);
+    expect(serialBody.lastUpdated).toMatch(/^\d+$/);
+
+    const wallets = app.get(WalletService);
+    const reconciliationRequest = {
+      requestId: `reconcile-${randomUUID()}`,
+      headers: {},
+    } as WafloRequest;
+    const [firstReconcile, concurrentReconcile] = await Promise.all([
+      wallets.reconcile(
+        fixture.ownerId,
+        fixture.organizationId,
+        massProgram.id,
+        reconciliationRequest,
+      ),
+      wallets.reconcile(
+        fixture.ownerId,
+        fixture.organizationId,
+        massProgram.id,
+        reconciliationRequest,
+      ),
+    ]);
+    expect(concurrentReconcile.jobId).toBe(firstReconcile.jobId);
+    expect(firstReconcile).toMatchObject({
+      status: "PENDING",
+      processedCount: 0,
+      safeErrorCode: null,
+    });
+    const reconcileWorkerA = new WalletWorker(prisma.client, {} as never, environment.values);
+    await reconcileWorkerA.processOneProgramSyncJob(firstReconcile.jobId);
+    expect(
+      await prisma.client.programWalletSyncJob.findUniqueOrThrow({
+        where: { id: firstReconcile.jobId },
+        select: { processedCount: true, status: true },
+      }),
+    ).toEqual({ processedCount: 500, status: "PENDING" });
+
+    await prisma.client.programWalletSyncJob.update({
+      where: { id: firstReconcile.jobId },
+      data: { cursorCreatedAt: null, cursorPassInstanceId: null },
+    });
+    const reconcileWorkerB = new WalletWorker(prisma.client, {} as never, environment.values);
+    await reconcileWorkerB.processOneProgramSyncJob(firstReconcile.jobId);
+    expect(
+      await prisma.client.programWalletSyncJob.findUniqueOrThrow({
+        where: { id: firstReconcile.jobId },
+        select: { processedCount: true },
+      }),
+    ).toEqual({ processedCount: 500 });
+    await reconcileWorkerB.processOneProgramSyncJob(firstReconcile.jobId);
+    await reconcileWorkerB.processOneProgramSyncJob(firstReconcile.jobId);
+    expect(
+      await wallets.reconciliationStatus(
+        fixture.ownerId,
+        fixture.organizationId,
+        massProgram.id,
+        firstReconcile.jobId,
+      ),
+    ).toMatchObject({ status: "COMPLETED", processedCount: count + 1 });
+    expect(
+      await prisma.client.walletCommand.count({
+        where: {
+          commandType: "RECONCILE",
+          idempotencyKey: { contains: `program-sync:${firstReconcile.jobId}` },
+        },
+      }),
+    ).toBe(count + 1);
+    expect(
+      await prisma.client.auditLog.count({
+        where: {
+          action: "wallet.program_reconciliation_job_created",
+          targetId: firstReconcile.jobId,
+        },
+      }),
+    ).toBe(1);
+    // Keep the shared local test database free of a 1,000-command backlog so
+    // later worker/E2E suites are not starved by this scale fixture.
+    await prisma.client.walletCommand.deleteMany({
+      where: { membership: { programId: massProgram.id } },
+    });
+  }, 180_000);
 });

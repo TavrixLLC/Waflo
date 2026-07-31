@@ -1,0 +1,76 @@
+$ pnpm test:prepare && vitest run --config vitest.config.ts --project http tests/http/w4-staff-operations.test.ts tests/http/w4-operational-boundary.test.ts
+$ turbo run build --filter=./packages/*
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/database, @waflo/i18n, @waflo/loyalty-ledger, @waflo/loyalty-policy, @waflo/operational-analytics, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/staff-device-security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google
+   • Running build in 20 packages
+   • Remote caching disabled
+
+@waflo/contracts:build: cache miss, executing b3b1681223c73192
+@waflo/auth:build: cache miss, executing de766ed0e78b92bb
+@waflo/brand:build: cache miss, executing cbcd6deed8c973f8
+@waflo/security:build: cache miss, executing 1320de444fa521d8
+@waflo/loyalty-ledger:build: cache miss, executing c14a7e50eae9bdc2
+@waflo/customer-security:build: cache miss, executing 191cadda5ef2c8f2
+@waflo/loyalty-policy:build: cache miss, executing 559d769569b344c6
+@waflo/config:build: cache miss, executing 6109c3d8cd215713
+@waflo/operational-analytics:build: cache miss, executing 6be2155f19bdf190
+@waflo/stamp-engine:build: cache miss, executing a1fe4f2c0a15ff41
+@waflo/contracts:build: $ tsc -p tsconfig.json
+@waflo/auth:build: $ tsc -p tsconfig.json
+@waflo/brand:build: $ tsc -p tsconfig.json
+@waflo/security:build: $ tsc -p tsconfig.json
+@waflo/loyalty-ledger:build: $ tsc -p tsconfig.json
+@waflo/customer-security:build: $ tsc -p tsconfig.json
+@waflo/loyalty-policy:build: $ tsc -p tsconfig.json
+@waflo/config:build: $ tsc -p tsconfig.json
+@waflo/operational-analytics:build: $ tsc -p tsconfig.json
+@waflo/stamp-engine:build: $ tsc -p tsconfig.json
+@waflo/staff-device-security:build: cache miss, executing 8d14f5e99fb4614a
+@waflo/qr-core:build: cache miss, executing 0ee0a273b95f9610
+@waflo/staff-device-security:build: $ tsc -p tsconfig.json
+@waflo/wallet-core:build: cache miss, executing 7060b9c1e39bf08c
+@waflo/qr-core:build: $ tsc -p tsconfig.json
+@waflo/i18n:build: cache miss, executing ccff3010f14c522d
+@waflo/permissions:build: cache miss, executing 582553e5515decb4
+@waflo/billing:build: cache miss, executing 9e2deeec1358b80a
+@waflo/wallet-core:build: $ tsc -p tsconfig.json
+@waflo/i18n:build: $ tsc -p tsconfig.json
+@waflo/permissions:build: $ tsc -p tsconfig.json
+@waflo/billing:build: $ tsc -p tsconfig.json
+@waflo/database:build: cache miss, executing 2a009151fd59efee
+@waflo/database:build: $ pnpm generate && tsc -p tsconfig.json
+@waflo/wallet-apple:build: cache miss, executing fa7096368ada4a39
+@waflo/wallet-google:build: cache miss, executing d39c0883fbdf3b57
+@waflo/ui:build: cache miss, executing 94431e5b0a1e13ef
+@waflo/database:build: $ prisma generate
+@waflo/wallet-apple:build: $ tsc -p tsconfig.json
+@waflo/wallet-google:build: $ tsc -p tsconfig.json
+@waflo/ui:build: $ tsc -p tsconfig.json
+@waflo/database:build: ◇ injected env (3) from ..\..\.env // tip: ⌁ auth for agents [www.vestauth.com]
+@waflo/database:build: Loaded Prisma config from prisma.config.ts.
+@waflo/database:build: 
+@waflo/database:build: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:build: 
+@waflo/database:build: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 519ms
+@waflo/database:build: 
+
+ Tasks:    20 successful, 20 total
+Cached:    0 cached, 20 total
+  Time:    12.687s 
+
+
+ RUN  v4.1.10 C:/Users/3ma/Documents/WAFLO
+
+(node:21104) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:2780) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  2 passed (2)
+      Tests  8 passed (8)
+   Start at  17:14:12
+   Duration  6.24s (transform 861ms, setup 0ms, import 4.19s, tests 1.68s, environment 0ms)
+
+
+exit_code=0

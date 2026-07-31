@@ -56,6 +56,15 @@ export interface ProgramDraftInput {
   templateCode?: string | undefined;
   templateVersion?: number | undefined;
   requiredStampCount: number;
+  operationalTimezone: string;
+  maximumStampsPerOperation: number;
+  maximumStampsPerCustomerPerDay: number | null;
+  minimumPurchaseAmountMinor: number | null;
+  minimumPurchaseCurrency: string | null;
+  staffOwnReversalWindowSeconds: number;
+  managerReversalWindowMinutes: number;
+  managerOverrideAllowed: boolean;
+  resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION";
   translations: {
     en: ProgramTranslationInput;
     ar: ProgramTranslationInput;
@@ -174,10 +183,19 @@ export interface ProgramVersion {
   supersededAt?: string | null;
   abandonedAt?: string | null;
   validationFingerprint?: string | null;
+  operationalTimezone: string;
+  staffOwnReversalWindowSeconds: number;
+  managerReversalWindowMinutes: number;
+  managerOverrideAllowed: boolean;
   translations: ServerTranslation[];
   stampRule: {
     requiredStampCount: number;
     earningDescription: string;
+    maximumStampsPerOperation: number;
+    maximumStampsPerCustomerPerDay: number | null;
+    minimumPurchaseAmountMinor: number | null;
+    minimumPurchaseCurrency: string | null;
+    resetBehaviorAfterReward: string;
   } | null;
   rewards: ServerReward[];
   locations: Array<{
@@ -274,11 +292,23 @@ export interface TestSession {
   currentStampCount: number;
   cycleCount: number;
   version: {
-    stampRule: { requiredStampCount: number } | null;
+    operationalTimezone: string;
+    staffOwnReversalWindowSeconds: number;
+    managerReversalWindowMinutes: number;
+    managerOverrideAllowed: boolean;
+    stampRule: {
+      requiredStampCount: number;
+      maximumStampsPerOperation: number;
+      maximumStampsPerCustomerPerDay: number | null;
+      minimumPurchaseAmountMinor: number | null;
+      minimumPurchaseCurrency: string | null;
+      resetBehaviorAfterReward: string;
+    } | null;
     rewards: Array<{
       id: string;
       internalName: string;
       thresholdStampCount: number;
+      requiresManagerApproval: boolean;
       translations: Array<{ locale: "EN" | "AR"; name: string }>;
     }>;
   };
@@ -334,6 +364,15 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
     templateCode: version.baseTemplateCode ?? undefined,
     templateVersion: version.baseTemplateVersion ?? undefined,
     requiredStampCount: version.stampRule?.requiredStampCount ?? 8,
+    operationalTimezone: version.operationalTimezone ?? "Asia/Baghdad",
+    maximumStampsPerOperation: version.stampRule?.maximumStampsPerOperation ?? 5,
+    maximumStampsPerCustomerPerDay: version.stampRule?.maximumStampsPerCustomerPerDay ?? null,
+    minimumPurchaseAmountMinor: version.stampRule?.minimumPurchaseAmountMinor ?? null,
+    minimumPurchaseCurrency: version.stampRule?.minimumPurchaseCurrency ?? null,
+    staffOwnReversalWindowSeconds: version.staffOwnReversalWindowSeconds ?? 120,
+    managerReversalWindowMinutes: version.managerReversalWindowMinutes ?? 1440,
+    managerOverrideAllowed: version.managerOverrideAllowed ?? true,
+    resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
     earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
     locationIds: version.locations.map((item) => item.locationId),
     translations: {
@@ -455,6 +494,15 @@ export function createQuickDraft(
     templateCode: template.code,
     templateVersion: template.version,
     requiredStampCount: template.recommendedStampGoal,
+    operationalTimezone: "Asia/Baghdad",
+    maximumStampsPerOperation: 5,
+    maximumStampsPerCustomerPerDay: null,
+    minimumPurchaseAmountMinor: null,
+    minimumPurchaseCurrency: null,
+    staffOwnReversalWindowSeconds: 120,
+    managerReversalWindowMinutes: 1440,
+    managerOverrideAllowed: true,
+    resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
     earningDescription: template.earningDescription,
     locationIds: [],
     translations: structuredClone(template.copy),

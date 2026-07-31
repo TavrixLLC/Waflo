@@ -1,0 +1,146 @@
+{
+  "generatedAt": "2026-07-31T14:18:16.355Z",
+  "commands": [
+    {
+      "label": "frozen-install",
+      "command": "pnpm install --frozen-lockfile",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:12:55.277Z",
+      "finishedAt": "2026-07-31T14:12:55.667Z"
+    },
+    {
+      "label": "format-check",
+      "command": "pnpm format:check",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:12:55.668Z",
+      "finishedAt": "2026-07-31T14:12:56.249Z"
+    },
+    {
+      "label": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:12:56.250Z",
+      "finishedAt": "2026-07-31T14:12:56.913Z"
+    },
+    {
+      "label": "typecheck",
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:12:56.914Z",
+      "finishedAt": "2026-07-31T14:13:17.032Z"
+    },
+    {
+      "label": "w4-unit",
+      "command": "pnpm test:w4:unit",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:13:17.033Z",
+      "finishedAt": "2026-07-31T14:13:34.762Z"
+    },
+    {
+      "label": "w4-integration",
+      "command": "pnpm test:w4:integration",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:13:34.763Z",
+      "finishedAt": "2026-07-31T14:13:57.657Z"
+    },
+    {
+      "label": "w4-http",
+      "command": "pnpm test:w4:http",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:13:57.657Z",
+      "finishedAt": "2026-07-31T14:14:19.008Z"
+    },
+    {
+      "label": "w4-concurrency",
+      "command": "pnpm test:w4:concurrency",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:14:19.009Z",
+      "finishedAt": "2026-07-31T14:14:41.749Z"
+    },
+    {
+      "label": "w4-failure",
+      "command": "pnpm test:w4:failure",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:14:41.749Z",
+      "finishedAt": "2026-07-31T14:15:02.431Z"
+    },
+    {
+      "label": "w4-database",
+      "command": "pnpm test:w4:database",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:15:02.432Z",
+      "finishedAt": "2026-07-31T14:15:17.663Z"
+    },
+    {
+      "label": "w4-load",
+      "command": "pnpm test:w4:load",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:15:17.664Z",
+      "finishedAt": "2026-07-31T14:15:37.233Z"
+    },
+    {
+      "label": "full-vitest",
+      "command": "pnpm test",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:15:37.234Z",
+      "finishedAt": "2026-07-31T14:17:23.487Z"
+    },
+    {
+      "label": "prisma-validate",
+      "command": "pnpm db:validate",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:17:23.488Z",
+      "finishedAt": "2026-07-31T14:17:25.515Z"
+    },
+    {
+      "label": "migration-deploy",
+      "command": "pnpm db:migrate:deploy",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:17:25.516Z",
+      "finishedAt": "2026-07-31T14:17:27.555Z"
+    },
+    {
+      "label": "migration-status",
+      "command": "pnpm --filter @waflo/database exec prisma migrate status",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:17:27.555Z",
+      "finishedAt": "2026-07-31T14:17:29.200Z"
+    },
+    {
+      "label": "production-build",
+      "command": "pnpm build",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:17:29.200Z",
+      "finishedAt": "2026-07-31T14:18:02.685Z"
+    },
+    {
+      "label": "provider-artifacts",
+      "command": "pnpm w4:provider-artifacts",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:18:02.685Z",
+      "finishedAt": "2026-07-31T14:18:13.771Z"
+    },
+    {
+      "label": "operational-worker-once",
+      "command": "pnpm --filter @waflo/operational-worker exec node dist/main.js --once",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:18:13.772Z",
+      "finishedAt": "2026-07-31T14:18:15.280Z"
+    },
+    {
+      "label": "secret-scan",
+      "command": "pnpm w4:secret-scan",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:18:15.281Z",
+      "finishedAt": "2026-07-31T14:18:15.895Z"
+    },
+    {
+      "label": "no-flutter",
+      "command": "pnpm w4:no-flutter",
+      "exitCode": 0,
+      "startedAt": "2026-07-31T14:18:15.896Z",
+      "finishedAt": "2026-07-31T14:18:16.355Z"
+    }
+  ],
+  "failures": []
+}

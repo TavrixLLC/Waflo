@@ -1,0 +1,125 @@
+{
+  "generatedAt": "2026-07-30T21:41:06.248Z",
+  "commands": [
+    {
+      "label": "frozen-install",
+      "command": "pnpm install --frozen-lockfile",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:37:52.259Z",
+      "finishedAt": "2026-07-30T21:37:52.764Z"
+    },
+    {
+      "label": "format-check",
+      "command": "pnpm format:check",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:37:52.766Z",
+      "finishedAt": "2026-07-30T21:37:53.447Z"
+    },
+    {
+      "label": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:37:53.448Z",
+      "finishedAt": "2026-07-30T21:37:54.222Z"
+    },
+    {
+      "label": "typecheck",
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:37:54.224Z",
+      "finishedAt": "2026-07-30T21:37:54.841Z"
+    },
+    {
+      "label": "unit",
+      "command": "pnpm test:unit",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:37:54.842Z",
+      "finishedAt": "2026-07-30T21:38:06.757Z"
+    },
+    {
+      "label": "integration",
+      "command": "pnpm test:integration",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:38:06.758Z",
+      "finishedAt": "2026-07-30T21:38:20.621Z"
+    },
+    {
+      "label": "http",
+      "command": "pnpm test:http",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:38:20.622Z",
+      "finishedAt": "2026-07-30T21:38:38.890Z"
+    },
+    {
+      "label": "concurrency",
+      "command": "pnpm test:concurrency",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:38:38.891Z",
+      "finishedAt": "2026-07-30T21:39:22.287Z"
+    },
+    {
+      "label": "full-vitest",
+      "command": "pnpm test",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:39:22.288Z",
+      "finishedAt": "2026-07-30T21:40:43.004Z"
+    },
+    {
+      "label": "prisma-validate",
+      "command": "pnpm db:validate",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:40:43.005Z",
+      "finishedAt": "2026-07-30T21:40:45.363Z"
+    },
+    {
+      "label": "migration-deploy",
+      "command": "pnpm db:migrate:deploy",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:40:45.366Z",
+      "finishedAt": "2026-07-30T21:40:47.712Z"
+    },
+    {
+      "label": "migration-status",
+      "command": "pnpm --filter @waflo/database exec prisma migrate status",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:40:47.713Z",
+      "finishedAt": "2026-07-30T21:40:49.623Z"
+    },
+    {
+      "label": "production-build",
+      "command": "pnpm build",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:40:49.623Z",
+      "finishedAt": "2026-07-30T21:40:50.360Z"
+    },
+    {
+      "label": "provider-artifacts",
+      "command": "pnpm w4:provider-artifacts",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:40:50.362Z",
+      "finishedAt": "2026-07-30T21:41:02.805Z"
+    },
+    {
+      "label": "operational-worker-once",
+      "command": "pnpm --filter @waflo/operational-worker exec node dist/main.js --once",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:41:02.808Z",
+      "finishedAt": "2026-07-30T21:41:05.035Z"
+    },
+    {
+      "label": "secret-scan",
+      "command": "pnpm w4:secret-scan",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:41:05.036Z",
+      "finishedAt": "2026-07-30T21:41:05.740Z"
+    },
+    {
+      "label": "no-flutter",
+      "command": "pnpm w4:no-flutter",
+      "exitCode": 0,
+      "startedAt": "2026-07-30T21:41:05.741Z",
+      "finishedAt": "2026-07-30T21:41:06.247Z"
+    }
+  ],
+  "failures": []
+}

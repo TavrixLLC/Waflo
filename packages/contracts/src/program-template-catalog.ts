@@ -306,7 +306,7 @@ function reward(
     rewardType: "TEXT_REWARD",
     internalName: milestone ? "Milestone reward" : "Final reward",
     requiresManagerApproval: false,
-    validityDurationDays: 30,
+    validityDurationDays: milestone ? 30 : null,
     maximumRedemptionsPerEarned: 1,
     translations: {
       en: {

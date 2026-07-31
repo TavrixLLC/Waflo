@@ -1,0 +1,9 @@
+$ pnpm --filter @waflo/database validate
+$ prisma validate
+◇ injected env (3) from ..\..\.env // tip: ⌘ enable debugging { debug: true }
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma\schema.prisma.
+The schema at prisma\schema.prisma is valid 🚀
+
+exit_code=0

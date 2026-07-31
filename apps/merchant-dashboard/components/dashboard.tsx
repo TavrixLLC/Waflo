@@ -13,20 +13,23 @@ import {
 import {
   BarChart3,
   CreditCard,
+  Download,
   FileClock,
   Gauge,
   Gift,
   LockKeyhole,
   LogOut,
   MapPin,
+  MonitorSmartphone,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch, ApiClientError, resetCsrf } from "../lib/api-client";
+import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import {
   AuditScreen,
   BillingScreen,
@@ -38,6 +41,14 @@ import {
   TeamScreen,
 } from "./dashboard-screens";
 import { ProgramsScreen } from "./programs-screen";
+import {
+  CustomersOperationsScreen,
+  DevicesOperationsScreen,
+  ExportsOperationsScreen,
+  ManagerApprovalsScreen,
+  OperationalAnalyticsScreen,
+  RiskOperationsScreen,
+} from "./w4-operations-screens";
 
 export interface MembershipView {
   id: string;
@@ -65,9 +76,13 @@ const sectionIcons = {
   overview: Gauge,
   programs: Gift,
   customers: Users,
+  devices: MonitorSmartphone,
+  approvals: ShieldCheck,
+  risk: ShieldAlert,
   locations: MapPin,
   team: Users,
   analytics: BarChart3,
+  exports: Download,
   billing: CreditCard,
   audit: FileClock,
   settings: Settings,
@@ -79,9 +94,13 @@ const labels = {
     overview: "Overview",
     programs: "Programs",
     customers: "Customers",
+    devices: "Staff devices",
+    approvals: "Manager approvals",
+    risk: "Risk",
     locations: "Locations",
     team: "Team",
     analytics: "Analytics",
+    exports: "Exports",
     billing: "Billing",
     audit: "Audit",
     settings: "Settings",
@@ -89,6 +108,10 @@ const labels = {
     logout: "Log out",
   },
   ar: {
+    devices: "أجهزة الموظفين",
+    approvals: "موافقات المدير",
+    risk: "المخاطر",
+    exports: "التصدير",
     overview: "نظرة عامة",
     programs: "البرامج",
     customers: "العملاء",
@@ -200,11 +223,9 @@ export function DashboardApplication({
   const allSections = Object.keys(sectionIcons) as DashboardSection[];
   const accessibleSections =
     membership.role === "STAFF"
-      ? allSections.filter((item) =>
-          ["overview", "customers", "analytics", "security"].includes(item),
-        )
+      ? allSections.filter((item) => ["overview", "security"].includes(item))
       : membership.role === "MANAGER"
-        ? allSections.filter((item) => !["billing", "audit", "settings"].includes(item))
+        ? allSections.filter((item) => !["billing", "audit", "settings", "exports"].includes(item))
         : allSections;
   const navigation = accessibleSections.map((item) => {
     const Icon = sectionIcons[item];
@@ -314,6 +335,42 @@ function DashboardScreen({
       <ProgramsScreen locale={locale} membership={membership} />
     );
   }
+  if (section === "customers")
+    return membership.role === "STAFF" ? (
+      <MerchantOperationsDenied locale={locale} />
+    ) : (
+      <CustomersOperationsScreen locale={locale} membership={membership} />
+    );
+  if (section === "devices")
+    return membership.role === "STAFF" ? (
+      <MerchantOperationsDenied locale={locale} />
+    ) : (
+      <DevicesOperationsScreen locale={locale} membership={membership} />
+    );
+  if (section === "approvals")
+    return membership.role === "STAFF" ? (
+      <MerchantOperationsDenied locale={locale} />
+    ) : (
+      <ManagerApprovalsScreen locale={locale} membership={membership} />
+    );
+  if (section === "risk")
+    return membership.role === "STAFF" ? (
+      <MerchantOperationsDenied locale={locale} />
+    ) : (
+      <RiskOperationsScreen locale={locale} membership={membership} />
+    );
+  if (section === "analytics")
+    return membership.role === "STAFF" ? (
+      <MerchantOperationsDenied locale={locale} />
+    ) : (
+      <OperationalAnalyticsScreen locale={locale} membership={membership} />
+    );
+  if (section === "exports")
+    return membership.role !== "OWNER" ? (
+      <MerchantOperationsDenied locale={locale} />
+    ) : (
+      <ExportsOperationsScreen locale={locale} membership={membership} />
+    );
   if (section === "locations") return <LocationsScreen locale={locale} membership={membership} />;
   if (section === "team") return <TeamScreen locale={locale} membership={membership} />;
   if (section === "billing") return <BillingScreen locale={locale} membership={membership} />;
@@ -329,4 +386,17 @@ function DashboardScreen({
   }
   if (section === "security") return <SecurityScreen locale={locale} membership={membership} />;
   return <FutureScreen locale={locale} section={section} />;
+}
+
+function MerchantOperationsDenied({ locale }: { locale: Locale }) {
+  return (
+    <Alert
+      tone="danger"
+      title={
+        locale === "ar"
+          ? "يتطلب هذا القسم صلاحيات المدير أو المالك."
+          : "This section requires Manager or Owner permission."
+      }
+    />
+  );
 }

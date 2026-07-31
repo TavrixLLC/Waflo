@@ -20,11 +20,16 @@ export default async function JoinProgramPage({
     directHost.includes(".localhost") || directHost.includes(".lvh.me")
       ? directHost
       : (requestHeaders.get("x-forwarded-host") ?? directHost);
+  const localHost =
+    directHost.includes("localhost") ||
+    directHost.includes("127.0.0.1") ||
+    directHost.includes(".lvh.me");
+  const tenant = localHost ? query.tenant : undefined;
   const result = await fetchCustomerApi<{
     status: string;
     merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
     program?: PublicProgram;
-  }>(`/v1/public/programs/${encodeURIComponent(programSlug)}`, host, query.tenant);
+  }>(`/v1/public/programs/${encodeURIComponent(programSlug)}`, host, tenant);
   const locale = localeForRequest(
     query.lang,
     result.program?.policy.primaryCustomerLocale ?? result.merchant?.defaultLocale,
@@ -60,12 +65,12 @@ export default async function JoinProgramPage({
         } as React.CSSProperties
       }
     >
-      <CustomerHeader locale={locale} {...(query.tenant ? { tenant: query.tenant } : {})} />
+      <CustomerHeader locale={locale} {...(tenant ? { tenant } : {})} />
       <EnrollmentForm
         merchant={result.merchant}
         program={result.program}
         initialLocale={locale}
-        {...(query.tenant ? { tenant: query.tenant } : {})}
+        {...(tenant ? { tenant } : {})}
       />
     </main>
   );

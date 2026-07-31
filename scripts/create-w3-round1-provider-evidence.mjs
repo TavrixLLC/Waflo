@@ -11,7 +11,7 @@ import {
   mapGoogleLoyaltyObject,
 } from "../packages/wallet-google/dist/index.js";
 
-const directory = resolve("artifacts/handoff-w3-round-1/provider-artifacts");
+const directory = resolve("artifacts/handoff-w3-round-2/provider-artifacts");
 await mkdir(directory, { recursive: true });
 
 const beanFilled =

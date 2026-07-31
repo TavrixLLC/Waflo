@@ -1,0 +1,26 @@
+{
+  "name": "@waflo/operational-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1095.0",
+    "@waflo/config": "workspace:*",
+    "@waflo/customer-security": "workspace:*",
+    "@waflo/database": "workspace:*",
+    "@waflo/loyalty-ledger": "workspace:*",
+    "@waflo/loyalty-policy": "workspace:*",
+    "@waflo/operational-analytics": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  }
+}

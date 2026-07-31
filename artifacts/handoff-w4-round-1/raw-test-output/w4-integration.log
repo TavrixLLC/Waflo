@@ -1,0 +1,76 @@
+$ pnpm test:prepare && vitest run --config vitest.config.ts --project integration tests/integration/w4-loyalty-lifecycle.test.ts tests/integration/w4-operational-domain.test.ts tests/integration/w4-incremental-analytics.test.ts
+$ turbo run build --filter=./packages/*
+• turbo 2.10.7
+
+   • Packages in scope: @waflo/auth, @waflo/billing, @waflo/brand, @waflo/config, @waflo/contracts, @waflo/customer-security, @waflo/database, @waflo/i18n, @waflo/loyalty-ledger, @waflo/loyalty-policy, @waflo/operational-analytics, @waflo/permissions, @waflo/qr-core, @waflo/security, @waflo/staff-device-security, @waflo/stamp-engine, @waflo/ui, @waflo/wallet-apple, @waflo/wallet-core, @waflo/wallet-google
+   • Running build in 20 packages
+   • Remote caching disabled
+
+@waflo/contracts:build: cache miss, executing f3051e8c66144a54
+@waflo/loyalty-ledger:build: cache miss, executing bebf284c091c1594
+@waflo/stamp-engine:build: cache miss, executing f163ca124b6ab810
+@waflo/customer-security:build: cache miss, executing f2009b5960607e9b
+@waflo/qr-core:build: cache miss, executing ec7069d3175d16b2
+@waflo/loyalty-policy:build: cache miss, executing 5842e7a9a1971bfe
+@waflo/security:build: cache miss, executing 4656f9d39c461068
+@waflo/config:build: cache miss, executing e5a2e836dacdd672
+@waflo/brand:build: cache miss, executing fd16254778458d10
+@waflo/operational-analytics:build: cache miss, executing 951abaec031ec9dd
+@waflo/contracts:build: $ tsc -p tsconfig.json
+@waflo/loyalty-ledger:build: $ tsc -p tsconfig.json
+@waflo/stamp-engine:build: $ tsc -p tsconfig.json
+@waflo/customer-security:build: $ tsc -p tsconfig.json
+@waflo/qr-core:build: $ tsc -p tsconfig.json
+@waflo/loyalty-policy:build: $ tsc -p tsconfig.json
+@waflo/security:build: $ tsc -p tsconfig.json
+@waflo/config:build: $ tsc -p tsconfig.json
+@waflo/brand:build: $ tsc -p tsconfig.json
+@waflo/operational-analytics:build: $ tsc -p tsconfig.json
+@waflo/staff-device-security:build: cache miss, executing 78ed37e437140ede
+@waflo/auth:build: cache miss, executing c2db8bf6d8089c6d
+@waflo/wallet-core:build: cache miss, executing b5e81f2b0ac90db5
+@waflo/permissions:build: cache miss, executing 71599f6596607b4f
+@waflo/billing:build: cache miss, executing b646402f2c9a1f5c
+@waflo/i18n:build: cache miss, executing 678b4bd61e312751
+@waflo/staff-device-security:build: $ tsc -p tsconfig.json
+@waflo/auth:build: $ tsc -p tsconfig.json
+@waflo/wallet-core:build: $ tsc -p tsconfig.json
+@waflo/permissions:build: $ tsc -p tsconfig.json
+@waflo/billing:build: $ tsc -p tsconfig.json
+@waflo/i18n:build: $ tsc -p tsconfig.json
+@waflo/wallet-google:build: cache miss, executing 66aa849c338316c5
+@waflo/wallet-apple:build: cache miss, executing 0f3160e43b8c4ba6
+@waflo/database:build: cache miss, executing cad296fae386be72
+@waflo/wallet-google:build: $ tsc -p tsconfig.json
+@waflo/wallet-apple:build: $ tsc -p tsconfig.json
+@waflo/database:build: $ pnpm generate && tsc -p tsconfig.json
+@waflo/ui:build: cache miss, executing ee382c96b730a8b4
+@waflo/database:build: $ prisma generate
+@waflo/ui:build: $ tsc -p tsconfig.json
+@waflo/database:build: ◇ injected env (3) from ..\..\.env // tip: ◈ encrypted .env [www.dotenvx.com]
+@waflo/database:build: Loaded Prisma config from prisma.config.ts.
+@waflo/database:build: 
+@waflo/database:build: Prisma schema loaded from prisma\schema.prisma.
+@waflo/database:build: 
+@waflo/database:build: ✔ Generated Prisma Client (7.9.0) to .\src\generated\prisma in 482ms
+@waflo/database:build: 
+
+ Tasks:    20 successful, 20 total
+Cached:    0 cached, 20 total
+  Time:    12.781s 
+
+
+ RUN  v4.1.10 C:/Users/3ma/Documents/WAFLO
+
+(node:13680) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:22964) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  3 passed (3)
+      Tests  3 passed (3)
+   Start at  17:13:49
+   Duration  7.60s (transform 1.00s, setup 0ms, import 4.49s, tests 2.55s, environment 0ms)
+
+
+exit_code=0

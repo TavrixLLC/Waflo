@@ -55,6 +55,13 @@ interface WalletHealth {
   externallyCertified?: boolean;
 }
 
+interface WalletSyncJob {
+  jobId: string;
+  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "DEAD_LETTER";
+  processedCount: number;
+  safeErrorCode: string | null;
+}
+
 export function ProgramEnrollmentSettings({
   organizationId,
   programId,
@@ -70,6 +77,7 @@ export function ProgramEnrollmentSettings({
   const [policy, setPolicy] = useState<EnrollmentPolicy | null>(null);
   const [slug, setSlug] = useState("");
   const [health, setHealth] = useState<WalletHealth[]>([]);
+  const [walletSyncJobId, setWalletSyncJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState<"policy" | "slug" | "wallet" | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -92,6 +100,50 @@ export function ProgramEnrollmentSettings({
       setError(caught instanceof Error ? caught.message : "Unable to load enrollment settings."),
     );
   }, [load]);
+
+  useEffect(() => {
+    if (!walletSyncJobId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const job = await apiFetch<WalletSyncJob>(
+          `/v1/organizations/${organizationId}/programs/${programId}/wallet-sync/${walletSyncJobId}`,
+        );
+        if (!active) return;
+        if (job.status === "COMPLETED") {
+          setMessage(
+            ar
+              ? `اكتملت مزامنة ${job.processedCount} بطاقة.`
+              : `Wallet reconciliation completed for ${job.processedCount} passes.`,
+          );
+          setWalletSyncJobId(null);
+          await load();
+          return;
+        }
+        if (job.status === "DEAD_LETTER") {
+          setError(job.safeErrorCode ?? "Wallet reconciliation could not be completed.");
+          setWalletSyncJobId(null);
+          return;
+        }
+        setMessage(
+          ar
+            ? `مزامنة Wallet: ${job.status} · تمت معالجة ${job.processedCount}`
+            : `Wallet reconciliation ${job.status.toLocaleLowerCase("en-US")} · ${job.processedCount} processed.`,
+        );
+        timer = setTimeout(poll, 2_000);
+      } catch (caught) {
+        if (!active) return;
+        setError(caught instanceof Error ? caught.message : "Unable to read Wallet sync progress.");
+        setWalletSyncJobId(null);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [ar, load, organizationId, programId, walletSyncJobId]);
 
   async function savePolicy() {
     if (!settings?.editableVersion || !policy) return;
@@ -136,14 +188,15 @@ export function ProgramEnrollmentSettings({
     setBusy("wallet");
     setError("");
     try {
-      const result = await apiFetch<{ queued: number }>(
+      const result = await apiFetch<WalletSyncJob>(
         `/v1/organizations/${organizationId}/programs/${programId}/wallet/reconcile`,
         { method: "POST" },
       );
+      setWalletSyncJobId(result.jobId);
       setMessage(
         ar
-          ? `تمت جدولة ${result.queued} من مهام المزامنة الآمنة.`
-          : `${result.queued} safe reconciliation commands queued.`,
+          ? `تم إنشاء مهمة مزامنة Wallet بحالة ${result.status}.`
+          : `Wallet reconciliation job ${result.status.toLocaleLowerCase("en-US")}.`,
       );
       await load();
     } catch (caught) {

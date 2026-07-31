@@ -1,0 +1,6 @@
+$ node scripts/no-flutter-scan.mjs
+No-Flutter scan passed.
+Inspected source files: 598
+Flutter/Dart artifacts: 0
+
+exit_code=0
