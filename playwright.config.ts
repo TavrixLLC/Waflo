@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 
 const rateLimitNamespace = `playwright-${randomUUID()}`;
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: local browser verification may use an installed Chrome when the bundled headless shell is unavailable.
+const localChrome = process.env.PLAYWRIGHT_USE_SYSTEM_CHROME === "1" ? { channel: "chrome" } : {};
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -21,43 +23,44 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testMatch: /(?:^|[/\\])platform\.spec\.ts$/,
-      use: { ...devices["Desktop Chrome"] },
+      testMatch:
+        /(?:^|[/\\])(?:platform|merchant-loyalty-cards|merchant-template-gallery)\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "accessibility",
       testMatch: /(?:^|[/\\])accessibility\.spec\.ts$/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "w3",
       testMatch: /w3-platform\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "w3-accessibility",
       testMatch: /w3-accessibility\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "w3-evidence",
       testMatch: /w3-evidence-extra\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "w3-provider-disabled",
       testMatch: /w3-provider-disabled\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "w4",
       testMatch: /w4-platform\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "w4-accessibility",
       testMatch: /w4-accessibility\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...localChrome },
     },
   ],
   webServer: process.env.WAFLO_MANAGED_SERVERS

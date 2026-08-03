@@ -1,6 +1,6 @@
-import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { expect, type Page, type APIRequestContext, test } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 
 const screenshots = "artifacts/handoff-w2-round-5/screenshots";
 const runId = randomUUID().slice(0, 8);
@@ -108,8 +108,28 @@ async function login(page: Page, email: string, password: string): Promise<void>
   await expect(page).toHaveURL(/\/en\/(?:dashboard(?:\/|$)|onboarding\/)/);
 }
 
+async function chooseGalleryTemplate(page: Page, templateName: string): Promise<void> {
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Choose a starting design" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: `Preview: ${templateName}, all templates` }).click();
+  await page
+    .getByRole("dialog", { name: templateName })
+    .getByRole("button", {
+      name: templateName === "Start from scratch" ? "Start from scratch" : "Use this template",
+    })
+    .click();
+}
+
 async function finishQuickWizard(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name: "Continue" }).click();
+  if (
+    (await page.getByRole("heading", { level: 1, name: "Choose a starting design" }).count()) > 0
+  ) {
+    await chooseGalleryTemplate(page, "Start from scratch");
+  }
+  if ((await page.getByText("Editing mode", { exact: true }).count()) > 0) {
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
   await page.getByPlaceholder("Weekend rewards").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.locator('input[name="en-program-name"]').fill(name);
@@ -214,12 +234,10 @@ test.describe
       await login(page, ownerEmail, initialPassword);
       await page.goto("/en/dashboard/programs");
       await expect(
-        page.getByRole("main").getByRole("heading", { name: "Loyalty programs" }),
+        page.getByRole("main").getByRole("heading", { name: "Loyalty cards" }),
       ).toBeVisible();
-      await page.getByRole("button", { name: "Create program" }).click();
-
-      await page.locator(".template-card").filter({ hasText: "Cookies" }).click();
-      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("button", { name: "Create loyalty card" }).click();
+      await chooseGalleryTemplate(page, "Cookies & bakery");
       await page.getByPlaceholder("Weekend rewards").fill("Browser Studio Rewards");
       await page.getByRole("button", { name: "Continue" }).click();
 
@@ -289,7 +307,7 @@ test.describe
       const arabicProgramCard = page
         .locator(".program-list__card")
         .filter({ hasText: "Browser Studio Rewards Updated" });
-      await arabicProgramCard.locator("button").last().click();
+      await arabicProgramCard.getByRole("button", { name: /فتح البطاقة/ }).click();
       await expect(page.locator(".studio-shell")).toHaveAttribute("dir", "rtl");
       await page.locator(".studio-preview-panel input[type=range]").fill("8");
       await expect(page.locator('img[alt="CUSTOMER_WEB preview"]')).toBeVisible();
@@ -299,7 +317,7 @@ test.describe
       const englishProgramCard = page
         .locator(".program-list__card")
         .filter({ hasText: "Browser Studio Rewards Updated" });
-      await englishProgramCard.getByRole("button", { name: "Open Studio" }).click();
+      await englishProgramCard.getByRole("button", { name: "Open card" }).click();
 
       await page
         .locator(".studio-section-nav")
@@ -337,7 +355,7 @@ test.describe
       await screenshot(page, "48-r4-after-redemption-all-empty");
       await screenshot(page, "25-loyalty-studio-test-mode");
 
-      await page.getByRole("button", { name: "Publish program" }).click();
+      await page.getByRole("button", { name: "Publish card" }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
       await expect(page.getByText("The published version remains live")).toBeVisible();
       await screenshot(page, "26-loyalty-studio-published");
@@ -352,7 +370,7 @@ test.describe
       const programCard = page
         .locator(".program-list__card")
         .filter({ hasText: "Browser Studio Rewards Updated" });
-      await programCard.getByRole("button", { name: "Open Studio" }).click();
+      await programCard.getByRole("button", { name: "Open card" }).click();
       await expect(page.getByText("The published version remains live")).toBeVisible();
 
       const billingResponse = await page.request.get(
@@ -372,7 +390,7 @@ test.describe
       expect(billingEnvelope.data.billingProfile.trialStart).toBeTruthy();
       expect(billingEnvelope.data.billingProfile.trialTriggeringProgramId).toBeTruthy();
 
-      await page.getByRole("button", { name: "Create draft from published" }).click();
+      await page.getByRole("button", { name: "Create draft from live card" }).click();
       await expect(page.getByText(/LOYALTY STUDIO.*v2/)).toBeVisible();
       await expect(
         page.getByText("Unpublished changes are isolated from the live version"),
@@ -383,7 +401,7 @@ test.describe
       const otherCard = otherPage
         .locator(".program-list__card")
         .filter({ hasText: "Browser Studio Rewards Updated" });
-      await otherCard.getByRole("button", { name: "Open Studio" }).click();
+      await otherCard.getByRole("button", { name: "Open card" }).click();
       await expect(otherPage.getByText(/LOYALTY STUDIO.*v2/)).toBeVisible();
 
       const otherSave = otherPage.waitForResponse(
@@ -449,21 +467,21 @@ test.describe
       }
       await page.getByRole("button", { name: "Synthetic redeem" }).click();
       await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Pause" }).click();
+      await page.getByRole("button", { name: "Pause card" }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
-      await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Resume card" })).toBeVisible();
       await expect(
         page.getByText("Unpublished changes are isolated from the paused published version."),
       ).toBeVisible();
-      await page.getByRole("button", { name: "Publish program" }).click();
+      await page.getByRole("button", { name: "Publish card" }).click();
       await expect(
         page.getByText(
-          "The new version will be published, but the program will remain paused. Use Resume separately when you are ready to make it live.",
+          "The new version will be published, but the card will remain paused. Use Resume separately when you are ready to make it live.",
         ),
       ).toBeVisible();
       await page.getByRole("button", { name: "Confirm" }).click();
       await expect(page.getByText("The published version remains paused")).toBeVisible();
-      await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Resume card" })).toBeVisible();
       await screenshot(page, "61-r5-paused-replacement-remains-paused");
 
       const history = page.locator(".studio-version-history");
@@ -479,20 +497,20 @@ test.describe
 
       await screenshot(page, "29-loyalty-studio-paused");
 
-      await page.getByRole("button", { name: "Resume" }).click();
+      await page.getByRole("button", { name: "Resume card" }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
-      await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Pause card" })).toBeVisible();
       await expect(page.getByText("The published version remains live")).toBeVisible();
       await screenshot(page, "62-r5-explicit-resume-after-paused-replacement");
 
-      await page.getByRole("button", { name: "Archive" }).click();
+      await page.getByRole("button", { name: "Archive card" }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
-      await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Restore card", exact: true })).toBeVisible();
       await screenshot(page, "30-loyalty-studio-archived");
 
-      await page.getByRole("button", { name: "Restore", exact: true }).click();
+      await page.getByRole("button", { name: "Restore card", exact: true }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
-      await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Pause card" })).toBeVisible();
       await screenshot(page, "31-loyalty-studio-restored");
     });
 
@@ -506,13 +524,12 @@ test.describe
       const growthOrganizationId = await switcher.locator("option").nth(1).getAttribute("value");
       expect(growthOrganizationId).toBeTruthy();
       await switcher.selectOption(growthOrganizationId as string);
-      await page.goto("/en/dashboard/programs");
-      await page.getByRole("button", { name: "Create program" }).click();
+      await page.goto("/en/dashboard/programs?create=quick");
 
       const cookies = page.locator(".template-card").filter({ hasText: "Cookies & bakery" });
       await cookies.click();
       await expect(cookies).toHaveClass(/template-card--selected/);
-      await expect(cookies.locator("img")).toHaveCount(3);
+      await expect(cookies.locator("img")).toHaveCount(2);
       await expect(cookies.getByAltText("Cookies & bakery filled stamp")).toBeVisible();
       await expect(cookies.getByAltText("Cookies & bakery empty stamp")).toBeVisible();
       await screenshot(page, "33-w2r3-cookies-colored-outline");
@@ -545,7 +562,7 @@ test.describe
       await carWash.click();
       await expect(carWash).toHaveClass(/template-card--selected/);
       await expect(carWash.getByAltText("Car wash filled stamp")).toBeVisible();
-      await expect(carWash.getByAltText("Car wash milestone artwork")).toBeVisible();
+      await expect(carWash.getByAltText("Car wash milestone artwork")).toHaveCount(0);
       await screenshot(page, "36-w2r3-car-wash-car-water");
       await page.getByRole("button", { name: "Continue" }).click();
       await expect(page.getByText("6 stamps", { exact: true })).toBeVisible();
@@ -654,10 +671,10 @@ test.describe
         await database.$disconnect();
       }
       await page.goto("/en/dashboard/programs");
-      await expect(page.getByRole("button", { name: "Load more programs" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Load more loyalty cards" })).toBeVisible();
       const firstPageCount = await page.locator(".program-list__card").count();
       expect(firstPageCount).toBe(20);
-      await page.getByRole("button", { name: "Load more programs" }).click();
+      await page.getByRole("button", { name: "Load more loyalty cards" }).click();
       await expect.poll(() => page.locator(".program-list__card").count()).toBeGreaterThan(20);
       await screenshot(page, "40-w2r3-program-pagination-loaded");
     });
@@ -839,9 +856,9 @@ test.describe
       await expect(roleSelect).toHaveValue("MANAGER");
       await staffPage.goto("/en/dashboard/programs");
       await expect(
-        staffPage.getByRole("main").getByRole("heading", { name: "Loyalty programs" }),
+        staffPage.getByRole("main").getByRole("heading", { name: "Loyalty cards" }),
       ).toBeVisible();
-      await expect(staffPage.getByRole("button", { name: "Create program" })).toBeVisible();
+      await expect(staffPage.getByRole("button", { name: "Create loyalty card" })).toBeVisible();
       await staffContext.close();
     });
 
@@ -986,12 +1003,12 @@ test.describe
           .poll(
             async () =>
               (await page.locator(".program-list__card").count()) +
-              (await page.getByText("Create your first stamp program").count()),
+              (await page.getByText("Create your first loyalty card").count()),
           )
           .toBeGreaterThan(0);
 
         if ((await page.locator(".program-list__card").count()) === 0) {
-          await page.getByRole("button", { name: "Create program" }).click();
+          await page.getByRole("button", { name: "Create loyalty card" }).click();
           const proMode = page.getByRole("radio", { name: /Pro Mode/ });
           await proMode.click();
           await expect(proMode).not.toBeChecked();
@@ -1001,10 +1018,10 @@ test.describe
           await expect(
             page.locator(".studio-toolbar").getByRole("heading", { level: 1 }),
           ).toContainText("Starter first");
-          await page.getByRole("button", { name: "Programs" }).click();
+          await page.getByRole("button", { name: "Loyalty Cards" }).click();
         }
 
-        await page.getByRole("button", { name: "Create program" }).click();
+        await page.getByRole("button", { name: "Create loyalty card" }).click();
         await finishQuickWizard(page, `Starter blocked ${runId}`);
         await expect(
           page.getByText("Your plan has reached its active program limit."),
@@ -1056,47 +1073,47 @@ test.describe
       await page.getByRole("button", { name: "Continue to dashboard" }).click();
       await page.goto("/en/dashboard/programs");
 
-      await page.getByRole("button", { name: "Create program" }).click();
+      await page.getByRole("button", { name: "Create loyalty card" }).click();
       await finishQuickWizard(page, firstProgramName);
-      await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Archive card" })).toBeVisible();
       await page
         .locator(".studio-section-nav")
         .getByRole("button", { name: /Version history/ })
         .click();
       await expect(page.getByText("Initial draft is preserved")).toBeVisible();
       await screenshot(page, "52-r4-initial-unpublished-archive-action");
-      await page.getByRole("button", { name: "Archive" }).click();
+      await page.getByRole("button", { name: "Archive card" }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
-      await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Programs" }).click();
-      await expect(page.getByRole("button", { name: "Create program" })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Restore card", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Loyalty Cards" }).click();
+      await expect(page.getByRole("button", { name: "Create loyalty card" })).toBeEnabled();
       await screenshot(page, "53-r4-starter-slot-released-after-archive");
 
-      await page.getByRole("button", { name: "Create program" }).click();
+      await page.getByRole("button", { name: "Create loyalty card" }).click();
       await finishQuickWizard(page, secondProgramName);
-      await page.getByRole("button", { name: "Programs" }).click();
+      await page.getByRole("button", { name: "Loyalty Cards" }).click();
       const archivedCard = page
         .locator(".program-list__card")
         .filter({ hasText: firstProgramName });
-      await archivedCard.getByRole("button", { name: "Open Studio" }).click();
+      await archivedCard.getByRole("button", { name: "Open card" }).click();
       await expect(page.getByText("Restore required before publishing")).toBeVisible();
       await expect(
         page.getByText(
-          "Restore this program before publishing. Its preserved draft will remain available.",
+          "Restore this card before publishing. Its preserved draft will remain available.",
         ),
       ).toBeVisible();
-      await expect(page.getByRole("button", { name: "Publish program" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Publish card" })).toBeDisabled();
       await screenshot(page, "59-r5-archived-publication-blocked-restore-guidance");
-      await page.getByRole("button", { name: "Restore", exact: true }).click();
+      await page.getByRole("button", { name: "Restore card", exact: true }).click();
       await page.getByRole("button", { name: "Confirm" }).click();
       await expect(
         page.getByText("Your plan cannot restore another active program."),
       ).toBeVisible();
       await screenshot(page, "54-r4-restore-blocked-at-program-limit");
       await page.getByRole("button", { name: "Cancel" }).click();
-      await page.getByRole("button", { name: "Programs" }).click();
+      await page.getByRole("button", { name: "Loyalty Cards" }).click();
       const activeCard = page.locator(".program-list__card").filter({ hasText: secondProgramName });
-      await activeCard.getByRole("button", { name: "Open Studio" }).click();
+      await activeCard.getByRole("button", { name: "Open card" }).click();
 
       await page
         .locator(".studio-section-nav")
@@ -1243,36 +1260,36 @@ test.describe
           where: { id: storedProgram.id },
           data: { status: "SUSPENDED" },
         });
-        await page.getByRole("button", { name: "Programs" }).click();
+        await page.getByRole("button", { name: "Loyalty Cards" }).click();
         await page
           .locator(".program-list__card")
           .filter({ hasText: secondProgramName })
-          .getByRole("button", { name: "Open Studio" })
+          .getByRole("button", { name: "Open card" })
           .click();
         await expect(page.getByText("Publishing is unavailable")).toBeVisible();
         await expect(
           page.getByText(
-            "This program cannot be published in its current state. Contact support for assistance.",
+            "This card cannot be published in its current state. Contact support for assistance.",
           ),
         ).toBeVisible();
-        await expect(page.getByRole("button", { name: "Publish program" })).toBeDisabled();
+        await expect(page.getByRole("button", { name: "Publish card" })).toBeDisabled();
         await screenshot(page, "60-r5-suspended-publication-blocked");
         await database.loyaltyProgram.update({
           where: { id: storedProgram.id },
           data: { status: "TEST" },
         });
-        await page.getByRole("button", { name: "Programs" }).click();
+        await page.getByRole("button", { name: "Loyalty Cards" }).click();
         await page
           .locator(".program-list__card")
           .filter({ hasText: secondProgramName })
-          .getByRole("button", { name: "Open Studio" })
+          .getByRole("button", { name: "Open card" })
           .click();
 
         await database.location.update({
           where: { id: locationId },
           data: { status: "ARCHIVED" },
         });
-        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Publish card" }).click();
         await page.getByRole("button", { name: "Confirm" }).click();
         await expect(
           page.getByText(
@@ -1290,7 +1307,7 @@ test.describe
           where: { id: publicationAssetId },
           data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
         });
-        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Publish card" }).click();
         await page.getByRole("button", { name: "Confirm" }).click();
         await expect(page.getByText(/asset is no longer publication-ready/)).toBeVisible();
         await page.getByRole("button", { name: "Cancel" }).click();
@@ -1324,7 +1341,7 @@ test.describe
           where: { organizationId: round4OrganizationId as string },
           data: { selectedPlan: "STARTER" },
         });
-        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Publish card" }).click();
         await page.getByRole("button", { name: "Confirm" }).click();
         await expect(
           page.getByText("The draft uses features that are unavailable on the current plan."),
@@ -1340,7 +1357,7 @@ test.describe
           where: { versionId: draft?.id as string },
           data: { layoutType: "GRID" },
         });
-        await page.getByRole("button", { name: "Publish program" }).click();
+        await page.getByRole("button", { name: "Publish card" }).click();
         await page.getByRole("button", { name: "Confirm" }).click();
         await expect(page.getByText("The published version remains live")).toBeVisible();
         await screenshot(page, "58-r4-final-valid-publication");

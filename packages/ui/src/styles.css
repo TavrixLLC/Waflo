@@ -513,9 +513,10 @@ select {
   backdrop-filter: blur(12px);
 }
 
-.wf-topnav h1 {
+.wf-topnav__title {
   margin: 0;
   font-size: 1.1rem;
+  font-weight: 700;
 }
 
 .wf-topnav__actions {

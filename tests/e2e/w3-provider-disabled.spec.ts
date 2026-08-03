@@ -10,7 +10,7 @@ test("shows disabled Wallet providers without exposing credentials", async ({ pa
   await switcher.selectOption({ label: "Today Coffee" });
   await page.goto("http://localhost:3001/en/dashboard/programs");
   const card = page.locator(".program-list__card").filter({ hasText: "W3 Browser Circle" }).first();
-  await card.getByRole("button", { name: "Open Studio" }).click();
+  await card.getByRole("button", { name: "Open card" }).click();
   await expect(page.getByText(/DISABLED/).first()).toBeVisible();
   await mkdir("artifacts/handoff-w3-round-2/screenshots", { recursive: true });
   await page.screenshot({

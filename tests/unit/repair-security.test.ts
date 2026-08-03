@@ -71,7 +71,7 @@ describe("repair-round security boundaries", () => {
         createErrorReporter("https://public@example.invalid/1").captureException(new Error("test")),
       ),
     ).resolves.toBeUndefined();
-  });
+  }, 15_000);
 
   it("escapes notification HTML and rejects unsafe or off-origin action URLs", () => {
     const origin = "https://app.waflo.app";

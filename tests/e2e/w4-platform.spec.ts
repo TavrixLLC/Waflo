@@ -42,9 +42,9 @@ async function searchCustomer(page: Page, query: string, name: string) {
 
 async function openProgramTestMode(page: Page, programName: string) {
   const program = page.locator(".program-list__card").filter({ hasText: programName });
-  await program.getByRole("button", { name: "Open Studio" }).click();
+  await program.getByRole("button", { name: "Open card" }).click();
   const testMode = page.locator(".studio-section-nav").getByRole("button", { name: /Test Mode/ });
-  const createDraft = page.getByRole("button", { name: "Create draft from published" });
+  const createDraft = page.getByRole("button", { name: "Create draft from live card" });
   await expect
     .poll(async () => (await createDraft.isVisible()) || (await testMode.isVisible()))
     .toBe(true);
@@ -354,7 +354,7 @@ test.describe
       ).toBeVisible();
       await capture(page, "37-daily-cap-blocked");
 
-      await page.getByRole("button", { name: "Programs", exact: true }).first().click();
+      await page.getByRole("button", { name: "Loyalty Cards", exact: true }).first().click();
       await openProgramTestMode(page, "Qualifying Purchase");
       await page.getByRole("button", { name: "Start Test Mode" }).click();
       await page.getByRole("button", { name: "+1 stamp" }).click();

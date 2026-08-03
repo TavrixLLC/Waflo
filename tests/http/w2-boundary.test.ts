@@ -422,25 +422,70 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
 
     const templates = await app.inject({
       method: "GET",
-      url: `${programsUrl}/templates`,
+      url: `${programsUrl}/templates?locale=AR`,
       headers: getHeaders(manager),
     });
     expect(templates.statusCode).toBe(200);
     const templateItems =
-      data<Array<{ code: string; version: number; artwork: object }>>(templates);
-    expect(new Set(templateItems.map((template) => template.code))).toEqual(
-      new Set([
-        "COFFEE",
-        "COOKIES",
-        "CAR_WASH",
-        "SALON",
-        "BARBERSHOP",
-        "RESTAURANT",
-        "RETAIL",
-        "GENERAL_VISITS",
-      ]),
-    );
-    expect(templateItems.every((template) => template.version >= 2)).toBe(true);
+      data<
+        Array<{
+          code: string;
+          version: number;
+          artwork: object;
+          galleryThumbnail: { profile: string; locale: string; svg: string };
+          blankGalleryThumbnail?: { presentation: string; svg: string };
+          galleryPreviews?: unknown;
+        }>
+      >(templates);
+    expect(templateItems).toHaveLength(32);
+    expect(new Set(templateItems.map((template) => template.code)).size).toBe(32);
+    expect(templateItems.every((template) => template.version >= 1)).toBe(true);
+    expect(
+      templateItems.every(
+        (template) =>
+          template.galleryThumbnail.profile === "CUSTOMER_WEB" &&
+          template.galleryThumbnail.locale === "AR" &&
+          template.galleryThumbnail.svg.startsWith("<svg") &&
+          template.galleryPreviews === undefined,
+      ),
+    ).toBe(true);
+    expect(
+      templateItems.find((template) => template.code === "GENERAL_VISITS")?.blankGalleryThumbnail,
+    ).toMatchObject({ presentation: "BLANK" });
+
+    const coffeeTemplate = templateItems.find((template) => template.code === "COFFEE");
+    if (!coffeeTemplate) throw new Error("Coffee template is required.");
+    const detailedPreviews = await app.inject({
+      method: "GET",
+      url: `${programsUrl}/templates/COFFEE/previews?version=${coffeeTemplate.version}&locale=AR&presentation=TEMPLATE`,
+      headers: getHeaders(manager),
+    });
+    expect(detailedPreviews.statusCode).toBe(200);
+    expect(
+      Object.keys(data<Record<string, { locale: string; svg: string }>>(detailedPreviews)).sort(),
+    ).toEqual(["APPLE_WALLET", "CUSTOMER_WEB", "GOOGLE_WALLET"]);
+    expect(
+      Object.values(data<Record<string, { locale: string; svg: string }>>(detailedPreviews)).every(
+        (preview) => preview.locale === "AR" && preview.svg.startsWith("<svg"),
+      ),
+    ).toBe(true);
+
+    const blankPreview = await app.inject({
+      method: "GET",
+      url: `${programsUrl}/templates/GENERAL_VISITS/previews?locale=EN&presentation=BLANK`,
+      headers: getHeaders(manager),
+    });
+    expect(blankPreview.statusCode).toBe(200);
+    expect(blankPreview.body).toContain("Your loyalty card");
+    expect(blankPreview.body).not.toContain("General visits rewards");
+
+    const invalidTemplateLocale = await app.inject({
+      method: "GET",
+      url: `${programsUrl}/templates?locale=fr`,
+      headers: getHeaders(manager),
+    });
+    expect(invalidTemplateLocale.statusCode).toBe(400);
+    expect(invalidTemplateLocale.json().error.code).toBe("TEMPLATE_LOCALE_INVALID");
 
     const csrfState = await csrf();
     const managerCreate = await app.inject({

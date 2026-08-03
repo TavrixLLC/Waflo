@@ -97,8 +97,12 @@ test("authenticated English and Arabic dashboard screens and dialogs are accessi
   await expectNoCriticalViolations(page);
 
   await page.goto("http://localhost:3001/en/dashboard/programs");
-  await page.getByRole("button", { name: "Create program" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Create loyalty card" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Choose a starting design" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Preview: Start from scratch, all templates" }).click();
+  await expect(page.getByRole("dialog", { name: "Start from scratch" })).toBeVisible();
   await expectNoCriticalViolations(page);
 
   await page.goto("http://localhost:3001/ar/dashboard/programs");
@@ -117,8 +121,7 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
   const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   await organizationSwitcher.selectOption(growthOrganizationId);
   await expect(organizationSwitcher).toHaveValue(growthOrganizationId);
-  await page.goto("http://localhost:3001/en/dashboard/programs");
-  await page.getByRole("button", { name: "Create program" }).click();
+  await page.goto("http://localhost:3001/en/dashboard/programs?create=quick");
   await page.getByRole("radio", { name: /Pro Mode/ }).check();
   await expectNoCriticalViolations(page);
   await expectKeyboardFocus(page);
@@ -269,8 +272,8 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
   await page.locator('button:has-text("Synthetic redeem"):not([disabled])').first().click();
   await expect(page.getByText("COMPLETED", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Publish program" }).click();
-  await expect(page.getByRole("dialog").filter({ hasText: "Publish program" })).toBeVisible();
+  await page.getByRole("button", { name: "Publish card" }).click();
+  await expect(page.getByRole("dialog").filter({ hasText: "Publish card" })).toBeVisible();
   await expectNoCriticalViolations(page);
   await expectKeyboardFocus(page);
   await page.getByRole("button", { name: "Cancel" }).click();
@@ -296,11 +299,11 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
     where: { id: storedProgram.id },
     data: { status: "ARCHIVED", archivedAt: new Date() },
   });
-  await page.getByRole("button", { name: "Programs" }).click();
+  await page.getByRole("button", { name: "Loyalty Cards" }).click();
   await page
     .locator(".program-list__card")
     .filter({ hasText: programName })
-    .getByRole("button", { name: "Open Studio" })
+    .getByRole("button", { name: "Open card" })
     .click();
   const archivedGuidance = page
     .locator(".studio-publication-state-guidance")
@@ -308,7 +311,7 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
   await expect(archivedGuidance).toBeVisible();
   await archivedGuidance.locator("summary").focus();
   await expect(archivedGuidance.locator("summary")).toBeFocused();
-  await expect(page.getByRole("button", { name: "Publish program" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Publish card" })).toBeDisabled();
   await expectNoCriticalViolations(page);
 
   await database.loyaltyProgram.update({
@@ -318,7 +321,7 @@ test("Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts,
   await database.$disconnect();
   await page.goto("http://localhost:3001/ar/dashboard/programs");
   const programCard = page.locator(".program-list__card").filter({ hasText: programName });
-  await programCard.locator("button").last().click();
+  await programCard.getByRole("button", { name: /فتح البطاقة/ }).click();
   await expect(page.locator(".studio-shell")).toHaveAttribute("dir", "rtl");
   await expect(page.locator(".studio-workspace")).toBeVisible();
   const suspendedGuidance = page

@@ -1,0 +1,567 @@
+[
+  {
+    "filename": "01-empty-loyalty-cards-en-desktop.png",
+    "locale": "en",
+    "plan": "GROWTH",
+    "programs": [],
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\01-empty-loyalty-cards-en-desktop.png",
+    "metrics": {
+      "width": 1440,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 1,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "738.078px 356.328px",
+      "cardCount": 0
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "02-empty-loyalty-cards-ar-desktop.png",
+    "locale": "ar",
+    "plan": "GROWTH",
+    "programs": [],
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\02-empty-loyalty-cards-ar-desktop.png",
+    "metrics": {
+      "width": 1440,
+      "direction": "rtl",
+      "h1Count": 1,
+      "visibleCreateActions": 1,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "738.078px 356.328px",
+      "cardCount": 0
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "03-empty-loyalty-cards-en-mobile.png",
+    "locale": "en",
+    "plan": "GROWTH",
+    "programs": [],
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\03-empty-loyalty-cards-en-mobile.png",
+    "metrics": {
+      "width": 390,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 1,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "358px",
+      "cardCount": 0
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "04-populated-loyalty-cards-en.png",
+    "locale": "en",
+    "plan": "SCALE",
+    "programs": [
+      {
+        "id": "visual-live-card",
+        "internalName": "Morning Coffee",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-draft-card",
+        "internalName": "Weekend Rewards",
+        "status": "DRAFT",
+        "updatedAt": "2026-08-02T13:30:00.000Z",
+        "currentDraftVersion": {
+          "id": "visual-draft-version",
+          "versionNumber": 1,
+          "revision": 3,
+          "status": "DRAFT",
+          "editingMode": "QUICK"
+        },
+        "currentPublishedVersion": null,
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-paused-card",
+        "internalName": "Lunch Club",
+        "status": "PAUSED",
+        "updatedAt": "2026-07-30T11:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-paused-version",
+          "versionNumber": 2,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-20T10:00:00.000Z"
+        },
+        "_count": {
+          "versions": 2
+        }
+      }
+    ],
+    "viewport": {
+      "width": 1440,
+      "height": 1100
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\04-populated-loyalty-cards-en.png",
+    "metrics": {
+      "width": 1440,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 4,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "738.078px 356.328px",
+      "cardCount": 3
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "05-populated-loyalty-cards-ar-rtl.png",
+    "locale": "ar",
+    "plan": "GROWTH",
+    "programs": [
+      {
+        "id": "visual-ar-live",
+        "internalName": "بطاقة القهوة",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-ar-suspended",
+        "internalName": "مكافآت المخبز",
+        "status": "SUSPENDED",
+        "updatedAt": "2026-08-02T13:30:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": null,
+        "_count": {
+          "versions": 1
+        }
+      }
+    ],
+    "viewport": {
+      "width": 1440,
+      "height": 1100
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\05-populated-loyalty-cards-ar-rtl.png",
+    "metrics": {
+      "width": 1440,
+      "direction": "rtl",
+      "h1Count": 1,
+      "visibleCreateActions": 3,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "738.078px 356.328px",
+      "cardCount": 2
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "06-starter-limit-loyalty-cards-en.png",
+    "locale": "en",
+    "plan": "STARTER",
+    "programs": [
+      {
+        "id": "visual-live-card",
+        "internalName": "Morning Coffee",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      }
+    ],
+    "viewport": {
+      "width": 1280,
+      "height": 960
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\06-starter-limit-loyalty-cards-en.png",
+    "metrics": {
+      "width": 1280,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 2,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "630.172px 304.234px",
+      "cardCount": 1
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "responsive-check-1280.png",
+    "locale": "en",
+    "plan": "SCALE",
+    "programs": [
+      {
+        "id": "visual-live-card",
+        "internalName": "Morning Coffee",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-draft-card",
+        "internalName": "Weekend Rewards",
+        "status": "DRAFT",
+        "updatedAt": "2026-08-02T13:30:00.000Z",
+        "currentDraftVersion": {
+          "id": "visual-draft-version",
+          "versionNumber": 1,
+          "revision": 3,
+          "status": "DRAFT",
+          "editingMode": "QUICK"
+        },
+        "currentPublishedVersion": null,
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-paused-card",
+        "internalName": "Lunch Club",
+        "status": "PAUSED",
+        "updatedAt": "2026-07-30T11:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-paused-version",
+          "versionNumber": 2,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-20T10:00:00.000Z"
+        },
+        "_count": {
+          "versions": 2
+        }
+      }
+    ],
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\responsive-check-1280.png",
+    "metrics": {
+      "width": 1280,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 4,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "630.172px 304.234px",
+      "cardCount": 3
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "responsive-check-1024.png",
+    "locale": "en",
+    "plan": "SCALE",
+    "programs": [
+      {
+        "id": "visual-live-card",
+        "internalName": "Morning Coffee",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-draft-card",
+        "internalName": "Weekend Rewards",
+        "status": "DRAFT",
+        "updatedAt": "2026-08-02T13:30:00.000Z",
+        "currentDraftVersion": {
+          "id": "visual-draft-version",
+          "versionNumber": 1,
+          "revision": 3,
+          "status": "DRAFT",
+          "editingMode": "QUICK"
+        },
+        "currentPublishedVersion": null,
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-paused-card",
+        "internalName": "Lunch Club",
+        "status": "PAUSED",
+        "updatedAt": "2026-07-30T11:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-paused-version",
+          "versionNumber": 2,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-20T10:00:00.000Z"
+        },
+        "_count": {
+          "versions": 2
+        }
+      }
+    ],
+    "viewport": {
+      "width": 1024,
+      "height": 900
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\responsive-check-1024.png",
+    "metrics": {
+      "width": 1024,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 4,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "454.406px 224px",
+      "cardCount": 3
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "responsive-check-768.png",
+    "locale": "ar",
+    "plan": "SCALE",
+    "programs": [
+      {
+        "id": "visual-live-card",
+        "internalName": "Morning Coffee",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-draft-card",
+        "internalName": "Weekend Rewards",
+        "status": "DRAFT",
+        "updatedAt": "2026-08-02T13:30:00.000Z",
+        "currentDraftVersion": {
+          "id": "visual-draft-version",
+          "versionNumber": 1,
+          "revision": 3,
+          "status": "DRAFT",
+          "editingMode": "QUICK"
+        },
+        "currentPublishedVersion": null,
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-paused-card",
+        "internalName": "Lunch Club",
+        "status": "PAUSED",
+        "updatedAt": "2026-07-30T11:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-paused-version",
+          "versionNumber": 2,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-20T10:00:00.000Z"
+        },
+        "_count": {
+          "versions": 2
+        }
+      }
+    ],
+    "viewport": {
+      "width": 768,
+      "height": 900
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\responsive-check-768.png",
+    "metrics": {
+      "width": 768,
+      "direction": "rtl",
+      "h1Count": 1,
+      "visibleCreateActions": 4,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "487.203px 235.203px",
+      "cardCount": 3
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  },
+  {
+    "filename": "responsive-check-360.png",
+    "locale": "en",
+    "plan": "SCALE",
+    "programs": [
+      {
+        "id": "visual-live-card",
+        "internalName": "Morning Coffee",
+        "status": "PUBLISHED",
+        "updatedAt": "2026-07-28T09:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-live-version",
+          "versionNumber": 1,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-25T09:00:00.000Z"
+        },
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-draft-card",
+        "internalName": "Weekend Rewards",
+        "status": "DRAFT",
+        "updatedAt": "2026-08-02T13:30:00.000Z",
+        "currentDraftVersion": {
+          "id": "visual-draft-version",
+          "versionNumber": 1,
+          "revision": 3,
+          "status": "DRAFT",
+          "editingMode": "QUICK"
+        },
+        "currentPublishedVersion": null,
+        "_count": {
+          "versions": 1
+        }
+      },
+      {
+        "id": "visual-paused-card",
+        "internalName": "Lunch Club",
+        "status": "PAUSED",
+        "updatedAt": "2026-07-30T11:00:00.000Z",
+        "currentDraftVersion": null,
+        "currentPublishedVersion": {
+          "id": "visual-paused-version",
+          "versionNumber": 2,
+          "status": "PUBLISHED",
+          "publishedAt": "2026-07-20T10:00:00.000Z"
+        },
+        "_count": {
+          "versions": 2
+        }
+      }
+    ],
+    "viewport": {
+      "width": 360,
+      "height": 900
+    },
+    "screenshotPath": "D:\\install\\business\\Waflo\\artifacts\\uiux\\loyalty-cards\\responsive-check-360.png",
+    "metrics": {
+      "width": 360,
+      "direction": "ltr",
+      "h1Count": 1,
+      "visibleCreateActions": 4,
+      "horizontalOverflow": false,
+      "headerActionCollision": false,
+      "summaryColumns": "328px",
+      "cardCount": 3
+    },
+    "axeViolations": [],
+    "consoleErrors": [
+      "Loading the stylesheet 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"style-src 'self' 'unsafe-inline'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+      "Connecting to 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap' violates the following Content Security Policy directive: \"connect-src 'self' http://localhost:4000 https://api.waflo.app\". The action has been blocked."
+    ],
+    "pageErrors": []
+  }
+]

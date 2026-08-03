@@ -2,6 +2,7 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale, PlanCode } from "@waflo/contracts";
+import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
 import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
@@ -14,7 +15,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
@@ -284,13 +284,18 @@ export function Modal({
   title,
   children,
   onClose,
+  closeLabel = "Close",
+  className = "",
 }: {
   open: boolean;
   title: string;
   children: ReactNode;
   onClose: () => void;
+  closeLabel?: string;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
@@ -300,7 +305,8 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className="wf-dialog"
+      className={`wf-dialog ${className}`}
+      aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -312,8 +318,8 @@ export function Modal({
       }}
     >
       <div className="wf-dialog__header">
-        <h2>{title}</h2>
-        <IconButton label="Close" onClick={onClose}>
+        <h2 id={titleId}>{title}</h2>
+        <IconButton label={closeLabel} onClick={onClose}>
           <X size={20} />
         </IconButton>
       </div>
@@ -526,7 +532,7 @@ export function Sidebar({
 export function TopNavigation({ title, actions }: { title: string; actions: ReactNode }) {
   return (
     <header className="wf-topnav">
-      <h1>{title}</h1>
+      <span className="wf-topnav__title">{title}</span>
       <div className="wf-topnav__actions">{actions}</div>
     </header>
   );

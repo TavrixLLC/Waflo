@@ -64,6 +64,10 @@ import {
   crossedRewardThresholds,
   projectTestStampAddition,
 } from "./program-rules.js";
+import {
+  renderTemplateGalleryPreviews,
+  renderTemplateGalleryThumbnail,
+} from "./template-gallery-preview.js";
 import { validateProgramConfiguration } from "./validation-engine.js";
 
 const templates = conceptTemplates();
@@ -297,10 +301,14 @@ export class ProgramsService {
     });
   }
 
-  templates(userId: string, organizationId: string) {
+  templates(userId: string, organizationId: string, locale: "EN" | "AR" = "EN") {
     return this.tenant.requireMembership(userId, organizationId, "programs.view").then(() =>
       templates.map((template) => ({
         ...template,
+        galleryThumbnail: renderTemplateGalleryThumbnail(template, locale),
+        ...(template.code === "GENERAL_VISITS"
+          ? { blankGalleryThumbnail: renderTemplateGalleryThumbnail(template, locale, "BLANK") }
+          : {}),
         artwork: {
           filled: {
             ...template.artwork.filled,
@@ -317,6 +325,33 @@ export class ProgramsService {
         },
       })),
     );
+  }
+
+  async templatePreviews(
+    userId: string,
+    organizationId: string,
+    templateCode: string,
+    version: number | undefined,
+    locale: "EN" | "AR",
+    presentation: "TEMPLATE" | "BLANK",
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "programs.view");
+    const template = findProgramTemplate(templateCode, version);
+    if (!template) {
+      throw new AppError(
+        "PROGRAM_TEMPLATE_NOT_FOUND",
+        "Program template not found.",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (presentation === "BLANK" && template.code !== "GENERAL_VISITS") {
+      throw new AppError(
+        "PROGRAM_TEMPLATE_PRESENTATION_INVALID",
+        "Blank presentation is only available for the safe default template.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return renderTemplateGalleryPreviews(template, locale, presentation);
   }
 
   async preview(
@@ -387,6 +422,9 @@ export class ProgramsService {
           HttpStatus.NOT_FOUND,
         );
       const goal = version.stampRule?.requiredStampCount ?? 8;
+      const baseTemplate = version.baseTemplateCode
+        ? findProgramTemplate(version.baseTemplateCode, version.baseTemplateVersion ?? undefined)
+        : undefined;
       const visual = version.visualTheme;
       const safeProgress = Math.max(0, Math.min(goal, progress));
       const safeLayout = visual?.layoutType ?? "GRID";
@@ -400,6 +438,7 @@ export class ProgramsService {
         template: {
           code: version.baseTemplateCode,
           version: version.baseTemplateVersion,
+          presentation: baseTemplate?.presentation ?? null,
         },
         version: { id: version.id, revision: version.revision },
         progress: safeProgress,
@@ -612,14 +651,17 @@ export class ProgramsService {
         progress: safeProgress,
         goal,
         stampSvg: rendered.svg,
+        stampLayout: safeLayout as "ROW" | "GRID" | "PATH" | "RING",
         backgroundColor: visualInput.backgroundColor,
         foregroundColor: visualInput.foregroundColor,
         accentColor: visualInput.accentColor,
         secondaryColor: visualInput.secondaryColor,
         ...(logoAsset ? { logoDataUri: logoAsset.dataUri } : {}),
+        ...(filledAsset ? { identityDataUri: filledAsset.dataUri } : {}),
         ...(heroAsset ? { heroDataUri: heroAsset.dataUri } : {}),
         ...(backgroundAsset ? { backgroundDataUri: backgroundAsset.dataUri } : {}),
         customerWebVariant: visualInput.customerWebVariant as "CARD" | "MINIMAL" | "HERO",
+        ...(baseTemplate?.presentation ? { presentation: baseTemplate.presentation } : {}),
         apple: {
           headerLabel: appleConfig.headerLabel ?? "REWARDS",
           headerValue: appleConfig.headerValue ?? program.internalName,

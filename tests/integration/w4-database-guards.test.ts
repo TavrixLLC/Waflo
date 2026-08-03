@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPrismaClient, type PrismaClient } from "../../packages/database/src/index.js";
 
@@ -134,5 +135,20 @@ describe.sequential("W4 direct database guards", () => {
         COOKIE_VERSION_ID,
       ),
     ).rejects.toThrow(/published|immutable|WAFLO/i);
+  });
+
+  it("rejects a risk signal that references a nonexistent Program", async () => {
+    await expect(
+      prisma.operationalRiskSignal.create({
+        data: {
+          organizationId: ORGANIZATION_ID,
+          programId: randomUUID(),
+          ruleCode: "INVALID_PROGRAM_REFERENCE_GUARD",
+          severity: "LOW",
+          score: 1,
+          safeEvidence: { test: "foreign-key-guard" },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "P2003" });
   });
 });

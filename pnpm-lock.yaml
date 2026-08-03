@@ -189,6 +189,9 @@ importers:
       '@waflo/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@waflo/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       '@waflo/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -244,6 +247,9 @@ importers:
       '@waflo/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@waflo/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       '@waflo/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -293,6 +299,9 @@ importers:
       '@waflo/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@waflo/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       '@waflo/ui':
         specifier: workspace:*
         version: link:../../packages/ui

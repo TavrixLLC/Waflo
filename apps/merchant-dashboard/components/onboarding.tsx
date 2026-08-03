@@ -388,8 +388,8 @@ export function CompletionOnboarding({
           </div>
           <Alert tone="info" title={ar ? "تجربتك المجانية محفوظة" : "Your free trial is waiting"}>
             {ar
-              ? "ستبدأ مدة 15 يوماً عند نشر أول برنامج ولاء. هذه الوظيفة ستتوفر في المرحلة W2."
-              : "Your 15 days begin when you publish your first loyalty program. Publishing arrives in Phase W2."}
+              ? "ستبدأ مدة 15 يوماً عند نشر أول بطاقة ولاء. هذه الوظيفة ستتوفر في المرحلة W2."
+              : "Your 15 days begin when you publish your first loyalty card. Publishing arrives in Phase W2."}
           </Alert>
           <a href={`/${locale}/dashboard`}>
             <Button style={{ width: "100%", marginTop: "1.25rem" }}>
@@ -397,7 +397,7 @@ export function CompletionOnboarding({
             </Button>
           </a>
           <Button variant="secondary" disabled style={{ width: "100%", marginTop: ".75rem" }}>
-            {ar ? "إنشاء أول برنامج ولاء — قريباً" : "Create first loyalty program — coming in W2"}
+            {ar ? "إنشاء أول بطاقة ولاء — قريباً" : "Create first loyalty card — coming in W2"}
           </Button>
         </>
       ) : (

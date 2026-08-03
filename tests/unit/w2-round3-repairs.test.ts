@@ -123,11 +123,20 @@ function storageReturning(bytes: Buffer): ObjectStorage {
 }
 
 describe("W2 Round 3 template catalog and application", () => {
-  it("publishes exactly the required versioned launch categories with complete defaults", () => {
+  it("retains every required W2 v2 launch template and publishes complete expanded defaults", () => {
+    const historicalLaunch = requiredTemplates.map((code) =>
+      required(findProgramTemplate(code, 2), `${code} v2`),
+    );
+    expect(historicalLaunch.map((template) => template.code)).toEqual(requiredTemplates);
+    expect(historicalLaunch.every((template) => template.version === 2)).toBe(true);
+
     const templates = latestProgramTemplates();
-    expect(templates.map((template) => template.code)).toEqual(requiredTemplates);
+    expect(templates).toHaveLength(32);
+    expect(
+      requiredTemplates.every((code) => templates.some((template) => template.code === code)),
+    ).toBe(true);
     for (const template of templates) {
-      expect(template.version).toBe(2);
+      expect(template.version).toBeGreaterThanOrEqual(1);
       expect(template.category).toBeTruthy();
       expect(template.name).toBeTruthy();
       expect(template.nameAr).toBeTruthy();

@@ -95,9 +95,9 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     await login(page);
     await page.goto("http://localhost:3001/en/dashboard/programs");
     const card = page.locator(".program-list__card").filter({ hasText: program.internalName });
-    await card.getByRole("button", { name: "Open Studio" }).click();
+    await card.getByRole("button", { name: "Open card" }).click();
     await screenshot(page, "31-wallet-setup-page");
-    await page.getByRole("button", { name: "Create draft from published" }).click();
+    await page.getByRole("button", { name: "Create draft from live card" }).click();
     await expect(
       page.getByText(new RegExp(`LOYALTY STUDIO.*v${replacementVersionNumber}`)),
     ).toBeVisible();
@@ -131,7 +131,7 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     const updatedCard = page
       .locator(".program-list__card")
       .filter({ hasText: program.internalName });
-    await updatedCard.getByRole("button", { name: "Open Studio" }).click();
+    await updatedCard.getByRole("button", { name: "Open card" }).click();
     await expect(
       page.getByText(new RegExp(`LOYALTY STUDIO.*v${replacementVersionNumber}`)),
     ).toBeVisible();

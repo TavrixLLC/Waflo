@@ -14,6 +14,7 @@
     "@waflo/brand": "workspace:*",
     "@waflo/contracts": "workspace:*",
     "@waflo/i18n": "workspace:*",
+    "@waflo/security": "workspace:*",
     "@waflo/ui": "workspace:*",
     "lucide-react": "1.27.0",
     "next": "16.2.12",

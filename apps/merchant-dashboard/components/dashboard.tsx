@@ -16,7 +16,6 @@ import {
   Download,
   FileClock,
   Gauge,
-  Gift,
   LockKeyhole,
   LogOut,
   MapPin,
@@ -25,6 +24,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Users,
+  WalletCards,
 } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -74,7 +74,7 @@ export interface MeView {
 
 const sectionIcons = {
   overview: Gauge,
-  programs: Gift,
+  programs: WalletCards,
   customers: Users,
   devices: MonitorSmartphone,
   approvals: ShieldCheck,
@@ -92,7 +92,7 @@ const sectionIcons = {
 const labels = {
   en: {
     overview: "Overview",
-    programs: "Programs",
+    programs: "Loyalty Cards",
     customers: "Customers",
     devices: "Staff devices",
     approvals: "Manager approvals",
@@ -113,7 +113,7 @@ const labels = {
     risk: "المخاطر",
     exports: "التصدير",
     overview: "نظرة عامة",
-    programs: "البرامج",
+    programs: "بطاقات الولاء",
     customers: "العملاء",
     locations: "المواقع",
     team: "الفريق",
@@ -131,9 +131,13 @@ export type DashboardSection = keyof typeof sectionIcons;
 export function DashboardApplication({
   locale,
   section,
+  programsView = "library",
+  legacyProgramCreate = false,
 }: {
   locale: Locale;
   section: DashboardSection;
+  programsView?: "library" | "gallery";
+  legacyProgramCreate?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -214,6 +218,7 @@ export function DashboardApplication({
             alt="Waflo"
             width={280}
             height={80}
+            loading="eager"
           />
         )}
       </div>
@@ -246,6 +251,8 @@ export function DashboardApplication({
       locale={locale}
       membership={membership}
       onOrganizationChanged={loadMe}
+      programsView={programsView}
+      legacyProgramCreate={legacyProgramCreate}
     />
   );
 
@@ -314,11 +321,15 @@ function DashboardScreen({
   locale,
   membership,
   onOrganizationChanged,
+  programsView,
+  legacyProgramCreate,
 }: {
   section: DashboardSection;
   locale: Locale;
   membership: MembershipView;
   onOrganizationChanged: () => Promise<void>;
+  programsView: "library" | "gallery";
+  legacyProgramCreate: boolean;
 }) {
   if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
   if (section === "programs") {
@@ -332,7 +343,12 @@ function DashboardScreen({
         tone="danger"
       />
     ) : (
-      <ProgramsScreen locale={locale} membership={membership} />
+      <ProgramsScreen
+        locale={locale}
+        membership={membership}
+        view={programsView}
+        legacyCreate={legacyProgramCreate}
+      />
     );
   }
   if (section === "customers")

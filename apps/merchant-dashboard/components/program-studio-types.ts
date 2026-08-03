@@ -118,6 +118,7 @@ export interface ProgramItem {
   id: string;
   internalName: string;
   status: ProgramOperationalStatus;
+  updatedAt?: string;
   currentDraftVersion: {
     id: string;
     versionNumber: number;
@@ -236,7 +237,25 @@ export interface ProgramDetail
 
 type TemplateArtworkPreview = ProgramTemplateArtworkReference & { previewUrl: string };
 
+export interface TemplateGalleryPreview {
+  svg: string;
+  digest: string;
+  width: number;
+  height: number;
+  warnings: Array<{
+    code: string;
+    severity: "warning";
+    platform: PreviewProfile;
+    message: string;
+  }>;
+  profile: PreviewProfile;
+  locale: "EN" | "AR";
+  presentation: "TEMPLATE" | "BLANK";
+}
+
 export interface TemplateItem extends Omit<ProgramTemplateDefinition, "artwork"> {
+  galleryThumbnail: TemplateGalleryPreview;
+  blankGalleryThumbnail?: TemplateGalleryPreview;
   artwork: {
     filled: TemplateArtworkPreview;
     empty: TemplateArtworkPreview;

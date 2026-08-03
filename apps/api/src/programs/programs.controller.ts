@@ -1,16 +1,16 @@
 import { Body, Controller, Get, HttpStatus, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { AppError } from "../common/app-error.js";
 import {
   programCreateSchema,
   programPublishSchema,
   programTestRedeemSchema,
-  programTestReverseSchema,
   programTestResetSchema,
+  programTestReverseSchema,
   programTestStampSchema,
   programUpdateSchema,
 } from "@waflo/contracts";
-import { CurrentUser } from "../common/decorators.js";
+import { AppError } from "../common/app-error.js";
 import { pageLimit } from "../common/cursor-pagination.js";
+import { CurrentUser } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { parseInput, parseUuid } from "../common/validation.js";
 import { ProgramsService } from "./programs.service.js";
@@ -33,8 +33,64 @@ export class ProgramsController {
   templates(
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
+    @Query("locale") locale = "EN",
   ) {
-    return this.programs.templates(user.id, parseUuid(organizationId));
+    const normalizedLocale = locale.toUpperCase();
+    if (!["EN", "AR"].includes(normalizedLocale))
+      throw new AppError(
+        "TEMPLATE_LOCALE_INVALID",
+        "Invalid template locale.",
+        HttpStatus.BAD_REQUEST,
+      );
+    return this.programs.templates(
+      user.id,
+      parseUuid(organizationId),
+      normalizedLocale as "EN" | "AR",
+    );
+  }
+
+  @Get("templates/:templateCode/previews")
+  templatePreviews(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("templateCode") templateCode: string,
+    @Query("version") version?: string,
+    @Query("locale") locale = "EN",
+    @Query("presentation") presentation = "TEMPLATE",
+  ) {
+    const normalizedLocale = locale.toUpperCase();
+    if (!["EN", "AR"].includes(normalizedLocale))
+      throw new AppError(
+        "TEMPLATE_LOCALE_INVALID",
+        "Invalid template locale.",
+        HttpStatus.BAD_REQUEST,
+      );
+    const normalizedPresentation = presentation.toUpperCase();
+    if (!["TEMPLATE", "BLANK"].includes(normalizedPresentation))
+      throw new AppError(
+        "TEMPLATE_PRESENTATION_INVALID",
+        "Invalid template presentation.",
+        HttpStatus.BAD_REQUEST,
+      );
+    const normalizedVersion = version === undefined ? undefined : Number(version);
+    if (
+      normalizedVersion !== undefined &&
+      (!Number.isSafeInteger(normalizedVersion) || normalizedVersion < 1)
+    ) {
+      throw new AppError(
+        "TEMPLATE_VERSION_INVALID",
+        "Invalid template version.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.programs.templatePreviews(
+      user.id,
+      parseUuid(organizationId),
+      templateCode,
+      normalizedVersion,
+      normalizedLocale as "EN" | "AR",
+      normalizedPresentation as "TEMPLATE" | "BLANK",
+    );
   }
 
   @Post()

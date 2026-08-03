@@ -9,6 +9,26 @@ interface AnalyticsWorkerAccess {
   processOneAnalyticsJob(): Promise<boolean>;
 }
 
+async function createAnalyticsFixtureProgram(
+  prisma: PrismaClient,
+  organizationId: string,
+  label: string,
+) {
+  const creator = await prisma.organizationMember.findFirstOrThrow({
+    where: { organizationId, status: "ACTIVE" },
+    orderBy: { createdAt: "asc" },
+    select: { userId: true },
+  });
+  return prisma.loyaltyProgram.create({
+    data: {
+      organizationId,
+      internalName: `W4 Analytics Fixture ${label}`,
+      status: "DRAFT",
+      createdByUserId: creator.userId,
+    },
+  });
+}
+
 describe.sequential("W4 incremental analytics checkpoint and rebuild", () => {
   let prisma: PrismaClient;
 
@@ -56,8 +76,12 @@ describe.sequential("W4 incremental analytics checkpoint and rebuild", () => {
         select: { id: true },
       })
     ).id;
-    const programA = randomUUID();
-    const programB = randomUUID();
+    const [programA, programB] = await Promise.all([
+      createAnalyticsFixtureProgram(prisma, organizationA, `A ${randomUUID().slice(0, 8)}`),
+      createAnalyticsFixtureProgram(prisma, organizationB, `B ${randomUUID().slice(0, 8)}`),
+    ]);
+    expect(programA.organizationId).toBe(organizationA);
+    expect(programB.organizationId).toBe(organizationB);
     const cursor = new Date("2030-01-01T00:00:00.000Z");
     await prisma.operationalAnalyticsCheckpoint.upsert({
       where: { sourceKind: "RISK" },
@@ -81,7 +105,7 @@ describe.sequential("W4 incremental analytics checkpoint and rebuild", () => {
       prisma.operationalRiskSignal.create({
         data: {
           organizationId: organizationA,
-          programId: programA,
+          programId: programA.id,
           ruleCode: "LATE_LEDGER_REVIEW",
           severity: "MEDIUM",
           score: 50,
@@ -92,7 +116,7 @@ describe.sequential("W4 incremental analytics checkpoint and rebuild", () => {
       prisma.operationalRiskSignal.create({
         data: {
           organizationId: organizationA,
-          programId: programA,
+          programId: programA.id,
           ruleCode: "WORKER_INTERRUPTION_REVIEW",
           severity: "HIGH",
           score: 75,
@@ -103,7 +127,7 @@ describe.sequential("W4 incremental analytics checkpoint and rebuild", () => {
       prisma.operationalRiskSignal.create({
         data: {
           organizationId: organizationB,
-          programId: programB,
+          programId: programB.id,
           ruleCode: "TENANT_ISOLATION_REVIEW",
           severity: "LOW",
           score: 25,

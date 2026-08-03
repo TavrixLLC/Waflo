@@ -367,7 +367,7 @@ test.describe
       await login(page);
       await page.goto("http://localhost:3001/en/dashboard/programs");
       const card = page.locator(".program-list__card").filter({ hasText: programName });
-      await card.getByRole("button", { name: "Open Studio" }).click();
+      await card.getByRole("button", { name: "Open card" }).click();
       await expect(page.getByText("CUSTOMER ENROLLMENT · W3")).toBeVisible();
       await expect(page.getByText(new RegExp(programSlug))).toBeVisible();
       await expect(page.getByText(/TEST_ADAPTER · HEALTHY/).first()).toBeVisible();

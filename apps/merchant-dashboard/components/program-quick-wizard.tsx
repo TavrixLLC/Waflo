@@ -18,20 +18,25 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api-client";
 import { ProgramAssetPicker } from "./program-asset-uploader";
 import {
-  applyTemplateToDraft,
-  apiDraft,
-  createQuickDraft,
-  templateReplacementFields,
   type AssetItem,
+  apiDraft,
+  applyTemplateToDraft,
+  createQuickDraft,
   type LocationItem,
   type ProgramDraftInput,
   type ProgramItem,
   type TemplateItem,
+  templateReplacementFields,
 } from "./program-studio-types";
+import {
+  templateCategory,
+  templateCategoryLabel,
+  templateStyleLabel,
+} from "./template-gallery-presentation";
 
 const stepLabels = [
   "Template",
-  "Program",
+  "Card",
   "English",
   "Arabic",
   "Locations",
@@ -50,6 +55,8 @@ export function ProgramQuickWizard({
   onAssetUploaded,
   onCreated,
   ar,
+  initialTemplate = null,
+  onBackToGallery,
 }: {
   open: boolean;
   onClose: () => void;
@@ -61,9 +68,14 @@ export function ProgramQuickWizard({
   onAssetUploaded: (asset: AssetItem) => void;
   onCreated: (programId: string) => void;
   ar: boolean;
+  initialTemplate?: TemplateItem | null;
+  onBackToGallery?: () => void;
 }) {
-  const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<ProgramDraftInput>(() => createQuickDraft("COOKIES"));
+  const locale = ar ? "ar" : "en";
+  const [step, setStep] = useState(initialTemplate ? 1 : 0);
+  const [draft, setDraft] = useState<ProgramDraftInput>(() =>
+    createQuickDraft(initialTemplate ?? "COOKIES"),
+  );
   const [hasUserEdits, setHasUserEdits] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<TemplateItem | null>(null);
   const [saving, setSaving] = useState(false);
@@ -99,12 +111,12 @@ export function ProgramQuickWizard({
 
   useEffect(() => {
     if (!open) return;
-    setStep(0);
+    setStep(initialTemplate ? 1 : 0);
     setError("");
     setHasUserEdits(false);
     setPendingTemplate(null);
-    setDraft(createQuickDraft(templates[0] ?? "COOKIES"));
-  }, [open, templates]);
+    setDraft(createQuickDraft(initialTemplate ?? templates[0] ?? "COOKIES"));
+  }, [initialTemplate, open, templates]);
 
   function editDraft(transform: (current: ProgramDraftInput) => ProgramDraftInput) {
     setHasUserEdits(true);
@@ -174,18 +186,14 @@ export function ProgramQuickWizard({
       onCreated(created.id);
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create the program.");
+      setError(caught instanceof Error ? caught.message : "Unable to create the loyalty card.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal
-      open={open}
-      title={ar ? "إنشاء برنامج أختام" : "Create a stamp program"}
-      onClose={onClose}
-    >
+    <Modal open={open} title={ar ? "إنشاء بطاقة ولاء" : "Create a loyalty card"} onClose={onClose}>
       <nav className="quick-progress" aria-label={ar ? "تقدم الإعداد" : "Setup progress"}>
         {stepLabels.map((label, index) => (
           <span
@@ -270,18 +278,12 @@ export function ProgramQuickWizard({
                     height={54}
                     unoptimized
                   />
-                  <Image
-                    src={item.artwork.milestone.previewUrl}
-                    alt={ar ? `${item.nameAr} milestone artwork` : `${item.name} milestone artwork`}
-                    width={54}
-                    height={54}
-                    unoptimized
-                  />
                 </div>
                 <strong>{ar ? item.nameAr : item.name}</strong>
                 <small>{ar ? item.descriptionAr : item.description}</small>
                 <Badge tone="neutral">
-                  {item.category} · v{item.version}
+                  {templateCategoryLabel(templateCategory(item), locale)} ·{" "}
+                  {templateStyleLabel(item, locale)}
                 </Badge>
               </button>
             ))}
@@ -291,7 +293,7 @@ export function ProgramQuickWizard({
 
       {step === 1 ? (
         <div className="quick-step">
-          <FormField label={ar ? "اسم البرنامج الداخلي" : "Internal program name"} required>
+          <FormField label={ar ? "اسم البطاقة الداخلي" : "Internal card name"} required>
             <TextInput
               name="internalName"
               value={draft.internalName}
@@ -517,7 +519,13 @@ export function ProgramQuickWizard({
         <Button
           type="button"
           variant="secondary"
-          onClick={step === 0 ? onClose : () => setStep((current) => current - 1)}
+          onClick={
+            step === 0
+              ? onClose
+              : step === 1 && initialTemplate && onBackToGallery
+                ? onBackToGallery
+                : () => setStep((current) => current - 1)
+          }
         >
           <ArrowLeft size={16} />
           {step === 0 ? (ar ? "إلغاء" : "Cancel") : ar ? "السابق" : "Back"}
@@ -570,7 +578,7 @@ function ContentStep({
     <div className="quick-step">
       <h3>{locale === "ar" ? "المحتوى العربي" : "English customer content"}</h3>
       <div className="studio-form-grid">
-        <FormField label={locale === "ar" ? "اسم البرنامج" : "Program name"} required>
+        <FormField label={locale === "ar" ? "اسم البطاقة" : "Card name"} required>
           <TextInput
             name={`${locale}-program-name`}
             value={values.programName}

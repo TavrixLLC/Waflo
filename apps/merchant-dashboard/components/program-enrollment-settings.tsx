@@ -174,7 +174,7 @@ export function ProgramEnrollmentSettings({
         method: "PATCH",
         body: JSON.stringify({ slug }),
       });
-      setMessage(ar ? "تم تحديث رابط البرنامج العام." : "Public program URL updated.");
+      setMessage(ar ? "تم تحديث رابط البطاقة العام." : "Public card URL updated.");
       await load();
       await onChanged?.();
     } catch (caught) {
@@ -232,7 +232,7 @@ export function ProgramEnrollmentSettings({
             <Link2 /> {ar ? "الرابط العام" : "Public link"}
           </h3>
           <FormField
-            label={ar ? "معرّف الرابط" : "Program URL slug"}
+            label={ar ? "معرّف رابط البطاقة" : "Card URL slug"}
             hint={
               ar ? "يُحجز الرابط السابق لمدة 90 يومًا." : "Previous slugs are reserved for 90 days."
             }

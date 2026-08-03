@@ -21,14 +21,25 @@ const dashboardSections = new Set<DashboardSection>([
 
 export default async function DashboardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: Locale; section?: string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale, section } = await params;
-  if ((section?.length ?? 0) > 1) notFound();
+  const query = await searchParams;
+  const programsGallery = section?.[0] === "programs" && section?.[1] === "new";
+  if ((section?.length ?? 0) > 1 && !programsGallery) notFound();
 
   const selected = (section?.[0] ?? "overview") as DashboardSection;
   if (!dashboardSections.has(selected)) notFound();
 
-  return <DashboardApplication locale={locale} section={selected} />;
+  return (
+    <DashboardApplication
+      locale={locale}
+      section={selected}
+      programsView={programsGallery ? "gallery" : "library"}
+      legacyProgramCreate={query.create === "quick"}
+    />
+  );
 }

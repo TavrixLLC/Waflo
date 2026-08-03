@@ -202,6 +202,21 @@ export function privacyAwareIp(ip: string | undefined): string | null {
   return octets.length === 4 ? `${octets.slice(0, 3).join(".")}.0/24` : null;
 }
 
+export interface NextContentSecurityPolicyOptions {
+  googleFonts?: boolean;
+}
+
+export function createNextContentSecurityPolicy(
+  nodeEnvironment: string | undefined,
+  options: NextContentSecurityPolicyOptions = {},
+): string {
+  const developmentScriptSource = nodeEnvironment === "development" ? " 'unsafe-eval'" : "";
+  const externalFontSource = options.googleFonts ? " https://fonts.gstatic.com" : "";
+  const externalFontStyleSource = options.googleFonts ? " https://fonts.googleapis.com" : "";
+
+  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self' http://localhost:4000 https://api.waflo.app`;
+}
+
 export const securityHeaders = {
   contentSecurityPolicy: {
     directives: {

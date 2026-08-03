@@ -26,8 +26,17 @@ export default async function LocaleLayout({
 }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
+  const productionFontStylesheet =
+    "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap";
   return (
     <html lang={locale} dir={directionFor(locale)}>
+      {process.env.NODE_ENV === "production" ? (
+        <head>
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+          <link rel="stylesheet" href={productionFontStylesheet} />
+        </head>
+      ) : null}
       <body>{children}</body>
     </html>
   );

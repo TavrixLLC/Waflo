@@ -114,8 +114,8 @@ export function OverviewScreen({
         title={ar ? `مرحباً في ${organization.name}` : `Welcome to ${organization.name}`}
         description={
           ar
-            ? "هذه النظرة مبنية على حالة مؤسستك الفعلية، من دون أرقام أو برامج ولاء وهمية."
-            : "This overview uses your organization’s real state—no fabricated loyalty metrics or programs."
+            ? "هذه النظرة مبنية على حالة مؤسستك الفعلية، من دون أرقام أو بطاقات ولاء وهمية."
+            : "This overview uses your organization’s real state—no fabricated loyalty metrics or cards."
         }
       />
       <div className="dashboard-grid">
@@ -125,8 +125,8 @@ export function OverviewScreen({
             <span className="dashboard-card__value">{ar ? "لم تبدأ بعد" : "Not started yet"}</span>
             <p>
               {ar
-                ? "تجربتك المجانية لمدة 15 يوماً لم تبدأ. ستبدأ عند نشر أول برنامج ولاء."
-                : "Your 15-day free trial has not started. It will begin when you publish your first loyalty program."}
+                ? "تجربتك المجانية لمدة 15 يوماً لم تبدأ. ستبدأ عند نشر أول بطاقة ولاء."
+                : "Your 15-day free trial has not started. It will begin when you publish your first loyalty card."}
             </p>
           </div>
           <StatusBadge status="pending" label="pending_activation" />
@@ -166,8 +166,8 @@ export function OverviewScreen({
           <h2>{ar ? "رابط التاجر" : "Merchant URL"}</h2>
           <p style={{ color: "var(--waflo-muted)" }}>
             {ar
-              ? "تظهر صفحة تحضير تحمل هوية Waflo إلى أن يصبح البرنامج جاهزاً."
-              : "A branded preparation page is live until a loyalty program is ready."}
+              ? "تظهر صفحة تحضير تحمل هوية Waflo إلى أن تصبح بطاقة الولاء جاهزة."
+              : "A branded preparation page is live until a loyalty card is ready."}
           </p>
           <div className="dashboard-url" dir="ltr">
             <span>https://{organization.merchantSlug}.waflo.app</span>
@@ -187,10 +187,12 @@ export function OverviewScreen({
           <h2>{ar ? "الخطوة التالية" : "Next step"}</h2>
           <p style={{ color: "var(--waflo-muted)", lineHeight: 1.65 }}>
             {ar
-              ? "راجع مواقعك وفريقك الآن. إنشاء برامج الولاء يصل في W2."
-              : "Review locations and team now. Loyalty-program creation arrives in W2."}
+              ? "راجع مواقعك وفريقك الآن. إنشاء بطاقات الولاء يصل في W2."
+              : "Review locations and team now. Loyalty-card creation arrives in W2."}
           </p>
-          <Button disabled>{ar ? "إنشاء برنامج — قريباً" : "Create program — coming soon"}</Button>
+          <Button disabled>
+            {ar ? "إنشاء بطاقة ولاء — قريباً" : "Create loyalty card — coming soon"}
+          </Button>
         </Card>
         {membership.role === "OWNER" ? (
           <Card className="dashboard-card dashboard-card--full">
@@ -1284,23 +1286,23 @@ export function FutureScreen({ locale, section }: { locale: Locale; section: Das
     programs: {
       icon: <Gift />,
       en: [
-        "Loyalty programs arrive in W2",
-        "Quick Mode, Pro Mode, and program publishing are intentionally not part of this foundation phase.",
+        "Loyalty cards arrive in W2",
+        "Quick Mode, Pro Mode, and card publishing are intentionally not part of this foundation phase.",
       ],
       ar: [
-        "برامج الولاء تصل في W2",
-        "الوضع السريع والاحترافي ونشر البرامج مؤجلة عمداً إلى مرحلة الأساس التالية.",
+        "بطاقات الولاء تصل في W2",
+        "الوضع السريع والاحترافي ونشر البطاقات مؤجلة عمداً إلى مرحلة الأساس التالية.",
       ],
     },
     customers: {
       icon: <Users />,
       en: [
         "Customer records are not active yet",
-        "Enrollment and customer memberships will be introduced after program foundations exist.",
+        "Enrollment and customer memberships will be introduced after loyalty-card foundations exist.",
       ],
       ar: [
         "سجلات العملاء غير مفعلة بعد",
-        "سيصل الانضمام وعضويات العملاء بعد اكتمال أساس برامج الولاء.",
+        "سيصل الانضمام وعضويات العملاء بعد اكتمال أساس بطاقات الولاء.",
       ],
     },
     analytics: {

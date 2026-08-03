@@ -1,32 +1,200 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
-import { Alert, Badge, Button, Card, EmptyState, PageHeader } from "@waflo/ui";
-import { ArrowRight, Layers3, Plus, Sparkles } from "lucide-react";
+import { planCatalog } from "@waflo/billing";
+import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
+import { formatDate } from "@waflo/i18n";
+import { Alert, AlertDialog, Badge, Button, Card, DropdownMenu, PageHeader } from "@waflo/ui";
+import {
+  Archive,
+  ArrowRight,
+  CreditCard,
+  Ellipsis,
+  Layers3,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch, ApiClientError } from "../lib/api-client";
+import { ApiClientError, apiFetch } from "../lib/api-client";
 import type { MembershipView } from "./dashboard";
+import {
+  type MerchantProgramLifecycleAction,
+  merchantProgramLifecycleLabel,
+  merchantProgramStatus,
+} from "./loyalty-card-presentation";
 import { ProgramQuickWizard } from "./program-quick-wizard";
 import { ProgramStudioEditor } from "./program-studio-editor";
-import type { AssetItem, LocationItem, ProgramItem, TemplateItem } from "./program-studio-types";
+import type {
+  AssetItem,
+  LocationItem,
+  PreviewProfile,
+  ProgramItem,
+  TemplateGalleryPreview,
+  TemplateItem,
+} from "./program-studio-types";
+import { TemplateGallery } from "./template-gallery";
 
 interface CursorPage<T> {
   items: T[];
   nextCursor: string | null;
 }
 
+interface OrganizationPresentationView {
+  businessCategory: string | null;
+}
+
+const planCodes = {
+  STARTER: "starter",
+  GROWTH: "growth",
+  SCALE: "scale",
+} as const;
+
+const decorativeStampSlots = [true, true, true, false, false] as const;
+
+type CardLifecycleAction = Exclude<MerchantProgramLifecycleAction, "publish" | "abandon">;
+
+const loyaltyCardCopy = {
+  en: {
+    eyebrow: "LOYALTY CARDS",
+    title: "Loyalty cards",
+    description:
+      "Create and manage the loyalty cards your customers save to Apple Wallet and Google Wallet.",
+    create: "Create loyalty card",
+    summaryLabel: "Loyalty card summary",
+    yourCards: "Your cards",
+    plan: "Plan",
+    cardSingular: "loyalty card",
+    cardPlural: "loyalty cards",
+    activeCardSingular: "active card included",
+    activeCardPlural: "active cards included",
+    noFixedLimit: "No fixed active-card limit",
+    currentPlan: "Current workspace plan",
+    emptyTitle: "Create your first loyalty card",
+    emptyDescription:
+      "Choose a design, customize your reward, test the customer experience, and publish when you’re ready.",
+    loading: "Loading loyalty cards…",
+    libraryTitle: "Your loyalty cards",
+    libraryDescription: "Open a card to review its setup, test it, or prepare the next update.",
+    updated: "Updated",
+    published: "Published",
+    open: "Open card",
+    loadMore: "Load more loyalty cards",
+    loadMoreAssets: "Load more design assets",
+    draftOnly: "Finish setup, test the customer experience, then publish this card.",
+    unpublishedChanges: "Unpublished changes are safely separate from the live card.",
+    live: "Live for customers. Create a draft when you’re ready to make changes.",
+    paused: "This card is paused and is not currently live for customers.",
+    archived: "This card is archived. Its setup and history remain preserved.",
+    suspended: "This card is suspended. Contact support before publishing changes.",
+    scheduled: "This card is scheduled, but scheduled publishing is not available yet.",
+    readyToTest: "The setup is ready for customer-experience testing.",
+    testing: "Customer-experience testing is in progress.",
+    moreActions: "More actions",
+    confirm: "Confirm",
+    cancel: "Cancel",
+    working: "Working…",
+    lifecycleError: "Unable to update this loyalty card.",
+    lifecycleDescriptions: {
+      pause: "The card will stop being live for customers until you resume it.",
+      resume: "The card will become live for customers again.",
+      archive: "The card will be archived while its setup and version history remain preserved.",
+      restore: "The card will return to its preserved state.",
+    },
+  },
+  ar: {
+    eyebrow: "بطاقات الولاء",
+    title: "بطاقات الولاء",
+    description:
+      "أنشئ وأدر بطاقات الولاء التي يمكن لعملائك الاحتفاظ بها في Apple Wallet وGoogle Wallet.",
+    create: "إنشاء بطاقة ولاء",
+    summaryLabel: "ملخص بطاقات الولاء",
+    yourCards: "بطاقاتك",
+    plan: "الخطة",
+    cardSingular: "بطاقة ولاء",
+    cardPlural: "بطاقات ولاء",
+    activeCardSingular: "بطاقة نشطة مشمولة",
+    activeCardPlural: "بطاقات نشطة مشمولة",
+    noFixedLimit: "بلا حد ثابت للبطاقات النشطة",
+    currentPlan: "خطة مساحة العمل الحالية",
+    emptyTitle: "أنشئ أول بطاقة ولاء",
+    emptyDescription:
+      "اختر تصميمًا، وخصّص المكافأة، واختبر تجربة العميل، ثم انشر البطاقة عندما تصبح جاهزة.",
+    loading: "جارٍ تحميل بطاقات الولاء…",
+    libraryTitle: "بطاقات الولاء الخاصة بك",
+    libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو اختبارها أو تحضير التحديث التالي.",
+    updated: "آخر تحديث",
+    published: "نُشرت في",
+    open: "فتح البطاقة",
+    loadMore: "تحميل المزيد من بطاقات الولاء",
+    loadMoreAssets: "تحميل المزيد من أصول التصميم",
+    draftOnly: "أكمل الإعداد، واختبر تجربة العميل، ثم انشر هذه البطاقة.",
+    unpublishedChanges: "التغييرات غير المنشورة منفصلة بأمان عن البطاقة المباشرة.",
+    live: "البطاقة مباشرة للعملاء. أنشئ مسودة عندما تصبح مستعدًا لإجراء تغييرات.",
+    paused: "هذه البطاقة متوقفة مؤقتًا وليست مباشرة للعملاء حاليًا.",
+    archived: "هذه البطاقة مؤرشفة، مع الاحتفاظ بإعداداتها وسجلها.",
+    suspended: "هذه البطاقة موقوفة. تواصل مع الدعم قبل نشر أي تغييرات.",
+    scheduled: "هذه البطاقة مجدولة، لكن النشر المجدول غير متاح بعد.",
+    readyToTest: "أصبحت الإعدادات جاهزة لاختبار تجربة العميل.",
+    testing: "يجري الآن اختبار تجربة العميل.",
+    moreActions: "المزيد من الإجراءات",
+    confirm: "تأكيد",
+    cancel: "إلغاء",
+    working: "جارٍ التنفيذ…",
+    lifecycleError: "تعذر تحديث بطاقة الولاء هذه.",
+    lifecycleDescriptions: {
+      pause: "ستتوقف البطاقة عن الظهور مباشرة للعملاء حتى تستأنفها.",
+      resume: "ستعود البطاقة مباشرة للعملاء.",
+      archive: "ستُؤرشف البطاقة مع الاحتفاظ بإعداداتها وسجل إصداراتها.",
+      restore: "ستعود البطاقة إلى حالتها المحفوظة.",
+    },
+  },
+} as const;
+
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof ApiClientError ? error.message : fallback;
+}
+
+function cardStateDescription(program: ProgramItem, locale: Locale): string {
+  const copy = loyaltyCardCopy[locale];
+
+  if (program.status === "SUSPENDED") return copy.suspended;
+  if (program.status === "ARCHIVED") return copy.archived;
+  if (program.status === "PAUSED") return copy.paused;
+  if (program.status === "SCHEDULED") return copy.scheduled;
+  if (program.currentPublishedVersion && program.currentDraftVersion)
+    return copy.unpublishedChanges;
+  if (program.status === "PUBLISHED") return copy.live;
+  if (program.status === "VALIDATED") return copy.readyToTest;
+  if (program.status === "TEST") return copy.testing;
+  return copy.draftOnly;
+}
+
+function cardLifecycleActions(status: ProgramOperationalStatus): CardLifecycleAction[] {
+  if (status === "ARCHIVED") return ["restore"];
+
+  const actions: CardLifecycleAction[] = [];
+  if (status === "PUBLISHED") actions.push("pause");
+  if (status === "PAUSED") actions.push("resume");
+  actions.push("archive");
+  return actions;
 }
 
 export function ProgramsScreen({
   locale,
   membership,
+  view = "library",
+  legacyCreate = false,
 }: {
   locale: Locale;
   membership: MembershipView;
+  view?: "library" | "gallery";
+  legacyCreate?: boolean;
 }) {
+  const router = useRouter();
   const ar = locale === "ar";
+  const copy = loyaltyCardCopy[locale];
   const organizationId = membership.organization.id;
   const [programs, setPrograms] = useState<ProgramItem[]>([]);
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
@@ -34,32 +202,46 @@ export function ProgramsScreen({
   const [assets, setAssets] = useState<AssetItem[]>([]);
   const [programCursor, setProgramCursor] = useState<string | null>(null);
   const [assetCursor, setAssetCursor] = useState<string | null>(null);
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [businessCategory, setBusinessCategory] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(legacyCreate);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
   const [studioProgramId, setStudioProgramId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lifecycleConfirmation, setLifecycleConfirmation] = useState<{
+    action: CardLifecycleAction;
+    programId: string;
+  } | null>(null);
+  const [lifecycleWorking, setLifecycleWorking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [programData, templateData, locationData, assetData] = await Promise.all([
-        apiFetch<CursorPage<ProgramItem>>(`/v1/organizations/${organizationId}/programs?limit=20`),
-        apiFetch<TemplateItem[]>(`/v1/organizations/${organizationId}/programs/templates`),
-        apiFetch<{ items: LocationItem[] } | LocationItem[]>(
-          `/v1/organizations/${organizationId}/locations`,
-        ),
-        apiFetch<CursorPage<AssetItem>>(`/v1/organizations/${organizationId}/assets?limit=30`),
-      ]);
+      const [programData, templateData, locationData, assetData, organizationData] =
+        await Promise.all([
+          apiFetch<CursorPage<ProgramItem>>(
+            `/v1/organizations/${organizationId}/programs?limit=20`,
+          ),
+          apiFetch<TemplateItem[]>(
+            `/v1/organizations/${organizationId}/programs/templates?locale=${ar ? "AR" : "EN"}`,
+          ),
+          apiFetch<{ items: LocationItem[] } | LocationItem[]>(
+            `/v1/organizations/${organizationId}/locations`,
+          ),
+          apiFetch<CursorPage<AssetItem>>(`/v1/organizations/${organizationId}/assets?limit=30`),
+          apiFetch<OrganizationPresentationView>(`/v1/organizations/${organizationId}`),
+        ]);
       setPrograms(programData.items);
       setProgramCursor(programData.nextCursor);
       setTemplates(templateData);
       setLocations(Array.isArray(locationData) ? locationData : locationData.items);
       setAssets(assetData.items);
       setAssetCursor(assetData.nextCursor);
+      setBusinessCategory(organizationData.businessCategory);
     } catch (caught) {
       setError(
-        errorMessage(caught, ar ? "تعذر تحميل استوديو الولاء." : "Unable to load Loyalty Studio."),
+        errorMessage(caught, ar ? "تعذر تحميل بطاقات الولاء." : "Unable to load loyalty cards."),
       );
     } finally {
       setLoading(false);
@@ -69,6 +251,10 @@ export function ProgramsScreen({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (legacyCreate) setWizardOpen(true);
+  }, [legacyCreate]);
 
   async function loadMorePrograms() {
     if (!programCursor) return;
@@ -94,6 +280,26 @@ export function ProgramsScreen({
     setAssetCursor(page.nextCursor);
   }
 
+  async function runCardLifecycle() {
+    if (!lifecycleConfirmation || lifecycleWorking) return;
+
+    setLifecycleWorking(true);
+    setError("");
+    try {
+      await apiFetch(
+        `/v1/organizations/${organizationId}/programs/${lifecycleConfirmation.programId}/${lifecycleConfirmation.action}`,
+        { method: "POST" },
+      );
+      setLifecycleConfirmation(null);
+      await load();
+    } catch (caught) {
+      setLifecycleConfirmation(null);
+      setError(errorMessage(caught, copy.lifecycleError));
+    } finally {
+      setLifecycleWorking(false);
+    }
+  }
+
   if (studioProgramId) {
     return (
       <ProgramStudioEditor
@@ -106,176 +312,312 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         ar={ar}
-        onClose={() => setStudioProgramId(null)}
+        onClose={() => {
+          setStudioProgramId(null);
+          if (view === "gallery") router.replace(`/${locale}/dashboard/programs`);
+        }}
         onChanged={load}
       />
     );
   }
 
+  const plan = planCatalog[planCodes[membership.organization.selectedPlan]];
+  const activeCardCount = programs.filter((program) => program.status !== "ARCHIVED").length;
+  const countIsExact = programCursor === null;
+  const displayedCardCount = countIsExact ? programs.length.toString() : `${programs.length}+`;
+  const cardCountNoun = programs.length === 1 ? copy.cardSingular : copy.cardPlural;
+  const activeLimit = plan.limits.programs;
+  const planCapacity =
+    activeLimit === null
+      ? copy.noFixedLimit
+      : countIsExact
+        ? ar
+          ? `${activeCardCount} من ${activeLimit} ضمن خطة ${plan.name}`
+          : `${activeCardCount} of ${activeLimit} on ${plan.name}`
+        : ar
+          ? `حد الخطة: ${activeLimit} بطاقة نشطة ضمن ${plan.name}`
+          : `${activeLimit}-card active limit on ${plan.name}`;
+  const planInclusion =
+    activeLimit === null
+      ? copy.currentPlan
+      : `${activeLimit} ${activeLimit === 1 ? copy.activeCardSingular : copy.activeCardPlural}`;
+  const empty = !loading && programs.length === 0;
+  const wizard = (
+    <ProgramQuickWizard
+      open={wizardOpen}
+      onClose={() => {
+        setWizardOpen(false);
+        setSelectedTemplate(null);
+      }}
+      organizationId={organizationId}
+      plan={membership.organization.selectedPlan}
+      templates={templates}
+      locations={locations}
+      assets={assets}
+      initialTemplate={selectedTemplate}
+      {...(selectedTemplate
+        ? {
+            onBackToGallery: () => {
+              setWizardOpen(false);
+              setSelectedTemplate(null);
+            },
+          }
+        : {})}
+      onAssetUploaded={(asset) =>
+        setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
+      }
+      onCreated={(programId) => {
+        setWizardOpen(false);
+        setSelectedTemplate(null);
+        setStudioProgramId(programId);
+        void load();
+      }}
+      ar={ar}
+    />
+  );
+
+  if (view === "gallery") {
+    return (
+      <>
+        <TemplateGallery
+          locale={locale}
+          templates={templates}
+          businessCategory={businessCategory}
+          loading={loading}
+          error={error}
+          onBack={() => router.push(`/${locale}/dashboard/programs`)}
+          onLoadPreviews={(template, presentation) =>
+            apiFetch<Record<PreviewProfile, TemplateGalleryPreview>>(
+              `/v1/organizations/${organizationId}/programs/templates/${encodeURIComponent(template.code)}/previews?version=${template.version}&locale=${ar ? "AR" : "EN"}&presentation=${presentation}`,
+            )
+          }
+          onUseTemplate={(template) => {
+            setSelectedTemplate(template);
+            setWizardOpen(true);
+          }}
+        />
+        {wizard}
+      </>
+    );
+  }
+
   return (
-    <div className="programs-home" dir={ar ? "rtl" : "ltr"}>
+    <div
+      className={`programs-home ${empty ? "programs-home--empty" : ""}`}
+      dir={ar ? "rtl" : "ltr"}
+    >
       <PageHeader
-        eyebrow={ar ? "استوديو الولاء" : "LOYALTY STUDIO"}
-        title={ar ? "برامج الولاء" : "Loyalty programs"}
-        description={
-          ar
-            ? "صمّم برنامج الأختام، راجعه على ثلاث منصات، اختبر دورة المكافآت، ثم انشره بثقة."
-            : "Design the stamp experience, review all three surfaces, test reward cycles, then publish with confidence."
-        }
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        description={copy.description}
         actions={
-          <Button onClick={() => setWizardOpen(true)}>
-            <Plus size={17} />
-            {ar ? "إنشاء برنامج" : "Create program"}
+          <Button
+            type="button"
+            className="programs-home__header-action"
+            onClick={() => router.push(`/${locale}/dashboard/programs/new`)}
+          >
+            <Plus size={17} aria-hidden="true" />
+            {copy.create}
           </Button>
         }
       />
 
       {error ? <Alert tone="danger" title={error} /> : null}
 
-      <section
-        className="programs-home__summary"
-        aria-label={ar ? "ملخص البرامج" : "Program summary"}
-      >
-        <Card>
-          <span className="dashboard-card__label">{ar ? "الخطة" : "PLAN"}</span>
-          <strong>{membership.organization.selectedPlan}</strong>
-          <small>
-            {membership.organization.selectedPlan === "STARTER"
-              ? ar
-                ? "الوضع السريع، مكافأة نهائية واحدة"
-                : "Quick Mode, one final reward"
-              : ar
-                ? "الوضع السريع وPro مع المعالم"
-                : "Quick and Pro Mode with milestones"}
-          </small>
+      <section className="programs-home__summary" aria-label={copy.summaryLabel}>
+        <Card className="loyalty-card-summary loyalty-card-summary--count">
+          <span className="dashboard-card__label">{copy.yourCards}</span>
+          <div className="loyalty-card-summary__value">
+            <strong>{displayedCardCount}</strong>
+            <span>{cardCountNoun}</span>
+          </div>
+          <small>{planCapacity}</small>
         </Card>
-        <Card>
-          <span className="dashboard-card__label">{ar ? "البرامج" : "PROGRAMS"}</span>
-          <strong>{programs.length}</strong>
-          <small>
-            {ar ? "مسودات وإصدارات منشورة معزولة" : "Isolated drafts and published versions"}
-          </small>
-        </Card>
-        <Card>
-          <span className="dashboard-card__label">{ar ? "الأصول" : "ASSETS"}</span>
-          <strong>{assets.length}</strong>
-          <small>
-            {ar ? "مكتبة Waflo وملفات مرفوعة خاصة" : "Waflo library and private uploads"}
-          </small>
+        <Card className="loyalty-card-summary loyalty-card-summary--plan">
+          <span className="dashboard-card__label">{copy.plan}</span>
+          <strong translate="no">{plan.name}</strong>
+          <small>{planInclusion}</small>
         </Card>
       </section>
 
       {loading ? (
         <Card className="programs-home__loading">
-          <Layers3 size={24} />
-          {ar ? "جارٍ تحميل البرامج…" : "Loading programs…"}
+          <Layers3 size={24} aria-hidden="true" />
+          {copy.loading}
         </Card>
       ) : programs.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={<Sparkles size={28} />}
-            title={ar ? "ابدأ أول برنامج أختام" : "Create your first stamp program"}
-            description={
-              ar
-                ? "يقودك الوضع السريع عبر المحتوى العربي والإنجليزي والمواقع والهوية البصرية دون افتراضات مخفية."
-                : "Quick Mode guides you through English, Arabic, locations, and visual identity without hidden assumptions."
-            }
-            action={
-              <Button onClick={() => setWizardOpen(true)}>
-                <Plus size={17} />
-                {ar ? "ابدأ الآن" : "Start now"}
-              </Button>
-            }
-          />
-        </Card>
+        <section className="wf-card loyalty-card-empty" aria-labelledby="loyalty-card-empty-title">
+          <div className="loyalty-card-empty__preview" aria-hidden="true">
+            <div className="loyalty-card-visual__brand">
+              <span>W</span>
+              <CreditCard size={22} />
+            </div>
+            <div className="loyalty-card-visual__stamps">
+              {decorativeStampSlots.map((filled, index) => (
+                <span
+                  className={filled ? "loyalty-card-visual__stamp--filled" : ""}
+                  key={`empty-card-stamp-${index.toString()}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="loyalty-card-empty__content">
+            <h2 id="loyalty-card-empty-title">{copy.emptyTitle}</h2>
+            <p>{copy.emptyDescription}</p>
+            <Button
+              type="button"
+              className="loyalty-card-empty__mobile-action"
+              onClick={() => router.push(`/${locale}/dashboard/programs/new`)}
+            >
+              <Plus size={17} aria-hidden="true" />
+              {copy.create}
+            </Button>
+          </div>
+        </section>
       ) : (
-        <div className="program-list">
-          {programs.map((program) => {
-            const draft = program.currentDraftVersion;
-            const published = program.currentPublishedVersion;
-            return (
-              <Card className="program-list__card" key={program.id}>
-                <div className="program-list__heading">
-                  <div>
-                    <span className="dashboard-card__label">
-                      {draft
-                        ? `${draft.editingMode} MODE · v${draft.versionNumber}`
-                        : `LIVE · v${published?.versionNumber ?? 1}`}
-                    </span>
-                    <h2>{program.internalName}</h2>
+        <section className="loyalty-card-library" aria-labelledby="loyalty-card-library-title">
+          <div className="loyalty-card-library__heading">
+            <div>
+              <h2 id="loyalty-card-library-title">{copy.libraryTitle}</h2>
+              <p>{copy.libraryDescription}</p>
+            </div>
+          </div>
+          <div className="program-list">
+            {programs.map((program) => {
+              const status = merchantProgramStatus(program.status, locale);
+              const lifecycleActions = cardLifecycleActions(program.status);
+              const relevantDate =
+                program.currentDraftVersion || !program.currentPublishedVersion
+                  ? program.updatedAt
+                  : (program.currentPublishedVersion.publishedAt ?? program.updatedAt);
+              const dateLabel =
+                program.currentDraftVersion || !program.currentPublishedVersion
+                  ? copy.updated
+                  : copy.published;
+
+              return (
+                <article className="wf-card program-list__card" key={program.id}>
+                  <div className="loyalty-card-visual" aria-hidden="true">
+                    <div className="loyalty-card-visual__brand">
+                      <span>{program.internalName.charAt(0).toLocaleUpperCase(locale)}</span>
+                      <CreditCard size={22} />
+                    </div>
+                    <div className="loyalty-card-visual__stamps">
+                      {decorativeStampSlots.map((filled, index) => (
+                        <span
+                          className={filled ? "loyalty-card-visual__stamp--filled" : ""}
+                          key={`${program.id}-stamp-${index.toString()}`}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <Badge tone={program.status === "PUBLISHED" ? "success" : "neutral"}>
-                    {program.status}
-                  </Badge>
-                </div>
-                <p>
-                  {draft
-                    ? ar
-                      ? `المسودة في حالة ${draft.status}، المراجعة ${draft.revision}.`
-                      : `Draft is ${draft.status.toLowerCase().replaceAll("_", " ")}, revision ${draft.revision}.`
-                    : ar
-                      ? "الإصدار المنشور مباشر. أنشئ مسودة معزولة لتعديله."
-                      : "The published version is live. Create an isolated draft to edit it."}
-                </p>
-                {published && draft ? (
-                  <Alert
-                    tone="info"
-                    title={
-                      ar
-                        ? "تغييرات غير منشورة معزولة عن الإصدار المباشر"
-                        : "Unpublished changes are isolated from the live version"
-                    }
-                  />
-                ) : null}
-                <div className="program-list__footer">
-                  <span>
-                    {program._count?.versions ?? (published && draft ? 2 : 1)}{" "}
-                    {ar ? "إصدار" : "version(s)"}
-                  </span>
-                  <Button onClick={() => setStudioProgramId(program.id)}>
-                    {ar ? "فتح الاستوديو" : "Open Studio"}
-                    <ArrowRight size={16} />
-                  </Button>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+                  <div className="program-list__content">
+                    <div className="program-list__heading">
+                      <h3>{program.internalName}</h3>
+                      <Badge tone={status.tone}>{status.label}</Badge>
+                    </div>
+                    <p>{cardStateDescription(program, locale)}</p>
+                    <div className="program-list__footer">
+                      {relevantDate ? (
+                        <span>
+                          {dateLabel}{" "}
+                          <time dateTime={relevantDate}>{formatDate(relevantDate, locale)}</time>
+                        </span>
+                      ) : (
+                        <span />
+                      )}
+                      <div className="program-list__actions">
+                        <DropdownMenu
+                          label={
+                            <span className="program-list__menu-trigger">
+                              <Ellipsis size={20} aria-hidden="true" />
+                              <span className="wf-sr-only">
+                                {copy.moreActions}: {program.internalName}
+                              </span>
+                            </span>
+                          }
+                        >
+                          {lifecycleActions.map((action) => (
+                            <button
+                              className={`program-list__menu-action${
+                                action === "archive" ? " program-list__menu-action--danger" : ""
+                              }`}
+                              key={action}
+                              type="button"
+                              onClick={() =>
+                                setLifecycleConfirmation({
+                                  action,
+                                  programId: program.id,
+                                })
+                              }
+                            >
+                              {action === "pause" ? <Pause size={17} aria-hidden="true" /> : null}
+                              {action === "resume" ? <Play size={17} aria-hidden="true" /> : null}
+                              {action === "archive" ? (
+                                <Archive size={17} aria-hidden="true" />
+                              ) : null}
+                              {action === "restore" ? (
+                                <RotateCcw size={17} aria-hidden="true" />
+                              ) : null}
+                              {merchantProgramLifecycleLabel(action, locale)}
+                            </button>
+                          ))}
+                        </DropdownMenu>
+                        <Button
+                          type="button"
+                          aria-label={`${copy.open}: ${program.internalName}`}
+                          onClick={() => setStudioProgramId(program.id)}
+                        >
+                          {copy.open}
+                          <ArrowRight
+                            className="loyalty-card-open-icon"
+                            size={16}
+                            aria-hidden="true"
+                          />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {programCursor || assetCursor ? (
         <div className="program-pagination-actions">
           {programCursor ? (
-            <Button variant="secondary" onClick={() => void loadMorePrograms()}>
-              {ar ? "تحميل المزيد من البرامج" : "Load more programs"}
+            <Button type="button" variant="secondary" onClick={() => void loadMorePrograms()}>
+              {copy.loadMore}
             </Button>
           ) : null}
           {assetCursor ? (
-            <Button variant="secondary" onClick={() => void loadMoreAssets()}>
-              {ar ? "تحميل المزيد من الأصول" : "Load more assets"}
+            <Button type="button" variant="secondary" onClick={() => void loadMoreAssets()}>
+              {copy.loadMoreAssets}
             </Button>
           ) : null}
         </div>
       ) : null}
 
-      <ProgramQuickWizard
-        open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
-        organizationId={organizationId}
-        plan={membership.organization.selectedPlan}
-        templates={templates}
-        locations={locations}
-        assets={assets}
-        onAssetUploaded={(asset) =>
-          setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
+      <AlertDialog
+        open={Boolean(lifecycleConfirmation)}
+        title={
+          lifecycleConfirmation
+            ? merchantProgramLifecycleLabel(lifecycleConfirmation.action, locale)
+            : ""
         }
-        onCreated={(programId) => {
-          setWizardOpen(false);
-          setStudioProgramId(programId);
-          void load();
-        }}
-        ar={ar}
+        description={
+          lifecycleConfirmation ? copy.lifecycleDescriptions[lifecycleConfirmation.action] : ""
+        }
+        confirmLabel={lifecycleWorking ? copy.working : copy.confirm}
+        cancelLabel={copy.cancel}
+        danger={lifecycleConfirmation?.action === "archive"}
+        onClose={() => setLifecycleConfirmation(null)}
+        onConfirm={() => void runCardLifecycle()}
       />
+
+      {wizard}
     </div>
   );
 }

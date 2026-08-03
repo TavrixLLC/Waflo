@@ -82,8 +82,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
       <h2>{ar ? "أنشئ حساب التاجر" : "Create your merchant account"}</h2>
       <p className="auth-card__intro">
         {ar
-          ? "ابدأ الإعداد الآن. لن تبدأ التجربة المجانية حتى تنشر أول برنامج ولاء."
-          : "Start setting up now. Your free trial will not begin until you publish your first loyalty program."}
+          ? "ابدأ الإعداد الآن. لن تبدأ التجربة المجانية حتى تنشر أول بطاقة ولاء."
+          : "Start setting up now. Your free trial will not begin until you publish your first loyalty card."}
       </p>
       {error ? <Alert tone="danger" title={error} /> : null}
       <form className="auth-form" onSubmit={submit}>

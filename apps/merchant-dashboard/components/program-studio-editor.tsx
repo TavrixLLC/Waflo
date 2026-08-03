@@ -47,6 +47,10 @@ import {
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
+import {
+  merchantProgramLifecycleLabel,
+  type MerchantProgramLifecycleAction,
+} from "./loyalty-card-presentation";
 import { ProgramAssetPicker } from "./program-asset-uploader";
 import { ProgramEnrollmentSettings } from "./program-enrollment-settings";
 import {
@@ -86,6 +90,7 @@ const sectionCopy: Record<StudioSection, { en: string; ar: string }> = {
 };
 
 type SaveState = "saved" | "unsaved" | "saving" | "failed" | "conflict";
+type LifecycleAction = MerchantProgramLifecycleAction;
 
 interface PreviewResult {
   svg: string;
@@ -117,6 +122,55 @@ function statusLabel(state: SaveState, ar: boolean) {
   return labels[state][ar ? 1 : 0];
 }
 
+function lifecycleActionLabel(action: LifecycleAction, ar: boolean): string {
+  return merchantProgramLifecycleLabel(action, ar ? "ar" : "en");
+}
+
+function lifecycleActionDescription(
+  action: LifecycleAction,
+  ar: boolean,
+  options: { hasPublishedVersion: boolean; pausedWithPublishedVersion: boolean },
+): string {
+  if (action === "publish") {
+    if (options.pausedWithPublishedVersion) {
+      return ar
+        ? "سيُنشر الإصدار الجديد، لكن البطاقة ستظل متوقفة مؤقتًا. استخدم الاستئناف بشكل منفصل عندما تكون مستعدًا لإعادتها للعمل."
+        : "The new version will be published, but the card will remain paused. Use Resume separately when you are ready to make it live.";
+    }
+    return ar
+      ? "يصبح الإصدار المختبَر مباشرًا للعملاء بعد إكمال التحقق ووضع الاختبار."
+      : "The tested version becomes live for customers after validation and Test Mode are complete.";
+  }
+  if (action === "abandon") {
+    return ar
+      ? "ستُعلَّم المسودة القابلة للتحرير كمسودة متروكة، بينما تبقى البطاقة المنشورة مباشرة."
+      : "The editable draft will be marked abandoned. The published card remains live.";
+  }
+  if (action === "archive" && !options.hasPublishedVersion) {
+    return ar
+      ? "تُؤرشف البطاقة غير المنشورة بأمان، مع الاحتفاظ بمسودتها الحالية وسجل إصداراتها لاستعادتها لاحقًا."
+      : "Archive this unpublished card safely. Its current draft and version history will be preserved for restoration.";
+  }
+  if (action === "restore" && !options.hasPublishedVersion) {
+    return ar
+      ? "تعود البطاقة غير المنشورة إلى حالة المسودة المحفوظة."
+      : "Restore this unpublished card to its preserved draft state.";
+  }
+  const descriptions: Record<Exclude<LifecycleAction, "publish" | "abandon">, [string, string]> = {
+    pause: [
+      "The card will stop being live for customers until you resume it.",
+      "ستتوقف البطاقة عن الظهور مباشرة للعملاء حتى تستأنفها.",
+    ],
+    resume: ["The card will become live for customers again.", "ستعود البطاقة مباشرة للعملاء."],
+    archive: [
+      "The card will be archived while its setup and version history remain preserved.",
+      "ستُؤرشف البطاقة مع الاحتفاظ بإعداداتها وسجل إصداراتها.",
+    ],
+    restore: ["The card will return to its preserved state.", "ستعود البطاقة إلى حالتها المحفوظة."],
+  };
+  return descriptions[action][ar ? 1 : 0];
+}
+
 function sectionForIssue(issue: ValidationIssue): StudioSection {
   if (issue.path.startsWith("policies")) return "policies";
   if (issue.path.startsWith("content.en")) return "english";
@@ -145,30 +199,30 @@ function sectionForPublicationError(code: string): StudioSection {
 function publicationStateGuidance(status: ProgramOperationalStatus, ar: boolean) {
   if (status === "ARCHIVED")
     return {
-      title: ar ? "البرنامج مؤرشف" : "Restore required before publishing",
+      title: ar ? "البطاقة مؤرشفة" : "Restore required before publishing",
       message: ar
-        ? "استعد البرنامج أولاً، ثم راجع المسودة وانشرها."
-        : "Restore this program before publishing. Its preserved draft will remain available.",
+        ? "استعد البطاقة أولاً، ثم راجع المسودة وانشرها."
+        : "Restore this card before publishing. Its preserved draft will remain available.",
     };
   if (status === "SUSPENDED")
     return {
       title: ar ? "النشر غير متاح" : "Publishing is unavailable",
       message: ar
-        ? "لا يمكن نشر هذا البرنامج في حالته الحالية. تواصل مع الدعم للمساعدة."
-        : "This program cannot be published in its current state. Contact support for assistance.",
+        ? "لا يمكن نشر هذه البطاقة في حالتها الحالية. تواصل مع الدعم للمساعدة."
+        : "This card cannot be published in its current state. Contact support for assistance.",
     };
   if (status === "SCHEDULED")
     return {
       title: ar ? "النشر المجدول غير متاح" : "Scheduled publishing is unavailable",
       message: ar
-        ? "لا يمكن نشر البرنامج المجدول حتى يتم تنفيذ ميزة الجدولة."
-        : "This program cannot publish while scheduling is not implemented.",
+        ? "لا يمكن نشر البطاقة المجدولة حتى تتوفر ميزة الجدولة."
+        : "This card cannot publish while scheduling is not implemented.",
     };
   return {
-    title: ar ? "حالة البرنامج تمنع النشر" : "Program state blocks publishing",
+    title: ar ? "حالة البطاقة تمنع النشر" : "Card status blocks publishing",
     message: ar
-      ? "راجع حالة البرنامج قبل محاولة النشر."
-      : "Review the program operational state before publishing.",
+      ? "راجع حالة البطاقة قبل محاولة النشر."
+      : "Review the card status before publishing.",
   };
 }
 
@@ -182,21 +236,21 @@ function publishedStatePresentation(status: ProgramOperationalStatus, ar: boolea
     };
   if (status === "ARCHIVED")
     return {
-      title: ar ? "البرنامج مؤرشف" : "This program is archived",
+      title: ar ? "البطاقة مؤرشفة" : "This card is archived",
       message: ar
-        ? "استعد البرنامج قبل إنشاء إصدار جديد أو نشر المسودة المحفوظة."
-        : "Restore the program before creating or publishing another version.",
+        ? "استعد البطاقة قبل إنشاء إصدار جديد أو نشر المسودة المحفوظة."
+        : "Restore the card before creating or publishing another version.",
     };
   if (status === "SUSPENDED")
     return {
       title: ar ? "النشر غير متاح" : "Publishing is unavailable",
       message: ar
-        ? "لا يمكن نشر هذا البرنامج في حالته الحالية. تواصل مع الدعم للمساعدة."
-        : "This program cannot be published in its current state. Contact support for assistance.",
+        ? "لا يمكن نشر هذه البطاقة في حالتها الحالية. تواصل مع الدعم للمساعدة."
+        : "This card cannot be published in its current state. Contact support for assistance.",
     };
   if (status === "SCHEDULED")
     return {
-      title: ar ? "البرنامج مجدول" : "This program is scheduled",
+      title: ar ? "البطاقة مجدولة" : "This card is scheduled",
       message: ar
         ? "النشر المجدول غير متاح حتى يتم تنفيذ ميزة الجدولة."
         : "Scheduled publishing remains unavailable until scheduling is implemented.",
@@ -204,8 +258,8 @@ function publishedStatePresentation(status: ProgramOperationalStatus, ar: boolea
   return {
     title: ar ? "الإصدار المنشور مباشر وآمن" : "The published version remains live",
     message: ar
-      ? "أنشئ مسودة جديدة لتحرير الإصدار التالي دون تغيير البرنامج المباشر."
-      : "Create a new draft to edit the next version without changing the live program.",
+      ? "أنشئ مسودة جديدة لتحرير الإصدار التالي دون تغيير البطاقة المباشرة."
+      : "Create a new draft to edit the next version without changing the live card.",
   };
 }
 
@@ -250,9 +304,7 @@ export function ProgramStudioEditor({
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [historicalVersion, setHistoricalVersion] = useState<ProgramVersion | null>(null);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
-  const [confirmation, setConfirmation] = useState<
-    "publish" | "pause" | "resume" | "archive" | "restore" | "abandon" | null
-  >(null);
+  const [confirmation, setConfirmation] = useState<LifecycleAction | null>(null);
   const [working, setWorking] = useState(false);
   const persistedRef = useRef("");
   const initializedRef = useRef(false);
@@ -591,7 +643,8 @@ export function ProgramStudioEditor({
       <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
         <div className="studio-toolbar">
           <Button variant="secondary" onClick={onClose}>
-            <ArrowLeft size={16} /> {ar ? "البرامج" : "Programs"}
+            <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
+            {ar ? "بطاقات الولاء" : "Loyalty Cards"}
           </Button>
           <div>
             <span className="dashboard-card__label">LOYALTY STUDIO</span>
@@ -605,7 +658,8 @@ export function ProgramStudioEditor({
           <p>{statePresentation.message}</p>
           {detail.status !== "ARCHIVED" ? (
             <Button onClick={() => void createDraft()} loading={working}>
-              <Plus size={16} /> {ar ? "إنشاء مسودة من المنشور" : "Create draft from published"}
+              <Plus size={16} aria-hidden="true" />
+              {ar ? "إنشاء مسودة من البطاقة المباشرة" : "Create draft from live card"}
             </Button>
           ) : null}
         </Card>
@@ -629,33 +683,38 @@ export function ProgramStudioEditor({
         <div className="studio-lifecycle-actions">
           {detail.status === "PUBLISHED" ? (
             <Button variant="secondary" onClick={() => setConfirmation("pause")}>
-              <Pause size={16} /> {ar ? "إيقاف مؤقت" : "Pause"}
+              <Pause size={16} aria-hidden="true" /> {lifecycleActionLabel("pause", ar)}
             </Button>
           ) : null}
           {detail.status === "PAUSED" ? (
             <Button variant="secondary" onClick={() => setConfirmation("resume")}>
-              <Play size={16} /> {ar ? "استئناف" : "Resume"}
+              <Play size={16} aria-hidden="true" /> {lifecycleActionLabel("resume", ar)}
             </Button>
           ) : null}
           {detail.status !== "ARCHIVED" ? (
             <Button variant="secondary" onClick={() => setConfirmation("archive")}>
-              <Archive size={16} /> {ar ? "أرشفة" : "Archive"}
+              <Archive size={16} aria-hidden="true" /> {lifecycleActionLabel("archive", ar)}
             </Button>
           ) : null}
           {detail.status === "ARCHIVED" ? (
             <Button variant="secondary" onClick={() => setConfirmation("restore")}>
-              <RotateCcw size={16} /> {ar ? "استعادة" : "Restore"}
+              <RotateCcw size={16} aria-hidden="true" /> {lifecycleActionLabel("restore", ar)}
             </Button>
           ) : null}
         </div>
         <AlertDialog
           open={Boolean(confirmation)}
-          title={
-            confirmation ? `${confirmation[0]?.toUpperCase()}${confirmation.slice(1)} program` : ""
+          title={confirmation ? lifecycleActionLabel(confirmation, ar) : ""}
+          description={
+            confirmation
+              ? lifecycleActionDescription(confirmation, ar, {
+                  hasPublishedVersion: Boolean(detail.currentPublishedVersion),
+                  pausedWithPublishedVersion: false,
+                })
+              : ""
           }
-          description={`Confirm the ${confirmation ?? ""} lifecycle action.`}
-          confirmLabel={working ? "Working…" : "Confirm"}
-          cancelLabel="Cancel"
+          confirmLabel={working ? (ar ? "جارٍ التنفيذ…" : "Working…") : ar ? "تأكيد" : "Confirm"}
+          cancelLabel={ar ? "إلغاء" : "Cancel"}
           danger={confirmation === "archive"}
           onClose={() => setConfirmation(null)}
           onConfirm={() => {
@@ -670,7 +729,8 @@ export function ProgramStudioEditor({
     <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
       <div className="studio-toolbar">
         <Button variant="secondary" onClick={onClose}>
-          <ArrowLeft size={16} /> {ar ? "البرامج" : "Programs"}
+          <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
+          {ar ? "بطاقات الولاء" : "Loyalty Cards"}
         </Button>
         <div className="studio-toolbar__title">
           <span className="dashboard-card__label">
@@ -865,22 +925,22 @@ export function ProgramStudioEditor({
       <div className="studio-lifecycle-actions">
         {detail.status === "PUBLISHED" ? (
           <Button variant="secondary" onClick={() => setConfirmation("pause")}>
-            <Pause size={16} /> {ar ? "إيقاف مؤقت" : "Pause"}
+            <Pause size={16} aria-hidden="true" /> {lifecycleActionLabel("pause", ar)}
           </Button>
         ) : null}
         {detail.status === "PAUSED" ? (
           <Button variant="secondary" onClick={() => setConfirmation("resume")}>
-            <Play size={16} /> {ar ? "استئناف" : "Resume"}
+            <Play size={16} aria-hidden="true" /> {lifecycleActionLabel("resume", ar)}
           </Button>
         ) : null}
         {detail.status !== "ARCHIVED" ? (
           <Button variant="secondary" onClick={() => setConfirmation("archive")}>
-            <Archive size={16} /> {ar ? "أرشفة" : "Archive"}
+            <Archive size={16} aria-hidden="true" /> {lifecycleActionLabel("archive", ar)}
           </Button>
         ) : null}
         {detail.status === "ARCHIVED" ? (
           <Button variant="secondary" onClick={() => setConfirmation("restore")}>
-            <RotateCcw size={16} /> {ar ? "استعادة" : "Restore"}
+            <RotateCcw size={16} aria-hidden="true" /> {lifecycleActionLabel("restore", ar)}
           </Button>
         ) : null}
       </div>
@@ -900,39 +960,18 @@ export function ProgramStudioEditor({
       />
       <AlertDialog
         open={Boolean(confirmation)}
-        title={
+        title={confirmation ? lifecycleActionLabel(confirmation, ar) : ""}
+        description={
           confirmation
-            ? ar
-              ? {
-                  publish: "نشر البرنامج",
-                  pause: "إيقاف البرنامج مؤقتًا",
-                  resume: "استئناف البرنامج",
-                  archive: "أرشفة البرنامج",
-                  restore: "استعادة البرنامج",
-                  abandon: "التخلي عن المسودة",
-                }[confirmation]
-              : `${confirmation[0]?.toUpperCase()}${confirmation.slice(1)} program`
+            ? lifecycleActionDescription(confirmation, ar, {
+                hasPublishedVersion: Boolean(detail.currentPublishedVersion),
+                pausedWithPublishedVersion:
+                  detail.status === "PAUSED" && Boolean(detail.currentPublishedVersion),
+              })
             : ""
         }
-        description={
-          confirmation === "publish"
-            ? detail.status === "PAUSED" && detail.currentPublishedVersion
-              ? ar
-                ? "سيُنشر الإصدار الجديد، لكن البرنامج سيظل متوقفًا مؤقتًا. استخدم الاستئناف بشكل منفصل عندما تكون مستعدًا لإعادته للعمل."
-                : "The new version will be published, but the program will remain paused. Use Resume separately when you are ready to make it live."
-              : ar
-                ? "يستبدل النشر الإصدار الحالي فقط بعد إكمال التحقق ووضع الاختبار."
-                : "Publishing replaces the live version only after validation and Test Mode completion."
-            : confirmation === "abandon"
-              ? "The editable draft will be marked abandoned. The published version remains live."
-              : confirmation === "archive" && !detail.currentPublishedVersion
-                ? "Archive this unpublished program safely. Its current draft and version history will be preserved for restoration."
-                : confirmation === "restore" && !detail.currentPublishedVersion
-                  ? "Restore this unpublished program to its preserved draft state."
-                  : `Confirm the ${confirmation ?? ""} lifecycle action.`
-        }
-        confirmLabel={working ? "Working…" : "Confirm"}
-        cancelLabel="Cancel"
+        confirmLabel={working ? (ar ? "جارٍ التنفيذ…" : "Working…") : ar ? "تأكيد" : "Confirm"}
+        cancelLabel={ar ? "إلغاء" : "Cancel"}
         danger={confirmation === "archive" || confirmation === "abandon"}
         onClose={() => setConfirmation(null)}
         onConfirm={() => {
@@ -1005,7 +1044,8 @@ function LifecycleChecklist({
           {"requiredAction" in publicationDecision &&
           publicationDecision.requiredAction === "RESTORE_PROGRAM" ? (
             <Button variant="secondary" onClick={onRestore}>
-              <RotateCcw size={16} /> {ar ? "استعادة البرنامج" : "Restore program"}
+              <RotateCcw size={16} aria-hidden="true" />
+              {lifecycleActionLabel("restore", ar)}
             </Button>
           ) : null}
         </details>
@@ -1021,7 +1061,7 @@ function LifecycleChecklist({
               : undefined
         }
       >
-        <Gift size={16} /> {ar ? "نشر البرنامج" : "Publish program"}
+        <Gift size={16} aria-hidden="true" /> {lifecycleActionLabel("publish", ar)}
       </Button>
     </Card>
   );
@@ -1395,8 +1435,8 @@ function StudioSectionContent({
       ) : (
         <Alert tone="info" title={ar ? "المسودة الأولى محفوظة" : "Initial draft is preserved"}>
           {ar
-            ? "استخدم إجراء الأرشفة الآمن لإخفاء البرنامج غير المنشور مع الاحتفاظ بالمسودة وسجل الإصدارات."
-            : "Use the safe Archive action to hide this unpublished program while preserving its draft and version history."}
+            ? "استخدم إجراء الأرشفة الآمن لإخفاء البطاقة غير المنشورة مع الاحتفاظ بالمسودة وسجل الإصدارات."
+            : "Use the safe Archive action to hide this unpublished card while preserving its draft and version history."}
         </Alert>
       )}
     </div>
@@ -1416,7 +1456,7 @@ function TranslationEditor({
   return (
     <div className="studio-section-content" dir={rtl ? "rtl" : "ltr"}>
       <div className="studio-form-grid">
-        <FormField label={rtl ? "اسم البرنامج" : "Program name"}>
+        <FormField label={rtl ? "اسم البطاقة" : "Card name"}>
           <TextInput
             value={value.programName}
             onChange={(event) => update("programName", event.target.value)}
