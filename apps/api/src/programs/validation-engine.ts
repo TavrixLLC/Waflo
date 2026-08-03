@@ -468,7 +468,27 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
           "applePreview.heroArtwork",
           "APPLE_WALLET",
           programPlatformCapabilities.APPLE_WALLET.heroArtwork.explanation,
-          "Review the Apple preview; the hero is used by Customer Web and Google only.",
+          "Keep the hero for Customer Web; the current Wallet providers do not generate it.",
+        ),
+        issue(
+          "GOOGLE_HERO_ARTWORK_UNSUPPORTED",
+          "warning",
+          "googlePreview.heroArtwork",
+          "GOOGLE_WALLET",
+          programPlatformCapabilities.GOOGLE_WALLET.heroArtwork.explanation,
+          "Keep the hero for Customer Web; the current Google loyalty object does not generate it.",
+        ),
+      );
+    const logo = input.visual.assets.find((role) => role.role === "logo");
+    if (logo?.asset)
+      issues.push(
+        issue(
+          "APPLE_CUSTOM_LOGO_NOT_MAPPED",
+          "warning",
+          "applePreview.logo",
+          "APPLE_WALLET",
+          programPlatformCapabilities.APPLE_WALLET.logo.explanation,
+          "Review the Apple preview; the custom logo remains available to Customer Web and Google Wallet.",
         ),
       );
     if (contrastRatio(input.visual.foregroundColor, input.visual.backgroundColor) < 4.5)

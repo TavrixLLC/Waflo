@@ -222,6 +222,7 @@ function TemplatePreviewDialog({
   loading,
   error,
   locale,
+  selectionPending,
   onClose,
   onRetry,
   onUseTemplate,
@@ -231,9 +232,10 @@ function TemplatePreviewDialog({
   loading: boolean;
   error: boolean;
   locale: Locale;
+  selectionPending: boolean;
   onClose: () => void;
   onRetry: () => void;
-  onUseTemplate: (template: TemplateItem) => void;
+  onUseTemplate: (template: TemplateItem, options: { blank: boolean }) => void;
 }) {
   const copy = galleryCopy[locale];
   const [profile, setProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
@@ -347,8 +349,18 @@ function TemplatePreviewDialog({
         <Button type="button" variant="secondary" onClick={onClose}>
           {copy.backToTemplates}
         </Button>
-        <Button type="button" onClick={() => onUseTemplate(template)}>
-          {blank ? copy.blankName : copy.useThisTemplate}
+        <Button
+          type="button"
+          disabled={selectionPending}
+          onClick={() => onUseTemplate(template, { blank })}
+        >
+          {selectionPending
+            ? locale === "ar"
+              ? "جارٍ تجهيز المسودة…"
+              : "Preparing draft…"
+            : blank
+              ? copy.blankName
+              : copy.useThisTemplate}
           <ArrowRight className="template-gallery__logical-arrow" size={16} aria-hidden="true" />
         </Button>
       </div>
@@ -362,6 +374,7 @@ export function TemplateGallery({
   businessCategory,
   loading = false,
   error = "",
+  selectionPending = false,
   onBack,
   onLoadPreviews,
   onUseTemplate,
@@ -371,12 +384,13 @@ export function TemplateGallery({
   businessCategory: string | null;
   loading?: boolean;
   error?: string;
+  selectionPending?: boolean;
   onBack: () => void;
   onLoadPreviews: (
     template: TemplateItem,
     presentation: TemplatePresentation,
   ) => Promise<TemplatePreviewSet>;
-  onUseTemplate: (template: TemplateItem) => void;
+  onUseTemplate: (template: TemplateItem, options: { blank: boolean }) => void;
 }) {
   const copy = galleryCopy[locale];
   const [selectedCategory, setSelectedCategory] = useState<TemplateGalleryCategory>("all");
@@ -581,13 +595,14 @@ export function TemplateGallery({
         loading={previewRequest?.key === activePreviewKey && previewRequest.status === "loading"}
         error={previewRequest?.key === activePreviewKey && previewRequest.status === "error"}
         locale={locale}
+        selectionPending={selectionPending}
         onClose={closePreview}
         onRetry={() => {
           if (previewSelection) void loadPreview(previewSelection, true);
         }}
-        onUseTemplate={(template) => {
+        onUseTemplate={(template, options) => {
           setPreviewSelection(null);
-          onUseTemplate(template);
+          onUseTemplate(template, options);
         }}
       />
     </div>

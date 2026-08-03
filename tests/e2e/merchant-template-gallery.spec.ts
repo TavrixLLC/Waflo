@@ -196,33 +196,53 @@ test("Start from scratch uses a neutral preview while retaining the safe General
   expect(previewRequests).toEqual([["GENERAL_VISITS", "BLANK"]]);
 
   await dialog.getByRole("button", { name: "Start from scratch" }).click();
-  await expect(page.getByRole("dialog", { name: "Create a loyalty card" })).toBeVisible();
+  await expect(page).toHaveURL(/\/en\/dashboard\/programs\/created-program-id\/edit$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Customize your loyalty card" }),
+  ).toBeVisible();
+  await expect(page.getByText("Start from scratch", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: /^Languages/u })
+    .first()
+    .click();
+  await expect(page.getByLabel("Card name")).toHaveValue("Your loyalty card");
 });
 
-test("preserves selected stable code and version through the existing Program create API", async ({
+test("preserves selected stable code and version through one Program draft and revisioned autosave", async ({
   page,
 }) => {
   const createBodies: Record<string, unknown>[] = [];
-  await mockTemplateGalleryApi(page, { onCreate: (body) => createBodies.push(body) });
+  const patchBodies: Record<string, unknown>[] = [];
+  await mockTemplateGalleryApi(page, {
+    onCreate: (body) => createBodies.push(body),
+    onPatch: (body) => patchBodies.push(body),
+    patchDelayMs: 700,
+  });
   await page.goto("/en/dashboard/programs/new");
 
   const dialog = await openPreview(page, "Clean Blue");
   await dialog.getByRole("button", { name: "Use this template" }).click();
-  await page.getByLabel("Internal card name").fill("Gallery car wash");
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("checkbox", { name: "Gallery Main Branch" }).check();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Save and open Studio" }).click();
 
   await expect.poll(() => createBodies.length).toBe(1);
   expect(createBodies[0]).toMatchObject({
-    internalName: "Gallery car wash",
+    internalName: "Clean Blue",
     templateCode: "CAR_WASH",
     templateVersion: 4,
     requiredStampCount: 6,
+    locationIds: ["gallery-location"],
+  });
+  await expect(page).toHaveURL(/\/en\/dashboard\/programs\/created-program-id\/edit$/u);
+  await expect(page.getByText("Clean Blue", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Card name in your dashboard").fill("Gallery car wash");
+  await expect(page.getByText("Saving…", { exact: true })).toBeVisible();
+  await expect.poll(() => patchBodies.length).toBe(1);
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  expect(patchBodies[0]).toMatchObject({
+    internalName: "Gallery car wash",
+    templateCode: "CAR_WASH",
+    templateVersion: 4,
+    revision: 1,
   });
 });
 

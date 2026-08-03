@@ -53,7 +53,11 @@ export const programPlatformCapabilities: Record<
     },
   },
   APPLE_WALLET: {
-    logo: { support: "SUPPORTED", explanation: "Mapped to the pass logo/header region." },
+    logo: {
+      support: "MAPPED",
+      explanation:
+        "The generated pass uses Waflo package artwork with the organization name; a custom merchant logo is not currently mapped to Apple Wallet.",
+    },
     heroArtwork: {
       support: "UNSUPPORTED",
       explanation: "The W2 Apple preview does not map hero artwork.",
@@ -67,7 +71,7 @@ export const programPlatformCapabilities: Record<
     textFields: { support: "SUPPORTED", explanation: "Mapped to pass header and field regions." },
     backContent: {
       support: "SUPPORTED",
-      explanation: "Represented by the back-content indicator.",
+      explanation: "Reward, security, and operator details are generated as pass back fields.",
     },
     links: { support: "MAPPED", explanation: "Links belong in pass back content." },
     locationMetadata: {
@@ -89,14 +93,19 @@ export const programPlatformCapabilities: Record<
   },
   GOOGLE_WALLET: {
     logo: { support: "SUPPORTED", explanation: "Mapped to the card logo region." },
-    heroArtwork: { support: "SUPPORTED", explanation: "Mapped to the card hero region." },
+    heroArtwork: {
+      support: "UNSUPPORTED",
+      explanation:
+        "The current Google loyalty class/object payload does not generate a hero image.",
+    },
     backgroundArtwork: {
       support: "UNSUPPORTED",
-      explanation: "Google preview uses hero artwork; selected background artwork is not used.",
+      explanation:
+        "Selected background artwork is not mapped; the generated class uses a background color and the object may include a stamp-progress image.",
     },
     backgroundColor: {
-      support: "MAPPED",
-      explanation: "Mapped through the Google card color treatment.",
+      support: "SUPPORTED",
+      explanation: "Mapped to the loyalty class hex background color.",
     },
     foregroundColor: {
       support: "MAPPED",

@@ -7,6 +7,44 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiUrl } from "../lib/api-client";
 import type { AssetCategory, AssetItem } from "./program-studio-types";
 
+function AssetThumbnail({ asset, label }: { asset: AssetItem; label: string }) {
+  const [source, setSource] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    void fetch(`${apiUrl}${asset.contentUrl}`, {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Asset preview unavailable");
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      })
+      .catch(() => {
+        if (active) setSource("");
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [asset.contentUrl]);
+
+  return source ? (
+    <Image src={source} alt="" width={76} height={76} unoptimized />
+  ) : (
+    <span className="studio-asset-thumbnail-placeholder" role="img" aria-label={label}>
+      <ImagePlus size={22} />
+    </span>
+  );
+}
+
 export function ProgramAssetPicker({
   organizationId,
   category,
@@ -34,10 +72,28 @@ export function ProgramAssetPicker({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
+  const [showChoices, setShowChoices] = useState(!selectedId);
   const choices = useMemo(
     () => assets.filter((asset) => asset.category === category),
     [assets, category],
   );
+  const selectedAsset = choices.find((asset) => asset.id === selectedId);
+
+  function displayName(asset: AssetItem): string {
+    if (ar && asset.source === "WAFLO_LIBRARY") return "رسم مدمج من Waflo";
+    const name = asset.originalFilename
+      .replace(/\.[^.]+$/u, "")
+      .replace(/[-_]v\d+$/iu, "")
+      .replace(/[-_](?:filled|empty)$/iu, "")
+      .replaceAll(/[-_]+/gu, " ")
+      .trim();
+    return name || label;
+  }
+
+  function choose(assetId: string | null): void {
+    onSelected(assetId);
+    setShowChoices(false);
+  }
 
   useEffect(() => {
     if (!file) {
@@ -102,10 +158,11 @@ export function ProgramAssetPicker({
               : "Choose from the Waflo library or upload PNG, JPEG, or WebP."}
           </p>
         </div>
-        <Button type="button" variant="secondary" onClick={() => fileInput.current?.click()}>
-          <Upload size={16} />
-          {ar ? "رفع" : "Upload"}
-        </Button>
+        {selectedAsset ? (
+          <Button type="button" variant="ghost" onClick={() => setShowChoices((open) => !open)}>
+            {showChoices ? (ar ? "إخفاء الخيارات" : "Hide options") : ar ? "تغيير" : "Change"}
+          </Button>
+        ) : null}
         <input
           ref={fileInput}
           className="wf-sr-only"
@@ -115,31 +172,80 @@ export function ProgramAssetPicker({
           onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
         />
       </div>
-      <div className="studio-asset-grid">
-        {choices.map((asset) => (
-          <button
-            type="button"
-            key={asset.id}
-            className={`studio-asset-option ${selectedId === asset.id ? "studio-asset-option--selected" : ""}`}
-            onClick={() => onSelected(asset.id)}
-            aria-pressed={selectedId === asset.id}
-          >
-            <Image src={`${apiUrl}${asset.contentUrl}`} alt="" width={72} height={72} unoptimized />
-            <span>{asset.originalFilename.replace(/\.[^.]+$/, "")}</span>
-            <small>{asset.source === "WAFLO_LIBRARY" ? "Waflo library" : "Uploaded"}</small>
-          </button>
-        ))}
-        {!choices.length ? (
-          <button
-            type="button"
-            className="studio-asset-empty"
-            onClick={() => fileInput.current?.click()}
-          >
-            <ImagePlus size={24} />
-            {ar ? "ارفع أول أصل" : "Upload the first asset"}
-          </button>
-        ) : null}
-      </div>
+      {selectedAsset ? (
+        <div className="studio-asset-current">
+          <AssetThumbnail asset={selectedAsset} label={label} />
+          <span>
+            <small>{ar ? "المستخدم حاليًا" : "Currently used"}</small>
+            <strong>{displayName(selectedAsset)}</strong>
+            <small>
+              {selectedAsset.source === "WAFLO_LIBRARY"
+                ? ar
+                  ? "مكتبة Waflo"
+                  : "Waflo library"
+                : ar
+                  ? "تصميم مرفوع"
+                  : "Uploaded artwork"}
+            </small>
+          </span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="studio-asset-empty"
+          onClick={() => fileInput.current?.click()}
+        >
+          <ImagePlus size={24} />
+          {category === "LOGO"
+            ? ar
+              ? "إضافة شعار"
+              : "Add logo"
+            : ar
+              ? "اختيار رسم أو رفع تصميمك"
+              : "Choose artwork or upload your own"}
+        </button>
+      )}
+      {showChoices ? (
+        <div className="studio-asset-library">
+          {choices.length ? (
+            <>
+              <span className="studio-asset-library__label">
+                {ar ? "الاختيار من المكتبة" : "Choose from library"}
+              </span>
+              <div className="studio-asset-grid">
+                {choices.map((asset) => (
+                  <button
+                    type="button"
+                    key={asset.id}
+                    className={`studio-asset-option ${selectedId === asset.id ? "studio-asset-option--selected" : ""}`}
+                    onClick={() => choose(asset.id)}
+                    aria-pressed={selectedId === asset.id}
+                    aria-label={`${label}: ${displayName(asset)}`}
+                  >
+                    <AssetThumbnail asset={asset} label={displayName(asset)} />
+                    <span>{displayName(asset)}</span>
+                    <small>
+                      {asset.source === "WAFLO_LIBRARY"
+                        ? ar
+                          ? "مكتبة Waflo"
+                          : "Waflo library"
+                        : ar
+                          ? "مرفوع"
+                          : "Uploaded"}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+          {selectedAsset || choices.length ? (
+            <Button type="button" variant="secondary" onClick={() => fileInput.current?.click()}>
+              <Upload size={16} />
+              {ar ? "رفع تصميمك" : "Upload your own"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <Modal
         open={Boolean(file)}

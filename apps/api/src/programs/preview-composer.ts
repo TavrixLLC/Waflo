@@ -5,6 +5,7 @@ import type { StampOutputProfile } from "@waflo/stamp-engine";
 export interface ProgramPreviewCompositionInput {
   profile: StampOutputProfile;
   locale: "EN" | "AR";
+  organizationName: string;
   programName: string;
   shortDescription: string;
   rewardSummary: string;
@@ -143,7 +144,7 @@ function composeLegacyCustomer(
     surface = `${motif(motifX, 46, 112)}${title(96, 30)}${description(128)}${stampImage(input.stampSvg, 60, 158, width - 120, 184)}${reward(400)}${terms}`;
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}"><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}${surface}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}"><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}${surface}</svg>`;
   return { svg, width, height, warnings };
 }
 
@@ -321,71 +322,40 @@ function composeCustomer(
     surface = `${motif()}${headerBlock(410, 84, { centered: true, descriptionWidth: 600 })}${stampBlock(126, 178, 568, 230)}${rewardBlock(156, 432, 508, 72)}${footer(64)}`;
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-composition="${presentation.composition}" data-visual-role="${presentation.visualRole}" data-density="${presentation.density}"><defs><clipPath id="customer-card-clip"><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}"/></clipPath></defs><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}<g clip-path="url(#customer-card-clip)">${surface}</g></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}" data-composition="${presentation.composition}" data-visual-role="${presentation.visualRole}" data-density="${presentation.density}"><defs><clipPath id="customer-card-clip"><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}"/></clipPath></defs><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}<g clip-path="url(#customer-card-clip)">${surface}</g></svg>`;
   return { svg, width, height, warnings };
-}
-
-function walletRoleDecoration(input: ProgramPreviewCompositionInput, rtl: boolean): string {
-  const role = input.presentation?.visualRole;
-  if (!role) return "";
-  const railX = rtl ? 428 : 24;
-  if (role === "SIGNATURE")
-    return `<g data-preview-block="wallet-role" data-visual-role="${role}"><rect x="${railX}" y="44" width="8" height="118" rx="4" fill="${input.accentColor}"/><circle cx="${rtl ? 76 : 384}" cy="178" r="54" fill="${input.secondaryColor}" opacity=".12"/></g>`;
-  if (role === "PREMIUM")
-    return `<g data-preview-block="wallet-role" data-visual-role="${role}"><rect x="34" y="32" width="392" height="576" rx="27" fill="none" stroke="${input.accentColor}" stroke-width="2" stroke-opacity=".45"/></g>`;
-  if (role === "FRIENDLY")
-    return `<g data-preview-block="wallet-role" data-visual-role="${role}"><circle cx="${rtl ? 382 : 78}" cy="88" r="48" fill="${input.secondaryColor}" opacity=".2"/><circle cx="${rtl ? 64 : 396}" cy="212" r="28" fill="${input.accentColor}" opacity=".1"/></g>`;
-  return `<g data-preview-block="wallet-role" data-visual-role="${role}"><path d="M42 132H418" stroke="${input.accentColor}" stroke-width="3" stroke-opacity=".55"/></g>`;
-}
-
-function walletContinuityMotif(
-  input: ProgramPreviewCompositionInput,
-  rtl: boolean,
-  y: number,
-): string {
-  const treatment = input.presentation?.motifTreatment;
-  const artwork = input.logoDataUri ?? input.identityDataUri;
-  if (!treatment || !artwork) return "";
-  const size =
-    treatment === "EDGE_CROP" || treatment === "WATERMARK"
-      ? 118
-      : treatment === "CORNER_MARK"
-        ? 92
-        : 74;
-  const opacity =
-    treatment === "WATERMARK"
-      ? 0.07
-      : treatment === "EDGE_CROP"
-        ? 0.12
-        : treatment === "HEADER_MARK"
-          ? 0.18
-          : 0.13;
-  const startSide = treatment === "SIDE_MARK";
-  const x = startSide ? (rtl ? 460 - 44 - size : 44) : rtl ? 44 : 460 - 44 - size;
-  return `<g data-preview-block="wallet-motif" data-motif-treatment="${treatment}" opacity="${opacity}">${imageTag(artwork, x, y, size, size, 16)}</g>`;
 }
 
 function composeApple(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 640;
+  const height = 690;
   const rtl = input.locale === "AR";
   const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
   const contentX = rtl ? 412 : 48;
-  const headerX = rtl ? 344 : 116;
-  const logoX = rtl ? 358 : 48;
-  const previewBadgeX = rtl ? 48 : 302;
-  const previewBadgeCenter = previewBadgeX + 51;
+  const headerX = rtl ? 48 : 412;
+  const headerAnchor = rtl ? "start" : "end";
+  const previewBadgeX = rtl ? 24 : 316;
+  const previewBadgeCenter = previewBadgeX + 60;
   const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
-  const backContent = rtl
-    ? input.apple.showBackContent
-      ? "تم إعداد التفاصيل والشروط · للمعاينة فقط"
-      : "التفاصيل الخلفية مخفية · للمعاينة فقط"
-    : input.apple.showBackContent
-      ? "Back content and terms configured · Preview only"
-      : "Back content hidden · Preview only";
+  const stampsLabel = rtl ? "الأختام" : "STAMPS";
+  const memberLabel = rtl ? "العضو" : "MEMBER";
+  const memberValue = rtl ? "عميل تجريبي" : "Demo customer";
+  const statusLabel = rtl ? "الحالة" : "STATUS";
+  const statusValue =
+    input.progress >= input.goal
+      ? rtl
+        ? "المكافأة جاهزة"
+        : "Reward ready"
+      : rtl
+        ? "نشطة"
+        : "Active";
+  const backRewardLabel = rtl ? "خلف البطاقة · المكافأة" : "BACK OF PASS · REWARD";
+  const barcodeLabel = rtl
+    ? "رمز العضوية بعد حفظ العميل للبطاقة"
+    : "Membership QR after the customer saves the card";
   const warnings: ProgramPreviewComposition["warnings"] = [];
   if (input.programName.length > 32 || input.rewardSummary.length > 64)
     warnings.push({
@@ -408,10 +378,16 @@ function composeApple(
       platform: "APPLE_WALLET",
       message: programPlatformCapabilities.APPLE_WALLET.heroArtwork.explanation,
     });
-  const roleDecoration = walletRoleDecoration(input, rtl);
-  const continuityMotif = walletContinuityMotif(input, rtl, 126);
-  const logo = imageTag(input.logoDataUri ?? input.identityDataUri, logoX, 60, 54, 54, 12);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}"><rect width="100%" height="100%" fill="#F1F3F6"/><rect x="24" y="22" width="412" height="596" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/>${roleDecoration}${continuityMotif}${logo}<text x="${headerX}" y="78" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="11" font-weight="700" fill="${input.foregroundColor}" opacity="0.65">${escapeXml(truncate(input.apple.headerLabel.toUpperCase(), 24))}</text><text x="${headerX}" y="102" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.apple.headerValue, 30))}</text><rect x="${previewBadgeX}" y="54" width="102" height="28" rx="14" fill="#111827"/><text x="${previewBadgeCenter}" y="73" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><text x="${contentX}" y="156" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="29" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 30))}</text><text x="${contentX}" y="188" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" font-weight="700" fill="${input.foregroundColor}" opacity="0.58">${escapeXml(truncate(input.apple.secondaryLabel.toUpperCase(), 24))}</text><text x="${contentX}" y="215" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="17" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, 42))}</text>${stampImage(input.stampSvg, 42, 236, 376, 170)}<rect x="48" y="430" width="364" height="118" rx="18" fill="#FFFFFF" opacity="0.76"/>${barcode(100, 452, 250, 54)}<text x="230" y="526" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" fill="#374151">${escapeXml(truncate(input.apple.barcodeLabel, 32))}</text><text x="${contentX}" y="582" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="11" fill="${input.foregroundColor}" opacity="0.62">${backContent}</text></svg>`;
+  if (input.logoDataUri)
+    warnings.push({
+      code: "APPLE_CUSTOM_LOGO_NOT_MAPPED",
+      severity: "warning",
+      platform: "APPLE_WALLET",
+      message: programPlatformCapabilities.APPLE_WALLET.logo.explanation,
+    });
+  const markX = rtl ? 386 : 48;
+  const organizationX = rtl ? 376 : 84;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}"><rect width="100%" height="100%" fill="#F1F3F6"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="580" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/><rect x="${markX}" y="66" width="26" height="26" rx="7" fill="#E4572E"/><path d="M${markX + 6} 74l4 12 4-7 4 7 4-12" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><text x="${organizationX}" y="85" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="72" text-anchor="${headerAnchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="96" text-anchor="${headerAnchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text><text x="${contentX}" y="154" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="29" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text x="${contentX}" y="188" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${memberLabel}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${memberValue}</text><text x="${rtl ? 48 : 412}" y="188" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text>${stampImage(input.stampSvg, 42, 232, 376, 170)}<rect x="48" y="424" width="364" height="130" rx="18" fill="#FFFFFF" opacity=".82"/>${barcode(104, 446, 252, 58)}<text x="230" y="532" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text><text x="230" y="650" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="230" y="673" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 48))}</text></svg>`;
   return { svg, width, height, warnings };
 }
 
@@ -419,15 +395,31 @@ function composeGoogle(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 640;
+  const height = 690;
   const rtl = input.locale === "AR";
   const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
   const contentX = rtl ? 412 : 48;
-  const logoX = rtl ? 354 : 48;
-  const previewBadgeX = rtl ? 48 : 296;
-  const previewBadgeCenter = previewBadgeX + 58;
+  const logoX = rtl ? 350 : 48;
+  const previewBadgeX = rtl ? 24 : 316;
+  const previewBadgeCenter = previewBadgeX + 60;
   const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
+  const pointsLabel = rtl ? "الأختام" : "Stamps";
+  const accountLabel = rtl ? "الحساب" : "Account";
+  const accountValue = rtl ? "عميل تجريبي" : "Demo customer";
+  const statusLabel = rtl ? "الحالة" : "Status";
+  const statusValue =
+    input.progress >= input.goal
+      ? rtl
+        ? "المكافأة جاهزة"
+        : "Reward ready"
+      : rtl
+        ? "نشطة"
+        : "Active";
+  const rewardLabel = rtl ? "المكافأة" : "Reward";
+  const barcodeLabel = rtl
+    ? "رمز العضوية بعد حفظ العميل للبطاقة"
+    : "Membership QR after the customer saves the card";
   const warnings: ProgramPreviewComposition["warnings"] = [];
   if (input.google.title.length > 48 || input.google.subtitle.length > 64)
     warnings.push({
@@ -443,11 +435,16 @@ function composeGoogle(
       platform: "GOOGLE_WALLET",
       message: programPlatformCapabilities.GOOGLE_WALLET.backgroundArtwork.explanation,
     });
-  const roleDecoration = walletRoleDecoration(input, rtl);
-  const continuityMotif = walletContinuityMotif(input, rtl, 74);
-  const hero = imageTag(input.heroDataUri, 24, 22, 412, 142, 28);
-  const logo = imageTag(input.logoDataUri ?? input.identityDataUri, logoX, 128, 58, 58, 15);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}"><rect width="100%" height="100%" fill="#EEF3FA"/><rect x="24" y="22" width="412" height="596" rx="28" fill="#FFFFFF" stroke="#D2DAE5" stroke-width="2"/>${hero}<rect x="24" y="22" width="412" height="142" rx="28" fill="${input.accentColor}" opacity="${input.heroDataUri ? "0.28" : "1"}"/>${roleDecoration}${continuityMotif}${logo}<rect x="${previewBadgeX}" y="44" width="116" height="28" rx="14" fill="#FFFFFF" opacity="0.92"/><text x="${previewBadgeCenter}" y="63" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#1F2937">${previewOnly}</text><text x="${contentX}" y="218" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="25" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.google.title || input.programName, 38))}</text><text x="${contentX}" y="248" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" fill="#4B5563">${escapeXml(truncate(input.google.subtitle || input.shortDescription, 52))}</text>${stampImage(input.stampSvg, 42, 270, 376, 164)}<text x="${contentX}" y="466" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="11" font-weight="700" fill="#6B7280">${escapeXml(truncate(input.google.detailsLabel.toUpperCase(), 30))}</text><text x="${contentX}" y="492" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="17" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 44))}</text>${barcode(110, 522, 240, 48)}<text x="230" y="592" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" fill="#4B5563">${escapeXml(truncate(input.google.barcodeLabel, 32))}</text></svg>`;
+  if (input.heroDataUri)
+    warnings.push({
+      code: "GOOGLE_HERO_ARTWORK_UNSUPPORTED",
+      severity: "warning",
+      platform: "GOOGLE_WALLET",
+      message: programPlatformCapabilities.GOOGLE_WALLET.heroArtwork.explanation,
+    });
+  const logo = imageTag(input.logoDataUri, logoX, 72, 62, 62, 15);
+  const issuerX = input.logoDataUri ? (rtl ? 338 : 120) : contentX;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}"><rect width="100%" height="100%" fill="#EEF3FA"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#1F2937"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="626" rx="28" fill="#FFFFFF" stroke="#D2DAE5" stroke-width="2"/><rect x="24" y="40" width="412" height="136" rx="28" fill="${input.backgroundColor}"/>${logo}<text x="${issuerX}" y="92" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" font-weight="700" fill="${input.foregroundColor}" opacity=".75">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="126" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="24" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 36))}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${accountLabel}</text><text x="${contentX}" y="232" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="15" font-weight="700" fill="#1F2937">${accountValue}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${pointsLabel}</text><text x="${rtl ? 48 : 412}" y="234" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="800" fill="#1F2937">${input.progress}/${input.goal}</text>${stampImage(input.stampSvg, 42, 252, 376, 158)}<text x="${contentX}" y="440" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${rewardLabel}</text><text x="${contentX}" y="464" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 46))}</text><text x="${rtl ? 48 : 412}" y="440" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="464" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="15" font-weight="700" fill="#1F2937">${statusValue}</text><rect x="62" y="492" width="336" height="130" rx="18" fill="#F7F8FA"/>${barcode(112, 512, 236, 56)}<text x="230" y="600" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" fill="#4B5563">${barcodeLabel}</text></svg>`;
   return { svg, width, height, warnings };
 }
 

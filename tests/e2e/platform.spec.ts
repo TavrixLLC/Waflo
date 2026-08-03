@@ -127,6 +127,17 @@ async function finishQuickWizard(page: Page, name: string): Promise<void> {
   ) {
     await chooseGalleryTemplate(page, "Start from scratch");
   }
+  if (
+    (await page.getByRole("heading", { level: 1, name: "Customize your loyalty card" }).count()) > 0
+  ) {
+    await page.getByLabel("Card name in your dashboard").fill(name);
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Review card" }).click();
+    await expect(page.getByText("Readiness checks passed", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Continue to Studio" }).click();
+    await expect(page.getByRole("navigation", { name: "Studio sections" })).toBeVisible();
+    return;
+  }
   if ((await page.getByText("Editing mode", { exact: true }).count()) > 0) {
     await page.getByRole("button", { name: "Continue" }).click();
   }
@@ -238,21 +249,22 @@ test.describe
       ).toBeVisible();
       await page.getByRole("button", { name: "Create loyalty card" }).click();
       await chooseGalleryTemplate(page, "Cookies & bakery");
-      await page.getByPlaceholder("Weekend rewards").fill("Browser Studio Rewards");
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      await page.locator('input[name="en-program-name"]').fill("Browser Studio Rewards");
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      await page.locator('input[name="ar-program-name"]').fill("مكافآت استوديو المتصفح");
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      await page.getByRole("checkbox", { name: "Browser Main Branch" }).check();
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      await page.getByRole("button", { name: "Continue" }).click();
-      await expect(page.getByRole("button", { name: "Save and open Studio" })).toBeEnabled();
-      await page.getByRole("button", { name: "Save and open Studio" }).click();
+      await page.getByLabel("Card name in your dashboard").fill("Browser Studio Rewards");
+      await page
+        .getByRole("button", { name: /^Languages/u })
+        .first()
+        .click();
+      await page.getByRole("tab", { name: /العربية/u }).click();
+      await page
+        .locator(".builder-language-panel")
+        .getByLabel("اسم البطاقة", { exact: true })
+        .fill("مكافآت استوديو المتصفح");
+      await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Review card" }).click();
+      await expect(
+        page.getByText("Readiness checks passed", { exact: true }).first(),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Continue to Studio" }).click();
 
       await expect(
         page.getByRole("heading", { level: 1, name: "Browser Studio Rewards" }),

@@ -248,13 +248,20 @@ describe("renderer-backed template gallery previews", () => {
     }
   });
 
-  it("carries each visual role and motif treatment into truthful Wallet framing", () => {
+  it("keeps template art direction on Customer while Wallet framing stays provider-truthful", () => {
     for (const template of latestProgramTemplates()) {
+      const customer = renderTemplateGalleryPreview(template, "CUSTOMER_WEB", "EN");
+      expect(customer.svg).toContain(`data-visual-role="${template.presentation?.visualRole}"`);
+      expect(customer.svg).toContain(
+        `data-motif-treatment="${template.presentation?.motifTreatment}"`,
+      );
+
       for (const profile of ["APPLE_WALLET", "GOOGLE_WALLET"] as const) {
         const preview = renderTemplateGalleryPreview(template, profile, "EN");
-        expect(preview.svg).toContain(`data-visual-role="${template.presentation?.visualRole}"`);
+        expect(preview.svg).not.toContain("data-visual-role");
+        expect(preview.svg).not.toContain("data-motif-treatment");
         expect(preview.svg).toContain(
-          `data-motif-treatment="${template.presentation?.motifTreatment}"`,
+          `data-wallet-provider="${profile === "APPLE_WALLET" ? "APPLE" : "GOOGLE"}"`,
         );
         expect(preview.svg).toContain("PREVIEW ONLY");
       }

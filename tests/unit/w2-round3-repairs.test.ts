@@ -65,6 +65,7 @@ function previewInput(
   return {
     profile,
     locale: "EN" as const,
+    organizationName: "Waflo Coffee",
     programName: "Waflo rewards",
     shortDescription: "Collect a stamp on every visit.",
     rewardSummary: "A reward on us",

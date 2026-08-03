@@ -16,7 +16,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import type { MembershipView } from "./dashboard";
 import {
@@ -24,16 +24,21 @@ import {
   merchantProgramLifecycleLabel,
   merchantProgramStatus,
 } from "./loyalty-card-presentation";
+import { ProgramCardBuilder } from "./program-card-builder";
+import { applyBuilderTemplate, createBuilderDraft } from "./program-card-builder-state";
 import { ProgramQuickWizard } from "./program-quick-wizard";
 import { ProgramStudioEditor } from "./program-studio-editor";
 import type {
   AssetItem,
   LocationItem,
   PreviewProfile,
+  ProgramDetail,
   ProgramItem,
+  ProgramVersion,
   TemplateGalleryPreview,
   TemplateItem,
 } from "./program-studio-types";
+import { apiDraft, versionToDraft } from "./program-studio-types";
 import { TemplateGallery } from "./template-gallery";
 
 interface CursorPage<T> {
@@ -156,6 +161,33 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof ApiClientError ? error.message : fallback;
 }
 
+function builderFlowError(error: unknown, locale: Locale): string {
+  const ar = locale === "ar";
+  if (!(error instanceof ApiClientError))
+    return ar
+      ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
+      : "Waflo could not start this loyalty card. Try again.";
+  if (error.code === "PROGRAM_LIMIT_REACHED")
+    return ar
+      ? "وصلت إلى حد بطاقات الولاء النشطة في خطتك. أرشف بطاقة حالية أو غيّر الخطة للمتابعة."
+      : "You have reached your plan's active loyalty-card limit. Archive a card or change plan to continue.";
+  if (error.code === "PROGRAM_LOCATION_INVALID")
+    return ar
+      ? "أضف موقعًا نشطًا قبل إنشاء بطاقة ولاء."
+      : "Add an active location before creating a loyalty card.";
+  if (error.code === "PROGRAM_PRO_MODE_UNAVAILABLE" || error.code.includes("LAYOUT_UNAVAILABLE"))
+    return ar
+      ? "يتطلب هذا التصميم خطة Growth أو Scale. اختر تصميمًا آخر أو غيّر الخطة."
+      : "This design requires Growth or Scale. Choose another design or change plan.";
+  if (error.code.includes("TEMPLATE"))
+    return ar
+      ? "لم يعد هذا التصميم متاحًا. اختر تصميمًا آخر."
+      : "That design is no longer available. Choose another design.";
+  return ar
+    ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
+    : "Waflo could not start this loyalty card. Try again.";
+}
+
 function cardStateDescription(program: ProgramItem, locale: Locale): string {
   const copy = loyaltyCardCopy[locale];
 
@@ -186,11 +218,15 @@ export function ProgramsScreen({
   membership,
   view = "library",
   legacyCreate = false,
+  builderProgramId,
+  changeProgramId,
 }: {
   locale: Locale;
   membership: MembershipView;
-  view?: "library" | "gallery";
+  view?: "library" | "gallery" | "builder";
   legacyCreate?: boolean;
+  builderProgramId?: string;
+  changeProgramId?: string;
 }) {
   const router = useRouter();
   const ar = locale === "ar";
@@ -208,6 +244,10 @@ export function ProgramsScreen({
   const [studioProgramId, setStudioProgramId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [builderError, setBuilderError] = useState("");
+  const [creatingBuilder, setCreatingBuilder] = useState(false);
+  const builderRequestRef = useRef(false);
+  const initialLoadKeyRef = useRef("");
   const [lifecycleConfirmation, setLifecycleConfirmation] = useState<{
     action: CardLifecycleAction;
     programId: string;
@@ -218,6 +258,23 @@ export function ProgramsScreen({
     setLoading(true);
     setError("");
     try {
+      if (view === "builder") {
+        const [templateData, locationData, assetData] = await Promise.all([
+          apiFetch<TemplateItem[]>(
+            `/v1/organizations/${organizationId}/programs/templates?locale=${ar ? "AR" : "EN"}`,
+          ),
+          apiFetch<{ items: LocationItem[] } | LocationItem[]>(
+            `/v1/organizations/${organizationId}/locations`,
+          ),
+          apiFetch<CursorPage<AssetItem>>(`/v1/organizations/${organizationId}/assets?limit=30`),
+        ]);
+        setTemplates(templateData);
+        setLocations(Array.isArray(locationData) ? locationData : locationData.items);
+        setAssets(assetData.items);
+        setAssetCursor(assetData.nextCursor);
+        return;
+      }
+
       const [programData, templateData, locationData, assetData, organizationData] =
         await Promise.all([
           apiFetch<CursorPage<ProgramItem>>(
@@ -246,11 +303,14 @@ export function ProgramsScreen({
     } finally {
       setLoading(false);
     }
-  }, [ar, organizationId]);
+  }, [ar, organizationId, view]);
 
   useEffect(() => {
+    const key = `${view}:${organizationId}:${ar ? "AR" : "EN"}`;
+    if (initialLoadKeyRef.current === key) return;
+    initialLoadKeyRef.current = key;
     void load();
-  }, [load]);
+  }, [ar, load, organizationId, view]);
 
   useEffect(() => {
     if (legacyCreate) setWizardOpen(true);
@@ -300,6 +360,71 @@ export function ProgramsScreen({
     }
   }
 
+  const plan = planCatalog[planCodes[membership.organization.selectedPlan]];
+  const activeCardCount = programs.filter((program) => program.status !== "ARCHIVED").length;
+  const countIsExact = programCursor === null;
+  const activeLimit = plan.limits.programs;
+
+  async function handleUseTemplate(
+    template: TemplateItem,
+    options: { blank: boolean },
+  ): Promise<void> {
+    if (builderRequestRef.current) return;
+    builderRequestRef.current = true;
+    setCreatingBuilder(true);
+    setBuilderError("");
+    try {
+      if (changeProgramId) {
+        const program = await apiFetch<ProgramDetail>(
+          `/v1/organizations/${organizationId}/programs/${changeProgramId}`,
+        );
+        if (!program.currentDraftVersion)
+          throw new Error("The selected loyalty card has no editable draft.");
+        const current = versionToDraft(program, program.currentDraftVersion);
+        const next = applyBuilderTemplate(template, current, options);
+        await apiFetch<{ currentDraftVersion: ProgramVersion }>(
+          `/v1/organizations/${organizationId}/programs/${changeProgramId}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              ...apiDraft(next),
+              revision: program.currentDraftVersion.revision,
+            }),
+          },
+        );
+        await load();
+        router.push(`/${locale}/dashboard/programs/${changeProgramId}/edit`);
+        return;
+      }
+
+      if (activeLimit !== null && countIsExact && activeCardCount >= activeLimit) {
+        throw new ApiClientError(
+          "PROGRAM_LIMIT_REACHED",
+          "The active loyalty-card limit has been reached.",
+        );
+      }
+      const activeLocations = locations.filter((location) => location.status === "ACTIVE");
+      if (activeLocations.length === 0) {
+        throw new ApiClientError("PROGRAM_LOCATION_INVALID", "An active location is required.");
+      }
+      const draft = createBuilderDraft(template, activeLocations, {
+        locale,
+        blank: options.blank,
+      });
+      const created = await apiFetch<ProgramItem>(`/v1/organizations/${organizationId}/programs`, {
+        method: "POST",
+        body: JSON.stringify(apiDraft(draft)),
+      });
+      await load();
+      router.push(`/${locale}/dashboard/programs/${created.id}/edit`);
+    } catch (caught) {
+      setBuilderError(builderFlowError(caught, locale));
+    } finally {
+      builderRequestRef.current = false;
+      setCreatingBuilder(false);
+    }
+  }
+
   if (studioProgramId) {
     return (
       <ProgramStudioEditor
@@ -321,12 +446,31 @@ export function ProgramsScreen({
     );
   }
 
-  const plan = planCatalog[planCodes[membership.organization.selectedPlan]];
-  const activeCardCount = programs.filter((program) => program.status !== "ARCHIVED").length;
-  const countIsExact = programCursor === null;
+  if (view === "builder" && builderProgramId) {
+    return (
+      <ProgramCardBuilder
+        organizationId={organizationId}
+        programId={builderProgramId}
+        plan={membership.organization.selectedPlan}
+        templates={templates}
+        locations={locations}
+        assets={assets}
+        onAssetUploaded={(asset) =>
+          setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
+        }
+        locale={locale}
+        onBack={() => router.push(`/${locale}/dashboard/programs`)}
+        onChangeDesign={() =>
+          router.push(`/${locale}/dashboard/programs/new?changeFor=${builderProgramId}`)
+        }
+        onOpenStudio={() => setStudioProgramId(builderProgramId)}
+        onChanged={load}
+      />
+    );
+  }
+
   const displayedCardCount = countIsExact ? programs.length.toString() : `${programs.length}+`;
   const cardCountNoun = programs.length === 1 ? copy.cardSingular : copy.cardPlural;
-  const activeLimit = plan.limits.programs;
   const planCapacity =
     activeLimit === null
       ? copy.noFixedLimit
@@ -378,26 +522,27 @@ export function ProgramsScreen({
 
   if (view === "gallery") {
     return (
-      <>
-        <TemplateGallery
-          locale={locale}
-          templates={templates}
-          businessCategory={businessCategory}
-          loading={loading}
-          error={error}
-          onBack={() => router.push(`/${locale}/dashboard/programs`)}
-          onLoadPreviews={(template, presentation) =>
-            apiFetch<Record<PreviewProfile, TemplateGalleryPreview>>(
-              `/v1/organizations/${organizationId}/programs/templates/${encodeURIComponent(template.code)}/previews?version=${template.version}&locale=${ar ? "AR" : "EN"}&presentation=${presentation}`,
-            )
-          }
-          onUseTemplate={(template) => {
-            setSelectedTemplate(template);
-            setWizardOpen(true);
-          }}
-        />
-        {wizard}
-      </>
+      <TemplateGallery
+        locale={locale}
+        templates={templates}
+        businessCategory={businessCategory}
+        loading={loading}
+        error={builderError || error}
+        selectionPending={creatingBuilder}
+        onBack={() =>
+          router.push(
+            changeProgramId
+              ? `/${locale}/dashboard/programs/${changeProgramId}/edit`
+              : `/${locale}/dashboard/programs`,
+          )
+        }
+        onLoadPreviews={(template, presentation) =>
+          apiFetch<Record<PreviewProfile, TemplateGalleryPreview>>(
+            `/v1/organizations/${organizationId}/programs/templates/${encodeURIComponent(template.code)}/previews?version=${template.version}&locale=${ar ? "AR" : "EN"}&presentation=${presentation}`,
+          )
+        }
+        onUseTemplate={(template, options) => void handleUseTemplate(template, options)}
+      />
     );
   }
 

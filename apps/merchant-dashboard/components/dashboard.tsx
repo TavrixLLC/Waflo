@@ -133,11 +133,15 @@ export function DashboardApplication({
   section,
   programsView = "library",
   legacyProgramCreate = false,
+  builderProgramId,
+  changeProgramId,
 }: {
   locale: Locale;
   section: DashboardSection;
-  programsView?: "library" | "gallery";
+  programsView?: "library" | "gallery" | "builder";
   legacyProgramCreate?: boolean;
+  builderProgramId?: string;
+  changeProgramId?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -253,6 +257,8 @@ export function DashboardApplication({
       onOrganizationChanged={loadMe}
       programsView={programsView}
       legacyProgramCreate={legacyProgramCreate}
+      {...(builderProgramId ? { builderProgramId } : {})}
+      {...(changeProgramId ? { changeProgramId } : {})}
     />
   );
 
@@ -323,13 +329,17 @@ function DashboardScreen({
   onOrganizationChanged,
   programsView,
   legacyProgramCreate,
+  builderProgramId,
+  changeProgramId,
 }: {
   section: DashboardSection;
   locale: Locale;
   membership: MembershipView;
   onOrganizationChanged: () => Promise<void>;
-  programsView: "library" | "gallery";
+  programsView: "library" | "gallery" | "builder";
   legacyProgramCreate: boolean;
+  builderProgramId?: string;
+  changeProgramId?: string;
 }) {
   if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
   if (section === "programs") {
@@ -348,6 +358,8 @@ function DashboardScreen({
         membership={membership}
         view={programsView}
         legacyCreate={legacyProgramCreate}
+        {...(builderProgramId ? { builderProgramId } : {})}
+        {...(changeProgramId ? { changeProgramId } : {})}
       />
     );
   }

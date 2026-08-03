@@ -368,6 +368,7 @@ export class ProgramsService {
       const program = await transaction.loyaltyProgram.findFirst({
         where: { id: programId, organizationId },
         include: {
+          organization: { select: { name: true } },
           currentDraftVersion: {
             include: {
               translations: true,
@@ -435,6 +436,7 @@ export class ProgramsService {
       });
       const previewCacheKey = createProgramPreviewCacheKey({
         rendererSchemaVersion: PREVIEW_RENDERER_SCHEMA_VERSION,
+        organizationName: program.organization.name,
         template: {
           code: version.baseTemplateCode,
           version: version.baseTemplateVersion,
@@ -614,8 +616,12 @@ export class ProgramsService {
         },
         outputProfile,
         filledColor: visualInput.accentColor,
-        emptyColor: visualInput.backgroundColor,
-        accentColor: visualInput.foregroundColor,
+        emptyColor:
+          outputProfile === "CUSTOMER_WEB"
+            ? visualInput.backgroundColor
+            : visualInput.secondaryColor,
+        accentColor:
+          outputProfile === "CUSTOMER_WEB" ? visualInput.foregroundColor : visualInput.accentColor,
         backgroundColor: visualInput.backgroundColor,
         foregroundColor: visualInput.foregroundColor,
         stampSize: visualInput.stampSize,
@@ -625,8 +631,8 @@ export class ProgramsService {
         label: `${safeProgress}/${goal}`,
         rewardLabel: rewardReady ? rewardReadyText : translation.rewardSummary,
         rewardReady,
-        progressLabelVisible: visualInput.progressLabelVisible,
-        rewardLabelVisible: visualInput.rewardLabelVisible,
+        progressLabelVisible: outputProfile === "CUSTOMER_WEB" && visualInput.progressLabelVisible,
+        rewardLabelVisible: outputProfile === "CUSTOMER_WEB" && visualInput.rewardLabelVisible,
       });
       const appleConfig = visualInput.applePreviewConfig as Partial<{
         headerLabel: string;
@@ -644,6 +650,7 @@ export class ProgramsService {
       const composed = composeProgramPreview({
         profile: outputProfile,
         locale,
+        organizationName: program.organization.name,
         programName: translation.programName,
         shortDescription: translation.shortDescription,
         rewardSummary: translation.rewardSummary,
