@@ -36,11 +36,12 @@ interface ProgramFixture {
 const organizationId = "merchant-loyalty-card-fixture";
 
 async function fulfill(route: Route, data: unknown): Promise<void> {
+  const origin = route.request().headers().origin ?? "http://localhost:3001";
   await route.fulfill({
     status: 200,
     contentType: "application/json",
     headers: {
-      "access-control-allow-origin": "http://localhost:3001",
+      "access-control-allow-origin": origin,
       "access-control-allow-credentials": "true",
     },
     body: JSON.stringify({ data, requestId: "merchant-loyalty-card-test" }),

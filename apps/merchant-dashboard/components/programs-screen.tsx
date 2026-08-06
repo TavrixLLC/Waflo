@@ -437,9 +437,15 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         ar={ar}
+        builderHandoff={view === "builder" && studioProgramId === builderProgramId}
         onClose={() => {
           setStudioProgramId(null);
           if (view === "gallery") router.replace(`/${locale}/dashboard/programs`);
+        }}
+        onEditDesign={() => {
+          const programId = studioProgramId;
+          setStudioProgramId(null);
+          router.push(`/${locale}/dashboard/programs/${programId}/edit`);
         }}
         onChanged={load}
       />

@@ -40,11 +40,12 @@ export function templateGalleryFixtures(locale: "EN" | "AR" = "EN"): TemplateIte
 }
 
 async function fulfill(route: Route, data: unknown): Promise<void> {
+  const origin = route.request().headers().origin ?? "http://localhost:3001";
   await route.fulfill({
     status: 200,
     contentType: "application/json",
     headers: {
-      "access-control-allow-origin": "http://localhost:3001",
+      "access-control-allow-origin": origin,
       "access-control-allow-credentials": "true",
     },
     body: JSON.stringify({ data, requestId: "merchant-template-gallery-test" }),
@@ -58,11 +59,12 @@ async function reject(
   message: string,
   details?: Record<string, unknown>,
 ): Promise<void> {
+  const origin = route.request().headers().origin ?? "http://localhost:3001";
   await route.fulfill({
     status,
     contentType: "application/json",
     headers: {
-      "access-control-allow-origin": "http://localhost:3001",
+      "access-control-allow-origin": origin,
       "access-control-allow-credentials": "true",
     },
     body: JSON.stringify({
@@ -84,6 +86,8 @@ export async function mockTemplateGalleryApi(
     patchFailures = 0,
     patchConflicts = 0,
     selectedPlan = "GROWTH",
+    studioState = "DRAFT",
+    validationErrors = [],
     existingPrograms = [],
     fixtureLocations = [{ id: "gallery-location", name: "Gallery Main Branch", status: "ACTIVE" }],
   }: {
@@ -101,6 +105,22 @@ export async function mockTemplateGalleryApi(
     patchFailures?: number;
     patchConflicts?: number;
     selectedPlan?: "STARTER" | "GROWTH" | "SCALE";
+    studioState?:
+      | "DRAFT"
+      | "CHECKED"
+      | "READY"
+      | "LIVE"
+      | "PAUSED"
+      | "ARCHIVED"
+      | "SCHEDULED"
+      | "SUSPENDED";
+    validationErrors?: Array<{
+      code: string;
+      path: string;
+      message: string;
+      suggestedAction: string;
+      severity: "error";
+    }>;
     existingPrograms?: Array<Record<string, unknown>>;
     fixtureLocations?: Array<{ id: string; name: string; status: string }>;
   } = {},
@@ -111,6 +131,7 @@ export async function mockTemplateGalleryApi(
   let revision = 1;
   let testStampCount = 0;
   let testCycleCount = 0;
+  let validationRequestCount = 0;
   let remainingPatchFailures = patchFailures;
   let remainingPatchConflicts = patchConflicts;
 
@@ -164,18 +185,30 @@ export async function mockTemplateGalleryApi(
     const rewards = storedDraft.rewards as Array<Record<string, unknown>>;
     const visualTheme = storedDraft.visualTheme as Record<string, unknown>;
     const requiredStampCount = Number(storedDraft.requiredStampCount ?? 8);
+    const publishedLifecycle = ["LIVE", "PAUSED", "ARCHIVED", "SUSPENDED"].includes(studioState);
     const version = {
       id: "33333333-3333-4333-8333-333333333333",
       versionNumber: 1,
-      status: "DRAFT",
+      status:
+        studioState === "READY" || studioState === "SCHEDULED"
+          ? "TEST_READY"
+          : studioState === "CHECKED"
+            ? "VALIDATED"
+            : publishedLifecycle
+              ? "PUBLISHED"
+              : "DRAFT",
       editingMode: storedDraft.editingMode === "pro" ? "PRO" : "QUICK",
       baseTemplateCode: storedDraft.templateCode,
       baseTemplateVersion: storedDraft.templateVersion,
       revision,
       changeSummary: storedDraft.changeSummary ?? null,
-      validatedAt: null,
-      testReadyAt: null,
-      publishedAt: null,
+      validatedAt: studioState === "DRAFT" ? null : "2026-08-02T09:00:00.000Z",
+      testReadyAt: ["READY", "LIVE", "PAUSED", "ARCHIVED", "SCHEDULED", "SUSPENDED"].includes(
+        studioState,
+      )
+        ? "2026-08-02T09:30:00.000Z"
+        : null,
+      publishedAt: publishedLifecycle ? "2026-08-02T10:00:00.000Z" : null,
       supersededAt: null,
       abandonedAt: null,
       validationFingerprint: null,
@@ -223,10 +256,23 @@ export async function mockTemplateGalleryApi(
     return {
       id: "created-program-id",
       internalName: storedDraft.internalName,
-      status: "DRAFT",
+      status:
+        studioState === "LIVE"
+          ? "PUBLISHED"
+          : studioState === "PAUSED"
+            ? "PAUSED"
+            : studioState === "ARCHIVED"
+              ? "ARCHIVED"
+              : studioState === "SCHEDULED"
+                ? "SCHEDULED"
+                : studioState === "SUSPENDED"
+                  ? "SUSPENDED"
+                  : studioState === "CHECKED"
+                    ? "VALIDATED"
+                    : "DRAFT",
       updatedAt: "2026-08-03T10:00:00.000Z",
       currentDraftVersion: version,
-      currentPublishedVersion: null,
+      currentPublishedVersion: publishedLifecycle ? version : null,
       versions: [version],
     };
   }
@@ -513,10 +559,12 @@ export async function mockTemplateGalleryApi(
         `/v1/organizations/${templateGalleryOrganizationId}/programs/created-program-id/validate` &&
       request.method() === "POST"
     ) {
+      validationRequestCount += 1;
+      const activeValidationErrors = validationRequestCount > 1 ? validationErrors : [];
       await fulfill(route, {
-        status: "PASSED",
+        status: activeValidationErrors.length ? "FAILED" : "PASSED",
         configurationFingerprint: "builder-test-fingerprint",
-        errors: [],
+        errors: activeValidationErrors,
         warnings: [],
       });
       return;
@@ -569,7 +617,7 @@ export async function mockTemplateGalleryApi(
         status: 200,
         contentType: "image/svg+xml",
         headers: {
-          "access-control-allow-origin": "http://localhost:3001",
+          "access-control-allow-origin": request.headers().origin ?? "http://localhost:3001",
           "access-control-allow-credentials": "true",
         },
         body: content,
@@ -582,6 +630,55 @@ export async function mockTemplateGalleryApi(
     }
     if (path.endsWith("/wallet/providers")) {
       await fulfill(route, []);
+      return;
+    }
+    if (path.endsWith("/programs/created-program-id/enrollment") && request.method() === "GET") {
+      const detail = programDetail();
+      const policy = {
+        emailCollectionMode: "OPTIONAL",
+        primaryCustomerLocale: "en",
+        allowLocaleSelection: true,
+        marketingConsentVisible: true,
+        marketingConsentDefault: false,
+        customerTermsRequired: true,
+        transferWithoutEmailAllowed: false,
+        enrollmentOpen: true,
+      };
+      await fulfill(route, {
+        programId: "created-program-id",
+        status: detail?.status ?? "DRAFT",
+        publicSlug: "gallery-coffee-rewards",
+        publicUrl: "http://localhost:3002/enroll/gallery-coffee-rewards",
+        enrollmentLinkStatus:
+          studioState === "LIVE"
+            ? "ACTIVE"
+            : ["PAUSED", "ARCHIVED", "SUSPENDED"].includes(studioState)
+              ? "BLOCKED"
+              : "NOT_PUBLISHED",
+        editableVersion: detail?.currentDraftVersion
+          ? {
+              id: detail.currentDraftVersion.id,
+              versionNumber: detail.currentDraftVersion.versionNumber,
+              status: detail.currentDraftVersion.status,
+              policy,
+            }
+          : null,
+        publishedVersion: detail?.currentPublishedVersion
+          ? {
+              id: detail.currentPublishedVersion.id,
+              versionNumber: detail.currentPublishedVersion.versionNumber,
+              status: detail.currentPublishedVersion.status,
+              policy,
+            }
+          : null,
+      });
+      return;
+    }
+    if (
+      (path.endsWith("/enrollment") || path.endsWith("/public-slug")) &&
+      request.method() === "PATCH"
+    ) {
+      await fulfill(route, { saved: true });
       return;
     }
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });

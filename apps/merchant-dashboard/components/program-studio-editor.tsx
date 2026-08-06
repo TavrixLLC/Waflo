@@ -4,7 +4,6 @@ import {
   decideProgramPublicationState,
   type ProgramOperationalStatus,
   type ProgramPreviewPlatform,
-  type ProgramPublicationStateDecision,
   programPlatformCapabilities,
 } from "@waflo/contracts";
 import {
@@ -24,6 +23,8 @@ import {
   Archive,
   ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Clock3,
   Copy,
@@ -32,16 +33,23 @@ import {
   FlaskConical,
   Gift,
   History,
+  LayoutDashboard,
+  MapPinned,
+  Menu,
   Pause,
   Play,
   Plus,
   RefreshCcw,
+  Rocket,
   RotateCcw,
   Save,
+  Settings2,
   ShieldCheck,
   Sparkles,
+  Store,
   Trash2,
   UploadCloud,
+  Workflow,
   X,
 } from "lucide-react";
 import Image from "next/image";
@@ -52,7 +60,7 @@ import {
   type MerchantProgramLifecycleAction,
 } from "./loyalty-card-presentation";
 import { ProgramAssetPicker } from "./program-asset-uploader";
-import { ProgramEnrollmentSettings } from "./program-enrollment-settings";
+import { ProgramEnrollmentSettings, ProgramWalletReadiness } from "./program-enrollment-settings";
 import {
   type AssetItem,
   apiDraft,
@@ -63,31 +71,21 @@ import {
   type ProgramVersion,
   type RewardInput,
   type StudioSection,
-  studioSections,
   type TestSession,
   type ValidationIssue,
   type ValidationResult,
   versionToDraft,
 } from "./program-studio-types";
-
-const sectionCopy: Record<StudioSection, { en: string; ar: string }> = {
-  overview: { en: "Overview", ar: "نظرة عامة" },
-  earning: { en: "Earning rules", ar: "قواعد الكسب" },
-  rewards: { en: "Rewards & milestones", ar: "المكافآت والمعالم" },
-  locations: { en: "Locations", ar: "المواقع" },
-  english: { en: "English content", ar: "المحتوى الإنجليزي" },
-  arabic: { en: "Arabic content", ar: "المحتوى العربي" },
-  visual: { en: "Visual identity", ar: "الهوية البصرية" },
-  artwork: { en: "Artwork", ar: "الرسومات" },
-  layout: { en: "Stamp layout", ar: "تخطيط الأختام" },
-  "customer-preview": { en: "Customer Web", ar: "ويب العميل" },
-  "apple-preview": { en: "Apple Wallet", ar: "Apple Wallet" },
-  "google-preview": { en: "Google Wallet", ar: "Google Wallet" },
-  policies: { en: "Policies", ar: "السياسات" },
-  validation: { en: "Validation", ar: "التحقق" },
-  "test-mode": { en: "Test Mode", ar: "وضع الاختبار" },
-  versions: { en: "Version history", ar: "سجل الإصدارات" },
-};
+import {
+  deriveStudioLifecyclePresentation,
+  type StudioArea,
+  studioAreaCopy,
+  studioAreaForPublicationError,
+  studioAreaForValidationPath,
+  studioAreas,
+  type StudioLifecyclePresentation,
+  type StudioPresentationAction,
+} from "./program-studio-presentation";
 
 type SaveState = "saved" | "unsaved" | "saving" | "failed" | "conflict";
 type LifecycleAction = MerchantProgramLifecycleAction;
@@ -171,31 +169,6 @@ function lifecycleActionDescription(
   return descriptions[action][ar ? 1 : 0];
 }
 
-function sectionForIssue(issue: ValidationIssue): StudioSection {
-  if (issue.path.startsWith("policies")) return "policies";
-  if (issue.path.startsWith("content.en")) return "english";
-  if (issue.path.startsWith("content.ar")) return "arabic";
-  if (issue.path.startsWith("earning")) return "earning";
-  if (issue.path.startsWith("rewards")) return "rewards";
-  if (issue.path.startsWith("locations")) return "locations";
-  if (issue.path.startsWith("artwork")) return "artwork";
-  if (issue.path.startsWith("visual")) return "visual";
-  if (issue.path.startsWith("stampLayout")) return "layout";
-  if (issue.path.startsWith("apple")) return "apple-preview";
-  if (issue.path.startsWith("google")) return "google-preview";
-  if (issue.path.startsWith("test")) return "test-mode";
-  return "customer-preview";
-}
-
-function sectionForPublicationError(code: string): StudioSection {
-  if (code === "PROGRAM_PUBLICATION_LOCATION_STALE") return "locations";
-  if (code === "PROGRAM_PUBLICATION_ASSET_STALE") return "artwork";
-  if (code === "PROGRAM_PUBLICATION_PREVIEW_STALE") return "customer-preview";
-  if (code === "PROGRAM_PUBLICATION_VALIDATION_STALE" || code === "PROGRAM_TEST_REQUIRED")
-    return "validation";
-  return "overview";
-}
-
 function publicationStateGuidance(status: ProgramOperationalStatus, ar: boolean) {
   if (status === "ARCHIVED")
     return {
@@ -226,49 +199,6 @@ function publicationStateGuidance(status: ProgramOperationalStatus, ar: boolean)
   };
 }
 
-function publishedStatePresentation(status: ProgramOperationalStatus, ar: boolean) {
-  if (status === "PAUSED")
-    return {
-      title: ar ? "الإصدار المنشور ما زال متوقفًا مؤقتًا" : "The published version remains paused",
-      message: ar
-        ? "هذا الإصدار غير مباشر للعملاء. استخدم الاستئناف بشكل صريح عندما تكون مستعدًا لإعادته للعمل."
-        : "This version is not live for customers. Use Resume explicitly when you are ready to make it live again.",
-    };
-  if (status === "ARCHIVED")
-    return {
-      title: ar ? "البطاقة مؤرشفة" : "This card is archived",
-      message: ar
-        ? "استعد البطاقة قبل إنشاء إصدار جديد أو نشر المسودة المحفوظة."
-        : "Restore the card before creating or publishing another version.",
-    };
-  if (status === "SUSPENDED")
-    return {
-      title: ar ? "النشر غير متاح" : "Publishing is unavailable",
-      message: ar
-        ? "لا يمكن نشر هذه البطاقة في حالتها الحالية. تواصل مع الدعم للمساعدة."
-        : "This card cannot be published in its current state. Contact support for assistance.",
-    };
-  if (status === "SCHEDULED")
-    return {
-      title: ar ? "البطاقة مجدولة" : "This card is scheduled",
-      message: ar
-        ? "النشر المجدول غير متاح حتى يتم تنفيذ ميزة الجدولة."
-        : "Scheduled publishing remains unavailable until scheduling is implemented.",
-    };
-  return {
-    title: ar ? "الإصدار المنشور مباشر وآمن" : "The published version remains live",
-    message: ar
-      ? "أنشئ مسودة جديدة لتحرير الإصدار التالي دون تغيير البطاقة المباشرة."
-      : "Create a new draft to edit the next version without changing the live card.",
-  };
-}
-
-function previewProfileForSection(section: StudioSection): PreviewProfile {
-  if (section === "apple-preview") return "APPLE_WALLET";
-  if (section === "google-preview") return "GOOGLE_WALLET";
-  return "CUSTOMER_WEB";
-}
-
 export function ProgramStudioEditor({
   organizationId,
   programId,
@@ -278,6 +208,7 @@ export function ProgramStudioEditor({
   onAssetUploaded,
   ar,
   onClose,
+  onEditDesign,
   onChanged,
 }: {
   organizationId: string;
@@ -287,13 +218,17 @@ export function ProgramStudioEditor({
   assets: AssetItem[];
   onAssetUploaded: (asset: AssetItem) => void;
   ar: boolean;
+  builderHandoff?: boolean;
   onClose: () => void;
+  onEditDesign: () => void;
   onChanged: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [revision, setRevision] = useState(1);
-  const [activeSection, setActiveSection] = useState<StudioSection>("overview");
+  const [activeArea, setActiveArea] = useState<StudioArea>("overview");
+  const [selectedProfile, setSelectedProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(0);
@@ -308,6 +243,16 @@ export function ProgramStudioEditor({
   const [working, setWorking] = useState(false);
   const persistedRef = useRef("");
   const initializedRef = useRef(false);
+  const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null);
+
+  function selectArea(area: StudioArea) {
+    const restoreMobileFocus = mobileNavigationOpen;
+    setActiveArea(area);
+    setMobileNavigationOpen(false);
+    if (restoreMobileFocus) {
+      window.requestAnimationFrame(() => mobileNavigationTriggerRef.current?.focus());
+    }
+  }
 
   const load = useCallback(async () => {
     const [program, history] = await Promise.all([
@@ -398,7 +343,11 @@ export function ProgramStudioEditor({
   }, [conflict, draft, organizationId, programId, revision]);
 
   const generatePreviews = useCallback(async () => {
-    if (!draft || saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current)
+    if (!draft && !detail?.currentPublishedVersion) return;
+    if (
+      draft &&
+      (saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current)
+    )
       return;
     setPreviewLoading(true);
     try {
@@ -416,7 +365,7 @@ export function ProgramStudioEditor({
     } finally {
       setPreviewLoading(false);
     }
-  }, [ar, draft, organizationId, programId, progress, saveState]);
+  }, [ar, detail?.currentPublishedVersion, draft, organizationId, programId, progress, saveState]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void generatePreviews(), 250);
@@ -577,7 +526,7 @@ export function ProgramStudioEditor({
       await onChanged();
     } catch (caught) {
       if (caught instanceof ApiClientError)
-        setActiveSection(sectionForPublicationError(caught.code));
+        setActiveArea(studioAreaForPublicationError(caught.code));
       if (
         ar &&
         caught instanceof ApiClientError &&
@@ -616,17 +565,21 @@ export function ProgramStudioEditor({
     setHistoricalVersion(version);
   }
 
-  const setupComplete = Boolean(
-    draft?.internalName.trim() &&
-      draft.locationIds.length &&
-      draft.translations.en.programName.trim() &&
-      draft.translations.ar.programName.trim() &&
-      draft.rewards.length,
+  const editingVersion = detail?.currentDraftVersion ?? null;
+  const displayVersion = editingVersion ?? detail?.currentPublishedVersion ?? null;
+  const displayDraft =
+    draft ?? (detail && displayVersion ? versionToDraft(detail, displayVersion) : null);
+  const designComplete = Boolean(
+    displayDraft?.internalName.trim() &&
+      displayDraft.translations.en.programName.trim() &&
+      displayDraft.translations.ar.programName.trim() &&
+      displayDraft.rewards.length,
   );
-  const currentVersion = detail?.currentDraftVersion;
-  const validated = ["VALIDATED", "TEST_READY"].includes(currentVersion?.status ?? "");
-  const testReady = currentVersion?.status === "TEST_READY";
-  const selectedProfile = previewProfileForSection(activeSection);
+  const locationsReady = Boolean(displayDraft?.locationIds.length);
+  const validated =
+    ["VALIDATED", "TEST_READY"].includes(editingVersion?.status ?? "") ||
+    Boolean(validation && validation.errors.length === 0);
+  const testReady = editingVersion?.status === "TEST_READY" || testSession?.status === "COMPLETED";
   const selectedPreview = previews[selectedProfile];
 
   if (!detail) {
@@ -637,312 +590,197 @@ export function ProgramStudioEditor({
     );
   }
 
-  if (!draft || !currentVersion) {
-    const statePresentation = publishedStatePresentation(detail.status, ar);
+  if (!displayDraft || !displayVersion) {
     return (
       <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
-        <div className="studio-toolbar">
-          <Button variant="secondary" onClick={onClose}>
-            <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
-            {ar ? "بطاقات الولاء" : "Loyalty Cards"}
-          </Button>
-          <div>
-            <span className="dashboard-card__label">LOYALTY STUDIO</span>
-            <h1>{detail.internalName}</h1>
-          </div>
-        </div>
-        {error ? <Alert tone="danger" title={error} /> : null}
-        <Card className="studio-live-only">
-          <ShieldCheck size={36} />
-          <h2>{statePresentation.title}</h2>
-          <p>{statePresentation.message}</p>
-          {detail.status !== "ARCHIVED" ? (
-            <Button onClick={() => void createDraft()} loading={working}>
-              <Plus size={16} aria-hidden="true" />
-              {ar ? "إنشاء مسودة من البطاقة المباشرة" : "Create draft from live card"}
-            </Button>
-          ) : null}
+        <Button variant="secondary" onClick={onClose}>
+          <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
+          {ar ? "بطاقات الولاء" : "Loyalty cards"}
+        </Button>
+        <Card className="studio-live-only" role="status">
+          <CircleAlert size={32} aria-hidden="true" />
+          <h1>{ar ? "لا يوجد إعداد محفوظ لهذه البطاقة" : "This card has no saved setup"}</h1>
+          <p>
+            {ar
+              ? "ارجع إلى بطاقات الولاء واختر بطاقة أخرى."
+              : "Return to Loyalty cards and choose another card."}
+          </p>
         </Card>
-        <ProgramEnrollmentSettings
-          organizationId={organizationId}
-          programId={programId}
-          ar={ar}
-          onChanged={load}
-        />
-        <VersionHistory
-          versions={detail.versions}
-          ar={ar}
-          onView={(id) => void viewHistorical(id)}
-          onLoadMore={historyCursor ? () => void loadMoreVersions() : undefined}
-        />
-        <HistoricalModal
-          version={historicalVersion}
-          onClose={() => setHistoricalVersion(null)}
-          ar={ar}
-        />
-        <div className="studio-lifecycle-actions">
-          {detail.status === "PUBLISHED" ? (
-            <Button variant="secondary" onClick={() => setConfirmation("pause")}>
-              <Pause size={16} aria-hidden="true" /> {lifecycleActionLabel("pause", ar)}
-            </Button>
-          ) : null}
-          {detail.status === "PAUSED" ? (
-            <Button variant="secondary" onClick={() => setConfirmation("resume")}>
-              <Play size={16} aria-hidden="true" /> {lifecycleActionLabel("resume", ar)}
-            </Button>
-          ) : null}
-          {detail.status !== "ARCHIVED" ? (
-            <Button variant="secondary" onClick={() => setConfirmation("archive")}>
-              <Archive size={16} aria-hidden="true" /> {lifecycleActionLabel("archive", ar)}
-            </Button>
-          ) : null}
-          {detail.status === "ARCHIVED" ? (
-            <Button variant="secondary" onClick={() => setConfirmation("restore")}>
-              <RotateCcw size={16} aria-hidden="true" /> {lifecycleActionLabel("restore", ar)}
-            </Button>
-          ) : null}
-        </div>
-        <AlertDialog
-          open={Boolean(confirmation)}
-          title={confirmation ? lifecycleActionLabel(confirmation, ar) : ""}
-          description={
-            confirmation
-              ? lifecycleActionDescription(confirmation, ar, {
-                  hasPublishedVersion: Boolean(detail.currentPublishedVersion),
-                  pausedWithPublishedVersion: false,
-                })
-              : ""
-          }
-          confirmLabel={working ? (ar ? "جارٍ التنفيذ…" : "Working…") : ar ? "تأكيد" : "Confirm"}
-          cancelLabel={ar ? "إلغاء" : "Cancel"}
-          danger={confirmation === "archive"}
-          onClose={() => setConfirmation(null)}
-          onConfirm={() => {
-            if (confirmation) void lifecycle(confirmation);
-          }}
-        />
       </div>
     );
   }
 
+  const locale = ar ? "ar" : "en";
+  const areaCopy = studioAreaCopy[locale][activeArea];
+  const publicationDecision = decideProgramPublicationState({
+    programStatus: detail.status,
+    hasCurrentPublishedVersion: detail.currentPublishedVersion !== null,
+  });
+  const lifecycleState = deriveStudioLifecyclePresentation({
+    programStatus: detail.status,
+    draftVersionStatus: editingVersion?.status ?? displayVersion.status,
+    locale,
+    validationState: validated ? "passed" : validation ? "failed" : "not-run",
+    testState: testReady ? "complete" : "incomplete",
+    designComplete,
+    locationsReady,
+    hasPublishedVersion: detail.currentPublishedVersion !== null,
+    publicationAllowed: publicationDecision.allowed,
+    planName: plan,
+    validationIssues: validation?.errors,
+  });
+
   return (
-    <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
+    <div className="studio-shell studio-shell--p4" dir={ar ? "rtl" : "ltr"}>
       <div className="studio-toolbar">
         <Button variant="secondary" onClick={onClose}>
           <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
-          {ar ? "بطاقات الولاء" : "Loyalty Cards"}
+          {ar ? "بطاقات الولاء" : "Loyalty cards"}
         </Button>
         <div className="studio-toolbar__title">
-          <span className="dashboard-card__label">
-            LOYALTY STUDIO · v{currentVersion.versionNumber}
-          </span>
-          <h1>{draft.internalName}</h1>
-          {detail.currentPublishedVersion ? (
-            <small>
-              {detail.status === "PAUSED"
-                ? ar
-                  ? "التغييرات غير المنشورة معزولة عن الإصدار المنشور المتوقف مؤقتًا."
-                  : "Unpublished changes are isolated from the paused published version."
-                : ar
-                  ? "التغييرات غير المنشورة معزولة عن الإصدار المباشر."
-                  : "Unpublished changes are isolated from the live version."}
-            </small>
-          ) : null}
+          <span className="dashboard-card__label">{ar ? "استوديو الولاء" : "LOYALTY STUDIO"}</span>
+          <div className="studio-title-line">
+            <h1>{displayDraft.internalName}</h1>
+            <Badge tone={lifecycleState.tone}>{lifecycleState.label}</Badge>
+          </div>
+          <small>{lifecycleState.description}</small>
         </div>
-        <div className={`studio-save-state studio-save-state--${saveState}`} role="status">
-          {saveState === "saving" ? (
-            <RefreshCcw className="studio-spin" size={16} />
-          ) : (
-            <Save size={16} />
-          )}
-          <span>{statusLabel(saveState, ar)}</span>
-          <small>rev {revision}</small>
-        </div>
+        {draft ? (
+          <div
+            className={`studio-save-state studio-save-state--${saveState}`}
+            role="status"
+            aria-live="polite"
+          >
+            {saveState === "saving" ? (
+              <RefreshCcw className="studio-spin" size={16} aria-hidden="true" />
+            ) : saveState === "failed" || saveState === "conflict" ? (
+              <CircleAlert size={16} aria-hidden="true" />
+            ) : (
+              <Save size={16} aria-hidden="true" />
+            )}
+            <span>{statusLabel(saveState, ar)}</span>
+          </div>
+        ) : (
+          <div className="studio-save-state studio-save-state--saved" role="status">
+            <ShieldCheck size={16} aria-hidden="true" />
+            <span>{ar ? "الإعداد المنشور محفوظ" : "Published setup saved"}</span>
+          </div>
+        )}
       </div>
+
+      <div
+        className={`studio-handoff studio-handoff--${lifecycleState.guidance.tone}`}
+        role="status"
+      >
+        <span className="studio-handoff__mark">
+          {lifecycleState.guidance.tone === "danger" ? (
+            <CircleAlert size={17} aria-hidden="true" />
+          ) : lifecycleState.guidance.tone === "warning" ? (
+            <Pause size={17} aria-hidden="true" />
+          ) : lifecycleState.guidance.tone === "neutral" ? (
+            <Archive size={17} aria-hidden="true" />
+          ) : (
+            <Check size={17} aria-hidden="true" />
+          )}
+        </span>
+        <div>
+          <strong>{lifecycleState.guidance.title}</strong>
+          <small>{lifecycleState.guidance.description}</small>
+        </div>
+        <ChevronRight className="studio-logical-next" size={18} aria-hidden="true" />
+      </div>
+
+      <StudioJourney
+        activeArea={activeArea}
+        presentation={lifecycleState}
+        ar={ar}
+        onArea={selectArea}
+      />
+
       {error ? <Alert tone="danger" title={error} /> : null}
 
-      <LifecycleChecklist
-        setupComplete={setupComplete}
-        validated={validated}
-        testReady={testReady}
-        published={Boolean(detail.currentPublishedVersion)}
-        ar={ar}
-        publicationDecision={decideProgramPublicationState({
-          programStatus: detail.status,
-          hasCurrentPublishedVersion: detail.currentPublishedVersion !== null,
-        })}
-        onSection={setActiveSection}
-        onPublish={() => setConfirmation("publish")}
-        onRestore={() => setConfirmation("restore")}
-      />
-
-      <ProgramEnrollmentSettings
-        organizationId={organizationId}
-        programId={programId}
-        ar={ar}
-        onChanged={load}
-      />
+      <div className="studio-mobile-navigation">
+        <button
+          ref={mobileNavigationTriggerRef}
+          type="button"
+          aria-expanded={mobileNavigationOpen}
+          aria-controls="studio-mobile-navigation-menu"
+          onClick={() => setMobileNavigationOpen((open) => !open)}
+        >
+          <span>
+            <Menu size={18} aria-hidden="true" /> {areaCopy.label}
+          </span>
+          <ChevronDown size={18} aria-hidden="true" />
+        </button>
+      </div>
 
       <div className="studio-workspace">
-        <nav className="studio-section-nav" aria-label={ar ? "أقسام الاستوديو" : "Studio sections"}>
-          {studioSections.map((section, index) => (
-            <button
-              type="button"
-              key={section}
-              className={activeSection === section ? "studio-section-nav__active" : ""}
-              onClick={() => setActiveSection(section)}
-              aria-current={activeSection === section ? "page" : undefined}
-            >
-              <span>{index + 1}</span>
-              {sectionCopy[section][ar ? "ar" : "en"]}
-            </button>
-          ))}
-        </nav>
+        <StudioNavigation
+          activeArea={activeArea}
+          ar={ar}
+          mobileOpen={mobileNavigationOpen}
+          onArea={selectArea}
+        />
 
-        <main className="studio-editor-panel">
+        <main className="studio-editor-panel" id="studio-area-content" tabIndex={-1}>
           <div className="studio-panel-heading">
             <div>
               <span className="dashboard-card__label">
-                {activeSection === "test-mode"
-                  ? "SYNTHETIC CUSTOMER ONLY"
-                  : `SECTION ${studioSections.indexOf(activeSection) + 1}`}
+                {activeArea === "test"
+                  ? ar
+                    ? "عميل تجريبي فقط"
+                    : "DEMO CUSTOMER ONLY"
+                  : ar
+                    ? "إدارة بطاقة الولاء"
+                    : "MANAGE LOYALTY CARD"}
               </span>
-              <h2>{sectionCopy[activeSection][ar ? "ar" : "en"]}</h2>
+              <h2>{areaCopy.label}</h2>
+              <p>{areaCopy.description}</p>
             </div>
-            {draft.editingMode === "pro" ? <Badge tone="brand">PRO</Badge> : <Badge>QUICK</Badge>}
+            {draft?.editingMode === "pro" ? (
+              <Badge tone="brand">PRO</Badge>
+            ) : (
+              <Badge>{ar ? "أساسي" : "QUICK"}</Badge>
+            )}
           </div>
-          <StudioSectionContent
-            section={activeSection}
-            draft={draft}
+
+          <StudioAreaContent
+            area={activeArea}
+            displayDraft={displayDraft}
+            editableDraft={draft}
             setDraft={setDraft}
+            displayVersion={displayVersion}
+            detail={detail}
+            organizationId={organizationId}
+            programId={programId}
             locations={locations}
             assets={assets}
-            organizationId={organizationId}
             onAssetUploaded={onAssetUploaded}
             plan={plan}
             ar={ar}
+            lifecycleState={lifecycleState}
             validation={validation}
-            onValidate={() => void validate()}
             validating={working}
-            onIssue={(issue) => setActiveSection(sectionForIssue(issue))}
+            selectedProfile={selectedProfile}
+            selectedPreview={selectedPreview}
+            previewLoading={previewLoading}
+            progress={progress}
+            onProgress={setProgress}
+            onProfile={setSelectedProfile}
+            onEditDesign={onEditDesign}
+            onArea={setActiveArea}
+            onValidate={() => void validate()}
+            onIssue={(issue) => setActiveArea(studioAreaForValidationPath(issue.path))}
             testSession={testSession}
             onStartTest={() => void startTest()}
             onTestCommand={(command) => void testCommand(command)}
-            detail={detail}
+            onCreateDraft={() => void createDraft()}
+            onPublish={() => setConfirmation("publish")}
+            onLifecycle={setConfirmation}
             onViewVersion={(id) => void viewHistorical(id)}
             onLoadMoreVersions={historyCursor ? () => void loadMoreVersions() : undefined}
-            onAbandon={() => setConfirmation("abandon")}
           />
         </main>
-
-        <aside className="studio-preview-panel">
-          <div className="studio-preview-header">
-            <div>
-              <span className="dashboard-card__label">
-                {ar ? "معاينة محفوظة" : "PERSISTED PREVIEW"}
-              </span>
-              <h3>
-                {selectedProfile === "CUSTOMER_WEB"
-                  ? "Customer Web"
-                  : selectedProfile === "APPLE_WALLET"
-                    ? "Apple Wallet"
-                    : "Google Wallet"}
-              </h3>
-            </div>
-            <Eye size={20} />
-          </div>
-          <div className="studio-preview-tabs" role="tablist">
-            {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
-              <button
-                type="button"
-                role="tab"
-                key={profile}
-                aria-selected={selectedProfile === profile}
-                onClick={() =>
-                  setActiveSection(
-                    profile === "APPLE_WALLET"
-                      ? "apple-preview"
-                      : profile === "GOOGLE_WALLET"
-                        ? "google-preview"
-                        : "customer-preview",
-                  )
-                }
-              >
-                <strong>
-                  {profile === "CUSTOMER_WEB"
-                    ? "Web"
-                    : profile === "APPLE_WALLET"
-                      ? "Apple"
-                      : "Google"}
-                </strong>
-                <small>
-                  {selectedProfile === profile ? (ar ? "محدد" : "Selected") : ar ? "فتح" : "Open"}
-                </small>
-              </button>
-            ))}
-          </div>
-          <FormField label={ar ? "تقدم المعاينة" : "Preview progress"}>
-            <input
-              type="range"
-              min={0}
-              max={draft.requiredStampCount}
-              value={progress}
-              onChange={(event) => setProgress(Number(event.target.value))}
-            />
-          </FormField>
-          <div
-            className={`studio-device-frame studio-device-frame--${selectedProfile.toLowerCase()}`}
-          >
-            {selectedPreview ? (
-              <Image
-                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(selectedPreview.svg)}`}
-                alt={`${selectedProfile} preview`}
-                width={selectedPreview.width}
-                height={selectedPreview.height}
-                unoptimized
-              />
-            ) : (
-              <div className="studio-preview-loading">
-                {previewLoading ? <RefreshCcw className="studio-spin" /> : <UploadCloud />}
-                <span>
-                  {previewLoading
-                    ? ar
-                      ? "جارٍ التوليد…"
-                      : "Generating…"
-                    : ar
-                      ? "احفظ لعرض المعاينة"
-                      : "Save to preview"}
-                </span>
-              </div>
-            )}
-          </div>
-          {selectedPreview?.warnings.map((warning) => (
-            <Alert key={warning.code} tone="warning" title={warning.message} />
-          ))}
-        </aside>
-      </div>
-
-      <div className="studio-lifecycle-actions">
-        {detail.status === "PUBLISHED" ? (
-          <Button variant="secondary" onClick={() => setConfirmation("pause")}>
-            <Pause size={16} aria-hidden="true" /> {lifecycleActionLabel("pause", ar)}
-          </Button>
-        ) : null}
-        {detail.status === "PAUSED" ? (
-          <Button variant="secondary" onClick={() => setConfirmation("resume")}>
-            <Play size={16} aria-hidden="true" /> {lifecycleActionLabel("resume", ar)}
-          </Button>
-        ) : null}
-        {detail.status !== "ARCHIVED" ? (
-          <Button variant="secondary" onClick={() => setConfirmation("archive")}>
-            <Archive size={16} aria-hidden="true" /> {lifecycleActionLabel("archive", ar)}
-          </Button>
-        ) : null}
-        {detail.status === "ARCHIVED" ? (
-          <Button variant="secondary" onClick={() => setConfirmation("restore")}>
-            <RotateCcw size={16} aria-hidden="true" /> {lifecycleActionLabel("restore", ar)}
-          </Button>
-        ) : null}
       </div>
 
       <ConflictModal
@@ -982,88 +820,1196 @@ export function ProgramStudioEditor({
   );
 }
 
-function LifecycleChecklist({
-  setupComplete,
-  validated,
-  testReady,
-  published,
+function StudioAreaIcon({ area }: { area: StudioArea }) {
+  if (area === "overview") return <LayoutDashboard size={19} aria-hidden="true" />;
+  if (area === "how-it-works") return <Workflow size={19} aria-hidden="true" />;
+  if (area === "customers-locations") return <MapPinned size={19} aria-hidden="true" />;
+  if (area === "test") return <FlaskConical size={19} aria-hidden="true" />;
+  if (area === "launch") return <Rocket size={19} aria-hidden="true" />;
+  return <Settings2 size={19} aria-hidden="true" />;
+}
+
+function StudioJourney({
+  activeArea,
+  presentation,
   ar,
-  publicationDecision,
-  onSection,
-  onPublish,
-  onRestore,
+  onArea,
 }: {
-  setupComplete: boolean;
-  validated: boolean;
-  testReady: boolean;
-  published: boolean;
+  activeArea: StudioArea;
+  presentation: StudioLifecyclePresentation;
   ar: boolean;
-  publicationDecision: ProgramPublicationStateDecision;
-  onSection: (section: StudioSection) => void;
-  onPublish: () => void;
-  onRestore: () => void;
+  onArea: (area: StudioArea) => void;
 }) {
-  const steps = [
-    {
-      label: ar ? "إكمال الإعداد" : "Complete setup",
-      complete: setupComplete,
-      section: "overview" as const,
-    },
-    { label: ar ? "التحقق" : "Validate", complete: validated, section: "validation" as const },
-    {
-      label: ar ? "إكمال وضع الاختبار" : "Complete Test Mode",
-      complete: testReady,
-      section: "test-mode" as const,
-    },
-    { label: ar ? "النشر" : "Publish", complete: published, section: "versions" as const },
-  ];
-  const blockedGuidance = publicationDecision.allowed
-    ? null
-    : publicationStateGuidance(publicationDecision.previousOperationalState, ar);
+  const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const currentIndex = presentation.journeyStages.findIndex(
+    (stage) => stage.key === presentation.currentJourneyStage,
+  );
+
+  useEffect(() => {
+    stageRefs.current[currentIndex]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [currentIndex]);
+
+  function moveFocus(index: number, direction: -1 | 1) {
+    const nextIndex = Math.max(
+      0,
+      Math.min(presentation.journeyStages.length - 1, index + direction),
+    );
+    stageRefs.current[nextIndex]?.focus();
+    stageRefs.current[nextIndex]?.scrollIntoView({ block: "nearest", inline: "center" });
+  }
+
   return (
-    <Card className="studio-lifecycle">
-      {steps.map((step, index) => (
-        <button
-          type="button"
-          key={step.label}
-          className={step.complete ? "studio-lifecycle__complete" : ""}
-          onClick={() => onSection(step.section)}
+    <div className="studio-journey-shell">
+      <section
+        className="studio-journey"
+        aria-label={ar ? "رحلة إطلاق البطاقة" : "Card launch journey"}
+      >
+        {presentation.journeyStages.map((stage, index) => (
+          <button
+            ref={(node) => {
+              stageRefs.current[index] = node;
+            }}
+            type="button"
+            key={stage.key}
+            className={`studio-journey__${stage.state}${
+              activeArea === stage.area ? " studio-journey__active" : ""
+            }`}
+            aria-label={`${stage.label}: ${stage.stateLabel}. ${stage.hint}`}
+            aria-current={stage.key === presentation.currentJourneyStage ? "step" : undefined}
+            onClick={() => onArea(stage.area)}
+            onKeyDown={(event) => {
+              const previousKey = ar ? "ArrowRight" : "ArrowLeft";
+              const nextKey = ar ? "ArrowLeft" : "ArrowRight";
+              if (event.key === previousKey) {
+                event.preventDefault();
+                moveFocus(index, -1);
+              }
+              if (event.key === nextKey) {
+                event.preventDefault();
+                moveFocus(index, 1);
+              }
+            }}
+          >
+            <span className="studio-journey__node">
+              {stage.state === "complete" ? (
+                <Check size={15} aria-hidden="true" />
+              ) : stage.state === "paused" ? (
+                <Pause size={14} aria-hidden="true" />
+              ) : stage.state === "archived" ? (
+                <Archive size={14} aria-hidden="true" />
+              ) : stage.state === "blocked" ? (
+                <CircleAlert size={14} aria-hidden="true" />
+              ) : (
+                <span aria-hidden="true" />
+              )}
+            </span>
+            <span>
+              <strong>{stage.label}</strong>
+              <small>
+                {stage.stateLabel} · {stage.hint}
+              </small>
+            </span>
+          </button>
+        ))}
+      </section>
+      <small className="studio-journey-hint">
+        {ar
+          ? "مرّر أو استخدم مفاتيح الأسهم لعرض جميع المراحل"
+          : "Swipe or use the arrow keys to see every stage"}
+      </small>
+    </div>
+  );
+}
+
+function StudioNavigation({
+  activeArea,
+  ar,
+  mobileOpen,
+  onArea,
+}: {
+  activeArea: StudioArea;
+  ar: boolean;
+  mobileOpen: boolean;
+  onArea: (area: StudioArea) => void;
+}) {
+  const locale = ar ? "ar" : "en";
+  return (
+    <nav
+      className={`studio-section-nav${mobileOpen ? " studio-section-nav--mobile-open" : ""}`}
+      id="studio-mobile-navigation-menu"
+      aria-label={ar ? "أقسام الاستوديو" : "Studio sections"}
+    >
+      {studioAreas.map((area) => {
+        const copy = studioAreaCopy[locale][area];
+        return (
+          <button
+            type="button"
+            key={area}
+            className={activeArea === area ? "studio-section-nav__active" : ""}
+            onClick={() => onArea(area)}
+            aria-current={activeArea === area ? "page" : undefined}
+          >
+            <span className="studio-section-nav__icon">
+              <StudioAreaIcon area={area} />
+            </span>
+            <span>
+              <strong>{copy.label}</strong>
+              <small>{copy.description}</small>
+            </span>
+            <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+type StudioTestCommand =
+  | {
+      kind: "add";
+      amount: number;
+      purchaseAmountMinor?: number;
+      purchaseCurrency?: string;
+      managerApproved?: boolean;
+      managerReason?: string;
+      simulatedOccurredAt?: string;
+    }
+  | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
+  | { kind: "reset" }
+  | { kind: "redeem"; rewardId: string; managerApproved?: boolean };
+
+function StudioAreaContent({
+  area,
+  displayDraft,
+  editableDraft,
+  setDraft,
+  displayVersion,
+  detail,
+  organizationId,
+  programId,
+  locations,
+  assets,
+  onAssetUploaded,
+  plan,
+  ar,
+  lifecycleState,
+  validation,
+  validating,
+  selectedProfile,
+  selectedPreview,
+  previewLoading,
+  progress,
+  onProgress,
+  onProfile,
+  onEditDesign,
+  onArea,
+  onValidate,
+  onIssue,
+  testSession,
+  onStartTest,
+  onTestCommand,
+  onCreateDraft,
+  onPublish,
+  onLifecycle,
+  onViewVersion,
+  onLoadMoreVersions,
+}: {
+  area: StudioArea;
+  displayDraft: ProgramDraftInput;
+  editableDraft: ProgramDraftInput | null;
+  setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
+  displayVersion: ProgramVersion;
+  detail: ProgramDetail;
+  organizationId: string;
+  programId: string;
+  locations: LocationItem[];
+  assets: AssetItem[];
+  onAssetUploaded: (asset: AssetItem) => void;
+  plan: "STARTER" | "GROWTH" | "SCALE";
+  ar: boolean;
+  lifecycleState: StudioLifecyclePresentation;
+  validation: ValidationResult | null;
+  validating: boolean;
+  selectedProfile: PreviewProfile;
+  selectedPreview: PreviewResult | undefined;
+  previewLoading: boolean;
+  progress: number;
+  onProgress: (progress: number) => void;
+  onProfile: (profile: PreviewProfile) => void;
+  onEditDesign: () => void;
+  onArea: (area: StudioArea) => void;
+  onValidate: () => void;
+  onIssue: (issue: ValidationIssue) => void;
+  testSession: TestSession | null;
+  onStartTest: () => void;
+  onTestCommand: (command: StudioTestCommand) => void;
+  onCreateDraft: () => void;
+  onPublish: () => void;
+  onLifecycle: (action: LifecycleAction) => void;
+  onViewVersion: (versionId: string) => void;
+  onLoadMoreVersions?: (() => void) | undefined;
+}) {
+  const nestedSection = (section: StudioSection) =>
+    editableDraft ? (
+      <StudioSectionContent
+        section={section}
+        draft={editableDraft}
+        setDraft={setDraft}
+        locations={locations}
+        assets={assets}
+        organizationId={organizationId}
+        onAssetUploaded={onAssetUploaded}
+        plan={plan}
+        ar={ar}
+        validation={validation}
+        onValidate={onValidate}
+        validating={validating}
+        onIssue={onIssue}
+        testSession={testSession}
+        onStartTest={onStartTest}
+        onTestCommand={onTestCommand}
+        detail={detail}
+        onViewVersion={onViewVersion}
+        onLoadMoreVersions={onLoadMoreVersions}
+        onAbandon={() => onLifecycle("abandon")}
+      />
+    ) : null;
+
+  if (area === "overview")
+    return (
+      <StudioOverview
+        displayDraft={displayDraft}
+        displayVersion={displayVersion}
+        detail={detail}
+        locations={locations}
+        lifecycleState={lifecycleState}
+        editable={Boolean(editableDraft)}
+        ar={ar}
+        selectedProfile={selectedProfile}
+        selectedPreview={selectedPreview}
+        previewLoading={previewLoading}
+        progress={progress}
+        onProgress={onProgress}
+        onProfile={onProfile}
+        onEditDesign={onEditDesign}
+        onArea={onArea}
+        onLifecycle={onLifecycle}
+      />
+    );
+
+  if (area === "how-it-works")
+    return (
+      <HowItWorksPanel
+        draft={displayDraft}
+        editable={Boolean(editableDraft)}
+        setDraft={setDraft}
+        ar={ar}
+        onEditDesign={onEditDesign}
+        advancedRules={nestedSection("policies")}
+        onCreateDraft={onCreateDraft}
+      />
+    );
+
+  if (area === "customers-locations")
+    return (
+      <CustomersLocationsPanel
+        draft={displayDraft}
+        editable={Boolean(editableDraft)}
+        locations={locations}
+        organizationId={organizationId}
+        programId={programId}
+        ar={ar}
+        locationEditor={nestedSection("locations")}
+        onCreateDraft={onCreateDraft}
+      />
+    );
+
+  if (area === "test")
+    return editableDraft ? (
+      <div className="studio-area-stack">
+        <Alert
+          tone="info"
+          title={ar ? "اختبر بأمان مع عميل تجريبي" : "Test safely with a demo customer"}
         >
-          <span>{step.complete ? <Check size={16} /> : index + 1}</span>
-          <strong>{step.label}</strong>
-          <small>{step.complete ? (ar ? "مكتمل" : "Complete") : ar ? "مطلوب" : "Required"}</small>
-        </button>
-      ))}
-      {blockedGuidance ? (
-        <details className="studio-publication-state-guidance" open>
-          <summary>
-            <CircleAlert size={18} />
-            <strong>{blockedGuidance.title}</strong>
-          </summary>
-          <small>{blockedGuidance.message}</small>
-          {"requiredAction" in publicationDecision &&
-          publicationDecision.requiredAction === "RESTORE_PROGRAM" ? (
-            <Button variant="secondary" onClick={onRestore}>
+          {ar ? "لن يتم إنشاء أي نشاط لعميل حقيقي." : "No real customer activity will be created."}
+        </Alert>
+        {nestedSection("test-mode")}
+        <Button variant="secondary" onClick={() => onArea("launch")}>
+          {ar ? "الانتقال إلى جاهزية الإطلاق" : "Go to launch readiness"}
+          <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
+        </Button>
+      </div>
+    ) : (
+      <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} />
+    );
+
+  if (area === "launch")
+    return (
+      <LaunchPanel
+        editable={Boolean(editableDraft)}
+        organizationId={organizationId}
+        ar={ar}
+        lifecycleState={lifecycleState}
+        validationPanel={nestedSection("validation")}
+        onValidate={onValidate}
+        onArea={onArea}
+        onPublish={onPublish}
+        onLifecycle={onLifecycle}
+      />
+    );
+
+  return (
+    <StudioSettingsPanel
+      draft={displayDraft}
+      editable={Boolean(editableDraft)}
+      lifecycleState={lifecycleState}
+      ar={ar}
+      history={nestedSection("versions")}
+      onEditDesign={onEditDesign}
+      onCreateDraft={onCreateDraft}
+      onLifecycle={onLifecycle}
+    />
+  );
+}
+
+function StudioOverview({
+  displayDraft,
+  displayVersion,
+  detail,
+  locations,
+  lifecycleState,
+  editable,
+  ar,
+  selectedProfile,
+  selectedPreview,
+  previewLoading,
+  progress,
+  onProgress,
+  onProfile,
+  onEditDesign,
+  onArea,
+  onLifecycle,
+}: {
+  displayDraft: ProgramDraftInput;
+  displayVersion: ProgramVersion;
+  detail: ProgramDetail;
+  locations: LocationItem[];
+  lifecycleState: StudioLifecyclePresentation;
+  editable: boolean;
+  ar: boolean;
+  selectedProfile: PreviewProfile;
+  selectedPreview: PreviewResult | undefined;
+  previewLoading: boolean;
+  progress: number;
+  onProgress: (progress: number) => void;
+  onProfile: (profile: PreviewProfile) => void;
+  onEditDesign: () => void;
+  onArea: (area: StudioArea) => void;
+  onLifecycle: (action: LifecycleAction) => void;
+}) {
+  const finalReward = [...displayDraft.rewards].sort(
+    (left, right) => right.thresholdStampCount - left.thresholdStampCount,
+  )[0];
+  const rewardName =
+    finalReward?.translations[ar ? "ar" : "en"].name ??
+    displayDraft.translations[ar ? "ar" : "en"].rewardSummary;
+  const activeLocations = locations.filter((location) =>
+    displayDraft.locationIds.includes(location.id),
+  );
+  const changedAt = detail.updatedAt ?? displayVersion.publishedAt ?? null;
+  const primaryAction = lifecycleState.primaryAction;
+
+  function runPrimaryAction() {
+    if (primaryAction.kind === "navigate") onArea(primaryAction.area);
+    else if (primaryAction.kind === "lifecycle") onLifecycle(primaryAction.action);
+    else onArea("launch");
+  }
+
+  return (
+    <div className="studio-overview">
+      <div className="studio-overview__hero">
+        <StudioPreview
+          draft={displayDraft}
+          ar={ar}
+          selectedProfile={selectedProfile}
+          preview={selectedPreview}
+          loading={previewLoading}
+          progress={progress}
+          onProgress={onProgress}
+          onProfile={onProfile}
+        />
+        <section className="studio-next-action" aria-labelledby="studio-next-action-title">
+          <span className="dashboard-card__label">{ar ? "الخطوة التالية" : "NEXT"}</span>
+          <h3 id="studio-next-action-title">{primaryAction.label}</h3>
+          <p>
+            {lifecycleState.key === "draft" || lifecycleState.key === "ready"
+              ? lifecycleState.launch.description
+              : lifecycleState.guidance.description}
+          </p>
+          <Button onClick={runPrimaryAction}>
+            {primaryAction.kind === "lifecycle" && primaryAction.action === "resume" ? (
+              <Play size={16} aria-hidden="true" />
+            ) : primaryAction.kind === "lifecycle" && primaryAction.action === "restore" ? (
               <RotateCcw size={16} aria-hidden="true" />
-              {lifecycleActionLabel("restore", ar)}
-            </Button>
-          ) : null}
+            ) : null}
+            {primaryAction.label}
+            {primaryAction.kind === "navigate" || primaryAction.kind === "run-checks" ? (
+              <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
+            ) : null}
+          </Button>
+        </section>
+      </div>
+
+      <div className="studio-overview__summary">
+        <section>
+          <span>
+            <Workflow size={18} aria-hidden="true" />
+          </span>
+          <div>
+            <small>{ar ? "طريقة العمل" : "How it works"}</small>
+            <strong>
+              {displayDraft.requiredStampCount} {ar ? "أختام" : "stamps"} · {rewardName}
+            </strong>
+            <p>{displayDraft.earningDescription}</p>
+          </div>
+          <button type="button" onClick={() => onArea("how-it-works")}>
+            {ar ? "فتح" : "Open"}
+            <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
+          </button>
+        </section>
+        <section>
+          <span>
+            <Store size={18} aria-hidden="true" />
+          </span>
+          <div>
+            <small>{ar ? "المواقع المشاركة" : "Participating locations"}</small>
+            <strong>
+              {activeLocations.length === 1
+                ? activeLocations[0]?.name
+                : ar
+                  ? `${activeLocations.length} مواقع`
+                  : `${activeLocations.length} locations`}
+            </strong>
+            <p>
+              {activeLocations.length
+                ? activeLocations.map((location) => location.name).join(" · ")
+                : ar
+                  ? "لم يتم اختيار موقع بعد"
+                  : "No location selected yet"}
+            </p>
+          </div>
+          <button type="button" onClick={() => onArea("customers-locations")}>
+            {ar ? "فتح" : "Open"}
+            <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
+          </button>
+        </section>
+        <section>
+          <span>
+            <Clock3 size={18} aria-hidden="true" />
+          </span>
+          <div>
+            <small>{ar ? "آخر تغيير" : "Last changed"}</small>
+            <strong>
+              {changedAt ? (
+                <time dateTime={changedAt}>
+                  {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-IQ", { dateStyle: "medium" }).format(
+                    new Date(changedAt),
+                  )}
+                </time>
+              ) : ar ? (
+                "محفوظ"
+              ) : (
+                "Saved"
+              )}
+            </strong>
+            <p>
+              {displayVersion.changeSummary || (ar ? "لا يوجد ملخص للتغيير" : "No change summary")}
+            </p>
+          </div>
+          <button type="button" onClick={() => onArea("settings")}>
+            {ar ? "السجل" : "History"}
+            <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
+          </button>
+        </section>
+      </div>
+
+      <div className="studio-design-owner">
+        <div>
+          <Eye size={19} aria-hidden="true" />
+          <span>
+            <strong>{ar ? "التصميم ومحتوى العميل" : "Design and customer content"}</strong>
+            <small>
+              {ar
+                ? "تُدار في منشئ البطاقة وتظهر هنا كملخص فقط."
+                : "Managed in the Card Builder and shown here as a read-only summary."}
+            </small>
+          </span>
+        </div>
+        {editable ? (
+          <Button variant="secondary" onClick={onEditDesign}>
+            {ar ? "تعديل التصميم" : "Edit design"}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StudioPreview({
+  draft,
+  ar,
+  selectedProfile,
+  preview,
+  loading,
+  progress,
+  onProgress,
+  onProfile,
+}: {
+  draft: ProgramDraftInput;
+  ar: boolean;
+  selectedProfile: PreviewProfile;
+  preview: PreviewResult | undefined;
+  loading: boolean;
+  progress: number;
+  onProgress: (progress: number) => void;
+  onProfile: (profile: PreviewProfile) => void;
+}) {
+  const profileLabel =
+    selectedProfile === "CUSTOMER_WEB"
+      ? ar
+        ? "بطاقة العميل"
+        : "Customer card"
+      : selectedProfile === "APPLE_WALLET"
+        ? "Apple Wallet"
+        : "Google Wallet";
+  return (
+    <section
+      className="studio-preview-panel studio-preview-panel--overview"
+      aria-label={ar ? "معاينة البطاقة" : "Card preview"}
+    >
+      <div className="studio-preview-header">
+        <div>
+          <span className="dashboard-card__label">{ar ? "ما يراه العميل" : "CUSTOMER VIEW"}</span>
+          <h3>{profileLabel}</h3>
+        </div>
+        <Eye size={20} aria-hidden="true" />
+      </div>
+      <div
+        className="studio-preview-tabs"
+        role="tablist"
+        aria-label={ar ? "أسطح المعاينة" : "Preview surfaces"}
+      >
+        {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
+          <button
+            type="button"
+            role="tab"
+            key={profile}
+            aria-selected={selectedProfile === profile}
+            onClick={() => onProfile(profile)}
+          >
+            {profile === "CUSTOMER_WEB"
+              ? ar
+                ? "العميل"
+                : "Customer"
+              : profile === "APPLE_WALLET"
+                ? "Apple"
+                : "Google"}
+          </button>
+        ))}
+      </div>
+      <div className={`studio-device-frame studio-device-frame--${selectedProfile.toLowerCase()}`}>
+        {preview ? (
+          <Image
+            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview.svg)}`}
+            alt={ar ? `معاينة ${profileLabel}` : `${profileLabel} preview`}
+            width={preview.width}
+            height={preview.height}
+            unoptimized
+          />
+        ) : (
+          <div className="studio-preview-loading" role="status">
+            <RefreshCcw className={loading ? "studio-spin" : ""} aria-hidden="true" />
+            <span>
+              {loading
+                ? ar
+                  ? "جارٍ تجهيز المعاينة…"
+                  : "Preparing preview…"
+                : ar
+                  ? "ستظهر المعاينة هنا"
+                  : "Preview will appear here"}
+            </span>
+          </div>
+        )}
+      </div>
+      <FormField label={ar ? "تقدم العميل" : "Customer progress"}>
+        <div className="studio-preview-progress">
+          <input
+            type="range"
+            min={0}
+            max={draft.requiredStampCount}
+            value={progress}
+            onChange={(event) => onProgress(Number(event.target.value))}
+          />
+          <output dir="ltr">
+            {progress}/{draft.requiredStampCount}
+          </output>
+        </div>
+      </FormField>
+      {preview?.warnings.map((warning) => (
+        <Alert key={warning.code} tone="warning" title={warning.message} />
+      ))}
+    </section>
+  );
+}
+
+function HowItWorksPanel({
+  draft,
+  editable,
+  setDraft,
+  ar,
+  onEditDesign,
+  advancedRules,
+  onCreateDraft,
+}: {
+  draft: ProgramDraftInput;
+  editable: boolean;
+  setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
+  ar: boolean;
+  onEditDesign: () => void;
+  advancedRules: React.ReactNode;
+  onCreateDraft: () => void;
+}) {
+  const reward = [...draft.rewards].sort(
+    (left, right) => right.thresholdStampCount - left.thresholdStampCount,
+  )[0];
+  const rewardName =
+    reward?.translations[ar ? "ar" : "en"].name ??
+    draft.translations[ar ? "ar" : "en"].rewardSummary;
+  return (
+    <div className="studio-area-stack">
+      <div className="studio-rule-summary">
+        <section>
+          <span className="studio-rule-summary__stamp" aria-hidden="true">
+            {draft.requiredStampCount}
+          </span>
+          <div>
+            <small>{ar ? "هدف الأختام" : "Stamp goal"}</small>
+            <h3>
+              {draft.requiredStampCount} {ar ? "أختام" : "stamps"}
+            </h3>
+            <p>{draft.earningDescription}</p>
+          </div>
+        </section>
+        <section>
+          <span className="studio-rule-summary__gift">
+            <Gift size={22} aria-hidden="true" />
+          </span>
+          <div>
+            <small>{ar ? "المكافأة" : "Reward"}</small>
+            <h3>{rewardName}</h3>
+            <p>
+              {reward?.requiresManagerApproval
+                ? ar
+                  ? "تتطلب موافقة المدير عند الاسترداد."
+                  : "Manager approval is required at redemption."
+                : ar
+                  ? "يمكن استردادها دون موافقة المدير."
+                  : "Can be redeemed without manager approval."}
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <div className="studio-design-owner">
+        <div>
+          <Eye size={19} aria-hidden="true" />
+          <span>
+            <strong>{ar ? "اسم المكافأة وشكل البطاقة" : "Reward name and card appearance"}</strong>
+            <small>
+              {ar
+                ? "يُعدّلان في منشئ البطاقة حتى يبقى لكل حقل مكان واحد."
+                : "Edit these in the Card Builder so every field has one clear home."}
+            </small>
+          </span>
+        </div>
+        {editable ? (
+          <Button variant="secondary" onClick={onEditDesign}>
+            {ar ? "تعديل التصميم" : "Edit design"}
+          </Button>
+        ) : null}
+      </div>
+
+      {editable ? (
+        <details className="studio-advanced-disclosure">
+          <summary>
+            <span>
+              <Settings2 size={19} aria-hidden="true" />
+              <strong>
+                {ar ? "قواعد الكسب والاسترداد المتقدمة" : "Advanced earning and redemption rules"}
+              </strong>
+            </span>
+            <ChevronDown size={18} aria-hidden="true" />
+          </summary>
+          <div className="studio-advanced-disclosure__content">
+            <RewardOperationsPanel draft={draft} setDraft={setDraft} ar={ar} />
+            {advancedRules}
+          </div>
+        </details>
+      ) : (
+        <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} compact />
+      )}
+    </div>
+  );
+}
+
+function RewardOperationsPanel({
+  draft,
+  setDraft,
+  ar,
+}: {
+  draft: ProgramDraftInput;
+  setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
+  ar: boolean;
+}) {
+  function updateReward(clientId: string, transform: (reward: RewardInput) => RewardInput) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            rewards: current.rewards.map((reward) =>
+              reward.clientId === clientId ? transform(reward) : reward,
+            ),
+          }
+        : current,
+    );
+  }
+  return (
+    <section className="studio-operational-rewards">
+      <div>
+        <span className="dashboard-card__label">{ar ? "عند الاسترداد" : "AT REDEMPTION"}</span>
+        <h3>{ar ? "طريقة استخدام المكافآت" : "How rewards are used"}</h3>
+      </div>
+      {draft.rewards.map((reward) => {
+        const name = reward.translations[ar ? "ar" : "en"].name;
+        return (
+          <Card key={reward.clientId} className="studio-operational-reward">
+            <div className="studio-section-heading">
+              <div>
+                <small>
+                  {ar
+                    ? `تُفتح عند ${reward.thresholdStampCount} أختام`
+                    : `Unlocks at ${reward.thresholdStampCount} stamps`}
+                </small>
+                <h4>{name}</h4>
+              </div>
+              <Badge
+                tone={reward.thresholdStampCount === draft.requiredStampCount ? "success" : "brand"}
+              >
+                {reward.thresholdStampCount === draft.requiredStampCount
+                  ? ar
+                    ? "نهائية"
+                    : "Final"
+                  : ar
+                    ? "مرحلية"
+                    : "Milestone"}
+              </Badge>
+            </div>
+            <div className="studio-form-grid">
+              <FormField label={ar ? "مدة الصلاحية بالأيام" : "Valid for (days)"}>
+                <TextInput
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={reward.validityDurationDays ?? ""}
+                  onChange={(event) =>
+                    updateReward(reward.clientId, (current) => ({
+                      ...current,
+                      validityDurationDays: event.target.value ? Number(event.target.value) : null,
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label={ar ? "مرات الاستخدام لكل مكافأة" : "Uses per earned reward"}>
+                <TextInput
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={reward.maximumRedemptionsPerEarned}
+                  onChange={(event) =>
+                    updateReward(reward.clientId, (current) => ({
+                      ...current,
+                      maximumRedemptionsPerEarned: Number(event.target.value),
+                    }))
+                  }
+                />
+              </FormField>
+            </div>
+            <Checkbox
+              checked={reward.requiresManagerApproval}
+              label={ar ? "طلب موافقة المدير عند الاسترداد" : "Require manager approval to redeem"}
+              onChange={(event) =>
+                updateReward(reward.clientId, (current) => ({
+                  ...current,
+                  requiresManagerApproval: event.target.checked,
+                }))
+              }
+            />
+          </Card>
+        );
+      })}
+    </section>
+  );
+}
+
+function CustomersLocationsPanel({
+  draft,
+  editable,
+  locations,
+  organizationId,
+  programId,
+  ar,
+  locationEditor,
+  onCreateDraft,
+}: {
+  draft: ProgramDraftInput;
+  editable: boolean;
+  locations: LocationItem[];
+  organizationId: string;
+  programId: string;
+  ar: boolean;
+  locationEditor: React.ReactNode;
+  onCreateDraft: () => void;
+}) {
+  const participating = locations.filter((location) => draft.locationIds.includes(location.id));
+  return (
+    <div className="studio-area-stack">
+      <section className="studio-locations-block">
+        <div className="studio-section-heading">
+          <div>
+            <span className="dashboard-card__label">
+              {ar ? "أماكن المشاركة" : "WHERE IT WORKS"}
+            </span>
+            <h3>{ar ? "المواقع المشاركة" : "Participating locations"}</h3>
+            <p>
+              {ar
+                ? "يمكن للعملاء كسب الأختام في المواقع النشطة المحددة هنا."
+                : "Customers can earn stamps at the active locations selected here."}
+            </p>
+          </div>
+          <Badge tone={participating.length ? "success" : "warning"}>
+            {ar ? `${participating.length} محددة` : `${participating.length} selected`}
+          </Badge>
+        </div>
+        {editable ? (
+          locationEditor
+        ) : (
+          <div className="studio-location-list">
+            {participating.map((location) => (
+              <span key={location.id}>
+                <Store size={17} aria-hidden="true" /> {location.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {!editable ? <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} compact /> : null}
+
+      <ProgramEnrollmentSettings
+        organizationId={organizationId}
+        programId={programId}
+        ar={ar}
+        showWalletReadiness={false}
+      />
+    </div>
+  );
+}
+
+function CreateUpdatePrompt({
+  ar,
+  onCreate,
+  compact = false,
+}: {
+  ar: boolean;
+  onCreate: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <Card className={`studio-create-update${compact ? " studio-create-update--compact" : ""}`}>
+      <Plus size={24} aria-hidden="true" />
+      <div>
+        <h3>{ar ? "أنشئ تحديثًا للتعديل" : "Create an update to make changes"}</h3>
+        <p>
+          {ar
+            ? "ستبقى البطاقة المباشرة كما هي حتى تختبر التحديث وتنشره."
+            : "The live card stays unchanged until you test and publish the update."}
+        </p>
+      </div>
+      <Button onClick={onCreate}>{ar ? "إنشاء تحديث" : "Create update"}</Button>
+    </Card>
+  );
+}
+
+function LaunchPanel({
+  editable,
+  organizationId,
+  ar,
+  lifecycleState,
+  validationPanel,
+  onValidate,
+  onArea,
+  onPublish,
+  onLifecycle,
+}: {
+  editable: boolean;
+  organizationId: string;
+  ar: boolean;
+  lifecycleState: StudioLifecyclePresentation;
+  validationPanel: React.ReactNode;
+  onValidate: () => void;
+  onArea: (area: StudioArea) => void;
+  onPublish: () => void;
+  onLifecycle: (action: LifecycleAction) => void;
+}) {
+  const automated = lifecycleState.launch.requirements.find(
+    (requirement) => requirement.key === "automated",
+  );
+
+  function runAction(action: StudioPresentationAction) {
+    if (action.kind === "navigate") onArea(action.area);
+    else if (action.kind === "lifecycle") onLifecycle(action.action);
+    else if (action.kind === "publish") onPublish();
+    else onValidate();
+  }
+
+  return (
+    <div className="studio-area-stack">
+      <section
+        className={`studio-launch-summary studio-launch-summary--${lifecycleState.launch.tone}`}
+        aria-labelledby="studio-launch-title"
+        role="status"
+      >
+        <div>
+          <span className="dashboard-card__label">
+            {ar ? "الحالة العامة" : "OVERALL LAUNCH STATUS"}
+          </span>
+          <h3 id="studio-launch-title">{lifecycleState.launch.label}</h3>
+          <p>{lifecycleState.launch.description}</p>
+        </div>
+        {lifecycleState.launch.tone === "success" ? (
+          <ShieldCheck size={34} aria-hidden="true" />
+        ) : lifecycleState.launch.tone === "warning" ? (
+          <Pause size={34} aria-hidden="true" />
+        ) : lifecycleState.launch.tone === "neutral" ? (
+          <Archive size={34} aria-hidden="true" />
+        ) : lifecycleState.launch.tone === "danger" ? (
+          <CircleAlert size={34} aria-hidden="true" />
+        ) : (
+          <Rocket size={34} aria-hidden="true" />
+        )}
+      </section>
+
+      <ul
+        className="studio-readiness-list"
+        aria-label={ar ? "متطلبات الإطلاق" : "Launch requirements"}
+      >
+        {lifecycleState.launch.requirements.map((requirement) => (
+          <ReadinessRow
+            key={requirement.key}
+            requirement={requirement}
+            onAction={
+              requirement.action &&
+              !(
+                requirement.action.kind === lifecycleState.launch.action.kind &&
+                requirement.action.label === lifecycleState.launch.action.label
+              )
+                ? () => {
+                    if (requirement.action) runAction(requirement.action);
+                  }
+                : undefined
+            }
+          />
+        ))}
+      </ul>
+
+      <ProgramWalletReadiness organizationId={organizationId} ar={ar} />
+
+      {editable ? (
+        <details className="studio-launch-checks" open={!automated?.complete}>
+          <summary>
+            <span>
+              <ShieldCheck size={19} aria-hidden="true" />{" "}
+              <strong>{ar ? "تفاصيل الفحوصات الآلية" : "Automated check details"}</strong>
+            </span>
+            <ChevronDown size={18} aria-hidden="true" />
+          </summary>
+          <div>{validationPanel}</div>
         </details>
       ) : null}
-      <Button
-        onClick={onPublish}
-        disabled={!testReady || !publicationDecision.allowed}
-        title={
-          !publicationDecision.allowed
-            ? blockedGuidance?.message
-            : !testReady
-              ? "Complete validation and Test Mode first."
-              : undefined
-        }
-      >
-        <Gift size={16} aria-hidden="true" /> {lifecycleActionLabel("publish", ar)}
-      </Button>
-    </Card>
+
+      <div className="studio-launch-action">
+        <div>
+          <strong>{lifecycleState.launch.action.label}</strong>
+          <small id="studio-launch-action-description">{lifecycleState.launch.description}</small>
+        </div>
+        <Button
+          onClick={() => runAction(lifecycleState.launch.action)}
+          aria-describedby="studio-launch-action-description"
+        >
+          {lifecycleState.launch.action.kind === "publish" ? (
+            <Rocket size={16} aria-hidden="true" />
+          ) : lifecycleState.launch.action.kind === "lifecycle" &&
+            lifecycleState.launch.action.action === "resume" ? (
+            <Play size={16} aria-hidden="true" />
+          ) : lifecycleState.launch.action.kind === "lifecycle" &&
+            lifecycleState.launch.action.action === "restore" ? (
+            <RotateCcw size={16} aria-hidden="true" />
+          ) : (
+            <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
+          )}
+          {lifecycleState.launch.action.label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessRow({
+  requirement,
+  onAction,
+}: {
+  requirement: StudioLifecyclePresentation["launch"]["requirements"][number];
+  onAction?: (() => void) | undefined;
+}) {
+  return (
+    <li className={requirement.blocking ? "studio-readiness-row--blocking" : ""}>
+      <span className={requirement.complete ? "studio-readiness-row__complete" : ""}>
+        {requirement.complete ? (
+          <Check size={16} aria-hidden="true" />
+        ) : (
+          <CircleAlert size={16} aria-hidden="true" />
+        )}
+      </span>
+      <span>
+        <strong>{requirement.label}</strong>
+        <small>{requirement.description}</small>
+      </span>
+      <span className="studio-readiness-row__status">
+        <strong>{requirement.status}</strong>
+        {onAction && requirement.action ? (
+          <button
+            type="button"
+            onClick={onAction}
+            aria-label={`${requirement.action.label}: ${requirement.label}`}
+          >
+            {requirement.action.label}
+            <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
+          </button>
+        ) : null}
+      </span>
+    </li>
+  );
+}
+
+function StudioSettingsPanel({
+  draft,
+  editable,
+  lifecycleState,
+  ar,
+  history,
+  onEditDesign,
+  onCreateDraft,
+  onLifecycle,
+}: {
+  draft: ProgramDraftInput;
+  editable: boolean;
+  lifecycleState: StudioLifecyclePresentation;
+  ar: boolean;
+  history: React.ReactNode;
+  onEditDesign: () => void;
+  onCreateDraft: () => void;
+  onLifecycle: (action: LifecycleAction) => void;
+}) {
+  return (
+    <div className="studio-area-stack">
+      <section className="studio-settings-section">
+        <div className="studio-section-heading">
+          <div>
+            <span className="dashboard-card__label">{ar ? "ملكية الحقول" : "FIELD OWNERSHIP"}</span>
+            <h3>{ar ? "التصميم ومحتوى العميل" : "Design and customer content"}</h3>
+            <p>
+              {ar
+                ? "تظهر هذه القيم هنا كملخص. يعدّلها منشئ البطاقة فقط."
+                : "These values are summarized here. The Card Builder is their only editor."}
+            </p>
+          </div>
+          {editable ? (
+            <Button variant="secondary" onClick={onEditDesign}>
+              {ar ? "تعديل التصميم" : "Edit design"}
+            </Button>
+          ) : null}
+        </div>
+        <dl className="studio-settings-summary">
+          <div>
+            <dt>{ar ? "اسم البطاقة" : "Card name"}</dt>
+            <dd>{draft.translations[ar ? "ar" : "en"].programName}</dd>
+          </div>
+          <div>
+            <dt>{ar ? "هدف الأختام" : "Stamp goal"}</dt>
+            <dd>{draft.requiredStampCount}</dd>
+          </div>
+          <div>
+            <dt>{ar ? "لغة العرض" : "Customer languages"}</dt>
+            <dd>{ar ? "العربية والإنجليزية" : "English and Arabic"}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="studio-settings-section">
+        <div className="studio-section-heading">
+          <div>
+            <span className="dashboard-card__label">{ar ? "حالة البطاقة" : "CARD STATE"}</span>
+            <h3>{lifecycleState.label}</h3>
+            <p>{lifecycleState.description}</p>
+          </div>
+          <Badge tone={lifecycleState.tone}>{lifecycleState.label}</Badge>
+        </div>
+        <div className="studio-lifecycle-actions">
+          {lifecycleState.capabilities.canPause ? (
+            <Button variant="secondary" onClick={() => onLifecycle("pause")}>
+              <Pause size={16} aria-hidden="true" /> {lifecycleActionLabel("pause", ar)}
+            </Button>
+          ) : null}
+          {lifecycleState.capabilities.canResume ? (
+            <Button onClick={() => onLifecycle("resume")}>
+              <Play size={16} aria-hidden="true" /> {lifecycleActionLabel("resume", ar)}
+            </Button>
+          ) : null}
+          {lifecycleState.capabilities.canArchive ? (
+            <Button variant="secondary" onClick={() => onLifecycle("archive")}>
+              <Archive size={16} aria-hidden="true" /> {lifecycleActionLabel("archive", ar)}
+            </Button>
+          ) : null}
+          {lifecycleState.capabilities.canRestore ? (
+            <Button onClick={() => onLifecycle("restore")}>
+              <RotateCcw size={16} aria-hidden="true" /> {lifecycleActionLabel("restore", ar)}
+            </Button>
+          ) : null}
+        </div>
+      </section>
+
+      {!editable && lifecycleState.key === "live" ? (
+        <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} compact />
+      ) : null}
+
+      {history ?? (
+        <Alert tone="info" title={ar ? "لا يوجد سجل تغييرات بعد" : "No change history yet"} />
+      )}
+    </div>
   );
 }
 
@@ -1786,12 +2732,12 @@ function OperationsPolicyEditor({
 }) {
   return (
     <div className="studio-section-content">
-      <Alert tone="info" title={ar ? "سياسة تشغيل مرتبطة بالإصدار" : "Versioned operations policy"}>
+      <Alert tone="info" title={ar ? "قواعد التحديث" : "How rule changes take effect"}>
         {ar
-          ? "تُطبق هذه القيم على العضويات المسجلة في هذا الإصدار. لا تتغير اقتصاديات العضويات الحالية عند نشر إصدار جديد."
-          : "These values apply to memberships enrolled in this version. Publishing a new version does not change existing membership economics."}
+          ? "تطبّق التغييرات الجديدة على العملاء الذين ينضمون بعد نشر التحديث، بينما تبقى شروط العملاء الحاليين كما هي."
+          : "New rules apply to customers who join after this update is published. Existing customers keep their current terms."}
       </Alert>
-      <FormField label={ar ? "المنطقة الزمنية التشغيلية" : "Operational timezone"} required>
+      <FormField label={ar ? "المنطقة الزمنية للنشاط" : "Business timezone"} required>
         <TextInput
           value={draft.operationalTimezone}
           onChange={(event) =>
@@ -1805,7 +2751,7 @@ function OperationsPolicyEditor({
             : "Controls daily limits, reporting days, and reward expiry dates."}
         </span>
       </FormField>
-      <FormField label={ar ? "الحد الأقصى للأختام لكل عملية" : "Maximum stamps per operation"}>
+      <FormField label={ar ? "أقصى أختام لكل عملية شراء" : "Most stamps per purchase"}>
         <TextInput
           type="number"
           min={1}
@@ -1829,10 +2775,10 @@ function OperationsPolicyEditor({
               : null,
           }))
         }
-        label={ar ? "تفعيل حد يومي لكل عضوية" : "Enable a daily membership limit"}
+        label={ar ? "تفعيل حد يومي لكل عميل" : "Set a daily limit per customer"}
       />
       {draft.maximumStampsPerCustomerPerDay !== null ? (
-        <FormField label={ar ? "الحد اليومي للأختام" : "Maximum stamps per membership per day"}>
+        <FormField label={ar ? "أقصى أختام يومية للعميل" : "Most stamps per customer per day"}>
           <TextInput
             type="number"
             min={1}
@@ -1847,8 +2793,8 @@ function OperationsPolicyEditor({
           />
           <span className="field-help">
             {ar
-              ? "يُحسب إجمالي الأختام المصدرة؛ لا تعيد عمليات العكس الحد المتاح."
-              : "Counts gross issued stamps; reversals do not restore allowance."}
+              ? "يُحسب كل ختم تمت إضافته خلال اليوم، حتى عند تصحيح عملية لاحقًا."
+              : "Every stamp added that day counts, even if a purchase is corrected later."}
           </span>
         </FormField>
       ) : null}
@@ -1861,13 +2807,11 @@ function OperationsPolicyEditor({
             minimumPurchaseCurrency: event.target.checked ? "IQD" : null,
           }))
         }
-        label={ar ? "تفعيل حد أدنى للشراء" : "Enable minimum purchase"}
+        label={ar ? "اشتراط حد أدنى للشراء" : "Require a minimum purchase"}
       />
       {draft.minimumPurchaseAmountMinor !== null ? (
         <div className="studio-form-grid">
-          <FormField
-            label={ar ? "الحد الأدنى للشراء (الوحدة الصغرى)" : "Minimum purchase (minor units)"}
-          >
+          <FormField label={ar ? "أصغر قيمة شراء مؤهلة" : "Smallest qualifying purchase"}>
             <TextInput
               type="number"
               min={0}
@@ -1897,7 +2841,7 @@ function OperationsPolicyEditor({
         </div>
       ) : null}
       <div className="studio-form-grid">
-        <FormField label={ar ? "نافذة عكس الموظف (ثوانٍ)" : "Staff own-reversal window (seconds)"}>
+        <FormField label={ar ? "مهلة تصحيح الموظف (ثوانٍ)" : "Staff correction window (seconds)"}>
           <TextInput
             type="number"
             min={15}
@@ -1911,7 +2855,7 @@ function OperationsPolicyEditor({
             }
           />
         </FormField>
-        <FormField label={ar ? "نافذة عكس المدير (دقائق)" : "Manager reversal window (minutes)"}>
+        <FormField label={ar ? "مهلة تصحيح المدير (دقائق)" : "Manager correction window (minutes)"}>
           <TextInput
             type="number"
             min={1}
@@ -1935,49 +2879,21 @@ function OperationsPolicyEditor({
           }))
         }
         label={
-          ar ? "السماح بتجاوز المدير مع سبب وتدقيق" : "Allow manager override with reason and audit"
+          ar
+            ? "السماح للمدير بإجراء استثناء مع توضيح السبب"
+            : "Allow manager exceptions with a required reason"
         }
       />
-      <FormField label={ar ? "سلوك إعادة الضبط النهائي" : "Final reward reset behavior"}>
+      <FormField label={ar ? "بعد استخدام المكافأة النهائية" : "After the final reward is used"}>
         <TextInput
-          value={
-            ar ? "إعادة الضبط بعد استرداد المكافأة النهائية" : "Reset after final reward redemption"
-          }
+          value={ar ? "يبدأ العميل دورة أختام جديدة" : "Start a new stamp cycle"}
           disabled
         />
         <span className="field-help">
           {ar
-            ? "مقفل عند الإطلاق. تبقى الأختام ممتلئة حتى نجاح الاسترداد."
-            : "Locked for launch. Stamps remain filled until redemption succeeds."}
+            ? "تبقى الأختام ممتلئة حتى يتم استخدام المكافأة بنجاح."
+            : "Stamps stay filled until the reward is successfully used."}
         </span>
-      </FormField>
-      <FormField label={ar ? "الشروط العربية" : "English terms"}>
-        <TextArea
-          dir={ar ? "rtl" : undefined}
-          value={
-            ar ? draft.translations.ar.termsAndConditions : draft.translations.en.termsAndConditions
-          }
-          onChange={(event) =>
-            update((current) => ({
-              ...current,
-              translations: ar
-                ? {
-                    ...current.translations,
-                    ar: {
-                      ...current.translations.ar,
-                      termsAndConditions: event.target.value,
-                    },
-                  }
-                : {
-                    ...current.translations,
-                    en: {
-                      ...current.translations.en,
-                      termsAndConditions: event.target.value,
-                    },
-                  },
-            }))
-          }
-        />
       </FormField>
     </div>
   );
@@ -2296,36 +3212,68 @@ function ValidationPanel({
     <div className="studio-section-content">
       <div className="studio-section-heading">
         <div>
-          <h3>{ar ? "محرك تحقق كامل" : "Complete validation engine"}</h3>
+          <h3>{ar ? "الفحوصات الآلية" : "Automated checks"}</h3>
           <p>
             {ar
-              ? "راجع الأخطاء والتحذيرات حسب القسم والمنصة."
-              : "Review typed errors and warnings by section and platform."}
+              ? "تأكد من اكتمال البطاقة والمواقع وتجارب العرض قبل الإطلاق."
+              : "Check the card, locations, and preview surfaces before launch."}
           </p>
         </div>
         <Button onClick={onValidate} loading={validating}>
-          <ShieldCheck size={16} /> {ar ? "تشغيل التحقق" : "Run validation"}
+          <ShieldCheck size={16} />{" "}
+          {result
+            ? ar
+              ? "تشغيل الفحوصات الآلية مجدداً"
+              : "Run automated checks again"
+            : ar
+              ? "تشغيل الفحوصات الآلية"
+              : "Run automated checks"}
         </Button>
       </div>
       {!result ? (
-        <Alert tone="info" title={ar ? "لم يتم التحقق بعد" : "Not validated yet"} />
+        <Alert tone="info" title={ar ? "لم تُشغّل الفحوصات بعد" : "Checks have not run yet"}>
+          {ar
+            ? "شغّل الفحوصات لرؤية أي خطوة تحتاج إلى إصلاح."
+            : "Run the checks to see whether anything needs attention."}
+        </Alert>
       ) : (
         <>
           <Alert
             tone={result.errors.length ? "danger" : result.warnings.length ? "warning" : "success"}
-            title={`${result.status} · ${result.errors.length} errors · ${result.warnings.length} warnings`}
-          />
+            title={
+              result.errors.length
+                ? ar
+                  ? `${result.errors.length} عناصر تمنع الإطلاق`
+                  : `${result.errors.length} launch blockers`
+                : result.warnings.length
+                  ? ar
+                    ? `اجتازت الفحوصات مع ${result.warnings.length} ملاحظات`
+                    : `Checks passed with ${result.warnings.length} notes`
+                  : ar
+                    ? "اجتازت الفحوصات الآلية"
+                    : "Automated checks passed"
+            }
+          >
+            {result.errors.length === 0
+              ? ar
+                ? "لا توجد مشكلة تمنع الانتقال إلى الاختبار."
+                : "Nothing here blocks you from moving to testing."
+              : ar
+                ? "افتح كل عنصر لإصلاحه في مكانه الصحيح."
+                : "Open each item to fix it in the right place."}
+          </Alert>
           <div className="studio-validation-list">
             {[...result.errors, ...result.warnings].map((item) => (
               <button type="button" key={`${item.code}-${item.path}`} onClick={() => onIssue(item)}>
                 {item.severity === "error" ? <CircleAlert size={18} /> : <Sparkles size={18} />}
                 <span>
-                  <strong>{item.code}</strong>
-                  <small>
-                    {item.platform} · {item.path}
-                  </small>
-                  <p>{item.message}</p>
-                  <em>{item.suggestedAction}</em>
+                  <strong>{item.message}</strong>
+                  <small>{item.suggestedAction}</small>
+                </span>
+                <span>
+                  {ar
+                    ? `إصلاح في ${studioAreaCopy.ar[studioAreaForValidationPath(item.path)].label}`
+                    : `Fix in ${studioAreaCopy.en[studioAreaForValidationPath(item.path)].label}`}
                 </span>
               </button>
             ))}
@@ -2334,6 +3282,21 @@ function ValidationPanel({
       )}
     </div>
   );
+}
+
+function testEventLabel(eventType: string, ar: boolean): string {
+  const labels: Record<string, [string, string]> = {
+    TEST_SESSION_STARTED: ["Demo customer started", "بدأ العميل التجريبي"],
+    TEST_STAMPS_ADDED: ["Stamps added", "تمت إضافة الأختام"],
+    TEST_STAMP_ADDED: ["Stamp added", "تمت إضافة ختم"],
+    TEST_STAMP_REVERSED: ["Latest stamp corrected", "تم تصحيح آخر ختم"],
+    TEST_REWARD_UNLOCKED: ["Reward unlocked", "أصبحت المكافأة جاهزة"],
+    TEST_REWARD_RELOCKED: ["Reward locked again", "أُغلقت المكافأة مجددًا"],
+    TEST_REWARD_REDEEMED: ["Reward used", "تم استخدام المكافأة"],
+    TEST_SESSION_RESET: ["Demo customer reset", "أُعيد ضبط العميل التجريبي"],
+    TEST_SESSION_COMPLETED: ["Test completed", "اكتمل الاختبار"],
+  };
+  return labels[eventType]?.[ar ? 1 : 0] ?? (ar ? "نشاط تجريبي" : "Test activity");
 }
 
 function TestModePanel({
@@ -2345,21 +3308,7 @@ function TestModePanel({
 }: {
   session: TestSession | null;
   onStart: () => void;
-  onCommand: (
-    command:
-      | {
-          kind: "add";
-          amount: number;
-          purchaseAmountMinor?: number;
-          purchaseCurrency?: string;
-          managerApproved?: boolean;
-          managerReason?: string;
-          simulatedOccurredAt?: string;
-        }
-      | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
-      | { kind: "reset" }
-      | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
-  ) => void;
+  onCommand: (command: StudioTestCommand) => void;
   working: boolean;
   ar: boolean;
 }) {
@@ -2372,14 +3321,14 @@ function TestModePanel({
     return (
       <div className="studio-section-content">
         <FlaskConical size={34} />
-        <h3>{ar ? "عميل اصطناعي فقط" : "Synthetic customer only"}</h3>
+        <h3>{ar ? "ابدأ بعميل تجريبي" : "Start with a demo customer"}</h3>
         <p>
           {ar
-            ? "لا يتم إنشاء عميل أو عضوية أو بطاقة حقيقية."
-            : "No real customer, membership, QR, or wallet pass is created."}
+            ? "لن يتم إنشاء أي نشاط لعميل حقيقي. يمكنك إعادة التجربة متى شئت."
+            : "No real customer activity will be created. You can reset and try again at any time."}
         </p>
         <Button onClick={onStart} loading={working}>
-          {ar ? "بدء وضع الاختبار" : "Start Test Mode"}
+          {ar ? "بدء عميل تجريبي" : "Start demo customer"}
         </Button>
       </div>
     );
@@ -2395,33 +3344,72 @@ function TestModePanel({
     ...(testManagerApproved ? { managerReason: "Synthetic Test Mode manager approval." } : {}),
     ...(testOccurredAt ? { simulatedOccurredAt: new Date(testOccurredAt).toISOString() } : {}),
   };
+  const testSteps = [
+    { label: ar ? "بدء عميل تجريبي" : "Start demo customer", complete: true },
+    {
+      label: ar ? "إضافة أختام" : "Add stamps",
+      complete: session.currentStampCount > 0 || unlocks.length > 0 || redemptions.length > 0,
+    },
+    {
+      label: ar ? "الوصول إلى المكافأة" : "Reach the reward",
+      complete: rewardReady || unlocks.length > 0 || redemptions.length > 0,
+    },
+    { label: ar ? "استخدام المكافأة" : "Use the reward", complete: redemptions.length > 0 },
+    {
+      label: ar ? "التأكد من بدء دورة جديدة" : "Verify the reset",
+      complete: session.cycleCount > 0,
+    },
+    { label: ar ? "إنهاء الاختبار" : "Finish test", complete: session.status === "COMPLETED" },
+  ];
   return (
     <div className="studio-section-content">
+      <ol className="studio-test-steps" aria-label={ar ? "خطوات الاختبار" : "Test steps"}>
+        {testSteps.map((step) => (
+          <li className={step.complete ? "studio-test-steps__complete" : ""} key={step.label}>
+            <span>{step.complete ? <Check size={15} aria-hidden="true" /> : null}</span>
+            <strong>{step.label}</strong>
+          </li>
+        ))}
+      </ol>
       <div className="test-mode-meter">
         <div>
-          <span>
-            {session.currentStampCount}/{goal}
-          </span>
-          <small>{ar ? "الأختام الحالية" : "current stamps"}</small>
+          <small>{ar ? "التقدم الحالي" : "Current progress"}</small>
+          <strong dir="ltr">
+            <span>
+              {session.currentStampCount} / {goal}
+            </span>
+            <small>{ar ? "أختام" : "stamps"}</small>
+          </strong>
         </div>
         <div>
-          <span>{session.cycleCount}</span>
-          <small>{ar ? "الدورات المكتملة" : "completed cycles"}</small>
+          <small>{ar ? "الدورات المكتملة" : "Completed cycles"}</small>
+          <strong>
+            <span>{session.cycleCount}</span>
+          </strong>
         </div>
-        <Badge tone={session.status === "COMPLETED" ? "success" : "brand"}>{session.status}</Badge>
+        <Badge tone={session.status === "COMPLETED" ? "success" : "brand"}>
+          {session.status === "COMPLETED"
+            ? ar
+              ? "اكتمل"
+              : "Complete"
+            : ar
+              ? "قيد الاختبار"
+              : "In progress"}
+        </Badge>
       </div>
-      <div className="dashboard-actions">
+      <div className="dashboard-actions studio-test-actions">
         <Button
           onClick={() => onCommand({ kind: "add", amount: 1, ...syntheticOperation })}
           disabled={working || rewardReady}
         >
-          +1 stamp
+          {ar ? "إضافة ختم" : "Add a stamp"}
         </Button>
         <Button
+          variant="secondary"
           onClick={() => onCommand({ kind: "add", amount: 5, ...syntheticOperation })}
           disabled={working || rewardReady}
         >
-          +5 stamps
+          {ar ? "+٥ أختام" : "+5 stamps"}
         </Button>
         <Button
           variant="secondary"
@@ -2436,60 +3424,75 @@ function TestModePanel({
           }
           disabled={working}
         >
-          <RotateCcw size={16} /> {ar ? "عكس آخر ختم" : "Reverse latest stamp"}
+          <RotateCcw size={16} /> {ar ? "تصحيح آخر ختم" : "Correct latest stamp"}
         </Button>
         <Button variant="secondary" onClick={() => onCommand({ kind: "reset" })} disabled={working}>
-          {ar ? "إعادة ضبط" : "Reset"}
+          {ar ? "إعادة ضبط العميل التجريبي" : "Reset demo customer"}
         </Button>
       </div>
-      <div className="studio-field-grid">
-        <FormField label={ar ? "قيمة الشراء بوحدات صغرى" : "Purchase amount (minor units)"}>
-          <TextInput
-            inputMode="numeric"
-            value={testPurchaseAmount}
-            onChange={(event) => setTestPurchaseAmount(event.target.value.replace(/\D/g, ""))}
+      <details className="studio-test-advanced">
+        <summary>
+          <span>
+            <Settings2 size={18} aria-hidden="true" />{" "}
+            {ar ? "تفاصيل عملية الشراء التجريبية" : "Demo purchase details"}
+          </span>
+          <ChevronDown size={18} aria-hidden="true" />
+        </summary>
+        <div className="studio-field-grid">
+          <FormField
+            label={ar ? "قيمة الشراء" : "Purchase amount"}
+            hint={ar ? "أدخلها بأصغر وحدة للعملة" : "Enter the smallest unit of the currency"}
+          >
+            <TextInput
+              inputMode="numeric"
+              value={testPurchaseAmount}
+              onChange={(event) => setTestPurchaseAmount(event.target.value.replace(/\D/g, ""))}
+            />
+          </FormField>
+          <FormField label={ar ? "عملة الشراء" : "Purchase currency"}>
+            <TextInput
+              maxLength={3}
+              value={testPurchaseCurrency}
+              onChange={(event) => setTestPurchaseCurrency(event.target.value.toUpperCase())}
+            />
+          </FormField>
+          <FormField label={ar ? "وقت العملية التجريبية" : "Demo purchase time"}>
+            <TextInput
+              type="datetime-local"
+              value={testOccurredAt}
+              onChange={(event) => setTestOccurredAt(event.target.value)}
+            />
+          </FormField>
+        </div>
+        <label className="studio-checkbox-row">
+          <input
+            type="checkbox"
+            checked={testManagerApproved}
+            onChange={(event) => setTestManagerApproved(event.target.checked)}
           />
-        </FormField>
-        <FormField label={ar ? "عملة الشراء" : "Purchase currency"}>
-          <TextInput
-            maxLength={3}
-            value={testPurchaseCurrency}
-            onChange={(event) => setTestPurchaseCurrency(event.target.value.toUpperCase())}
+          <span>
+            {ar ? "اعتبار العملية معتمدة من المدير" : "Treat this purchase as manager approved"}
+          </span>
+        </label>
+        <label className="studio-checkbox-row">
+          <input
+            type="checkbox"
+            checked={testManagerActor}
+            onChange={(event) => setTestManagerActor(event.target.checked)}
           />
-        </FormField>
-        <FormField label={ar ? "الوقت الاصطناعي" : "Synthetic time"}>
-          <TextInput
-            type="datetime-local"
-            value={testOccurredAt}
-            onChange={(event) => setTestOccurredAt(event.target.value)}
-          />
-        </FormField>
-      </div>
-      <label className="studio-checkbox-row">
-        <input
-          type="checkbox"
-          checked={testManagerApproved}
-          onChange={(event) => setTestManagerApproved(event.target.checked)}
-        />
-        <span>{ar ? "محاكاة موافقة المدير" : "Simulate manager approval"}</span>
-      </label>
-      <label className="studio-checkbox-row">
-        <input
-          type="checkbox"
-          checked={testManagerActor}
-          onChange={(event) => setTestManagerActor(event.target.checked)}
-        />
-        <span>{ar ? "استخدام نافذة عكس المدير" : "Use manager reversal window"}</span>
-      </label>
-      <Alert tone="info" title={ar ? "سياسة العمليات المثبتة" : "Pinned operations policy"}>
-        {session.version.operationalTimezone} · {ar ? "حد العملية" : "operation max"}{" "}
-        {session.version.stampRule?.maximumStampsPerOperation ?? 5} ·{" "}
-        {ar ? "الحد اليومي" : "daily cap"}{" "}
-        {session.version.stampRule?.maximumStampsPerCustomerPerDay ?? "—"} ·{" "}
-        {ar ? "الحد الأدنى للشراء" : "minimum purchase"}{" "}
-        {session.version.stampRule?.minimumPurchaseAmountMinor ?? "—"}{" "}
-        {session.version.stampRule?.minimumPurchaseCurrency ?? ""}
-      </Alert>
+          <span>{ar ? "استخدام مهلة تصحيح المدير" : "Use the manager correction window"}</span>
+        </label>
+        <Alert tone="info" title={ar ? "القواعد الجاري اختبارها" : "Rules used in this test"}>
+          {session.version.operationalTimezone} ·{" "}
+          {ar ? "أقصى أختام للعملية" : "stamps per purchase"}{" "}
+          {session.version.stampRule?.maximumStampsPerOperation ?? 5} ·{" "}
+          {ar ? "الحد اليومي" : "daily limit"}{" "}
+          {session.version.stampRule?.maximumStampsPerCustomerPerDay ?? "—"} ·{" "}
+          {ar ? "الحد الأدنى للشراء" : "minimum purchase"}{" "}
+          {session.version.stampRule?.minimumPurchaseAmountMinor ?? "—"}{" "}
+          {session.version.stampRule?.minimumPurchaseCurrency ?? ""}
+        </Alert>
+      </details>
       {rewardReady ? (
         <Alert tone="success" title={ar ? "المكافأة جاهزة" : "Reward ready"}>
           {ar
@@ -2511,14 +3514,17 @@ function TestModePanel({
           return (
             <Card key={reward.id}>
               <Badge tone={earned > redeemed ? "success" : "neutral"}>
-                STAMP {reward.thresholdStampCount}
+                {ar
+                  ? `عند ${reward.thresholdStampCount} أختام`
+                  : `At ${reward.thresholdStampCount} stamps`}
               </Badge>
               <h4>{name}</h4>
               <p>
-                {earned} earned · {redeemed} redeemed
+                {ar
+                  ? `${earned} مكتسبة · ${redeemed} مستخدمة`
+                  : `${earned} earned · ${redeemed} used`}
               </p>
               <Button
-                variant="secondary"
                 disabled={earned <= redeemed || working}
                 onClick={() =>
                   onCommand({
@@ -2528,21 +3534,29 @@ function TestModePanel({
                   })
                 }
               >
-                {ar ? "استرداد اصطناعي" : "Synthetic redeem"}
+                {ar ? "استخدام المكافأة التجريبية" : "Use demo reward"}
               </Button>
             </Card>
           );
         })}
       </div>
-      <div className="studio-event-log">
-        <h4>{ar ? "سجل الأحداث الملحق فقط" : "Append-only event log"}</h4>
-        {session.events.slice(0, 20).map((event) => (
-          <div key={event.id}>
-            <code>{event.eventType}</code>
-            <small>{event.safeMetadata?.cycle ? `cycle ${event.safeMetadata.cycle}` : ""}</small>
-          </div>
-        ))}
-      </div>
+      <details className="studio-event-log">
+        <summary>{ar ? "عرض نشاط الاختبار" : "Show test activity"}</summary>
+        <div>
+          {session.events.slice(0, 20).map((event) => (
+            <div key={event.id}>
+              <strong>{testEventLabel(event.eventType, ar)}</strong>
+              <small>
+                {event.safeMetadata?.cycle
+                  ? ar
+                    ? `الدورة ${event.safeMetadata.cycle}`
+                    : `Cycle ${event.safeMetadata.cycle}`
+                  : ""}
+              </small>
+            </div>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
@@ -2562,33 +3576,87 @@ function VersionHistory({
     <Card className="studio-version-history">
       <div className="studio-section-heading">
         <div>
-          <span className="dashboard-card__label">IMMUTABLE HISTORY</span>
-          <h3>{ar ? "سجل الإصدارات" : "Version history"}</h3>
+          <span className="dashboard-card__label">{ar ? "سجل التغييرات" : "CHANGE HISTORY"}</span>
+          <h3>{ar ? "التغييرات المحفوظة" : "Saved changes"}</h3>
         </div>
-        <History size={20} />
+        <History size={20} aria-hidden="true" />
       </div>
-      {versions.map((version) => (
-        <button type="button" key={version.id} onClick={() => onView(version.id)}>
-          <span>
-            <strong>v{version.versionNumber}</strong>
-            <small>{version.changeSummary || (ar ? "بدون ملخص" : "No change summary")}</small>
-          </span>
-          <Badge
-            tone={
-              version.status === "PUBLISHED"
-                ? "success"
-                : version.status === "SUPERSEDED"
-                  ? "neutral"
-                  : "brand"
-            }
-          >
-            {version.status}
-          </Badge>
-        </button>
-      ))}
+      {versions.map((version) => {
+        const timestamp =
+          version.publishedAt ??
+          version.supersededAt ??
+          version.testReadyAt ??
+          version.validatedAt ??
+          version.abandonedAt ??
+          null;
+        const publicationLabel =
+          version.status === "PUBLISHED"
+            ? ar
+              ? "منشور"
+              : "Published"
+            : version.status === "SUPERSEDED"
+              ? ar
+                ? "إصدار منشور سابق"
+                : "Previous publication"
+              : ar
+                ? "غير منشور"
+                : "Unpublished";
+        const saveLabel =
+          version.status === "ABANDONED" ? (ar ? "متروك" : "Abandoned") : ar ? "محفوظ" : "Saved";
+        return (
+          <button type="button" key={version.id} onClick={() => onView(version.id)}>
+            <span className="studio-version-history__title">
+              <small>{ar ? "عنوان التغيير" : "Change title"}</small>
+              <strong>
+                {version.changeSummary || (ar ? "تحديث محفوظ للبطاقة" : "Saved card update")}
+              </strong>
+            </span>
+            <dl className="studio-version-history__meta">
+              <div>
+                <dt>{ar ? "حالة النشر" : "Publication state"}</dt>
+                <dd>
+                  <Badge
+                    tone={
+                      version.status === "PUBLISHED"
+                        ? "success"
+                        : version.status === "SUPERSEDED"
+                          ? "neutral"
+                          : "brand"
+                    }
+                  >
+                    {publicationLabel}
+                  </Badge>
+                </dd>
+              </div>
+              <div>
+                <dt>{ar ? "حالة الحفظ" : "Save status"}</dt>
+                <dd>{saveLabel}</dd>
+              </div>
+              <div>
+                <dt>{ar ? "الوقت" : "Timestamp"}</dt>
+                <dd>
+                  {timestamp ? (
+                    <time dateTime={timestamp}>
+                      {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-IQ", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(timestamp))}
+                    </time>
+                  ) : ar ? (
+                    "غير متاح"
+                  ) : (
+                    "Not available"
+                  )}
+                </dd>
+              </div>
+            </dl>
+            <ChevronRight className="studio-logical-next" size={17} aria-hidden="true" />
+          </button>
+        );
+      })}
       {onLoadMore ? (
         <Button variant="secondary" onClick={onLoadMore}>
-          {ar ? "تحميل المزيد من الإصدارات" : "Load more versions"}
+          {ar ? "تحميل المزيد من التغييرات" : "Load more changes"}
         </Button>
       ) : null}
     </Card>
@@ -2607,49 +3675,43 @@ function HistoricalModal({
   return (
     <Modal
       open={Boolean(version)}
-      title={ar ? "إصدار تاريخي غير قابل للتغيير" : "Immutable historical version"}
+      title={ar ? "تفاصيل التغيير المحفوظ" : "Saved change details"}
       onClose={onClose}
     >
       {version ? (
         <div className="historical-version">
           <div className="studio-section-heading">
-            <h3>v{version.versionNumber}</h3>
+            <h3>{version.changeSummary || (ar ? "تحديث محفوظ للبطاقة" : "Saved card update")}</h3>
             <Badge tone={version.status === "PUBLISHED" ? "success" : "neutral"}>
-              {version.status}
+              {version.status === "PUBLISHED"
+                ? ar
+                  ? "منشور"
+                  : "Published"
+                : ar
+                  ? "محفوظ"
+                  : "Saved"}
             </Badge>
           </div>
           <dl className="quick-review-list">
             <div>
-              <dt>Mode</dt>
-              <dd>{version.editingMode}</dd>
-            </div>
-            <div>
-              <dt>Revision</dt>
-              <dd>{version.revision}</dd>
-            </div>
-            <div>
-              <dt>Goal</dt>
+              <dt>{ar ? "هدف الأختام" : "Stamp goal"}</dt>
               <dd>{version.stampRule?.requiredStampCount ?? "—"}</dd>
             </div>
             <div>
-              <dt>Rewards</dt>
+              <dt>{ar ? "المكافآت" : "Rewards"}</dt>
               <dd>{version.rewards.length}</dd>
             </div>
             <div>
-              <dt>Locations</dt>
+              <dt>{ar ? "المواقع" : "Locations"}</dt>
               <dd>{version.locations.length}</dd>
             </div>
             <div>
-              <dt>Published</dt>
+              <dt>{ar ? "تاريخ النشر" : "Published"}</dt>
               <dd>{version.publishedAt ?? "—"}</dd>
             </div>
-            <div>
-              <dt>Superseded</dt>
-              <dd>{version.supersededAt ?? "—"}</dd>
-            </div>
           </dl>
-          <Alert tone="info" title={ar ? "عرض فقط" : "Read only"}>
-            {ar ? "لا يمكن تعديل هذا الإصدار التاريخي." : "Historical versions cannot be edited."}
+          <Alert tone="info" title={ar ? "للعرض فقط" : "Read only"}>
+            {ar ? "لا يمكن تعديل هذا التغيير المحفوظ." : "Saved changes cannot be edited."}
           </Alert>
         </div>
       ) : null}
@@ -2685,16 +3747,16 @@ function ConflictModal({
             title={ar ? "تم الاحتفاظ بتعديلاتك المحلية" : "Your local edits are preserved"}
           >
             {ar
-              ? `مراجعتك المحلية ${conflict.localRevision}، وأحدث مراجعة على الخادم ${conflict.serverRevision}.`
-              : `Local revision ${conflict.localRevision}; server revision ${conflict.serverRevision}.`}
+              ? "تم حفظ تغيير أحدث في مكان آخر. لن يستبدل Waflo أي تعديل تلقائيًا."
+              : "A newer change was saved elsewhere. Waflo will not overwrite either set of edits automatically."}
           </Alert>
           <p>
             {ar
-              ? "راجع الاختلافات أو انسخ القيم المحلية قبل إعادة التحميل أو إعادة التطبيق."
-              : "Review, copy, or export local values before deliberately reloading or reapplying."}
+              ? "احتفظ بنسخة من تعديلاتك، ثم حمّل الأحدث أو أعد تطبيق تعديلاتك بوضوح."
+              : "Keep a copy of your edits, then load the latest card or deliberately reapply yours."}
           </p>
           <details>
-            <summary>{ar ? "عرض القيم المحلية" : "Show local values"}</summary>
+            <summary>{ar ? "عرض نسخة تعديلاتك" : "Show your edit backup"}</summary>
             <pre>{JSON.stringify(apiDraft(conflict.localDraft), null, 2)}</pre>
           </details>
           <div className="dashboard-actions">
@@ -2702,13 +3764,13 @@ function ConflictModal({
               <Copy size={16} /> {ar ? "نسخ" : "Copy local"}
             </Button>
             <Button variant="secondary" onClick={onExport}>
-              <Download size={16} /> {ar ? "تصدير" : "Export JSON"}
+              <Download size={16} /> {ar ? "تنزيل نسخة احتياطية" : "Download backup"}
             </Button>
             <Button variant="secondary" onClick={onReload}>
-              <RefreshCcw size={16} /> {ar ? "تحميل الأحدث" : "Reload latest"}
+              <RefreshCcw size={16} /> {ar ? "تحميل أحدث بطاقة" : "Load latest card"}
             </Button>
             <Button onClick={onReapply}>
-              <UploadCloud size={16} /> {ar ? "إعادة التطبيق عمداً" : "Reapply deliberately"}
+              <UploadCloud size={16} /> {ar ? "إعادة تطبيق تعديلاتي" : "Reapply my edits"}
             </Button>
           </div>
         </div>

@@ -333,6 +333,9 @@ test("fixture boundary exposes the expanded catalog and only one initial preview
 test("keeps visual discovery lazy, console-clean, and within practical browser budgets", async ({
   page,
 }) => {
+  await page.route("https://fonts.googleapis.com/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "text/css", body: "" });
+  });
   const previewRequests: Array<[string, string]> = [];
   const consoleProblems: string[] = [];
   const failedRequests: string[] = [];

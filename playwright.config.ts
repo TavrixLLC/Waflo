@@ -4,6 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
 const rateLimitNamespace = `playwright-${randomUUID()}`;
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: local browser verification may use an installed Chrome when the bundled headless shell is unavailable.
 const localChrome = process.env.PLAYWRIGHT_USE_SYSTEM_CHROME === "1" ? { channel: "chrome" } : {};
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: lets local visual QA avoid a port already owned by another Waflo service.
+const merchantBaseUrl = process.env.WAFLO_E2E_BASE_URL ?? "http://localhost:3001";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -15,7 +17,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL: merchantBaseUrl,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -24,7 +26,7 @@ export default defineConfig({
     {
       name: "chromium",
       testMatch:
-        /(?:^|[/\\])(?:platform|merchant-loyalty-cards|merchant-template-gallery|merchant-card-builder)\.spec\.ts$/,
+        /(?:^|[/\\])(?:platform|merchant-loyalty-cards|merchant-template-gallery|merchant-card-builder|merchant-loyalty-studio|merchant-loyalty-studio-evidence)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {

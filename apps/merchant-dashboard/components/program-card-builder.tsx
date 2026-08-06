@@ -1192,44 +1192,12 @@ function RewardSection({
               <option value="CUSTOM">{ar ? "مخصصة" : "Custom"}</option>
             </Select>
           </FormField>
-          <FormField label={ar ? "صلاحية المكافأة بالأيام" : "Reward validity in days"}>
-            <TextInput
-              type="number"
-              min={1}
-              max={3650}
-              value={reward.validityDurationDays ?? ""}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  rewards: current.rewards.map((item, rewardIndex) =>
-                    rewardIndex === index
-                      ? {
-                          ...item,
-                          validityDurationDays: event.target.value
-                            ? Number(event.target.value)
-                            : null,
-                        }
-                      : item,
-                  ),
-                }))
-              }
-            />
-          </FormField>
         </div>
-        <Checkbox
-          checked={reward.requiresManagerApproval}
-          label={ar ? "تتطلب المكافأة موافقة المدير" : "Require manager approval to redeem"}
-          onChange={(event) =>
-            update((current) => ({
-              ...current,
-              rewards: current.rewards.map((item, rewardIndex) =>
-                rewardIndex === index
-                  ? { ...item, requiresManagerApproval: event.target.checked }
-                  : item,
-              ),
-            }))
-          }
-        />
+        <p className="builder-studio-ownership-note">
+          {ar
+            ? "تُضبط صلاحية المكافأة وموافقات الاسترداد في الاستوديو بعد اكتمال تصميم البطاقة."
+            : "Reward validity and redemption approvals are set in Studio after the card design is complete."}
+        </p>
       </details>
     </div>
   );
@@ -1746,120 +1714,14 @@ function AdvancedSection({
           ))}
         </div>
       ) : null}
-      <details className="builder-disclosure" open={draft.editingMode === "pro"}>
-        <summary>{ar ? "سياسة التشغيل" : "Operational policy"}</summary>
-        <div className="builder-form-grid">
-          <FormField label={ar ? "المنطقة الزمنية التشغيلية" : "Operational timezone"} required>
-            <TextInput
-              value={draft.operationalTimezone}
-              onChange={(event) =>
-                update((current) => ({ ...current, operationalTimezone: event.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label={ar ? "الحد الأقصى للأختام في العملية" : "Maximum stamps per operation"}>
-            <TextInput
-              type="number"
-              min={1}
-              max={30}
-              value={draft.maximumStampsPerOperation}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  maximumStampsPerOperation: Number(event.target.value),
-                }))
-              }
-            />
-          </FormField>
-          <FormField label={ar ? "الحد اليومي لكل عميل" : "Daily stamps per customer"}>
-            <TextInput
-              type="number"
-              min={1}
-              max={1000}
-              value={draft.maximumStampsPerCustomerPerDay ?? ""}
-              placeholder={ar ? "بلا حد" : "No limit"}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  maximumStampsPerCustomerPerDay: event.target.value
-                    ? Number(event.target.value)
-                    : null,
-                }))
-              }
-            />
-          </FormField>
-          <FormField label={ar ? "الحد الأدنى للشراء" : "Minimum purchase (minor units)"}>
-            <TextInput
-              type="number"
-              min={0}
-              value={draft.minimumPurchaseAmountMinor ?? ""}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  minimumPurchaseAmountMinor: event.target.value
-                    ? Number(event.target.value)
-                    : null,
-                  minimumPurchaseCurrency: event.target.value
-                    ? (current.minimumPurchaseCurrency ?? "IQD")
-                    : null,
-                }))
-              }
-            />
-          </FormField>
-          <FormField label={ar ? "عملة الحد الأدنى للشراء" : "Purchase currency"}>
-            <TextInput
-              maxLength={3}
-              disabled={draft.minimumPurchaseAmountMinor === null}
-              value={draft.minimumPurchaseCurrency ?? ""}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  minimumPurchaseCurrency: event.target.value.toUpperCase(),
-                }))
-              }
-            />
-          </FormField>
-          <FormField label={ar ? "نافذة عكس الموظف بالثواني" : "Staff reversal window (seconds)"}>
-            <TextInput
-              type="number"
-              min={15}
-              max={900}
-              value={draft.staffOwnReversalWindowSeconds}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  staffOwnReversalWindowSeconds: Number(event.target.value),
-                }))
-              }
-            />
-          </FormField>
-          <FormField label={ar ? "نافذة عكس المدير بالدقائق" : "Manager reversal window (minutes)"}>
-            <TextInput
-              type="number"
-              min={1}
-              max={10080}
-              value={draft.managerReversalWindowMinutes}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  managerReversalWindowMinutes: Number(event.target.value),
-                }))
-              }
-            />
-          </FormField>
-        </div>
-        <Checkbox
-          checked={draft.managerOverrideAllowed}
-          label={
-            ar
-              ? "السماح بتجاوز المدير مع السبب والتدقيق"
-              : "Allow manager override with reason and audit"
-          }
-          onChange={(event) =>
-            update((current) => ({ ...current, managerOverrideAllowed: event.target.checked }))
-          }
-        />
-      </details>
+      <div className="builder-studio-ownership-note" role="note">
+        <strong>{ar ? "قواعد التشغيل في الاستوديو" : "Operational rules live in Studio"}</strong>
+        <p>
+          {ar
+            ? "بعد إنهاء التصميم، اضبط حدود الأختام ومتطلبات الشراء وفترات التراجع وصلاحيات المدير من منطقة «طريقة العمل»."
+            : "After design, set stamp limits, purchase requirements, reversal windows, and manager permissions in How it works."}
+        </p>
+      </div>
       <details className="builder-disclosure">
         <summary>{ar ? "تخطيط الأختام" : "Stamp arrangement"}</summary>
         <div className="builder-layout-options">
@@ -1897,6 +1759,131 @@ function AdvancedSection({
               </button>
             );
           })}
+        </div>
+      </details>
+      <details className="builder-disclosure">
+        <summary>{ar ? "تفاصيل أسطح المعاينة" : "Preview surface details"}</summary>
+        <div className="builder-form-stack">
+          <div className="builder-subheading">
+            <div>
+              <h3>{ar ? "بطاقة العميل" : "Customer card"}</h3>
+              <p>
+                {ar
+                  ? "اختر تركيب بطاقة الويب الغني الذي يراه العميل."
+                  : "Choose the richer web-card composition customers see."}
+              </p>
+            </div>
+          </div>
+          <FormField label={ar ? "تركيب بطاقة العميل" : "Customer card layout"}>
+            <Select
+              value={draft.visualTheme.customerWebVariant}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  visualTheme: {
+                    ...current.visualTheme,
+                    customerWebVariant: event.target.value as "CARD" | "MINIMAL" | "HERO",
+                  },
+                }))
+              }
+            >
+              <option value="CARD">{ar ? "بطاقة" : "Card"}</option>
+              <option value="MINIMAL">{ar ? "مبسطة" : "Minimal"}</option>
+              <option value="HERO">{ar ? "بارزة" : "Hero"}</option>
+            </Select>
+          </FormField>
+          <div className="builder-subheading">
+            <div>
+              <h3>Apple Wallet</h3>
+              <p>
+                {ar
+                  ? "هذه النصوص تخص المعاينة التي يدعمها Apple Wallet."
+                  : "These labels apply to the fields supported by Apple Wallet."}
+              </p>
+            </div>
+          </div>
+          <div className="builder-form-grid">
+            {(
+              [
+                ["headerLabel", ar ? "عنوان الرأس" : "Header label"],
+                ["headerValue", ar ? "قيمة الرأس" : "Header value"],
+                ["secondaryLabel", ar ? "العنوان الثانوي" : "Secondary label"],
+                ["barcodeLabel", ar ? "عنوان الرمز" : "Barcode label"],
+              ] as const
+            ).map(([key, label]) => (
+              <FormField key={key} label={label}>
+                <TextInput
+                  value={draft.visualTheme.applePreviewConfig[key]}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      visualTheme: {
+                        ...current.visualTheme,
+                        applePreviewConfig: {
+                          ...current.visualTheme.applePreviewConfig,
+                          [key]: event.target.value,
+                        },
+                      },
+                    }))
+                  }
+                />
+              </FormField>
+            ))}
+          </div>
+          <Checkbox
+            checked={draft.visualTheme.applePreviewConfig.showBackContent}
+            label={ar ? "إظهار محتوى ظهر بطاقة Apple" : "Show Apple card back content"}
+            onChange={(event) =>
+              update((current) => ({
+                ...current,
+                visualTheme: {
+                  ...current.visualTheme,
+                  applePreviewConfig: {
+                    ...current.visualTheme.applePreviewConfig,
+                    showBackContent: event.target.checked,
+                  },
+                },
+              }))
+            }
+          />
+          <div className="builder-subheading">
+            <div>
+              <h3>Google Wallet</h3>
+              <p>
+                {ar
+                  ? "هذه النصوص تخص المعاينة التي يدعمها Google Wallet."
+                  : "These labels apply to the fields supported by Google Wallet."}
+              </p>
+            </div>
+          </div>
+          <div className="builder-form-grid">
+            {(
+              [
+                ["title", ar ? "العنوان" : "Title"],
+                ["subtitle", ar ? "العنوان الفرعي" : "Subtitle"],
+                ["detailsLabel", ar ? "عنوان التفاصيل" : "Details label"],
+                ["barcodeLabel", ar ? "عنوان الرمز" : "Barcode label"],
+              ] as const
+            ).map(([key, label]) => (
+              <FormField key={key} label={label}>
+                <TextInput
+                  value={draft.visualTheme.googlePreviewConfig[key]}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      visualTheme: {
+                        ...current.visualTheme,
+                        googlePreviewConfig: {
+                          ...current.visualTheme.googlePreviewConfig,
+                          [key]: event.target.value,
+                        },
+                      },
+                    }))
+                  }
+                />
+              </FormField>
+            ))}
+          </div>
         </div>
       </details>
       <FormField label={ar ? "ملخص التغييرات" : "Change summary"}>

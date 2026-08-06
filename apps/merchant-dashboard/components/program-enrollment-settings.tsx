@@ -44,7 +44,7 @@ interface EnrollmentSettings {
   } | null;
 }
 
-interface WalletHealth {
+export interface WalletHealth {
   provider: "APPLE" | "GOOGLE";
   mode: "DISABLED" | "TEST_ADAPTER" | "REAL";
   status: string;
@@ -66,17 +66,20 @@ export function ProgramEnrollmentSettings({
   organizationId,
   programId,
   ar,
+  showWalletReadiness = true,
   onChanged,
 }: {
   organizationId: string;
   programId: string;
   ar: boolean;
+  showWalletReadiness?: boolean;
   onChanged?: (() => Promise<void>) | undefined;
 }) {
   const [settings, setSettings] = useState<EnrollmentSettings | null>(null);
   const [policy, setPolicy] = useState<EnrollmentPolicy | null>(null);
   const [slug, setSlug] = useState("");
   const [health, setHealth] = useState<WalletHealth[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [walletSyncJobId, setWalletSyncJobId] = useState<string | null>(null);
   const [busy, setBusy] = useState<"policy" | "slug" | "wallet" | null>(null);
   const [message, setMessage] = useState("");
@@ -87,18 +90,22 @@ export function ProgramEnrollmentSettings({
       apiFetch<EnrollmentSettings>(
         `/v1/organizations/${organizationId}/programs/${programId}/enrollment`,
       ),
-      apiFetch<WalletHealth[]>(`/v1/organizations/${organizationId}/wallet/providers`),
+      showWalletReadiness
+        ? apiFetch<WalletHealth[]>(`/v1/organizations/${organizationId}/wallet/providers`)
+        : Promise.resolve([]),
     ]);
     setSettings(next);
     setPolicy(next.editableVersion?.policy ?? next.publishedVersion?.policy ?? null);
     setSlug(next.publicSlug ?? "");
     setHealth(providers);
-  }, [organizationId, programId]);
+  }, [organizationId, programId, showWalletReadiness]);
 
   useEffect(() => {
-    void load().catch((caught) =>
-      setError(caught instanceof Error ? caught.message : "Unable to load enrollment settings."),
-    );
+    void load()
+      .catch((caught) =>
+        setError(caught instanceof Error ? caught.message : "Unable to load enrollment settings."),
+      )
+      .finally(() => setLoaded(true));
   }, [load]);
 
   useEffect(() => {
@@ -206,22 +213,68 @@ export function ProgramEnrollmentSettings({
     }
   }
 
-  if (!settings || !policy) return null;
+  if (!settings || !policy)
+    return (
+      <Card className="program-enrollment-settings program-enrollment-settings--loading">
+        <div className="program-enrollment-settings__heading">
+          <div>
+            <span className="dashboard-card__label">{ar ? "وصول العملاء" : "CUSTOMER ACCESS"}</span>
+            <h2>{ar ? "طريقة انضمام العملاء" : "How customers join"}</h2>
+            <p>
+              {ar
+                ? "الرابط العام ورمز QR وسلوك الدخول ولغة العميل وإعدادات الموافقة المدعومة."
+                : "Public link, QR code, entry behavior, customer language, and supported consent settings."}
+            </p>
+          </div>
+        </div>
+        {error ? (
+          <Alert
+            tone="warning"
+            title={
+              ar ? "تعذر تحميل إعدادات وصول العملاء" : "Customer access settings are unavailable"
+            }
+          >
+            {error}
+          </Alert>
+        ) : (
+          <div className="program-enrollment-settings__loading" role="status">
+            <RefreshCcw className="studio-spin" size={18} aria-hidden="true" />
+            {loaded
+              ? ar
+                ? "لا تتوفر إعدادات وصول لهذه البطاقة."
+                : "No customer access settings are available for this card."
+              : ar
+                ? "جارٍ تحميل إعدادات وصول العملاء…"
+                : "Loading customer access settings…"}
+          </div>
+        )}
+      </Card>
+    );
   const qrBase = `${apiUrl}/v1/organizations/${organizationId}/programs/${programId}/enrollment-qr`;
   return (
     <Card className="program-enrollment-settings">
       <div className="program-enrollment-settings__heading">
         <div>
-          <span className="dashboard-card__label">CUSTOMER ENROLLMENT · W3</span>
-          <h2>{ar ? "التسجيل العام وWallet" : "Public enrollment & Wallet"}</h2>
+          <span className="dashboard-card__label">{ar ? "وصول العملاء" : "CUSTOMER ACCESS"}</span>
+          <h2>{ar ? "طريقة انضمام العملاء" : "How customers join"}</h2>
           <p>
             {ar
-              ? "أنشئ رابطًا ورمز QR عامًا، واضبط جمع البريد والنقل في المسودة."
-              : "Publish a canonical link and QR, then control email collection and transfer policy on the draft."}
+              ? "شارك رابط البطاقة أو رمز QR وحدد المعلومات المطلوبة عند الانضمام."
+              : "Share the card link or QR code and choose what customers provide when they join."}
           </p>
         </div>
         <Badge tone={settings.enrollmentLinkStatus === "ACTIVE" ? "success" : "warning"}>
-          {settings.enrollmentLinkStatus.replaceAll("_", " ")}
+          {settings.enrollmentLinkStatus === "ACTIVE"
+            ? ar
+              ? "متاح للعملاء"
+              : "Available to customers"
+            : settings.enrollmentLinkStatus === "NOT_PUBLISHED"
+              ? ar
+                ? "متاح بعد الإطلاق"
+                : "Available after launch"
+              : ar
+                ? "غير متاح حاليًا"
+                : "Currently unavailable"}
         </Badge>
       </div>
       {error ? <Alert tone="danger" title={error} /> : null}
@@ -229,10 +282,10 @@ export function ProgramEnrollmentSettings({
       <div className="program-enrollment-settings__grid">
         <section>
           <h3>
-            <Link2 /> {ar ? "الرابط العام" : "Public link"}
+            <Link2 aria-hidden="true" /> {ar ? "رابط الانضمام" : "Join link"}
           </h3>
           <FormField
-            label={ar ? "معرّف رابط البطاقة" : "Card URL slug"}
+            label={ar ? "عنوان رابط البطاقة" : "Card link name"}
             hint={
               ar ? "يُحجز الرابط السابق لمدة 90 يومًا." : "Previous slugs are reserved for 90 days."
             }
@@ -294,9 +347,9 @@ export function ProgramEnrollmentSettings({
                 })
               }
             >
-              <option value="HIDDEN">Hidden</option>
-              <option value="OPTIONAL">Optional</option>
-              <option value="REQUIRED">Required</option>
+              <option value="HIDDEN">{ar ? "بدون بريد إلكتروني" : "Do not ask"}</option>
+              <option value="OPTIONAL">{ar ? "اختياري" : "Optional"}</option>
+              <option value="REQUIRED">{ar ? "مطلوب" : "Required"}</option>
             </Select>
           </FormField>
           <FormField label={ar ? "لغة العميل الأساسية" : "Primary customer language"}>
@@ -318,7 +371,7 @@ export function ProgramEnrollmentSettings({
             label={
               ar
                 ? "فتح التسجيل عند نشر هذا الإصدار"
-                : "Open enrollment when this version is published"
+                : "Allow customers to join when this update is published"
             }
           />
           <Checkbox
@@ -351,48 +404,166 @@ export function ProgramEnrollmentSettings({
           />
           {settings.editableVersion ? (
             <Button loading={busy === "policy"} onClick={() => void savePolicy()}>
-              {ar ? "حفظ في المسودة" : "Save to draft"}
+              {ar ? "حفظ إعدادات الانضمام" : "Save access settings"}
             </Button>
           ) : (
             <Alert tone="info" title={ar ? "أنشئ مسودة للتعديل" : "Create a draft to edit"}>
-              {ar ? "السياسة المنشورة ثابتة." : "Published enrollment policy is immutable."}
+              {ar
+                ? "أنشئ تحديثًا لتغيير طريقة الانضمام."
+                : "Create an update to change customer access."}
             </Alert>
           )}
         </section>
       </div>
-      <section className="wallet-provider-health">
-        <div>
-          <h3>
-            <WalletCards /> {ar ? "جاهزية Wallet" : "Wallet readiness"}
-          </h3>
-          <p>
-            {ar
-              ? "تعرض الحالة الفعلية ولا تدّعي نجاح مزود خارجي."
-              : "Truthful provider state; no external success is claimed."}
-          </p>
-        </div>
-        {health.map((provider) => (
-          <span key={provider.provider}>
-            <strong>{provider.provider}</strong>
-            <Badge tone={provider.status === "HEALTHY" ? "success" : "warning"}>
-              {provider.mode} · {provider.status}
-            </Badge>
-            <small>{provider.safeMessage}</small>
-            <small>
-              Configured: {provider.configured ? "yes" : "no"} Â· Provider reachable:{" "}
-              {provider.providerReachable ? "yes" : "no"} Â· Externally certified:{" "}
-              {provider.externallyCertified ? "yes" : "no"}
-            </small>
-          </span>
-        ))}
-        <Button
-          variant="secondary"
-          loading={busy === "wallet"}
-          onClick={() => void reconcileWallet()}
+      {showWalletReadiness ? (
+        <section className="wallet-provider-health">
+          <div>
+            <h3>
+              <WalletCards /> {ar ? "جاهزية Wallet" : "Wallet readiness"}
+            </h3>
+            <p>
+              {ar
+                ? "تعرض الحالة الفعلية ولا تدّعي نجاح مزود خارجي."
+                : "Truthful provider state; no external success is claimed."}
+            </p>
+          </div>
+          {health.map((provider) => (
+            <span key={provider.provider}>
+              <strong>{provider.provider}</strong>
+              <Badge tone={provider.status === "HEALTHY" ? "success" : "warning"}>
+                {provider.mode} · {provider.status}
+              </Badge>
+              <small dir="auto">{provider.safeMessage}</small>
+              <small>
+                Configured: {provider.configured ? "yes" : "no"} Â· Provider reachable:{" "}
+                {provider.providerReachable ? "yes" : "no"} Â· Externally certified:{" "}
+                {provider.externallyCertified ? "yes" : "no"}
+              </small>
+            </span>
+          ))}
+          <Button
+            variant="secondary"
+            loading={busy === "wallet"}
+            onClick={() => void reconcileWallet()}
+          >
+            <RefreshCcw size={16} /> {ar ? "إعادة مزامنة آمنة" : "Safe reconcile"}
+          </Button>
+        </section>
+      ) : null}
+    </Card>
+  );
+}
+
+export function ProgramWalletReadiness({
+  organizationId,
+  ar,
+}: {
+  organizationId: string;
+  ar: boolean;
+}) {
+  const [health, setHealth] = useState<WalletHealth[]>([]);
+  const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch<WalletHealth[]>(`/v1/organizations/${organizationId}/wallet/providers`)
+      .then((providers) => {
+        if (active) {
+          setHealth(providers);
+          setLoaded(true);
+        }
+      })
+      .catch((caught: unknown) => {
+        if (active) {
+          setError(caught instanceof Error ? caught.message : "Unable to load Wallet readiness.");
+          setLoaded(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [organizationId]);
+
+  return (
+    <Card className="wallet-provider-health wallet-provider-health--launch">
+      <div>
+        <span className="dashboard-card__label">
+          {ar ? "اختياري لإطلاق بطاقة العميل" : "OPTIONAL FOR CUSTOMER WEB LAUNCH"}
+        </span>
+        <h3>
+          <WalletCards aria-hidden="true" /> {ar ? "توفر المحافظ" : "Wallet availability"}
+        </h3>
+        <p>
+          {ar
+            ? "توضح كل حالة توفر Apple Wallet وGoogle Wallet بشكل منفصل. عدم توفر الحالة لا يمنع إطلاق بطاقة العميل على الويب."
+            : "Apple Wallet and Google Wallet are shown separately. Missing provider status does not block Customer Web launch."}
+        </p>
+      </div>
+      {error ? (
+        <Alert
+          tone="info"
+          title={
+            ar ? "تعذر التحقق من حالة المحافظ · اختيارية" : "Wallet status unavailable · Optional"
+          }
         >
-          <RefreshCcw size={16} /> {ar ? "إعادة مزامنة آمنة" : "Safe reconcile"}
-        </Button>
-      </section>
+          {ar
+            ? "لا يمكن تأكيد توفر المحافظ حالياً. يبقى إطلاق بطاقة العميل على الويب متاحاً."
+            : "Wallet availability cannot be confirmed right now. Customer Web launch remains available."}
+        </Alert>
+      ) : null}
+      {!error && !loaded ? (
+        <div className="wallet-provider-health__loading" role="status">
+          <RefreshCcw className="studio-spin" size={17} aria-hidden="true" />
+          {ar ? "جارٍ فحص جاهزية المحافظ…" : "Checking Wallet readiness…"}
+        </div>
+      ) : null}
+      {!error && loaded && health.length === 0
+        ? (["APPLE", "GOOGLE"] as const).map((provider) => (
+            <span key={provider}>
+              <strong>{provider === "APPLE" ? "Apple Wallet" : "Google Wallet"}</strong>
+              <Badge tone="neutral">
+                {ar ? "اختيارية · الحالة غير متاحة" : "Optional · Status unavailable"}
+              </Badge>
+              <small>
+                {ar
+                  ? "لا تتوفر بيانات مزود تسمح بتأكيد الاتصال أو الجاهزية."
+                  : "No provider data is available to confirm a connection or readiness."}
+              </small>
+              <small>
+                {ar
+                  ? "لا يمنع ذلك إطلاق بطاقة العميل على الويب."
+                  : "This does not block Customer Web launch."}
+              </small>
+            </span>
+          ))
+        : null}
+      {health.map((provider) => {
+        const providerName = provider.provider === "APPLE" ? "Apple Wallet" : "Google Wallet";
+        const ready = provider.status === "HEALTHY";
+        return (
+          <span key={provider.provider}>
+            <strong>{providerName}</strong>
+            <Badge tone={ready ? "success" : "neutral"}>
+              {ready
+                ? ar
+                  ? "جاهزة"
+                  : "Ready"
+                : ar
+                  ? "غير متاحة · اختيارية"
+                  : "Unavailable · Optional"}
+            </Badge>
+            <small dir="auto">{provider.safeMessage}</small>
+            {!ready ? (
+              <small>
+                {ar
+                  ? "تتأثر واجهة المحفظة فقط؛ يبقى إطلاق بطاقة العميل على الويب متاحاً."
+                  : "Only this Wallet surface is affected; Customer Web launch remains available."}
+              </small>
+            ) : null}
+          </span>
+        );
+      })}
     </Card>
   );
 }
