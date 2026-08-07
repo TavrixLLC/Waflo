@@ -447,6 +447,8 @@ export function ProgramsScreen({
           setStudioProgramId(null);
           router.push(`/${locale}/dashboard/programs/${programId}/edit`);
         }}
+        onOpenCustomers={() => router.push(`/${locale}/dashboard/customers`)}
+        onOpenBilling={() => router.push(`/${locale}/dashboard/billing`)}
         onChanged={load}
       />
     );

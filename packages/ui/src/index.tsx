@@ -286,6 +286,9 @@ export function Modal({
   onClose,
   closeLabel = "Close",
   className = "",
+  description,
+  descriptionVisible = false,
+  locked = false,
 }: {
   open: boolean;
   title: string;
@@ -293,37 +296,107 @@ export function Modal({
   onClose: () => void;
   closeLabel?: string;
   className?: string;
+  description?: string;
+  descriptionVisible?: boolean;
+  locked?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
+  const descriptionId = useId();
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      returnFocusRef.current = document.activeElement as HTMLElement | null;
+      dialog.showModal();
+      requestAnimationFrame(() => dialog.focus());
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousDocumentOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = previousDocumentOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [open]);
+
+  function restoreFocus() {
+    const target = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (target?.isConnected) requestAnimationFrame(() => target.focus());
+  }
   return (
     <dialog
       ref={ref}
       className={`wf-dialog ${className}`}
       aria-labelledby={titleId}
+      aria-describedby={description ? descriptionId : undefined}
+      aria-busy={locked}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const dialog = ref.current;
+        if (!dialog) return;
+        const focusable = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((element) => !element.hasAttribute("hidden"));
+        if (!focusable.length) {
+          event.preventDefault();
+          dialog.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (
+          event.shiftKey &&
+          (document.activeElement === dialog || document.activeElement === first)
+        ) {
+          event.preventDefault();
+          last?.focus();
+        } else if (
+          !event.shiftKey &&
+          (document.activeElement === dialog || document.activeElement === last)
+        ) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }}
       onCancel={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        if (!locked) onClose();
       }}
       onClose={(event) => {
         event.stopPropagation();
-        onClose();
+        restoreFocus();
       }}
     >
       <div className="wf-dialog__header">
         <h2 id={titleId}>{title}</h2>
-        <IconButton label={closeLabel} onClick={onClose}>
+        <IconButton label={closeLabel} onClick={onClose} disabled={locked}>
           <X size={20} />
         </IconButton>
       </div>
-      {children}
+      <div className="wf-dialog__body">
+        {description ? (
+          <p
+            className={descriptionVisible ? "wf-dialog__description" : "wf-sr-only"}
+            id={descriptionId}
+          >
+            {description}
+          </p>
+        ) : null}
+        {children}
+      </div>
     </dialog>
   );
 }
@@ -334,7 +407,9 @@ export function AlertDialog({
   description,
   confirmLabel,
   cancelLabel,
+  closeLabel = "Close",
   danger = false,
+  loading = false,
   onConfirm,
   onClose,
 }: {
@@ -343,18 +418,32 @@ export function AlertDialog({
   description: string;
   confirmLabel: string;
   cancelLabel: string;
+  closeLabel?: string;
   danger?: boolean;
+  loading?: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }) {
   return (
-    <Modal open={open} title={title} onClose={onClose}>
-      <p>{description}</p>
+    <Modal
+      open={open}
+      title={title}
+      description={description}
+      descriptionVisible
+      closeLabel={closeLabel}
+      locked={loading}
+      onClose={onClose}
+    >
       <div className="wf-dialog__actions">
-        <Button variant="secondary" onClick={onClose}>
+        <Button variant="secondary" onClick={onClose} disabled={loading}>
           {cancelLabel}
         </Button>
-        <Button variant={danger ? "danger" : "primary"} onClick={onConfirm}>
+        <Button
+          variant={danger ? "danger" : "primary"}
+          onClick={onConfirm}
+          disabled={loading}
+          loading={loading}
+        >
           {confirmLabel}
         </Button>
       </div>

@@ -108,7 +108,7 @@ describe("merchant Loyalty Studio lifecycle presentation", () => {
       guidance: "Ready to launch",
       primary: "Review launch",
       liveStage: "current",
-      launch: "Publish card",
+      launch: "Launch loyalty card",
       setting: "canArchive",
     },
     {
@@ -210,9 +210,41 @@ describe("merchant Loyalty Studio lifecycle presentation", () => {
         publicationAllowed: programStatus !== "ARCHIVED",
       });
       expect(presentation.primaryAction.label).not.toMatch(
-        /Run readiness checks|Start test|Review launch|Publish card/u,
+        /Run readiness checks|Start test|Review launch|Launch loyalty card/u,
       );
     }
+  });
+
+  it("keeps the ready journey truthful and separates saved changes from the live card", () => {
+    const ready = deriveStudioLifecyclePresentation({
+      ...baseLifecycleInput,
+      draftVersionStatus: "TEST_READY",
+      validationState: "passed",
+      testState: "complete",
+    });
+    expect(ready.journeyStages.find((stage) => stage.key === "live")).toMatchObject({
+      state: "current",
+      hint: "Publish to make available",
+    });
+
+    const changes = deriveStudioLifecyclePresentation({
+      ...baseLifecycleInput,
+      programStatus: "PUBLISHED",
+      draftVersionStatus: "TEST_READY",
+      validationState: "passed",
+      testState: "complete",
+      hasPublishedVersion: true,
+      hasUnpublishedChanges: true,
+    });
+    expect(changes).toMatchObject({
+      label: "Live",
+      guidance: {
+        title: "Saved changes · Not live yet",
+        description:
+          "Review the saved changes before publishing them. The current live card is unchanged.",
+      },
+      primaryAction: { label: "Review changes" },
+    });
   });
 
   it("keeps automated checks scoped when the demo cycle is incomplete", () => {

@@ -17,7 +17,14 @@ async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {
   await expect(page).toHaveURL(
     new RegExp(`/${locale}/dashboard/programs/created-program-id/edit$`, "u"),
   );
-  if (locale === "en") {
+  const reviewCard = page.getByRole("button", {
+    name: locale === "ar" ? "مراجعة البطاقة" : "Review card",
+  });
+  const continueToStudio = page.getByRole("button", {
+    name: locale === "ar" ? "المتابعة إلى الاستوديو" : "Continue to Studio",
+  });
+  await expect(reviewCard.or(continueToStudio)).toBeVisible();
+  if (locale === "en" && (await reviewCard.isVisible())) {
     await page
       .getByRole("button", { name: /^Reward/u })
       .first()
@@ -31,21 +38,17 @@ async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {
     await expect(page.getByText("Preview surface details", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Operational timezone")).toHaveCount(0);
   }
-  await page
-    .getByRole("button", { name: locale === "ar" ? "مراجعة البطاقة" : "Review card" })
-    .click();
-  await expect(
-    page
-      .getByText(locale === "ar" ? "اجتازت البطاقة فحوصات الجاهزية" : "Readiness checks passed", {
-        exact: true,
-      })
-      .first(),
-  ).toBeVisible();
-  await page
-    .getByRole("button", {
-      name: locale === "ar" ? "المتابعة إلى الاستوديو" : "Continue to Studio",
-    })
-    .click();
+  if (await reviewCard.isVisible()) {
+    await reviewCard.click();
+    await expect(
+      page
+        .getByText(locale === "ar" ? "اجتازت البطاقة فحوصات الجاهزية" : "Readiness checks passed", {
+          exact: true,
+        })
+        .first(),
+    ).toBeVisible();
+  }
+  await continueToStudio.click();
 }
 
 test("continues from Builder into a six-area merchant Studio without duplicate design editors", async ({
@@ -90,7 +93,9 @@ test("continues from Builder into a six-area merchant Studio without duplicate d
 
   await navigation.getByRole("button", { name: /^Launch/u }).click();
   await expect(page.getByRole("heading", { name: "Not ready to launch" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run checks" })).toBeVisible();
+  await expect(
+    page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }),
+  ).toBeVisible();
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(
@@ -182,7 +187,7 @@ test("routes launch blockers to the merchant area that can fix them", async ({ p
   await enterStudio(page, "en");
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
   await navigation.getByRole("button", { name: /^Launch/u }).click();
-  await page.getByRole("button", { name: "Run checks" }).click();
+  await page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }).click();
   await expect(page.getByText("1 launch blockers", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Choose at least one participating location/u }).click();
   await expect(
@@ -240,7 +245,7 @@ const lifecycleScenarios = [
     "Current",
     "Review launch",
     "Ready to launch",
-    "Publish card",
+    "Launch loyalty card",
     "Archive card",
   ],
   [
@@ -249,7 +254,7 @@ const lifecycleScenarios = [
     "Currently available to eligible customers.",
     "Your loyalty card is live",
     "Complete",
-    "View customers",
+    "Share loyalty card",
     "Card is live",
     "View customers",
     "Pause card",
@@ -293,7 +298,7 @@ const lifecycleScenarios = [
     "This card is unavailable under the existing suspension rule.",
     "Your loyalty card is temporarily unavailable",
     "Blocked",
-    "View card status",
+    "Review customer access",
     "Launch unavailable",
     "View card status",
     "Archive card",
@@ -358,7 +363,7 @@ for (const [
 test("shows complete customer access controls and truthful optional Wallet availability", async ({
   page,
 }) => {
-  await mockTemplateGalleryApi(page);
+  await mockTemplateGalleryApi(page, { studioState: "LIVE" });
   await enterStudio(page, "en");
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
   await navigation.getByRole("button", { name: /^Customers & locations/u }).click();
@@ -367,16 +372,18 @@ test("shows complete customer access controls and truthful optional Wallet avail
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "How customers join" })).toBeVisible();
   await expect(page.getByLabel("Card link name")).toHaveValue("gallery-coffee-rewards");
-  await expect(page.getByRole("button", { name: "QR PNG" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download enrollment QR as PNG" })).toBeVisible();
   await expect(page.getByLabel("Primary customer language")).toHaveValue("en");
   await expect(page.getByLabel("Show separate marketing consent")).toBeChecked();
 
   await navigation.getByRole("button", { name: /^Launch/u }).click();
   await expect(page.getByText("Apple Wallet", { exact: true })).toBeVisible();
   await expect(page.getByText("Google Wallet", { exact: true })).toBeVisible();
-  await expect(page.getByText("Optional · Status unavailable", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("Status unavailable", { exact: true })).toHaveCount(2);
   await expect(
-    page.getByText("This does not block Customer Web launch.", { exact: true }),
+    page.getByText("No provider data is available. This does not block Customer Web launch.", {
+      exact: true,
+    }),
   ).toHaveCount(2);
 });
 

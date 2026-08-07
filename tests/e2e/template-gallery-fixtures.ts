@@ -83,10 +83,18 @@ export async function mockTemplateGalleryApi(
     onPreviewRequest,
     patchDelayMs = 0,
     previewDelayMs = 0,
+    publishedPreviewAvailable = true,
     patchFailures = 0,
     patchConflicts = 0,
     selectedPlan = "GROWTH",
     studioState = "DRAFT",
+    walletHealth = [],
+    enrollmentOpen = true,
+    billingStatus = "PENDING_ACTIVATION",
+    publishDelayMs = 0,
+    publicationFailures = 0,
+    publicationFailureCode = "PUBLICATION_PROVIDER_UNAVAILABLE",
+    onPublish,
     validationErrors = [],
     existingPrograms = [],
     fixtureLocations = [{ id: "gallery-location", name: "Gallery Main Branch", status: "ACTIVE" }],
@@ -102,6 +110,7 @@ export async function mockTemplateGalleryApi(
     onPreviewRequest?: (templateCode: string, presentation: string) => void;
     patchDelayMs?: number;
     previewDelayMs?: number;
+    publishedPreviewAvailable?: boolean;
     patchFailures?: number;
     patchConflicts?: number;
     selectedPlan?: "STARTER" | "GROWTH" | "SCALE";
@@ -110,10 +119,19 @@ export async function mockTemplateGalleryApi(
       | "CHECKED"
       | "READY"
       | "LIVE"
+      | "LIVE_WITH_CHANGES"
       | "PAUSED"
+      | "PAUSED_WITH_CHANGES"
       | "ARCHIVED"
       | "SCHEDULED"
       | "SUSPENDED";
+    walletHealth?: Array<Record<string, unknown>>;
+    enrollmentOpen?: boolean;
+    billingStatus?: string;
+    publishDelayMs?: number;
+    publicationFailures?: number;
+    publicationFailureCode?: string;
+    onPublish?: (body: Record<string, unknown>, requestCount: number) => void;
     validationErrors?: Array<{
       code: string;
       path: string;
@@ -134,6 +152,9 @@ export async function mockTemplateGalleryApi(
   let validationRequestCount = 0;
   let remainingPatchFailures = patchFailures;
   let remainingPatchConflicts = patchConflicts;
+  let remainingPublicationFailures = publicationFailures;
+  let publicationRequestCount = 0;
+  let currentStudioState = studioState;
 
   function currentArtwork() {
     if (!storedDraft) return null;
@@ -185,14 +206,24 @@ export async function mockTemplateGalleryApi(
     const rewards = storedDraft.rewards as Array<Record<string, unknown>>;
     const visualTheme = storedDraft.visualTheme as Record<string, unknown>;
     const requiredStampCount = Number(storedDraft.requiredStampCount ?? 8);
-    const publishedLifecycle = ["LIVE", "PAUSED", "ARCHIVED", "SUSPENDED"].includes(studioState);
+    const publishedLifecycle = [
+      "LIVE",
+      "LIVE_WITH_CHANGES",
+      "PAUSED",
+      "PAUSED_WITH_CHANGES",
+      "ARCHIVED",
+      "SUSPENDED",
+    ].includes(currentStudioState);
+    const hasUpdateDraft = ["LIVE_WITH_CHANGES", "PAUSED_WITH_CHANGES"].includes(
+      currentStudioState,
+    );
     const version = {
       id: "33333333-3333-4333-8333-333333333333",
       versionNumber: 1,
       status:
-        studioState === "READY" || studioState === "SCHEDULED"
+        currentStudioState === "READY" || currentStudioState === "SCHEDULED" || hasUpdateDraft
           ? "TEST_READY"
-          : studioState === "CHECKED"
+          : currentStudioState === "CHECKED"
             ? "VALIDATED"
             : publishedLifecycle
               ? "PUBLISHED"
@@ -202,13 +233,20 @@ export async function mockTemplateGalleryApi(
       baseTemplateVersion: storedDraft.templateVersion,
       revision,
       changeSummary: storedDraft.changeSummary ?? null,
-      validatedAt: studioState === "DRAFT" ? null : "2026-08-02T09:00:00.000Z",
-      testReadyAt: ["READY", "LIVE", "PAUSED", "ARCHIVED", "SCHEDULED", "SUSPENDED"].includes(
-        studioState,
-      )
+      validatedAt: currentStudioState === "DRAFT" ? null : "2026-08-02T09:00:00.000Z",
+      testReadyAt: [
+        "READY",
+        "LIVE",
+        "LIVE_WITH_CHANGES",
+        "PAUSED",
+        "PAUSED_WITH_CHANGES",
+        "ARCHIVED",
+        "SCHEDULED",
+        "SUSPENDED",
+      ].includes(currentStudioState)
         ? "2026-08-02T09:30:00.000Z"
         : null,
-      publishedAt: publishedLifecycle ? "2026-08-02T10:00:00.000Z" : null,
+      publishedAt: publishedLifecycle && !hasUpdateDraft ? "2026-08-02T10:00:00.000Z" : null,
       supersededAt: null,
       abandonedAt: null,
       validationFingerprint: null,
@@ -253,27 +291,46 @@ export async function mockTemplateGalleryApi(
         emptyStampAssetId: visualTheme.emptyStampAssetId ?? emptyAssetId,
       },
     };
+    const publishedVersion = publishedLifecycle
+      ? {
+          ...version,
+          id: "22222222-2222-4222-8222-222222222222",
+          versionNumber: hasUpdateDraft ? 1 : version.versionNumber,
+          status: "PUBLISHED",
+          publishedAt: "2026-08-02T10:00:00.000Z",
+          testReadyAt: "2026-08-02T09:30:00.000Z",
+          translations: publishedPreviewAvailable ? version.translations : [],
+          stampRule: publishedPreviewAvailable ? version.stampRule : null,
+          visualTheme: publishedPreviewAvailable ? version.visualTheme : null,
+        }
+      : null;
+    const editableVersion =
+      publishedLifecycle && !hasUpdateDraft
+        ? null
+        : {
+            ...version,
+            versionNumber: hasUpdateDraft ? 2 : version.versionNumber,
+          };
     return {
       id: "created-program-id",
       internalName: storedDraft.internalName,
-      status:
-        studioState === "LIVE"
-          ? "PUBLISHED"
-          : studioState === "PAUSED"
-            ? "PAUSED"
-            : studioState === "ARCHIVED"
-              ? "ARCHIVED"
-              : studioState === "SCHEDULED"
-                ? "SCHEDULED"
-                : studioState === "SUSPENDED"
-                  ? "SUSPENDED"
-                  : studioState === "CHECKED"
-                    ? "VALIDATED"
-                    : "DRAFT",
+      status: ["LIVE", "LIVE_WITH_CHANGES"].includes(currentStudioState)
+        ? "PUBLISHED"
+        : ["PAUSED", "PAUSED_WITH_CHANGES"].includes(currentStudioState)
+          ? "PAUSED"
+          : currentStudioState === "ARCHIVED"
+            ? "ARCHIVED"
+            : currentStudioState === "SCHEDULED"
+              ? "SCHEDULED"
+              : currentStudioState === "SUSPENDED"
+                ? "SUSPENDED"
+                : currentStudioState === "CHECKED"
+                  ? "VALIDATED"
+                  : "DRAFT",
       updatedAt: "2026-08-03T10:00:00.000Z",
-      currentDraftVersion: version,
-      currentPublishedVersion: publishedLifecycle ? version : null,
-      versions: [version],
+      currentDraftVersion: editableVersion,
+      currentPublishedVersion: publishedVersion,
+      versions: [editableVersion, publishedVersion].filter(Boolean),
     };
   }
 
@@ -391,7 +448,7 @@ export async function mockTemplateGalleryApi(
 
   function testSession() {
     const detail = programDetail();
-    const version = detail?.currentDraftVersion;
+    const version = detail?.currentDraftVersion ?? detail?.currentPublishedVersion;
     return {
       id: "77777777-7777-4777-8777-777777777777",
       status: "ACTIVE",
@@ -442,7 +499,15 @@ export async function mockTemplateGalleryApi(
       return;
     }
     if (path === `/v1/organizations/${templateGalleryOrganizationId}`) {
-      await fulfill(route, { id: templateGalleryOrganizationId, businessCategory });
+      await fulfill(route, {
+        id: templateGalleryOrganizationId,
+        businessCategory,
+        billingProfile: {
+          subscriptionStatus: billingStatus,
+          trialStart: null,
+          trialEnd: null,
+        },
+      });
       return;
     }
     if (path.endsWith("/programs/templates")) {
@@ -600,6 +665,70 @@ export async function mockTemplateGalleryApi(
       await fulfill(route, { accepted: true });
       return;
     }
+    if (path.endsWith("/programs/created-program-id/publish") && request.method() === "POST") {
+      publicationRequestCount += 1;
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      onPublish?.(body, publicationRequestCount);
+      if (publishDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, publishDelayMs));
+      if (remainingPublicationFailures > 0) {
+        remainingPublicationFailures -= 1;
+        await reject(route, 503, publicationFailureCode, "Publication could not be completed.");
+        return;
+      }
+      const remainedPaused = currentStudioState === "PAUSED_WITH_CHANGES";
+      currentStudioState = remainedPaused ? "PAUSED" : "LIVE";
+      await fulfill(route, {
+        status: "COMPLETED",
+        trialStarted: billingStatus === "PENDING_ACTIVATION",
+        trialStart: billingStatus === "PENDING_ACTIVATION" ? "2026-08-06T10:00:00.000Z" : null,
+        trialEnd: billingStatus === "PENDING_ACTIVATION" ? "2026-08-21T10:00:00.000Z" : null,
+      });
+      return;
+    }
+    const lifecycleMatch = path.match(
+      /\/programs\/created-program-id\/(pause|resume|archive|restore)$/u,
+    );
+    if (lifecycleMatch && request.method() === "POST") {
+      const action = lifecycleMatch[1];
+      if (action === "pause") currentStudioState = "PAUSED";
+      if (action === "resume") currentStudioState = "LIVE";
+      if (action === "archive") currentStudioState = "ARCHIVED";
+      if (action === "restore") currentStudioState = "LIVE";
+      await fulfill(route, { status: programDetail()?.status });
+      return;
+    }
+    if (path.endsWith("/programs/created-program-id/draft") && request.method() === "POST") {
+      currentStudioState =
+        currentStudioState === "PAUSED" ? "PAUSED_WITH_CHANGES" : "LIVE_WITH_CHANGES";
+      await fulfill(route, programDetail());
+      return;
+    }
+    if (path.endsWith("/audit") && request.method() === "GET") {
+      const stateAction =
+        currentStudioState === "PAUSED"
+          ? "program.paused"
+          : currentStudioState === "ARCHIVED"
+            ? "program.archived"
+            : "program.published";
+      await fulfill(route, {
+        items: [
+          {
+            id: "audit-publication-event",
+            action: stateAction,
+            targetType: "loyalty_program",
+            targetId: "created-program-id",
+            createdAt: "2026-08-06T10:00:00.000Z",
+            actor: { id: "merchant-template-gallery-owner", displayName: "Gallery Merchant" },
+            metadata: {
+              publicationType: "FIRST_PUBLICATION",
+              programId: "created-program-id",
+            },
+          },
+        ],
+        nextCursor: null,
+      });
+      return;
+    }
     if (path.endsWith("/locations")) {
       await fulfill(route, { items: fixtureLocations });
       return;
@@ -629,7 +758,7 @@ export async function mockTemplateGalleryApi(
       return;
     }
     if (path.endsWith("/wallet/providers")) {
-      await fulfill(route, []);
+      await fulfill(route, walletHealth);
       return;
     }
     if (path.endsWith("/programs/created-program-id/enrollment") && request.method() === "GET") {
@@ -642,7 +771,7 @@ export async function mockTemplateGalleryApi(
         marketingConsentDefault: false,
         customerTermsRequired: true,
         transferWithoutEmailAllowed: false,
-        enrollmentOpen: true,
+        enrollmentOpen,
       };
       await fulfill(route, {
         programId: "created-program-id",
@@ -650,9 +779,9 @@ export async function mockTemplateGalleryApi(
         publicSlug: "gallery-coffee-rewards",
         publicUrl: "http://localhost:3002/enroll/gallery-coffee-rewards",
         enrollmentLinkStatus:
-          studioState === "LIVE"
+          detail?.status === "PUBLISHED"
             ? "ACTIVE"
-            : ["PAUSED", "ARCHIVED", "SUSPENDED"].includes(studioState)
+            : ["PAUSED", "ARCHIVED", "SUSPENDED"].includes(detail?.status ?? "")
               ? "BLOCKED"
               : "NOT_PUBLISHED",
         editableVersion: detail?.currentDraftVersion

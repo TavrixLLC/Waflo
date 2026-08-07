@@ -26,7 +26,7 @@ export default defineConfig({
     {
       name: "chromium",
       testMatch:
-        /(?:^|[/\\])(?:platform|merchant-loyalty-cards|merchant-template-gallery|merchant-card-builder|merchant-loyalty-studio|merchant-loyalty-studio-evidence)\.spec\.ts$/,
+        /(?:^|[/\\])(?:platform|merchant-loyalty-cards|merchant-template-gallery|merchant-card-builder|merchant-loyalty-studio|merchant-loyalty-studio-evidence|merchant-launch-publish|merchant-launch-publish-evidence)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {

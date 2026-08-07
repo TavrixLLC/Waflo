@@ -56,11 +56,40 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import {
-  merchantProgramLifecycleLabel,
   type MerchantProgramLifecycleAction,
+  merchantProgramLifecycleLabel,
 } from "./loyalty-card-presentation";
 import { ProgramAssetPicker } from "./program-asset-uploader";
-import { ProgramEnrollmentSettings, ProgramWalletReadiness } from "./program-enrollment-settings";
+import {
+  type EnrollmentSettings,
+  ProgramEnrollmentSettings,
+  type WalletHealth,
+} from "./program-enrollment-settings";
+import {
+  LaunchPanel,
+  LiveAccessSummary,
+  type OrganizationPublicationContext,
+  type PublicationCommandResult,
+  PublicationConfirmationDialog,
+  type PublicationFailureState,
+  type PublicationSuccessState,
+} from "./program-launch-experience";
+import {
+  deriveProgramSharingPresentation,
+  hasSavedUnpublishedChanges,
+  publicationFailurePresentation,
+  publicationMode,
+  selectCustomerPreviewSource,
+} from "./program-publication-presentation";
+import {
+  deriveStudioLifecyclePresentation,
+  type StudioArea,
+  type StudioLifecyclePresentation,
+  studioAreaCopy,
+  studioAreaForPublicationError,
+  studioAreaForValidationPath,
+  studioAreas,
+} from "./program-studio-presentation";
 import {
   type AssetItem,
   apiDraft,
@@ -76,18 +105,9 @@ import {
   type ValidationResult,
   versionToDraft,
 } from "./program-studio-types";
-import {
-  deriveStudioLifecyclePresentation,
-  type StudioArea,
-  studioAreaCopy,
-  studioAreaForPublicationError,
-  studioAreaForValidationPath,
-  studioAreas,
-  type StudioLifecyclePresentation,
-  type StudioPresentationAction,
-} from "./program-studio-presentation";
 
 type SaveState = "saved" | "unsaved" | "saving" | "failed" | "conflict";
+type PreviewLoadState = "idle" | "loading" | "available" | "unavailable";
 type LifecycleAction = MerchantProgramLifecycleAction;
 
 interface PreviewResult {
@@ -109,6 +129,16 @@ interface ConflictState {
   localDraft: ProgramDraftInput;
 }
 
+interface ProgramAuditEvent {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  createdAt: string;
+  actor: { id: string; displayName: string } | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 function statusLabel(state: SaveState, ar: boolean) {
   const labels: Record<SaveState, [string, string]> = {
     saved: ["Saved", "تم الحفظ"],
@@ -118,6 +148,10 @@ function statusLabel(state: SaveState, ar: boolean) {
     conflict: ["Edited elsewhere", "تم التحرير في مكان آخر"],
   };
   return labels[state][ar ? 1 : 0];
+}
+
+function hasPublishedCustomerPreviewPayload(version: ProgramVersion): boolean {
+  return Boolean(version.translations.length && version.stampRule && version.visualTheme);
 }
 
 function lifecycleActionLabel(action: LifecycleAction, ar: boolean): string {
@@ -132,12 +166,12 @@ function lifecycleActionDescription(
   if (action === "publish") {
     if (options.pausedWithPublishedVersion) {
       return ar
-        ? "سيُنشر الإصدار الجديد، لكن البطاقة ستظل متوقفة مؤقتًا. استخدم الاستئناف بشكل منفصل عندما تكون مستعدًا لإعادتها للعمل."
-        : "The new version will be published, but the card will remain paused. Use Resume separately when you are ready to make it live.";
+        ? "ستُنشر التغييرات الجديدة، لكن البطاقة ستظل متوقفة مؤقتاً. استخدم الاستئناف بشكل منفصل عندما تكون مستعداً لإعادتها للعمل."
+        : "The new changes will be published, but the card will remain paused. Resume it separately when you are ready to make it live.";
     }
     return ar
-      ? "يصبح الإصدار المختبَر مباشرًا للعملاء بعد إكمال التحقق ووضع الاختبار."
-      : "The tested version becomes live for customers after validation and Test Mode are complete.";
+      ? "تصبح التغييرات المختبرة مباشرة للعملاء بعد إكمال التحقق ووضع الاختبار."
+      : "The tested changes become live for customers after validation and Test Mode are complete.";
   }
   if (action === "abandon") {
     return ar
@@ -146,8 +180,8 @@ function lifecycleActionDescription(
   }
   if (action === "archive" && !options.hasPublishedVersion) {
     return ar
-      ? "تُؤرشف البطاقة غير المنشورة بأمان، مع الاحتفاظ بمسودتها الحالية وسجل إصداراتها لاستعادتها لاحقًا."
-      : "Archive this unpublished card safely. Its current draft and version history will be preserved for restoration.";
+      ? "تُؤرشف البطاقة غير المنشورة بأمان، مع الاحتفاظ بمسودتها الحالية وسجل تغييراتها لاستعادتها لاحقاً."
+      : "Archive this unpublished card safely. Its current draft and change history will be preserved for restoration.";
   }
   if (action === "restore" && !options.hasPublishedVersion) {
     return ar
@@ -156,15 +190,21 @@ function lifecycleActionDescription(
   }
   const descriptions: Record<Exclude<LifecycleAction, "publish" | "abandon">, [string, string]> = {
     pause: [
-      "The card will stop being live for customers until you resume it.",
-      "ستتوقف البطاقة عن الظهور مباشرة للعملاء حتى تستأنفها.",
+      "New enrollment, stamp earning, and reward use will stop. Existing customer cards remain viewable while paused, and a Wallet status sync will be queued.",
+      "سيتوقف التسجيل الجديد وإصدار الأختام واستخدام المكافآت. تبقى بطاقات العملاء الحاليين قابلة للعرض، وستتم جدولة مزامنة حالة Wallet.",
     ],
-    resume: ["The card will become live for customers again.", "ستعود البطاقة مباشرة للعملاء."],
+    resume: [
+      "Enrollment and loyalty operations return according to the published policy, and a Wallet status sync will be queued.",
+      "يعود التسجيل وعمليات الولاء وفق السياسة المنشورة، وستتم جدولة مزامنة حالة Wallet.",
+    ],
     archive: [
-      "The card will be archived while its setup and version history remain preserved.",
-      "ستُؤرشف البطاقة مع الاحتفاظ بإعداداتها وسجل إصداراتها.",
+      "The card leaves discovery and stops enrollment and loyalty operations. Existing direct cards remain viewable, setup and history are preserved, the active-card slot is freed, and Wallet invalidation is queued.",
+      "ستغادر البطاقة الاكتشاف ويتوقف التسجيل وعمليات الولاء. تبقى البطاقات المباشرة الحالية قابلة للعرض، وتُحفظ الإعدادات والسجل، وتتحرر خانة بطاقة نشطة، وتتم جدولة إبطال Wallet.",
     ],
-    restore: ["The card will return to its preserved state.", "ستعود البطاقة إلى حالتها المحفوظة."],
+    restore: [
+      "The plan limit will be checked, then the card returns to its preserved published or draft state and a Wallet status sync is queued.",
+      "سيتم فحص حد الخطة، ثم تعود البطاقة إلى حالتها المنشورة أو مسودتها المحفوظة وتتم جدولة مزامنة Wallet.",
+    ],
   };
   return descriptions[action][ar ? 1 : 0];
 }
@@ -209,6 +249,8 @@ export function ProgramStudioEditor({
   ar,
   onClose,
   onEditDesign,
+  onOpenCustomers,
+  onOpenBilling,
   onChanged,
 }: {
   organizationId: string;
@@ -221,6 +263,8 @@ export function ProgramStudioEditor({
   builderHandoff?: boolean;
   onClose: () => void;
   onEditDesign: () => void;
+  onOpenCustomers: () => void;
+  onOpenBilling: () => void;
   onChanged: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
@@ -233,7 +277,7 @@ export function ProgramStudioEditor({
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(0);
   const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewResult>>>({});
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>("idle");
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -241,9 +285,25 @@ export function ProgramStudioEditor({
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<LifecycleAction | null>(null);
   const [working, setWorking] = useState(false);
+  const [organization, setOrganization] = useState<OrganizationPublicationContext | null>(null);
+  const [enrollmentAccess, setEnrollmentAccess] = useState<EnrollmentSettings | null>(null);
+  const [walletHealth, setWalletHealth] = useState<WalletHealth[]>([]);
+  const [publicationSuccess, setPublicationSuccess] = useState<PublicationSuccessState | null>(
+    null,
+  );
+  const [publicationFailure, setPublicationFailure] = useState<PublicationFailureState | null>(
+    null,
+  );
+  const [auditEvents, setAuditEvents] = useState<ProgramAuditEvent[]>([]);
+  const [lifecycleNotice, setLifecycleNotice] = useState<{
+    title: string;
+    message: string;
+    action: Exclude<LifecycleAction, "publish">;
+  } | null>(null);
   const persistedRef = useRef("");
   const initializedRef = useRef(false);
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null);
+  const publishKeyRef = useRef<string | null>(null);
 
   function selectArea(area: StudioArea) {
     const restoreMobileFocus = mobileNavigationOpen;
@@ -255,15 +315,39 @@ export function ProgramStudioEditor({
   }
 
   const load = useCallback(async () => {
-    const [program, history] = await Promise.all([
+    const [program, history, nextOrganization, access, providers, audit] = await Promise.all([
       apiFetch<ProgramDetail>(`/v1/organizations/${organizationId}/programs/${programId}`),
       apiFetch<CursorPage<ProgramVersion>>(
         `/v1/organizations/${organizationId}/programs/${programId}/versions?limit=20`,
       ),
+      apiFetch<OrganizationPublicationContext>(`/v1/organizations/${organizationId}`),
+      apiFetch<EnrollmentSettings>(
+        `/v1/organizations/${organizationId}/programs/${programId}/enrollment`,
+      ),
+      apiFetch<WalletHealth[]>(`/v1/organizations/${organizationId}/wallet/providers`).catch(
+        () => [] as WalletHealth[],
+      ),
+      apiFetch<CursorPage<ProgramAuditEvent>>(
+        `/v1/organizations/${organizationId}/audit?action=program.&limit=50`,
+      ).catch(() => ({ items: [], nextCursor: null }) as CursorPage<ProgramAuditEvent>),
     ]);
     program.versions = history.items;
+    const versionIds = new Set(history.items.map((version) => version.id));
+    setAuditEvents(
+      audit.items.filter(
+        (event) =>
+          event.targetId === programId ||
+          (event.targetId ? versionIds.has(event.targetId) : false) ||
+          event.metadata?.programId === programId,
+      ),
+    );
     setHistoryCursor(history.nextCursor);
     setDetail(program);
+    setPreviews({});
+    setPreviewLoadState("idle");
+    setOrganization(nextOrganization);
+    setEnrollmentAccess(access);
+    setWalletHealth(providers);
     if (program.currentDraftVersion) {
       const next = versionToDraft(program, program.currentDraftVersion);
       setDraft(next);
@@ -309,6 +393,7 @@ export function ProgramStudioEditor({
     if (serialized === persistedRef.current) return;
     setSaveState("unsaved");
     setPreviews({});
+    setPreviewLoadState("idle");
     const timer = window.setTimeout(async () => {
       setSaveState("saving");
       try {
@@ -343,13 +428,9 @@ export function ProgramStudioEditor({
   }, [conflict, draft, organizationId, programId, revision]);
 
   const generatePreviews = useCallback(async () => {
-    if (!draft && !detail?.currentPublishedVersion) return;
-    if (
-      draft &&
-      (saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current)
-    )
-      return;
-    setPreviewLoading(true);
+    if (detail?.currentPublishedVersion || !draft) return;
+    if (saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current) return;
+    setPreviewLoadState("loading");
     try {
       const results: PreviewResult[] = [];
       for (const profile of ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const) {
@@ -360,10 +441,11 @@ export function ProgramStudioEditor({
         );
       }
       setPreviews(Object.fromEntries(results.map((item) => [item.profile, item])));
+      setPreviewLoadState("available");
     } catch (caught) {
+      setPreviews({});
+      setPreviewLoadState("unavailable");
       setError(caught instanceof Error ? caught.message : "Preview generation failed.");
-    } finally {
-      setPreviewLoading(false);
     }
   }, [ar, detail?.currentPublishedVersion, draft, organizationId, programId, progress, saveState]);
 
@@ -505,15 +587,35 @@ export function ProgramStudioEditor({
   }
 
   async function lifecycle(action: NonNullable<typeof confirmation>) {
+    if (working) return;
     setWorking(true);
     setError("");
+    if (action === "publish") setPublicationFailure(null);
     try {
-      if (action === "publish")
-        await apiFetch(`/v1/organizations/${organizationId}/programs/${programId}/publish`, {
-          method: "POST",
-          body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
-        });
-      else if (action === "abandon")
+      if (action === "publish") {
+        const mode = publicationMode(Boolean(detail?.currentPublishedVersion));
+        const remainedPaused = detail?.status === "PAUSED";
+        const idempotencyKey = publishKeyRef.current ?? crypto.randomUUID();
+        publishKeyRef.current = idempotencyKey;
+        const command = await apiFetch<PublicationCommandResult>(
+          `/v1/organizations/${organizationId}/programs/${programId}/publish`,
+          {
+            method: "POST",
+            body: JSON.stringify({ idempotencyKey }),
+          },
+        );
+        setConfirmation(null);
+        await load();
+        await onChanged();
+        setPublicationSuccess({ mode, remainedPaused, command });
+        publishKeyRef.current = null;
+        window.requestAnimationFrame(() =>
+          window.requestAnimationFrame(() =>
+            document.getElementById("publication-success")?.focus(),
+          ),
+        );
+        return;
+      } else if (action === "abandon")
         await apiFetch(`/v1/organizations/${organizationId}/programs/${programId}/draft/abandon`, {
           method: "POST",
         });
@@ -524,7 +626,56 @@ export function ProgramStudioEditor({
       setConfirmation(null);
       await load();
       await onChanged();
+      if (action === "archive") setActiveArea("settings");
+      const notices: Record<
+        Exclude<LifecycleAction, "publish">,
+        [string, string, string, string]
+      > = {
+        pause: [
+          "Loyalty card paused",
+          "New enrollment and loyalty operations are stopped. Existing cards remain viewable.",
+          "تم إيقاف بطاقة الولاء",
+          "توقف التسجيل الجديد وعمليات الولاء. تبقى البطاقات الحالية قابلة للعرض.",
+        ],
+        resume: [
+          "Loyalty card resumed",
+          "Customer access and loyalty operations now follow the published policy.",
+          "تم استئناف بطاقة الولاء",
+          "يتبع وصول العملاء وعمليات الولاء الآن السياسة المنشورة.",
+        ],
+        archive: [
+          "Loyalty card archived",
+          "The setup and change history are preserved, and the active-card slot is available again.",
+          "تمت أرشفة بطاقة الولاء",
+          "تم حفظ الإعدادات وسجل التغييرات، وأصبحت خانة البطاقة النشطة متاحة مجددًا.",
+        ],
+        restore: [
+          "Loyalty card restored",
+          "The card returned to its preserved state after the plan check passed.",
+          "تمت استعادة بطاقة الولاء",
+          "عادت البطاقة إلى حالتها المحفوظة بعد اجتياز فحص الخطة.",
+        ],
+        abandon: [
+          "Draft abandoned",
+          "The published card remains unchanged and the abandoned update stays in history.",
+          "تم التخلي عن المسودة",
+          "تبقى البطاقة المنشورة دون تغيير ويظل الإصدار المتروك في السجل.",
+        ],
+      };
+      const notice = notices[action];
+      setLifecycleNotice({
+        title: notice[ar ? 2 : 0],
+        message: notice[ar ? 3 : 1],
+        action,
+      });
     } catch (caught) {
+      if (action === "publish") {
+        const code = caught instanceof ApiClientError ? caught.code : "NETWORK_ERROR";
+        setPublicationFailure({ code, presentation: publicationFailurePresentation(code, ar) });
+        setConfirmation(null);
+        setActiveArea("launch");
+        return;
+      }
       if (caught instanceof ApiClientError)
         setActiveArea(studioAreaForPublicationError(caught.code));
       if (
@@ -551,6 +702,8 @@ export function ProgramStudioEditor({
       });
       await load();
       await onChanged();
+      setPublicationSuccess(null);
+      setPublicationFailure(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to create a draft.");
     } finally {
@@ -616,6 +769,11 @@ export function ProgramStudioEditor({
     programStatus: detail.status,
     hasCurrentPublishedVersion: detail.currentPublishedVersion !== null,
   });
+  const savedUnpublishedChanges = hasSavedUnpublishedChanges({
+    hasPublishedVersion: detail.currentPublishedVersion !== null,
+    hasDraftVersion: detail.currentDraftVersion !== null,
+  });
+  const activePublicationMode = publicationMode(detail.currentPublishedVersion !== null);
   const lifecycleState = deriveStudioLifecyclePresentation({
     programStatus: detail.status,
     draftVersionStatus: editingVersion?.status ?? displayVersion.status,
@@ -625,6 +783,7 @@ export function ProgramStudioEditor({
     designComplete,
     locationsReady,
     hasPublishedVersion: detail.currentPublishedVersion !== null,
+    hasUnpublishedChanges: savedUnpublishedChanges,
     publicationAllowed: publicationDecision.allowed,
     planName: plan,
     validationIssues: validation?.errors,
@@ -658,7 +817,13 @@ export function ProgramStudioEditor({
             ) : (
               <Save size={16} aria-hidden="true" />
             )}
-            <span>{statusLabel(saveState, ar)}</span>
+            <span>
+              {savedUnpublishedChanges && saveState === "saved"
+                ? ar
+                  ? "تغييرات محفوظة · ليست مباشرة بعد"
+                  : "Saved changes · Not live yet"
+                : statusLabel(saveState, ar)}
+            </span>
           </div>
         ) : (
           <div className="studio-save-state studio-save-state--saved" role="status">
@@ -698,6 +863,30 @@ export function ProgramStudioEditor({
       />
 
       {error ? <Alert tone="danger" title={error} /> : null}
+      {lifecycleNotice ? (
+        <Alert tone="success" title={lifecycleNotice.title}>
+          {lifecycleNotice.message}
+          {lifecycleNotice.action === "archive" ? (
+            <div className="studio-lifecycle-notice__actions">
+              <Button onClick={onClose}>
+                {ar ? "العودة إلى بطاقات الولاء" : "Return to Loyalty Cards"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setActiveArea("settings");
+                  window.requestAnimationFrame(() =>
+                    document.getElementById("studio-change-history")?.focus(),
+                  );
+                }}
+              >
+                <History size={16} aria-hidden="true" />
+                {ar ? "عرض سجل التغييرات" : "View change history"}
+              </Button>
+            </div>
+          ) : null}
+        </Alert>
+      ) : null}
 
       <div className="studio-mobile-navigation">
         <button
@@ -751,6 +940,7 @@ export function ProgramStudioEditor({
             setDraft={setDraft}
             displayVersion={displayVersion}
             detail={detail}
+            auditEvents={auditEvents}
             organizationId={organizationId}
             programId={programId}
             locations={locations}
@@ -763,11 +953,13 @@ export function ProgramStudioEditor({
             validating={working}
             selectedProfile={selectedProfile}
             selectedPreview={selectedPreview}
-            previewLoading={previewLoading}
+            previewLoadState={previewLoadState}
             progress={progress}
             onProgress={setProgress}
             onProfile={setSelectedProfile}
             onEditDesign={onEditDesign}
+            onOpenCustomers={onOpenCustomers}
+            onOpenBilling={onOpenBilling}
             onArea={setActiveArea}
             onValidate={() => void validate()}
             onIssue={(issue) => setActiveArea(studioAreaForValidationPath(issue.path))}
@@ -777,6 +969,15 @@ export function ProgramStudioEditor({
             onCreateDraft={() => void createDraft()}
             onPublish={() => setConfirmation("publish")}
             onLifecycle={setConfirmation}
+            organization={organization}
+            enrollmentAccess={enrollmentAccess}
+            walletHealth={walletHealth}
+            publicationMode={activePublicationMode}
+            publicationSuccess={publicationSuccess}
+            publicationFailure={publicationFailure}
+            hasUnpublishedChanges={savedUnpublishedChanges}
+            onRetryPublication={() => void lifecycle("publish")}
+            onReloadPublication={() => void reloadLatest()}
             onViewVersion={(id) => void viewHistorical(id)}
             onLoadMoreVersions={historyCursor ? () => void loadMoreVersions() : undefined}
           />
@@ -796,8 +997,22 @@ export function ProgramStudioEditor({
         onClose={() => setHistoricalVersion(null)}
         ar={ar}
       />
+      <PublicationConfirmationDialog
+        open={confirmation === "publish"}
+        mode={activePublicationMode}
+        paused={detail.status === "PAUSED"}
+        startsTrial={Boolean(
+          activePublicationMode === "first-launch" &&
+            organization?.billingProfile?.subscriptionStatus === "PENDING_ACTIVATION" &&
+            organization.billingProfile.trialStart === null,
+        )}
+        working={working && confirmation === "publish"}
+        ar={ar}
+        onClose={() => setConfirmation(null)}
+        onConfirm={() => void lifecycle("publish")}
+      />
       <AlertDialog
-        open={Boolean(confirmation)}
+        open={Boolean(confirmation && confirmation !== "publish")}
         title={confirmation ? lifecycleActionLabel(confirmation, ar) : ""}
         description={
           confirmation
@@ -808,9 +1023,13 @@ export function ProgramStudioEditor({
               })
             : ""
         }
-        confirmLabel={working ? (ar ? "جارٍ التنفيذ…" : "Working…") : ar ? "تأكيد" : "Confirm"}
+        confirmLabel={
+          confirmation && confirmation !== "publish" ? lifecycleActionLabel(confirmation, ar) : ""
+        }
         cancelLabel={ar ? "إلغاء" : "Cancel"}
+        closeLabel={ar ? "إغلاق" : "Close"}
         danger={confirmation === "archive" || confirmation === "abandon"}
+        loading={working && Boolean(confirmation && confirmation !== "publish")}
         onClose={() => setConfirmation(null)}
         onConfirm={() => {
           if (confirmation) void lifecycle(confirmation);
@@ -989,6 +1208,7 @@ function StudioAreaContent({
   setDraft,
   displayVersion,
   detail,
+  auditEvents,
   organizationId,
   programId,
   locations,
@@ -1001,11 +1221,13 @@ function StudioAreaContent({
   validating,
   selectedProfile,
   selectedPreview,
-  previewLoading,
+  previewLoadState,
   progress,
   onProgress,
   onProfile,
   onEditDesign,
+  onOpenCustomers,
+  onOpenBilling,
   onArea,
   onValidate,
   onIssue,
@@ -1015,6 +1237,15 @@ function StudioAreaContent({
   onCreateDraft,
   onPublish,
   onLifecycle,
+  organization,
+  enrollmentAccess,
+  walletHealth,
+  publicationMode: activePublicationMode,
+  publicationSuccess,
+  publicationFailure,
+  hasUnpublishedChanges,
+  onRetryPublication,
+  onReloadPublication,
   onViewVersion,
   onLoadMoreVersions,
 }: {
@@ -1024,6 +1255,7 @@ function StudioAreaContent({
   setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
   displayVersion: ProgramVersion;
   detail: ProgramDetail;
+  auditEvents: ProgramAuditEvent[];
   organizationId: string;
   programId: string;
   locations: LocationItem[];
@@ -1036,11 +1268,13 @@ function StudioAreaContent({
   validating: boolean;
   selectedProfile: PreviewProfile;
   selectedPreview: PreviewResult | undefined;
-  previewLoading: boolean;
+  previewLoadState: PreviewLoadState;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
   onEditDesign: () => void;
+  onOpenCustomers: () => void;
+  onOpenBilling: () => void;
   onArea: (area: StudioArea) => void;
   onValidate: () => void;
   onIssue: (issue: ValidationIssue) => void;
@@ -1050,6 +1284,15 @@ function StudioAreaContent({
   onCreateDraft: () => void;
   onPublish: () => void;
   onLifecycle: (action: LifecycleAction) => void;
+  organization: OrganizationPublicationContext | null;
+  enrollmentAccess: EnrollmentSettings | null;
+  walletHealth: WalletHealth[];
+  publicationMode: ReturnType<typeof publicationMode>;
+  publicationSuccess: PublicationSuccessState | null;
+  publicationFailure: PublicationFailureState | null;
+  hasUnpublishedChanges: boolean;
+  onRetryPublication: () => void;
+  onReloadPublication: () => void;
   onViewVersion: (versionId: string) => void;
   onLoadMoreVersions?: (() => void) | undefined;
 }) {
@@ -1073,6 +1316,7 @@ function StudioAreaContent({
         onStartTest={onStartTest}
         onTestCommand={onTestCommand}
         detail={detail}
+        auditEvents={auditEvents}
         onViewVersion={onViewVersion}
         onLoadMoreVersions={onLoadMoreVersions}
         onAbandon={() => onLifecycle("abandon")}
@@ -1091,11 +1335,17 @@ function StudioAreaContent({
         ar={ar}
         selectedProfile={selectedProfile}
         selectedPreview={selectedPreview}
-        previewLoading={previewLoading}
+        previewLoadState={previewLoadState}
         progress={progress}
         onProgress={onProgress}
         onProfile={onProfile}
         onEditDesign={onEditDesign}
+        organizationId={organizationId}
+        programId={programId}
+        enrollmentAccess={enrollmentAccess}
+        walletHealth={walletHealth}
+        hasUnpublishedChanges={hasUnpublishedChanges}
+        onOpenCustomers={onOpenCustomers}
         onArea={onArea}
         onLifecycle={onLifecycle}
       />
@@ -1152,12 +1402,28 @@ function StudioAreaContent({
       <LaunchPanel
         editable={Boolean(editableDraft)}
         organizationId={organizationId}
+        programId={programId}
+        draft={displayDraft}
+        detail={detail}
+        locations={locations}
+        plan={plan}
+        organization={organization}
+        access={enrollmentAccess}
+        walletHealth={walletHealth}
         ar={ar}
         lifecycleState={lifecycleState}
+        mode={activePublicationMode}
+        success={publicationSuccess}
+        failure={publicationFailure}
         validationPanel={nestedSection("validation")}
         onValidate={onValidate}
         onArea={onArea}
         onPublish={onPublish}
+        onRetry={onRetryPublication}
+        onReload={onReloadPublication}
+        onEditDesign={onEditDesign}
+        onOpenBilling={onOpenBilling}
+        onViewCustomers={onOpenCustomers}
         onLifecycle={onLifecycle}
       />
     );
@@ -1168,7 +1434,19 @@ function StudioAreaContent({
       editable={Boolean(editableDraft)}
       lifecycleState={lifecycleState}
       ar={ar}
-      history={nestedSection("versions")}
+      history={
+        editableDraft ? (
+          nestedSection("versions")
+        ) : (
+          <VersionHistory
+            versions={detail.versions}
+            auditEvents={auditEvents}
+            ar={ar}
+            onView={onViewVersion}
+            onLoadMore={onLoadMoreVersions}
+          />
+        )
+      }
       onEditDesign={onEditDesign}
       onCreateDraft={onCreateDraft}
       onLifecycle={onLifecycle}
@@ -1186,11 +1464,17 @@ function StudioOverview({
   ar,
   selectedProfile,
   selectedPreview,
-  previewLoading,
+  previewLoadState,
   progress,
   onProgress,
   onProfile,
   onEditDesign,
+  organizationId,
+  programId,
+  enrollmentAccess,
+  walletHealth,
+  hasUnpublishedChanges,
+  onOpenCustomers,
   onArea,
   onLifecycle,
 }: {
@@ -1203,11 +1487,17 @@ function StudioOverview({
   ar: boolean;
   selectedProfile: PreviewProfile;
   selectedPreview: PreviewResult | undefined;
-  previewLoading: boolean;
+  previewLoadState: PreviewLoadState;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
   onEditDesign: () => void;
+  organizationId: string;
+  programId: string;
+  enrollmentAccess: EnrollmentSettings | null;
+  walletHealth: WalletHealth[];
+  hasUnpublishedChanges: boolean;
+  onOpenCustomers: () => void;
   onArea: (area: StudioArea) => void;
   onLifecycle: (action: LifecycleAction) => void;
 }) {
@@ -1221,10 +1511,60 @@ function StudioOverview({
     displayDraft.locationIds.includes(location.id),
   );
   const changedAt = detail.updatedAt ?? displayVersion.publishedAt ?? null;
-  const primaryAction = lifecycleState.primaryAction;
+  const publishedDraft =
+    detail.currentPublishedVersion &&
+    hasPublishedCustomerPreviewPayload(detail.currentPublishedVersion)
+      ? versionToDraft(detail, detail.currentPublishedVersion)
+      : null;
+  const customerPreview = selectCustomerPreviewSource({
+    hasCurrentPublishedVersion: Boolean(detail.currentPublishedVersion),
+    currentPublishedPreview: publishedDraft,
+    savedDraft: displayDraft,
+    draftPreviewSupported: lifecycleState.key !== "archived",
+  });
+  const customerPreviewDraft = customerPreview.preview ?? displayDraft;
+  const publishedPreviewContext = Boolean(detail.currentPublishedVersion);
+  const publishedPolicy = enrollmentAccess?.publishedVersion?.policy ?? null;
+  const sharing = deriveProgramSharingPresentation({
+    lifecycle: detail.status,
+    enrollmentPolicy: publishedPolicy,
+    hasPublishedVersion: Boolean(detail.currentPublishedVersion),
+    publicUrl: enrollmentAccess?.publicUrl ?? null,
+    slug: enrollmentAccess?.publicSlug ?? null,
+    qrAvailability: Boolean(enrollmentAccess?.publicSlug),
+    customerAccessState:
+      enrollmentAccess?.enrollmentLinkStatus === "ACTIVE" ? "available" : "unavailable",
+    locale: ar ? "ar" : "en",
+  });
+  const primaryAction =
+    detail.currentPublishedVersion && lifecycleState.key === "paused"
+      ? ({ kind: "lifecycle", action: "resume", label: sharing.primaryActionLabel } as const)
+      : detail.currentPublishedVersion && lifecycleState.key === "archived"
+        ? ({ kind: "lifecycle", action: "restore", label: sharing.primaryActionLabel } as const)
+        : hasUnpublishedChanges
+          ? ({
+              kind: "navigate",
+              area: "launch",
+              label: ar ? "مراجعة التغييرات" : "Review changes",
+            } as const)
+          : detail.currentPublishedVersion && sharing.primaryAction === "share"
+            ? ({ kind: "share", label: sharing.primaryActionLabel } as const)
+            : detail.currentPublishedVersion && sharing.primaryAction === "review-enrollment"
+              ? ({
+                  kind: "navigate",
+                  area: "customers-locations",
+                  label: sharing.primaryActionLabel,
+                } as const)
+              : lifecycleState.primaryAction;
 
   function runPrimaryAction() {
-    if (primaryAction.kind === "navigate") onArea(primaryAction.area);
+    if (primaryAction.kind === "share") {
+      document.getElementById("studio-live-sharing")?.focus();
+      document.getElementById("studio-live-sharing")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    } else if (primaryAction.kind === "navigate") onArea(primaryAction.area);
     else if (primaryAction.kind === "lifecycle") onLifecycle(primaryAction.action);
     else onArea("launch");
   }
@@ -1233,11 +1573,14 @@ function StudioOverview({
     <div className="studio-overview">
       <div className="studio-overview__hero">
         <StudioPreview
-          draft={displayDraft}
+          draft={customerPreviewDraft}
           ar={ar}
           selectedProfile={selectedProfile}
-          preview={selectedPreview}
-          loading={previewLoading}
+          preview={customerPreview.source === "draft" ? selectedPreview : undefined}
+          loadState={previewLoadState}
+          source={customerPreview.source}
+          publishedPreviewContext={publishedPreviewContext}
+          publishedStatus={detail.status}
           progress={progress}
           onProgress={onProgress}
           onProfile={onProfile}
@@ -1246,9 +1589,13 @@ function StudioOverview({
           <span className="dashboard-card__label">{ar ? "الخطوة التالية" : "NEXT"}</span>
           <h3 id="studio-next-action-title">{primaryAction.label}</h3>
           <p>
-            {lifecycleState.key === "draft" || lifecycleState.key === "ready"
-              ? lifecycleState.launch.description
-              : lifecycleState.guidance.description}
+            {hasUnpublishedChanges
+              ? ar
+                ? "راجع التغييرات المحفوظة قبل نشرها. البطاقة المباشرة الحالية لم تتغير."
+                : "Review the saved changes before publishing them. The current live card is unchanged."
+              : lifecycleState.key === "draft" || lifecycleState.key === "ready"
+                ? lifecycleState.launch.description
+                : lifecycleState.guidance.description}
           </p>
           <Button onClick={runPrimaryAction}>
             {primaryAction.kind === "lifecycle" && primaryAction.action === "resume" ? (
@@ -1337,6 +1684,20 @@ function StudioOverview({
         </section>
       </div>
 
+      {detail.currentPublishedVersion ? (
+        <LiveAccessSummary
+          detail={detail}
+          access={enrollmentAccess}
+          walletHealth={walletHealth}
+          organizationId={organizationId}
+          programId={programId}
+          ar={ar}
+          hasUnpublishedChanges={hasUnpublishedChanges}
+          onReviewChanges={() => onArea("launch")}
+          onViewCustomers={onOpenCustomers}
+        />
+      ) : null}
+
       <div className="studio-design-owner">
         <div>
           <Eye size={19} aria-hidden="true" />
@@ -1364,7 +1725,10 @@ function StudioPreview({
   ar,
   selectedProfile,
   preview,
-  loading,
+  loadState,
+  source,
+  publishedPreviewContext,
+  publishedStatus,
   progress,
   onProgress,
   onProfile,
@@ -1373,19 +1737,50 @@ function StudioPreview({
   ar: boolean;
   selectedProfile: PreviewProfile;
   preview: PreviewResult | undefined;
-  loading: boolean;
+  loadState: PreviewLoadState;
+  source: "published" | "draft" | "unavailable";
+  publishedPreviewContext: boolean;
+  publishedStatus: ProgramOperationalStatus;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
 }) {
-  const profileLabel =
-    selectedProfile === "CUSTOMER_WEB"
+  const profileLabel = publishedPreviewContext
+    ? ar
+      ? "عرض العميل المنشور"
+      : "Published customer view"
+    : selectedProfile === "CUSTOMER_WEB"
       ? ar
         ? "بطاقة العميل"
         : "Customer card"
       : selectedProfile === "APPLE_WALLET"
         ? "Apple Wallet"
         : "Google Wallet";
+  const publishedState =
+    publishedStatus === "PUBLISHED"
+      ? {
+          eyebrow: ar ? "المنشور حالياً" : "CURRENTLY LIVE",
+          label: ar ? "مباشرة الآن" : "Currently live",
+          tone: "success" as const,
+        }
+      : publishedStatus === "PAUSED"
+        ? {
+            eyebrow: ar ? "المظهر المنشور" : "PUBLISHED APPEARANCE",
+            label: ar ? "متوقفة" : "Paused",
+            tone: "warning" as const,
+          }
+        : publishedStatus === "ARCHIVED"
+          ? {
+              eyebrow: ar ? "المظهر المحفوظ" : "PRESERVED APPEARANCE",
+              label: ar ? "مؤرشفة" : "Archived",
+              tone: "neutral" as const,
+            }
+          : {
+              eyebrow: ar ? "المظهر المنشور" : "PUBLISHED APPEARANCE",
+              label: ar ? "منشورة" : "Published",
+              tone: "neutral" as const,
+            };
+  const loading = source === "draft" && (loadState === "idle" || loadState === "loading");
   return (
     <section
       className="studio-preview-panel studio-preview-panel--overview"
@@ -1393,36 +1788,52 @@ function StudioPreview({
     >
       <div className="studio-preview-header">
         <div>
-          <span className="dashboard-card__label">{ar ? "ما يراه العميل" : "CUSTOMER VIEW"}</span>
+          <span className="dashboard-card__label">
+            {publishedPreviewContext
+              ? publishedState.eyebrow
+              : ar
+                ? "ما يراه العميل"
+                : "CUSTOMER VIEW"}
+          </span>
           <h3>{profileLabel}</h3>
         </div>
-        <Eye size={20} aria-hidden="true" />
+        {publishedPreviewContext ? (
+          <Badge tone={publishedState.tone}>{publishedState.label}</Badge>
+        ) : (
+          <Eye size={20} aria-hidden="true" />
+        )}
       </div>
+      {source === "draft" ? (
+        <div
+          className="studio-preview-tabs"
+          role="tablist"
+          aria-label={ar ? "أسطح المعاينة" : "Preview surfaces"}
+        >
+          {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
+            <button
+              type="button"
+              role="tab"
+              key={profile}
+              aria-selected={selectedProfile === profile}
+              onClick={() => onProfile(profile)}
+            >
+              {profile === "CUSTOMER_WEB"
+                ? ar
+                  ? "العميل"
+                  : "Customer"
+                : profile === "APPLE_WALLET"
+                  ? "Apple"
+                  : "Google"}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div
-        className="studio-preview-tabs"
-        role="tablist"
-        aria-label={ar ? "أسطح المعاينة" : "Preview surfaces"}
+        className={`studio-device-frame studio-device-frame--${publishedPreviewContext ? "published" : selectedProfile.toLowerCase()}`}
       >
-        {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
-          <button
-            type="button"
-            role="tab"
-            key={profile}
-            aria-selected={selectedProfile === profile}
-            onClick={() => onProfile(profile)}
-          >
-            {profile === "CUSTOMER_WEB"
-              ? ar
-                ? "العميل"
-                : "Customer"
-              : profile === "APPLE_WALLET"
-                ? "Apple"
-                : "Google"}
-          </button>
-        ))}
-      </div>
-      <div className={`studio-device-frame studio-device-frame--${selectedProfile.toLowerCase()}`}>
-        {preview ? (
+        {source === "published" ? (
+          <PublishedCustomerPreview draft={draft} progress={progress} ar={ar} />
+        ) : source === "draft" && preview ? (
           <Image
             src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview.svg)}`}
             alt={ar ? `معاينة ${profileLabel}` : `${profileLabel} preview`}
@@ -1432,37 +1843,99 @@ function StudioPreview({
           />
         ) : (
           <div className="studio-preview-loading" role="status">
-            <RefreshCcw className={loading ? "studio-spin" : ""} aria-hidden="true" />
+            {loading ? (
+              <RefreshCcw className="studio-spin" aria-hidden="true" />
+            ) : (
+              <CircleAlert aria-hidden="true" />
+            )}
             <span>
               {loading
                 ? ar
-                  ? "جارٍ تجهيز المعاينة…"
-                  : "Preparing preview…"
+                  ? "جارٍ تحميل المعاينة…"
+                  : "Loading preview…"
                 : ar
-                  ? "ستظهر المعاينة هنا"
-                  : "Preview will appear here"}
+                  ? "المعاينة غير متاحة"
+                  : "Preview unavailable"}
             </span>
           </div>
         )}
       </div>
-      <FormField label={ar ? "تقدم العميل" : "Customer progress"}>
-        <div className="studio-preview-progress">
-          <input
-            type="range"
-            min={0}
-            max={draft.requiredStampCount}
-            value={progress}
-            onChange={(event) => onProgress(Number(event.target.value))}
-          />
-          <output dir="ltr">
-            {progress}/{draft.requiredStampCount}
-          </output>
-        </div>
-      </FormField>
-      {preview?.warnings.map((warning) => (
-        <Alert key={warning.code} tone="warning" title={warning.message} />
-      ))}
+      {source !== "unavailable" ? (
+        <FormField label={ar ? "تقدم العميل" : "Customer progress"}>
+          <div className="studio-preview-progress">
+            <input
+              type="range"
+              min={0}
+              max={draft.requiredStampCount}
+              value={progress}
+              onChange={(event) => onProgress(Number(event.target.value))}
+            />
+            <output dir="ltr">
+              {progress}/{draft.requiredStampCount}
+            </output>
+          </div>
+        </FormField>
+      ) : null}
+      {source === "draft" &&
+        preview?.warnings.map((warning) => (
+          <Alert key={warning.code} tone="warning" title={warning.message} />
+        ))}
     </section>
+  );
+}
+
+function PublishedCustomerPreview({
+  draft,
+  progress,
+  ar,
+}: {
+  draft: ProgramDraftInput;
+  progress: number;
+  ar: boolean;
+}) {
+  const content = draft.translations[ar ? "ar" : "en"];
+  const reward = [...draft.rewards].sort(
+    (left, right) => right.thresholdStampCount - left.thresholdStampCount,
+  )[0];
+  const rewardName = reward?.translations[ar ? "ar" : "en"].name ?? content.rewardSummary;
+  const stampSlots = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"].slice(
+    0,
+    Math.min(draft.requiredStampCount, 12),
+  );
+  return (
+    <div
+      className="studio-published-customer-preview"
+      style={{
+        backgroundColor: draft.visualTheme.backgroundColor,
+        color: draft.visualTheme.foregroundColor,
+        borderRadius: `${Math.max(14, draft.visualTheme.borderRadius)}px`,
+      }}
+      role="img"
+      aria-label={ar ? "عرض بطاقة العميل المنشورة حالياً" : "Currently published customer card"}
+    >
+      <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
+      <h4>{content.programName}</h4>
+      <p>{content.shortDescription}</p>
+      <div className="studio-published-customer-preview__stamps" aria-hidden="true">
+        {stampSlots.map((slot, index) => (
+          <span
+            key={slot}
+            className={index < progress ? "is-earned" : ""}
+            style={{
+              borderColor: draft.visualTheme.accentColor,
+              backgroundColor: index < progress ? draft.visualTheme.accentColor : "transparent",
+            }}
+          />
+        ))}
+      </div>
+      <div className="studio-published-customer-preview__reward">
+        <small>{ar ? "المكافأة" : "REWARD"}</small>
+        <strong>{rewardName}</strong>
+      </div>
+      <output dir="ltr">
+        {Math.min(progress, draft.requiredStampCount)}/{draft.requiredStampCount}
+      </output>
+    </div>
   );
 }
 
@@ -1754,167 +2227,6 @@ function CreateUpdatePrompt({
   );
 }
 
-function LaunchPanel({
-  editable,
-  organizationId,
-  ar,
-  lifecycleState,
-  validationPanel,
-  onValidate,
-  onArea,
-  onPublish,
-  onLifecycle,
-}: {
-  editable: boolean;
-  organizationId: string;
-  ar: boolean;
-  lifecycleState: StudioLifecyclePresentation;
-  validationPanel: React.ReactNode;
-  onValidate: () => void;
-  onArea: (area: StudioArea) => void;
-  onPublish: () => void;
-  onLifecycle: (action: LifecycleAction) => void;
-}) {
-  const automated = lifecycleState.launch.requirements.find(
-    (requirement) => requirement.key === "automated",
-  );
-
-  function runAction(action: StudioPresentationAction) {
-    if (action.kind === "navigate") onArea(action.area);
-    else if (action.kind === "lifecycle") onLifecycle(action.action);
-    else if (action.kind === "publish") onPublish();
-    else onValidate();
-  }
-
-  return (
-    <div className="studio-area-stack">
-      <section
-        className={`studio-launch-summary studio-launch-summary--${lifecycleState.launch.tone}`}
-        aria-labelledby="studio-launch-title"
-        role="status"
-      >
-        <div>
-          <span className="dashboard-card__label">
-            {ar ? "الحالة العامة" : "OVERALL LAUNCH STATUS"}
-          </span>
-          <h3 id="studio-launch-title">{lifecycleState.launch.label}</h3>
-          <p>{lifecycleState.launch.description}</p>
-        </div>
-        {lifecycleState.launch.tone === "success" ? (
-          <ShieldCheck size={34} aria-hidden="true" />
-        ) : lifecycleState.launch.tone === "warning" ? (
-          <Pause size={34} aria-hidden="true" />
-        ) : lifecycleState.launch.tone === "neutral" ? (
-          <Archive size={34} aria-hidden="true" />
-        ) : lifecycleState.launch.tone === "danger" ? (
-          <CircleAlert size={34} aria-hidden="true" />
-        ) : (
-          <Rocket size={34} aria-hidden="true" />
-        )}
-      </section>
-
-      <ul
-        className="studio-readiness-list"
-        aria-label={ar ? "متطلبات الإطلاق" : "Launch requirements"}
-      >
-        {lifecycleState.launch.requirements.map((requirement) => (
-          <ReadinessRow
-            key={requirement.key}
-            requirement={requirement}
-            onAction={
-              requirement.action &&
-              !(
-                requirement.action.kind === lifecycleState.launch.action.kind &&
-                requirement.action.label === lifecycleState.launch.action.label
-              )
-                ? () => {
-                    if (requirement.action) runAction(requirement.action);
-                  }
-                : undefined
-            }
-          />
-        ))}
-      </ul>
-
-      <ProgramWalletReadiness organizationId={organizationId} ar={ar} />
-
-      {editable ? (
-        <details className="studio-launch-checks" open={!automated?.complete}>
-          <summary>
-            <span>
-              <ShieldCheck size={19} aria-hidden="true" />{" "}
-              <strong>{ar ? "تفاصيل الفحوصات الآلية" : "Automated check details"}</strong>
-            </span>
-            <ChevronDown size={18} aria-hidden="true" />
-          </summary>
-          <div>{validationPanel}</div>
-        </details>
-      ) : null}
-
-      <div className="studio-launch-action">
-        <div>
-          <strong>{lifecycleState.launch.action.label}</strong>
-          <small id="studio-launch-action-description">{lifecycleState.launch.description}</small>
-        </div>
-        <Button
-          onClick={() => runAction(lifecycleState.launch.action)}
-          aria-describedby="studio-launch-action-description"
-        >
-          {lifecycleState.launch.action.kind === "publish" ? (
-            <Rocket size={16} aria-hidden="true" />
-          ) : lifecycleState.launch.action.kind === "lifecycle" &&
-            lifecycleState.launch.action.action === "resume" ? (
-            <Play size={16} aria-hidden="true" />
-          ) : lifecycleState.launch.action.kind === "lifecycle" &&
-            lifecycleState.launch.action.action === "restore" ? (
-            <RotateCcw size={16} aria-hidden="true" />
-          ) : (
-            <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
-          )}
-          {lifecycleState.launch.action.label}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function ReadinessRow({
-  requirement,
-  onAction,
-}: {
-  requirement: StudioLifecyclePresentation["launch"]["requirements"][number];
-  onAction?: (() => void) | undefined;
-}) {
-  return (
-    <li className={requirement.blocking ? "studio-readiness-row--blocking" : ""}>
-      <span className={requirement.complete ? "studio-readiness-row__complete" : ""}>
-        {requirement.complete ? (
-          <Check size={16} aria-hidden="true" />
-        ) : (
-          <CircleAlert size={16} aria-hidden="true" />
-        )}
-      </span>
-      <span>
-        <strong>{requirement.label}</strong>
-        <small>{requirement.description}</small>
-      </span>
-      <span className="studio-readiness-row__status">
-        <strong>{requirement.status}</strong>
-        {onAction && requirement.action ? (
-          <button
-            type="button"
-            onClick={onAction}
-            aria-label={`${requirement.action.label}: ${requirement.label}`}
-          >
-            {requirement.action.label}
-            <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
-          </button>
-        ) : null}
-      </span>
-    </li>
-  );
-}
-
 function StudioSettingsPanel({
   draft,
   editable,
@@ -2031,6 +2343,7 @@ function StudioSectionContent({
   onStartTest,
   onTestCommand,
   detail,
+  auditEvents,
   onViewVersion,
   onLoadMoreVersions,
   onAbandon,
@@ -2066,6 +2379,7 @@ function StudioSectionContent({
       | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
   ) => void;
   detail: ProgramDetail;
+  auditEvents: ProgramAuditEvent[];
   onViewVersion: (versionId: string) => void;
   onLoadMoreVersions?: (() => void) | undefined;
   onAbandon: () => void;
@@ -2116,7 +2430,7 @@ function StudioSectionContent({
             onChange={(event) =>
               update((current) => ({ ...current, changeSummary: event.target.value }))
             }
-            placeholder="What changed in this version?"
+            placeholder="Summarize what changed"
           />
         </FormField>
       </div>
@@ -2159,7 +2473,7 @@ function StudioSectionContent({
         <Alert tone="info" title={ar ? "سياسة عمليات W4" : "W4 operations policy"}>
           {ar
             ? "تُطبّق حدود العملية واليوم وسياسة الشراء من إصدار البرنامج المثبت للعضوية."
-            : "Operation limits, gross daily caps, purchase policy, and reset semantics come from the Membership's pinned Program Version."}
+            : "Operation limits, daily caps, purchase policy, and reset behavior follow the setup each customer joined under."}
         </Alert>
         <Alert tone="info" title={ar ? "محاكاة آمنة" : "Safe simulation"}>
           {ar
@@ -2370,6 +2684,7 @@ function StudioSectionContent({
     <div className="studio-section-content">
       <VersionHistory
         versions={detail.versions}
+        auditEvents={auditEvents}
         ar={ar}
         onView={onViewVersion}
         onLoadMore={onLoadMoreVersions}
@@ -2382,7 +2697,7 @@ function StudioSectionContent({
         <Alert tone="info" title={ar ? "المسودة الأولى محفوظة" : "Initial draft is preserved"}>
           {ar
             ? "استخدم إجراء الأرشفة الآمن لإخفاء البطاقة غير المنشورة مع الاحتفاظ بالمسودة وسجل الإصدارات."
-            : "Use the safe Archive action to hide this unpublished card while preserving its draft and version history."}
+            : "Use Archive to hide this unpublished card while preserving its draft and change history."}
         </Alert>
       )}
     </div>
@@ -3561,19 +3876,50 @@ function TestModePanel({
   );
 }
 
+function auditEventLabel(event: ProgramAuditEvent, ar: boolean): string {
+  if (event.action === "program.published") {
+    const first = event.metadata?.publicationType === "FIRST_PUBLICATION";
+    return first
+      ? ar
+        ? "تم إطلاق بطاقة الولاء"
+        : "Loyalty card launched"
+      : ar
+        ? "تم نشر تغييرات البطاقة"
+        : "Card changes published";
+  }
+  const labels: Record<string, [string, string]> = {
+    "program.draft_updated": ["Draft change saved", "تم حفظ تغيير في المسودة"],
+    "program.draft_abandoned": ["Draft abandoned", "تم التخلي عن المسودة"],
+    "program.paused": ["Loyalty card paused", "تم إيقاف بطاقة الولاء"],
+    "program.resumed": ["Loyalty card resumed", "تم استئناف بطاقة الولاء"],
+    "program.archived": ["Loyalty card archived", "تمت أرشفة بطاقة الولاء"],
+    "program.restored": ["Loyalty card restored", "تمت استعادة بطاقة الولاء"],
+    "program.version_superseded": ["Previous publication replaced", "تم استبدال النشر السابق"],
+    "program.wallet_sync_job_created": [
+      "Wallet status sync queued",
+      "تمت جدولة مزامنة حالة Wallet",
+    ],
+  };
+  return (
+    labels[event.action]?.[ar ? 1 : 0] ?? (ar ? "تم تحديث بطاقة الولاء" : "Loyalty card updated")
+  );
+}
+
 function VersionHistory({
   versions,
+  auditEvents,
   ar,
   onView,
   onLoadMore,
 }: {
   versions: ProgramVersion[];
+  auditEvents: ProgramAuditEvent[];
   ar: boolean;
   onView: (versionId: string) => void;
   onLoadMore?: (() => void) | undefined;
 }) {
   return (
-    <Card className="studio-version-history">
+    <Card className="studio-version-history" id="studio-change-history" tabIndex={-1}>
       <div className="studio-section-heading">
         <div>
           <span className="dashboard-card__label">{ar ? "سجل التغييرات" : "CHANGE HISTORY"}</span>
@@ -3581,6 +3927,35 @@ function VersionHistory({
         </div>
         <History size={20} aria-hidden="true" />
       </div>
+      {auditEvents.length ? (
+        <div className="studio-audit-timeline">
+          <h4>{ar ? "نشاط البطاقة" : "Card activity"}</h4>
+          {auditEvents.slice(0, 12).map((event) => (
+            <article key={event.id}>
+              <span aria-hidden="true" />
+              <div>
+                <strong>{auditEventLabel(event, ar)}</strong>
+                <small>{event.actor?.displayName ?? (ar ? "النظام" : "System")}</small>
+              </div>
+              <time dateTime={event.createdAt}>
+                {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-IQ", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(event.createdAt))}
+              </time>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="studio-audit-timeline__empty">
+          {ar
+            ? "ستظهر إجراءات النشر ودورة الحياة هنا."
+            : "Publication and lifecycle actions will appear here."}
+        </p>
+      )}
+      <h4 className="studio-version-history__subheading">
+        {ar ? "لقطات الإعداد المحفوظ" : "Saved setup snapshots"}
+      </h4>
       {versions.map((version) => {
         const timestamp =
           version.publishedAt ??

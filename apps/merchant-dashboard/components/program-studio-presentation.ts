@@ -144,6 +144,7 @@ export interface StudioLifecyclePresentationInput {
   designComplete: boolean;
   locationsReady: boolean;
   hasPublishedVersion: boolean;
+  hasUnpublishedChanges?: boolean | undefined;
   publicationAllowed: boolean;
   planName: "STARTER" | "GROWTH" | "SCALE";
   validationIssues?: ReadonlyArray<{ code: string; path: string }> | undefined;
@@ -581,9 +582,10 @@ export function deriveStudioLifecyclePresentation(
   const ar = locale === "ar";
   const domainKey = lifecycleKey(programStatus, draftVersionStatus);
   const operationallyCompleted = ["live", "paused", "scheduled", "suspended"].includes(domainKey);
+  const updateInProgress = Boolean(input.hasUnpublishedChanges);
   const archivedAfterPublication = domainKey === "archived" && input.hasPublishedVersion;
   const checksComplete =
-    operationallyCompleted ||
+    (!updateInProgress && operationallyCompleted) ||
     archivedAfterPublication ||
     (input.validationState !== "failed" &&
       (input.validationState === "passed" ||
@@ -591,7 +593,7 @@ export function deriveStudioLifecyclePresentation(
   const testComplete =
     input.testState === "complete" ||
     ["TEST_READY", "PUBLISHED", "SUPERSEDED"].includes(draftVersionStatus ?? "") ||
-    operationallyCompleted ||
+    (!updateInProgress && operationallyCompleted) ||
     archivedAfterPublication;
   const key =
     domainKey === "ready" &&
@@ -599,7 +601,7 @@ export function deriveStudioLifecyclePresentation(
       ? "draft"
       : domainKey;
   const lifecycle = { key, ...stateCopy[locale][key] } as MerchantStudioState;
-  const actions = presentationAction(
+  const baseActions = presentationAction(
     key,
     checksComplete,
     testComplete,
@@ -607,6 +609,28 @@ export function deriveStudioLifecyclePresentation(
     input.locationsReady,
     locale,
   );
+  const actions = updateInProgress
+    ? {
+        primary: !checksComplete
+          ? ({
+              kind: "navigate",
+              area: "launch",
+              label: ar ? "مراجعة التغييرات" : "Review changes",
+            } as const)
+          : !testComplete
+            ? ({
+                kind: "navigate",
+                area: "test",
+                label: ar ? "اختبار التغييرات" : "Test changes",
+              } as const)
+            : ({
+                kind: "navigate",
+                area: "launch",
+                label: ar ? "مراجعة التغييرات" : "Review changes",
+              } as const),
+        secondary: baseActions.secondary,
+      }
+    : baseActions;
   const currentJourneyStage: StudioJourneyStagePresentation["key"] = [
     "live",
     "paused",
@@ -681,19 +705,23 @@ export function deriveStudioLifecyclePresentation(
             ? ar
               ? "غير متاحة مؤقتاً"
               : "Temporarily unavailable"
-            : ar
-              ? "متاحة للعملاء"
-              : "Available to customers",
+            : key === "ready"
+              ? ar
+                ? "انشرها لإتاحتها"
+                : "Publish to make available"
+              : ar
+                ? "متاحة للعملاء"
+                : "Available to customers",
       "launch",
     ),
   ];
 
   const { requirements, planBlocked } = launchRequirements(input, checksComplete, testComplete);
-  const lifecycleOwnsLaunch = ["live", "paused", "archived", "scheduled", "suspended"].includes(
-    key,
-  );
+  const lifecycleOwnsLaunch =
+    ["live", "paused", "archived", "scheduled", "suspended"].includes(key) &&
+    !(updateInProgress && (key === "live" || key === "paused"));
   const launchReady =
-    key === "ready" &&
+    (key === "ready" || (updateInProgress && (key === "live" || key === "paused"))) &&
     input.designComplete &&
     checksComplete &&
     testComplete &&
@@ -706,57 +734,93 @@ export function deriveStudioLifecyclePresentation(
   const launchAction: StudioPresentationAction = lifecycleOwnsLaunch
     ? actions.primary
     : launchReady
-      ? { kind: "publish", label: ar ? "نشر البطاقة" : "Publish card" }
+      ? {
+          kind: "publish",
+          label: updateInProgress
+            ? ar
+              ? "نشر التغييرات"
+              : "Publish changes"
+            : ar
+              ? "إطلاق بطاقة الولاء"
+              : "Launch loyalty card",
+        }
       : (firstBlocker?.action ?? actions.primary);
   const launchLabel =
-    key === "live"
-      ? ar
-        ? "البطاقة مباشرة"
-        : "Card is live"
-      : key === "paused"
+    updateInProgress && (key === "live" || key === "paused")
+      ? launchReady
         ? ar
-          ? "البطاقة متوقفة مؤقتاً"
-          : "Card is paused"
-        : key === "archived"
+          ? "جاهزة لنشر التغييرات"
+          : "Ready to publish changes"
+        : ar
+          ? "تغييرات بانتظار النشر"
+          : "Changes waiting to be published"
+      : key === "live"
+        ? ar
+          ? "البطاقة مباشرة"
+          : "Card is live"
+        : key === "paused"
           ? ar
-            ? "البطاقة مؤرشفة"
-            : "Card is archived"
-          : key === "scheduled"
+            ? "البطاقة متوقفة مؤقتاً"
+            : "Card is paused"
+          : key === "archived"
             ? ar
-              ? "مجدولة للإطلاق"
-              : "Scheduled to go live"
-            : key === "suspended"
+              ? "البطاقة مؤرشفة"
+              : "Card is archived"
+            : key === "scheduled"
               ? ar
-                ? "الإطلاق غير متاح"
-                : "Launch unavailable"
-              : launchReady
+                ? "مجدولة للإطلاق"
+                : "Scheduled to go live"
+              : key === "suspended"
                 ? ar
-                  ? "جاهزة للإطلاق"
-                  : "Ready to launch"
-                : ar
-                  ? "غير جاهزة للإطلاق"
-                  : "Not ready to launch";
-  const launchDescription = lifecycleOwnsLaunch
-    ? lifecycle.description
-    : launchReady
-      ? ar
-        ? "اكتملت جميع المتطلبات المطلوبة. أكد النشر لإتاحتها للعملاء."
-        : "Every required step is complete. Confirm publishing to make it available to customers."
-      : (firstBlocker?.description ??
-        (ar
-          ? "أكمل المتطلبات المطلوبة قبل النشر."
-          : "Complete the required steps before publishing."));
+                  ? "الإطلاق غير متاح"
+                  : "Launch unavailable"
+                : launchReady
+                  ? ar
+                    ? "جاهزة للإطلاق"
+                    : "Ready to launch"
+                  : ar
+                    ? "غير جاهزة للإطلاق"
+                    : "Not ready to launch";
+  const launchDescription =
+    updateInProgress && (key === "live" || key === "paused")
+      ? launchReady
+        ? ar
+          ? "اكتملت فحوصات التحديث واختباره. البطاقة الحالية لم تتغير بعد."
+          : "The update has passed checks and testing. The current live card is unchanged."
+        : (firstBlocker?.description ??
+          (ar
+            ? "أكمل فحوصات التحديث واختباره قبل النشر. البطاقة الحالية لم تتغير."
+            : "Complete the update checks and test before publishing. The current live card is unchanged."))
+      : lifecycleOwnsLaunch
+        ? lifecycle.description
+        : launchReady
+          ? ar
+            ? "اكتملت جميع المتطلبات المطلوبة. أكد النشر لإتاحتها للعملاء."
+            : "Every required step is complete. Confirm publishing to make it available to customers."
+          : (firstBlocker?.description ??
+            (ar
+              ? "أكمل المتطلبات المطلوبة قبل النشر."
+              : "Complete the required steps before publishing."));
 
   return {
     ...lifecycle,
-    guidance: guidanceFor(
-      key,
-      checksComplete,
-      testComplete,
-      input.designComplete,
-      input.locationsReady,
-      locale,
-    ),
+    guidance:
+      updateInProgress && key === "live"
+        ? {
+            title: ar ? "تغييرات محفوظة · ليست مباشرة بعد" : "Saved changes · Not live yet",
+            description: ar
+              ? "راجع التغييرات المحفوظة قبل نشرها. البطاقة المباشرة الحالية لم تتغير."
+              : "Review the saved changes before publishing them. The current live card is unchanged.",
+            tone: "brand",
+          }
+        : guidanceFor(
+            key,
+            checksComplete,
+            testComplete,
+            input.designComplete,
+            input.locationsReady,
+            locale,
+          ),
     journeyStages,
     currentJourneyStage,
     primaryAction: actions.primary,
@@ -765,7 +829,7 @@ export function deriveStudioLifecyclePresentation(
       label: launchLabel,
       description: launchDescription,
       tone:
-        key === "live" || launchReady
+        (key === "live" && !updateInProgress) || launchReady
           ? "success"
           : key === "paused"
             ? "warning"

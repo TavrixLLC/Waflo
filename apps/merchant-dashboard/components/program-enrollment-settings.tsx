@@ -12,8 +12,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiUrl } from "../lib/api-client";
+import {
+  deriveProgramSharingPresentation,
+  isLocalPreviewUrl,
+  walletSurfacePresentation,
+} from "./program-publication-presentation";
 
-interface EnrollmentPolicy {
+export interface EnrollmentPolicy {
   emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
   primaryCustomerLocale: "en" | "ar";
   allowLocaleSelection: boolean;
@@ -24,7 +29,7 @@ interface EnrollmentPolicy {
   enrollmentOpen: boolean;
 }
 
-interface EnrollmentSettings {
+export interface EnrollmentSettings {
   programId: string;
   status: string;
   publicSlug: string | null;
@@ -84,6 +89,7 @@ export function ProgramEnrollmentSettings({
   const [busy, setBusy] = useState<"policy" | "slug" | "wallet" | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const [next, providers] = await Promise.all([
@@ -191,6 +197,17 @@ export function ProgramEnrollmentSettings({
     }
   }
 
+  async function copyJoinLink() {
+    if (!settings?.publicUrl) return;
+    try {
+      await navigator.clipboard.writeText(settings.publicUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_500);
+    } catch {
+      setError(ar ? "تعذر نسخ رابط الانضمام." : "The join link could not be copied.");
+    }
+  }
+
   async function reconcileWallet() {
     setBusy("wallet");
     setError("");
@@ -251,6 +268,20 @@ export function ProgramEnrollmentSettings({
       </Card>
     );
   const qrBase = `${apiUrl}/v1/organizations/${organizationId}/programs/${programId}/enrollment-qr`;
+  const livePolicy = settings.publishedVersion?.policy ?? policy;
+  const sharing = deriveProgramSharingPresentation({
+    lifecycle: settings.status as Parameters<
+      typeof deriveProgramSharingPresentation
+    >[0]["lifecycle"],
+    enrollmentPolicy: livePolicy,
+    hasPublishedVersion: Boolean(settings.publishedVersion),
+    publicUrl: settings.publicUrl,
+    slug: settings.publicSlug,
+    qrAvailability: Boolean(settings.publicSlug),
+    customerAccessState: settings.enrollmentLinkStatus === "ACTIVE" ? "available" : "unavailable",
+    locale: ar ? "ar" : "en",
+  });
+  const localPreview = isLocalPreviewUrl(settings.publicUrl);
   return (
     <Card className="program-enrollment-settings">
       <div className="program-enrollment-settings__heading">
@@ -258,32 +289,44 @@ export function ProgramEnrollmentSettings({
           <span className="dashboard-card__label">{ar ? "وصول العملاء" : "CUSTOMER ACCESS"}</span>
           <h2>{ar ? "طريقة انضمام العملاء" : "How customers join"}</h2>
           <p>
-            {ar
-              ? "شارك رابط البطاقة أو رمز QR وحدد المعلومات المطلوبة عند الانضمام."
-              : "Share the card link or QR code and choose what customers provide when they join."}
+            {sharing.canShare
+              ? ar
+                ? "شارك رابط البطاقة أو رمز QR وحدد المعلومات المطلوبة عند الانضمام."
+                : "Share the card link or QR code and choose what customers provide when they join."
+              : ar
+                ? "أدر إعداد التسجيل المحفوظ وراجع متى تصبح مشاركة العملاء متاحة."
+                : "Manage the saved enrollment setup and review when customer sharing is available."}
           </p>
         </div>
-        <Badge tone={settings.enrollmentLinkStatus === "ACTIVE" ? "success" : "warning"}>
-          {settings.enrollmentLinkStatus === "ACTIVE"
-            ? ar
-              ? "متاح للعملاء"
-              : "Available to customers"
-            : settings.enrollmentLinkStatus === "NOT_PUBLISHED"
-              ? ar
-                ? "متاح بعد الإطلاق"
-                : "Available after launch"
-              : ar
-                ? "غير متاح حاليًا"
-                : "Currently unavailable"}
-        </Badge>
+        <Badge tone={sharing.tone}>{sharing.label}</Badge>
       </div>
       {error ? <Alert tone="danger" title={error} /> : null}
       {message ? <Alert tone="success" title={message} /> : null}
+      <div className="program-access-truth" role="status">
+        <ShieldCheck size={18} aria-hidden="true" />
+        <span>
+          <strong>{sharing.label}</strong>
+          <small>{sharing.description}</small>
+        </span>
+      </div>
+      {sharing.blockingReason ? (
+        <Alert
+          tone={sharing.tone === "neutral" ? "info" : "warning"}
+          title={sharing.blockingReason}
+        />
+      ) : null}
       <div className="program-enrollment-settings__grid">
         <section>
           <h3>
             <Link2 aria-hidden="true" /> {ar ? "رابط الانضمام" : "Join link"}
           </h3>
+          <p className="program-enrollment-settings__purpose">
+            {sharing.canShare
+              ? ar
+                ? "استخدمه مع العملاء الجدد للتسجيل في بطاقة الولاء."
+                : "Use this for new customers to enroll in the loyalty card."
+              : sharing.description}
+          </p>
           <FormField
             label={ar ? "عنوان رابط البطاقة" : "Card link name"}
             hint={
@@ -299,37 +342,82 @@ export function ProgramEnrollmentSettings({
             <Button loading={busy === "slug"} onClick={() => void saveSlug()}>
               {ar ? "حفظ الرابط" : "Save URL"}
             </Button>
-            {settings.publicUrl ? (
+            {settings.publicUrl && (sharing.canCopyJoinLink || sharing.canOpenJoinPage) ? (
               <>
-                <Button
-                  variant="secondary"
-                  onClick={() => void navigator.clipboard.writeText(settings.publicUrl ?? "")}
-                >
-                  <Copy size={16} /> {ar ? "نسخ" : "Copy"}
-                </Button>
-                <a href={settings.publicUrl} target="_blank" rel="noreferrer">
-                  <Button variant="secondary">
-                    <ExternalLink size={16} /> {ar ? "فتح" : "Open"}
+                {sharing.canCopyJoinLink ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void copyJoinLink()}
+                    aria-label={ar ? "نسخ رابط انضمام العملاء" : "Copy customer join link"}
+                  >
+                    <Copy size={16} />{" "}
+                    {copied
+                      ? ar
+                        ? "تم نسخ الرابط"
+                        : "Link copied"
+                      : ar
+                        ? "نسخ الرابط"
+                        : "Copy link"}
                   </Button>
-                </a>
+                ) : null}
+                {sharing.canOpenJoinPage ? (
+                  <a
+                    href={settings.publicUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={ar ? "فتح صفحة انضمام العملاء" : "Open customer join page"}
+                  >
+                    <Button variant="secondary">
+                      <ExternalLink size={16} /> {ar ? "فتح صفحة الانضمام" : "Open join page"}
+                    </Button>
+                  </a>
+                ) : null}
               </>
             ) : null}
           </div>
           {settings.publicUrl ? (
-            <code className="public-enrollment-url">{settings.publicUrl}</code>
+            <>
+              {!sharing.canShare ? (
+                <small className="program-local-preview-label">
+                  {ar ? "رابط محفوظ وغير نشط" : "Saved inactive link"}
+                </small>
+              ) : localPreview ? (
+                <small className="program-local-preview-label">
+                  {ar ? "معاينة محلية للتطوير" : "Local development preview"}
+                </small>
+              ) : null}
+              <code className="public-enrollment-url" dir="ltr">
+                {settings.publicUrl}
+              </code>
+            </>
           ) : null}
-          <div className="program-enrollment-settings__actions">
-            <a href={`${qrBase}?format=png&locale=${ar ? "ar" : "en"}`}>
-              <Button variant="secondary">
-                <Download size={16} /> QR PNG
-              </Button>
-            </a>
-            <a href={`${qrBase}?format=svg&locale=${ar ? "ar" : "en"}`}>
-              <Button variant="secondary">
-                <Download size={16} /> QR SVG
-              </Button>
-            </a>
-          </div>
+          {settings.publicSlug && sharing.canDownloadQr ? (
+            <div className="program-enrollment-settings__actions">
+              <a href={`${qrBase}?format=png&locale=${ar ? "ar" : "en"}`} download>
+                <Button
+                  variant="secondary"
+                  aria-label={
+                    ar ? "تنزيل رمز QR للتسجيل بصيغة PNG" : "Download enrollment QR as PNG"
+                  }
+                >
+                  <Download size={16} /> {ar ? "تنزيل QR بصيغة PNG" : "Download QR PNG"}
+                </Button>
+              </a>
+              <a href={`${qrBase}?format=svg&locale=${ar ? "ar" : "en"}`} download>
+                <Button
+                  variant="secondary"
+                  aria-label={
+                    ar ? "تنزيل رمز QR للتسجيل بصيغة SVG" : "Download enrollment QR as SVG"
+                  }
+                >
+                  <Download size={16} /> {ar ? "تنزيل QR بصيغة SVG" : "Download QR SVG"}
+                </Button>
+              </a>
+            </div>
+          ) : null}
+          <span className="wf-sr-only" role="status" aria-live="polite">
+            {copied ? (ar ? "تم نسخ الرابط" : "Link copied") : ""}
+          </span>
         </section>
         <section>
           <h3>
@@ -427,20 +515,16 @@ export function ProgramEnrollmentSettings({
                 : "Truthful provider state; no external success is claimed."}
             </p>
           </div>
-          {health.map((provider) => (
-            <span key={provider.provider}>
-              <strong>{provider.provider}</strong>
-              <Badge tone={provider.status === "HEALTHY" ? "success" : "warning"}>
-                {provider.mode} · {provider.status}
-              </Badge>
-              <small dir="auto">{provider.safeMessage}</small>
-              <small>
-                Configured: {provider.configured ? "yes" : "no"} Â· Provider reachable:{" "}
-                {provider.providerReachable ? "yes" : "no"} Â· Externally certified:{" "}
-                {provider.externallyCertified ? "yes" : "no"}
-              </small>
-            </span>
-          ))}
+          {health.map((provider) => {
+            const surface = walletSurfacePresentation(provider, ar);
+            return (
+              <span key={provider.provider}>
+                <strong>{provider.provider === "APPLE" ? "Apple Wallet" : "Google Wallet"}</strong>
+                <Badge tone={surface.tone}>{surface.label}</Badge>
+                <small>{surface.explanation}</small>
+              </span>
+            );
+          })}
           <Button
             variant="secondary"
             loading={busy === "wallet"}
@@ -540,27 +624,12 @@ export function ProgramWalletReadiness({
         : null}
       {health.map((provider) => {
         const providerName = provider.provider === "APPLE" ? "Apple Wallet" : "Google Wallet";
-        const ready = provider.status === "HEALTHY";
+        const surface = walletSurfacePresentation(provider, ar);
         return (
           <span key={provider.provider}>
             <strong>{providerName}</strong>
-            <Badge tone={ready ? "success" : "neutral"}>
-              {ready
-                ? ar
-                  ? "جاهزة"
-                  : "Ready"
-                : ar
-                  ? "غير متاحة · اختيارية"
-                  : "Unavailable · Optional"}
-            </Badge>
-            <small dir="auto">{provider.safeMessage}</small>
-            {!ready ? (
-              <small>
-                {ar
-                  ? "تتأثر واجهة المحفظة فقط؛ يبقى إطلاق بطاقة العميل على الويب متاحاً."
-                  : "Only this Wallet surface is affected; Customer Web launch remains available."}
-              </small>
-            ) : null}
+            <Badge tone={surface.tone}>{surface.label}</Badge>
+            <small>{surface.explanation}</small>
           </span>
         );
       })}
