@@ -462,7 +462,7 @@ function PublicationCardAnchor({
           borderRadius: `${Math.max(14, draft.visualTheme.borderRadius)}px`,
         }}
       >
-        <span>{ar ? "جاهزة" : "READY"}</span>
+        <span>{ar ? "ملخص الإطلاق" : "LAUNCH SUMMARY"}</span>
         <h4>{content.programName}</h4>
         <p>{rewardName}</p>
         <div className="publication-card-anchor__stamps" aria-hidden="true">

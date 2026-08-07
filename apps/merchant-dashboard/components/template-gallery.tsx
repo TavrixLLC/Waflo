@@ -138,14 +138,12 @@ function TemplateTile({
   locale,
   context,
   blank = false,
-  deferOffscreen = false,
   onPreview,
 }: {
   template: TemplateItem;
   locale: Locale;
   context: string;
   blank?: boolean;
-  deferOffscreen?: boolean;
   onPreview: (selection: PreviewSelection, trigger: HTMLButtonElement) => void;
 }) {
   const copy = galleryCopy[locale];
@@ -163,7 +161,7 @@ function TemplateTile({
 
   return (
     <article
-      className={`template-gallery-card${blank ? " template-gallery-card--blank" : ""}${deferOffscreen ? " template-gallery-card--deferred" : ""}`}
+      className={`template-gallery-card${blank ? " template-gallery-card--blank" : ""}`}
       aria-labelledby={titleId}
       data-template-code={blank ? "BLANK" : template.code}
       data-template-role={blank ? "MINIMAL" : template.presentation?.visualRole}
@@ -570,7 +568,6 @@ export function TemplateGallery({
                 locale={locale}
                 context={copy.contextAll}
                 blank
-                deferOffscreen
                 onPreview={(selection, trigger) => void loadPreview(selection, false, trigger)}
               />
             ) : null}
@@ -580,7 +577,6 @@ export function TemplateGallery({
                 template={template}
                 locale={locale}
                 context={copy.contextAll}
-                deferOffscreen
                 onPreview={(selection, trigger) => void loadPreview(selection, false, trigger)}
               />
             ))}

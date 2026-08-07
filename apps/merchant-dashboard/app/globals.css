@@ -715,6 +715,50 @@ body {
   box-shadow: none;
 }
 
+.program-list__card .loyalty-card-visual--summary {
+  justify-content: space-between;
+  color: var(--waflo-ink);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(255, 107, 74, 0.1), transparent 34%),
+    color-mix(in srgb, var(--waflo-cloud) 68%, white);
+  border: 1px dashed color-mix(in srgb, var(--waflo-brick) 24%, var(--waflo-border));
+}
+
+.program-list__card .loyalty-card-visual--summary::before {
+  opacity: 0.26;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--waflo-border) 65%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--waflo-border) 65%, transparent) 1px,
+      transparent 1px
+    );
+}
+
+.loyalty-card-visual--summary .loyalty-card-visual__brand > span {
+  color: white;
+  background: var(--waflo-ink);
+}
+
+.loyalty-card-visual__summary-copy {
+  display: grid;
+  gap: 0.25rem;
+  max-width: 85%;
+}
+
+.loyalty-card-visual__summary-copy small {
+  color: var(--waflo-muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.loyalty-card-visual__summary-copy strong {
+  overflow: hidden;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .program-list__content {
   display: grid;
   gap: 0.65rem;
@@ -1597,11 +1641,6 @@ body {
     border-color var(--waflo-motion-quick) var(--waflo-ease);
 }
 
-.template-gallery-card--deferred {
-  content-visibility: auto;
-  contain-intrinsic-block-size: 28rem;
-}
-
 .template-gallery-card:hover {
   border-color: color-mix(in srgb, var(--waflo-brick) 42%, var(--waflo-border));
   transform: translateY(-2px);
@@ -1761,7 +1800,7 @@ body {
 .template-preview-dialog {
   width: min(56rem, calc(100vw - 2rem - env(safe-area-inset-left) - env(safe-area-inset-right)));
   max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-  height: auto;
+  height: fit-content;
   margin: auto;
   padding: 0;
   overflow: hidden;
@@ -1820,7 +1859,7 @@ body {
 
 .template-preview-dialog__canvas {
   display: grid;
-  min-height: min(22rem, 44dvh);
+  min-height: clamp(14rem, 32dvh, 18rem);
   place-items: center;
   margin-block: 1rem;
   padding: 1rem;
@@ -1838,7 +1877,7 @@ body {
   width: auto;
   max-width: 100%;
   height: auto;
-  max-height: 47dvh;
+  max-height: 38dvh;
   object-fit: contain;
 }
 
@@ -2043,7 +2082,7 @@ body {
     inset: 0;
     width: min(100%, calc(100vw - 2rem - env(safe-area-inset-left) - env(safe-area-inset-right)));
     max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    height: auto;
+    height: fit-content;
     margin: auto;
     padding: 0;
     overflow: hidden;
@@ -2059,12 +2098,12 @@ body {
   }
 
   .template-preview-dialog__canvas {
-    min-height: min(19rem, 42dvh);
+    min-height: min(15rem, 32dvh);
     padding: 0.65rem;
   }
 
   .template-preview-dialog__canvas img {
-    max-height: 46dvh;
+    max-height: 34dvh;
   }
 
   .template-preview-dialog__error {
@@ -3121,7 +3160,7 @@ body {
 
 .builder-preview-tabs button {
   min-width: 0;
-  min-height: 2.7rem;
+  min-height: 44px;
   padding-inline: 0.3rem;
   overflow: visible;
   text-align: center;
@@ -3129,6 +3168,24 @@ body {
   white-space: normal;
   font-size: 0.76rem;
   line-height: 1.15;
+}
+
+.builder-preview-tabs button:not([aria-selected="true"]) {
+  color: color-mix(in srgb, var(--waflo-ink) 70%, var(--waflo-muted));
+  background: color-mix(in srgb, var(--waflo-cloud) 86%, white);
+  border-color: color-mix(in srgb, var(--waflo-border) 76%, transparent);
+}
+
+.builder-preview-tabs button:not([aria-selected="true"]):hover {
+  color: var(--waflo-ink);
+  border-color: color-mix(in srgb, var(--builder-live-accent) 42%, var(--waflo-border));
+}
+
+.builder-preview-provider-note {
+  margin: -0.1rem 0 0;
+  color: var(--waflo-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .builder-preview-canvas {
@@ -3304,7 +3361,12 @@ body {
 
 @media (max-width: 1100px) {
   .builder-shell {
-    padding-block-end: calc(5.25rem + env(safe-area-inset-bottom));
+    padding-block-end: calc(7rem + env(safe-area-inset-bottom));
+    scroll-padding-block-end: calc(7.5rem + env(safe-area-inset-bottom));
+  }
+
+  .builder-editor :is(input, textarea, select, button) {
+    scroll-margin-block-end: calc(7.5rem + env(safe-area-inset-bottom));
   }
 
   .builder-workspace {

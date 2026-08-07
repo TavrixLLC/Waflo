@@ -56,7 +56,7 @@ const planCodes = {
   SCALE: "scale",
 } as const;
 
-const decorativeStampSlots = [true, true, true, false, false] as const;
+const emptyStateStampSlots = [true, true, true, false, false] as const;
 
 type CardLifecycleAction = Exclude<MerchantProgramLifecycleAction, "publish" | "abandon">;
 
@@ -65,7 +65,7 @@ const loyaltyCardCopy = {
     eyebrow: "LOYALTY CARDS",
     title: "Loyalty cards",
     description:
-      "Create and manage the loyalty cards your customers save to Apple Wallet and Google Wallet.",
+      "Create and manage customer-ready loyalty cards for the web, with Wallet availability when supported.",
     create: "Create loyalty card",
     summaryLabel: "Loyalty card summary",
     yourCards: "Your cards",
@@ -84,6 +84,7 @@ const loyaltyCardCopy = {
       "Loyalty cards could not be loaded. Your cards were not changed. Reload and try again.",
     libraryTitle: "Your loyalty cards",
     libraryDescription: "Open a card to review its setup, test it, or prepare the next update.",
+    visualSummary: "Design available in Studio",
     updated: "Updated",
     published: "Published",
     open: "Open card",
@@ -115,7 +116,7 @@ const loyaltyCardCopy = {
     eyebrow: "بطاقات الولاء",
     title: "بطاقات الولاء",
     description:
-      "أنشئ وأدر بطاقات الولاء التي يمكن لعملائك الاحتفاظ بها في Apple Wallet وGoogle Wallet.",
+      "أنشئ وأدر بطاقات ولاء جاهزة للعملاء على الويب، مع توفر المحافظ الرقمية عند دعمها.",
     create: "إنشاء بطاقة ولاء",
     summaryLabel: "ملخص بطاقات الولاء",
     yourCards: "بطاقاتك",
@@ -133,6 +134,7 @@ const loyaltyCardCopy = {
     loadError: "تعذر تحميل بطاقات الولاء. لم تتغير بطاقاتك. أعد تحميل الصفحة وحاول مرة أخرى.",
     libraryTitle: "بطاقات الولاء الخاصة بك",
     libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو اختبارها أو تحضير التحديث التالي.",
+    visualSummary: "التصميم متاح في الاستوديو",
     updated: "آخر تحديث",
     published: "نُشرت في",
     open: "فتح البطاقة",
@@ -604,7 +606,7 @@ export function ProgramsScreen({
               <CreditCard size={22} />
             </div>
             <div className="loyalty-card-visual__stamps">
-              {decorativeStampSlots.map((filled, index) => (
+              {emptyStateStampSlots.map((filled, index) => (
                 <span
                   className={filled ? "loyalty-card-visual__stamp--filled" : ""}
                   key={`empty-card-stamp-${index.toString()}`}
@@ -648,18 +650,18 @@ export function ProgramsScreen({
 
               return (
                 <article className="wf-card program-list__card" key={program.id}>
-                  <div className="loyalty-card-visual" aria-hidden="true">
+                  <div
+                    className="loyalty-card-visual loyalty-card-visual--summary"
+                    role="img"
+                    aria-label={`${copy.visualSummary}: ${program.internalName}`}
+                  >
                     <div className="loyalty-card-visual__brand">
                       <span>{program.internalName.charAt(0).toLocaleUpperCase(locale)}</span>
-                      <CreditCard size={22} />
+                      <Layers3 size={22} aria-hidden="true" />
                     </div>
-                    <div className="loyalty-card-visual__stamps">
-                      {decorativeStampSlots.map((filled, index) => (
-                        <span
-                          className={filled ? "loyalty-card-visual__stamp--filled" : ""}
-                          key={`${program.id}-stamp-${index.toString()}`}
-                        />
-                      ))}
+                    <div className="loyalty-card-visual__summary-copy">
+                      <small>{copy.visualSummary}</small>
+                      <strong>{program.internalName}</strong>
                     </div>
                   </div>
                   <div className="program-list__content">

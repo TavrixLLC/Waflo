@@ -242,7 +242,7 @@ const lifecycleScenarios = [
     "Ready to launch",
     "Required checks and testing are complete. The card is not live yet.",
     "Ready to launch",
-    "Current",
+    "Next required",
     "Review launch",
     "Ready to launch",
     "Launch loyalty card",
@@ -286,7 +286,7 @@ const lifecycleScenarios = [
     "Scheduled to go live",
     "This card is waiting for its existing scheduled launch.",
     "Your loyalty card is scheduled",
-    "Current",
+    "Next required",
     "View launch schedule",
     "Scheduled to go live",
     "View launch schedule",
@@ -407,16 +407,21 @@ test("uses spaced Test stats, one primary progression action, and a truthful res
   await expect(page.getByRole("button", { name: "Reset demo customer" })).toBeVisible();
 });
 
-test("keeps the current mobile journey stage visible in LTR and RTL", async ({ page }) => {
+test("separates the current Studio location from the next required journey stage in LTR and RTL", async ({
+  page,
+}) => {
   for (const locale of ["en", "ar"] as const) {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await mockTemplateGalleryApi(page, { studioState: "READY" });
     await page.setViewportSize({ width: 360, height: 800 });
     await enterStudio(page, locale);
-    const current = page.locator('.studio-journey [aria-current="step"]');
-    await expect(current).toBeVisible();
+    const currentLocation = page.locator('.studio-journey [aria-current="page"]');
+    const nextRequired = page.locator('.studio-journey [data-progression-state="current"]');
+    await expect(currentLocation).toBeVisible();
+    await expect(nextRequired).toBeVisible();
+    await expect(nextRequired).toContainText(locale === "ar" ? "المطلوبة تاليًا" : "Next required");
     expect(
-      await current.evaluate((element) => {
+      await nextRequired.evaluate((element) => {
         const stage = element.getBoundingClientRect();
         const rail = element.parentElement?.getBoundingClientRect();
         return Boolean(rail && stage.left >= rail.left && stage.right <= rail.right);

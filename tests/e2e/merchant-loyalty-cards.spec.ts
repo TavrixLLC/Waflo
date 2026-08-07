@@ -185,7 +185,7 @@ test("keeps the Programs route while presenting an English loyalty-card empty st
   await expect(page.getByRole("heading", { level: 1, name: "Loyalty cards" })).toBeVisible();
   await expect(
     page.getByText(
-      "Create and manage the loyalty cards your customers save to Apple Wallet and Google Wallet.",
+      "Create and manage customer-ready loyalty cards for the web, with Wallet availability when supported.",
     ),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Create your first loyalty card" })).toBeVisible();

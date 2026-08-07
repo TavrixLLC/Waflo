@@ -1058,6 +1058,16 @@ function StudioJourney({
   onArea: (area: StudioArea) => void;
 }) {
   const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const locationStage =
+    activeArea === "launch"
+      ? "checks"
+      : activeArea === "test"
+        ? "test"
+        : activeArea === "overview"
+          ? presentation.currentJourneyStage === "live"
+            ? "live"
+            : "design"
+          : null;
   const currentIndex = presentation.journeyStages.findIndex(
     (stage) => stage.key === presentation.currentJourneyStage,
   );
@@ -1093,10 +1103,11 @@ function StudioJourney({
             type="button"
             key={stage.key}
             className={`studio-journey__${stage.state}${
-              activeArea === stage.area ? " studio-journey__active" : ""
+              locationStage === stage.key ? " studio-journey__active" : ""
             }`}
             aria-label={`${stage.label}: ${stage.stateLabel}. ${stage.hint}`}
-            aria-current={stage.key === presentation.currentJourneyStage ? "step" : undefined}
+            aria-current={locationStage === stage.key ? "page" : undefined}
+            data-progression-state={stage.state}
             onClick={() => onArea(stage.area)}
             onKeyDown={(event) => {
               const previousKey = ar ? "ArrowRight" : "ArrowLeft";
@@ -1745,8 +1756,8 @@ function StudioPreview({
 }) {
   const profileLabel = publishedPreviewContext
     ? ar
-      ? "عرض العميل المنشور"
-      : "Published customer view"
+      ? "ملخص البطاقة المنشورة"
+      : "Published card summary"
     : selectedProfile === "CUSTOMER_WEB"
       ? ar
         ? "بطاقة العميل"
@@ -1763,18 +1774,18 @@ function StudioPreview({
         }
       : publishedStatus === "PAUSED"
         ? {
-            eyebrow: ar ? "المظهر المنشور" : "PUBLISHED APPEARANCE",
+            eyebrow: ar ? "الإعداد المنشور" : "PUBLISHED SETUP",
             label: ar ? "متوقفة" : "Paused",
             tone: "warning" as const,
           }
         : publishedStatus === "ARCHIVED"
           ? {
-              eyebrow: ar ? "المظهر المحفوظ" : "PRESERVED APPEARANCE",
+              eyebrow: ar ? "الإعداد المحفوظ" : "PRESERVED SETUP",
               label: ar ? "مؤرشفة" : "Archived",
               tone: "neutral" as const,
             }
           : {
-              eyebrow: ar ? "المظهر المنشور" : "PUBLISHED APPEARANCE",
+              eyebrow: ar ? "الإعداد المنشور" : "PUBLISHED SETUP",
               label: ar ? "منشورة" : "Published",
               tone: "neutral" as const,
             };
@@ -1830,7 +1841,7 @@ function StudioPreview({
         className={`studio-device-frame studio-device-frame--${publishedPreviewContext ? "published" : selectedProfile.toLowerCase()}`}
       >
         {source === "published" ? (
-          <PublishedCustomerPreview draft={draft} progress={progress} ar={ar} />
+          <PublishedCardSummary draft={draft} progress={progress} ar={ar} />
         ) : source === "draft" && preview ? (
           <Image
             src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview.svg)}`}
@@ -1882,7 +1893,7 @@ function StudioPreview({
   );
 }
 
-function PublishedCustomerPreview({
+function PublishedCardSummary({
   draft,
   progress,
   ar,
@@ -1909,7 +1920,7 @@ function PublishedCustomerPreview({
         borderRadius: `${Math.max(14, draft.visualTheme.borderRadius)}px`,
       }}
       role="img"
-      aria-label={ar ? "عرض بطاقة العميل المنشورة حالياً" : "Currently published customer card"}
+      aria-label={ar ? "ملخص البطاقة المنشورة حاليًا" : "Current published card summary"}
     >
       <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
       <h4>{content.programName}</h4>

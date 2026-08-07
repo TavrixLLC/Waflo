@@ -165,7 +165,7 @@ test("captures the focused P4B Repair Round 1 evidence set", async ({ page }) =>
   await capture(page, "04-archived-share-disabled.png", true);
 
   await openScenario(page, { studioState: "LIVE_WITH_CHANGES", billingStatus: "ACTIVE" });
-  await expect(page.getByText("Published customer view", { exact: true })).toBeVisible();
+  await expect(page.getByText("Published card summary", { exact: true })).toBeVisible();
   await capture(page, "05-live-preview-with-unpublished-changes.png", true);
 
   await openScenario(page, { studioState: "READY" }, "en", { width: 1440, height: 900 });
@@ -217,7 +217,7 @@ test("captures the final published customer preview repair evidence", async ({ p
   await openScenario(page, { studioState: "LIVE", billingStatus: "ACTIVE" });
   const livePreview = page.getByLabel("Card preview");
   await expect(
-    livePreview.getByRole("img", { name: "Currently published customer card" }),
+    livePreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
   await expect(livePreview.getByText("Preview will appear here", { exact: true })).toHaveCount(0);
   await page.screenshot({
@@ -250,7 +250,7 @@ test("captures the final published customer preview repair evidence", async ({ p
 
   await openScenario(page, { studioState: "LIVE_WITH_CHANGES", billingStatus: "ACTIVE" });
   await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
-  await expect(page.getByRole("img", { name: "Currently published customer card" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Current published card summary" })).toBeVisible();
   await page.screenshot({
     path: path.join(finalPreviewEvidenceDirectory, "02-live-with-pending-changes-preview.png"),
     fullPage: true,
@@ -259,7 +259,7 @@ test("captures the final published customer preview repair evidence", async ({ p
 
   await openScenario(page, { studioState: "PAUSED", billingStatus: "ACTIVE" });
   await expect(page.getByLabel("Card preview").getByText("Paused", { exact: true })).toBeVisible();
-  await expect(page.getByRole("img", { name: "Currently published customer card" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Current published card summary" })).toBeVisible();
   await page.screenshot({
     path: path.join(finalPreviewEvidenceDirectory, "03-paused-published-preview.png"),
     fullPage: true,

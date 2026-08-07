@@ -277,16 +277,16 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
 
   await resetScenario(page, { studioState: "READY" }, desktop);
   await expect(
-    page.getByRole("button", { name: /Live: Current\. Publish to make available/u }),
+    page.getByRole("button", { name: /Live: Next required\. Publish to make available/u }),
   ).toBeVisible();
   await expect(page.getByText("Available to customers", { exact: true })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "LIVE", billingStatus: "ACTIVE" }, desktop);
   const livePreview = page.getByLabel("Card preview");
   await expect(
-    livePreview.getByRole("img", { name: "Currently published customer card" }),
+    livePreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
-  await expect(livePreview.getByText("Published customer view", { exact: true })).toBeVisible();
+  await expect(livePreview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(livePreview.getByText("Currently live", { exact: true })).toBeVisible();
   await expect(livePreview.getByText("Preview will appear here", { exact: true })).toHaveCount(0);
   await expect(livePreview.getByText("Preview unavailable", { exact: true })).toHaveCount(0);
@@ -302,9 +302,9 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await resetScenario(page, { studioState: "LIVE_WITH_CHANGES", billingStatus: "ACTIVE" }, desktop);
   const pendingPreview = page.getByLabel("Card preview");
   await expect(
-    pendingPreview.getByRole("img", { name: "Currently published customer card" }),
+    pendingPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
-  await expect(pendingPreview.getByText("Published customer view", { exact: true })).toBeVisible();
+  await expect(pendingPreview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(pendingPreview.getByText("Currently live", { exact: true })).toBeVisible();
   await expect(pendingPreview.getByRole("tab", { name: "Customer" })).toHaveCount(0);
   await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
@@ -322,9 +322,9 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await resetScenario(page, { studioState: "PAUSED", billingStatus: "ACTIVE" }, desktop);
   const pausedPreview = page.getByLabel("Card preview");
   await expect(
-    pausedPreview.getByRole("img", { name: "Currently published customer card" }),
+    pausedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
-  await expect(pausedPreview.getByText("Published customer view", { exact: true })).toBeVisible();
+  await expect(pausedPreview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(pausedPreview.getByText("Paused", { exact: true })).toBeVisible();
   await expect(pausedPreview.getByText("Currently live", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Resume card" }).first()).toBeVisible();
@@ -341,9 +341,9 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await resetScenario(page, { studioState: "ARCHIVED", billingStatus: "ACTIVE" }, desktop);
   const archivedPreview = page.getByLabel("Card preview");
   await expect(
-    archivedPreview.getByRole("img", { name: "Currently published customer card" }),
+    archivedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
-  await expect(archivedPreview.getByText("Published customer view", { exact: true })).toBeVisible();
+  await expect(archivedPreview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(archivedPreview.getByText("Archived", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Restore card" }).first()).toBeVisible();
   const archivedShare = page.locator("#studio-live-sharing");
@@ -370,7 +370,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
     unavailableArchivedPreview.getByText("Preview unavailable", { exact: true }),
   ).toBeVisible();
   await expect(
-    unavailableArchivedPreview.getByRole("img", { name: "Currently published customer card" }),
+    unavailableArchivedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toHaveCount(0);
 });
 
@@ -386,7 +386,7 @@ test("distinguishes a loading customer preview from a confirmed unavailable prev
   await expect(loadingPreview.getByRole("img", { name: "Customer card preview" })).toBeVisible({
     timeout: 10_000,
   });
-  await expect(loadingPreview.getByText("Published customer view", { exact: true })).toHaveCount(0);
+  await expect(loadingPreview.getByText("Published card summary", { exact: true })).toHaveCount(0);
 
   await page.route("**/programs/created-program-id/preview?**", async (route) => {
     await route.fulfill({

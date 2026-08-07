@@ -138,6 +138,8 @@ const copy = {
     previewPreparing: "Preparing your preview…",
     previewLoading: "Updating the real card preview…",
     previewError: "The preview could not be refreshed.",
+    walletPreviewNote:
+      "Visual preview only. Wallet availability and production readiness are shown separately in Studio.",
     retry: "Retry",
     customer: "Customer",
     previewProgress: "Preview stamp progress",
@@ -229,6 +231,8 @@ const copy = {
     previewPreparing: "جارٍ إعداد المعاينة…",
     previewLoading: "جارٍ تحديث المعاينة الحقيقية للبطاقة…",
     previewError: "تعذر تحديث المعاينة.",
+    walletPreviewNote:
+      "معاينة مرئية فقط. يظهر توفر المحافظ الرقمية وجاهزيتها للإنتاج بشكل منفصل في الاستوديو.",
     retry: "إعادة المحاولة",
     customer: "العميل",
     previewProgress: "تقدم الأختام في المعاينة",
@@ -2204,6 +2208,7 @@ function PreviewPanel({
           </button>
         ))}
       </div>
+      <p className="builder-preview-provider-note">{text.walletPreviewNote}</p>
       <div
         id={`${idPrefix}-panel`}
         role="tabpanel"

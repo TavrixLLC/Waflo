@@ -461,7 +461,7 @@ test("captures exactly the focused P5 visual QA set", async ({ context }) => {
   const studioLive = await context.newPage();
   await openStudio(studioLive, { state: "LIVE" });
   await expect(
-    studioLive.getByRole("img", { name: "Currently published customer card" }),
+    studioLive.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
   await capture(studioLive, "06-studio-live.png");
   await studioLive.close();
