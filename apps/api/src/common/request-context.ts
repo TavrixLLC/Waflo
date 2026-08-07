@@ -32,6 +32,9 @@ export interface WafloRequest extends FastifyRequest {
     devicePublicId: string;
     deviceSessionId: string;
     platform: "IOS" | "ANDROID" | "TEST_CLIENT";
+    appVersion: string;
+    minimumSupportedAppVersion: string;
+    appVersionSupported: true;
     requestId: string;
   };
 }

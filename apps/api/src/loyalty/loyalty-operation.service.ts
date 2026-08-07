@@ -1,6 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import type { IssueStampInput, RedeemRewardInput, ReverseOperationInput } from "@waflo/contracts";
+import type {
+  IssueStampInput,
+  MembershipResolveResult,
+  RedeemRewardInput,
+  ReverseOperationInput,
+} from "@waflo/contracts";
+import {
+  membershipResolveResultSchema,
+  operationCommandStatusResultSchema,
+  operationPublicStatusResultSchema,
+  redemptionOperationResultSchema,
+  reverseOperationResultSchema,
+  stampOperationResultSchema,
+} from "@waflo/contracts";
 import {
   type LoyaltyLedgerEventType,
   type ProjectionState,
@@ -129,7 +142,10 @@ export class LoyaltyOperationService {
     private readonly audit: AuditService,
   ) {}
 
-  async resolveMembership(context: StaffOperationContext, qrPayload: string) {
+  async resolveMembership(
+    context: StaffOperationContext,
+    qrPayload: string,
+  ): Promise<MembershipResolveResult> {
     const credential = await this.customerSecurity.verifyCredentialPayload(qrPayload);
     if (!credential || credential.organizationId !== context.organizationId) {
       throw new AppError(
@@ -150,6 +166,12 @@ export class LoyaltyOperationService {
             translations: true,
             rewards: { include: { translations: true }, orderBy: { thresholdStampCount: "asc" } },
             locations: { where: { locationId: context.locationId } },
+            visualTheme: {
+              include: {
+                filledStampAsset: true,
+                emptyStampAsset: true,
+              },
+            },
           },
         },
         organization: { include: { billingProfile: true } },
@@ -197,21 +219,12 @@ export class LoyaltyOperationService {
       membership.enrollmentProgramVersion.translations.find(
         (candidate) => candidate.locale === locale,
       ) ?? membership.enrollmentProgramVersion.translations[0];
-    return {
-      membershipPublicId: membership.publicMembershipId,
-      customerDisplayName: membership.customer.displayName,
-      programName: translation?.programName ?? membership.program.internalName,
-      progress: membership.progress.currentCycleStampCount,
-      goal: membership.enrollmentProgramVersion.stampRule.requiredStampCount,
-      rewardReady: membership.progress.rewardReady,
-      completedCycles: membership.progress.completedCycleCount,
-      membershipStatus: membership.status,
-      locationEligibility: {
-        earning: Boolean(programLocation?.earningEnabled) && authorization.deviceEarningAllowed,
-        redemption:
-          Boolean(programLocation?.redemptionEnabled) && authorization.deviceRedemptionAllowed,
-      },
-      availableRewards: await this.prisma.client.rewardEntitlement.findMany({
+    const operationalDate = operationalLocalDate(
+      new Date(),
+      membership.enrollmentProgramVersion.operationalTimezone,
+    );
+    const [availableEntitlements, dailyEntries] = await Promise.all([
+      this.prisma.client.rewardEntitlement.findMany({
         where: {
           membershipId: membership.id,
           status: { in: ["AVAILABLE", "PARTIALLY_REDEEMED"] },
@@ -227,7 +240,96 @@ export class LoyaltyOperationService {
         },
         orderBy: { threshold: "asc" },
       }),
-    };
+      this.prisma.client.loyaltyLedgerEntry.findMany({
+        where: {
+          membershipId: membership.id,
+          programVersionId: membership.enrollmentProgramVersionId,
+          operationalLocalDate: new Date(`${operationalDate}T00:00:00.000Z`),
+          eventType: { in: ["STAMP_ISSUED", "MANUAL_STAMP_ADJUSTMENT"] },
+          stampDelta: { gt: 0 },
+        },
+        select: { eventType: true, stampDelta: true, operationalLocalDate: true },
+      }),
+    ]);
+    const stampRule = membership.enrollmentProgramVersion.stampRule;
+    const dailyIssued = grossPositiveDailyStampUnits(
+      dailyEntries.map((entry) => ({
+        eventType: entry.eventType,
+        stampDelta: entry.stampDelta,
+        operationalLocalDate: entry.operationalLocalDate.toISOString().slice(0, 10),
+      })),
+      operationalDate,
+    );
+    const dailyLimit = stampRule.maximumStampsPerCustomerPerDay;
+    const purchaseRequired =
+      stampRule.minimumPurchaseAmountMinor !== null && stampRule.minimumPurchaseCurrency !== null;
+    const rewardById = new Map(
+      membership.enrollmentProgramVersion.rewards.map((reward) => [reward.id, reward]),
+    );
+    return membershipResolveResultSchema.parse({
+      membershipPublicId: membership.publicMembershipId,
+      membershipStatus: membership.status,
+      customerDisplayName: membership.customer.displayName,
+      programName: translation?.programName ?? membership.program.internalName,
+      locale: locale === "AR" ? "ar" : "en",
+      progress: membership.progress.currentCycleStampCount,
+      goal: stampRule.requiredStampCount,
+      rewardReady: membership.progress.rewardReady,
+      completedCycles: membership.progress.completedCycleCount,
+      projectionVersion: membership.progress.projectionVersion,
+      locationEligibility: {
+        earning:
+          Boolean(programLocation?.earningEnabled) &&
+          authorization.staffEarningAllowed &&
+          authorization.deviceEarningAllowed,
+        redemption:
+          Boolean(programLocation?.redemptionEnabled) &&
+          authorization.staffRedemptionAllowed &&
+          authorization.deviceRedemptionAllowed,
+      },
+      operationLimits: {
+        maximumStampsPerOperation: stampRule.maximumStampsPerOperation,
+        maximumStampsPerCustomerPerDay: dailyLimit,
+        dailyRemainingStamps: dailyLimit === null ? null : Math.max(0, dailyLimit - dailyIssued),
+      },
+      operationalTimezone: membership.enrollmentProgramVersion.operationalTimezone,
+      operationalDate,
+      purchaseRequirement: {
+        required: purchaseRequired,
+        minimumAmountMinor: purchaseRequired ? stampRule.minimumPurchaseAmountMinor : null,
+        currency: purchaseRequired ? stampRule.minimumPurchaseCurrency : null,
+      },
+      stampVisuals: {
+        filled: {
+          state: "FILLED",
+          contentDigest:
+            membership.enrollmentProgramVersion.visualTheme?.filledStampAsset.sha256Digest ?? null,
+        },
+        empty: {
+          state: "EMPTY",
+          contentDigest:
+            membership.enrollmentProgramVersion.visualTheme?.emptyStampAsset.sha256Digest ?? null,
+        },
+      },
+      availableRewards: availableEntitlements.map((entitlement) => {
+        const reward = rewardById.get(entitlement.rewardDefinitionId);
+        const rewardTranslation =
+          reward?.translations.find((candidate) => candidate.locale === locale) ??
+          reward?.translations[0];
+        return {
+          publicId: entitlement.publicId,
+          name: rewardTranslation?.name ?? reward?.internalName ?? "—",
+          description: rewardTranslation?.description ?? "",
+          threshold: entitlement.threshold,
+          finalReward: entitlement.threshold === stampRule.requiredStampCount,
+          status: entitlement.status as "AVAILABLE" | "PARTIALLY_REDEEMED",
+          redemptionCount: entitlement.redemptionCount,
+          maximumRedemptionCount: entitlement.maximumRedemptionCount,
+          expiresAt: entitlement.expiresAt?.toISOString() ?? null,
+          requiresManagerApproval: reward?.requiresManagerApproval ?? false,
+        };
+      }),
+    });
   }
 
   async issueStamps(
@@ -563,13 +665,16 @@ export class LoyaltyOperationService {
           );
           const result = {
             operationPublicId: replay.command.publicId,
+            commandId,
             replayed: false,
+            beforeProgress: membership.progress.currentCycleStampCount,
             progress: projection.currentCycleStampCount,
             goal: stampRule.requiredStampCount,
             rewardReady: projection.rewardReady,
             completedCycles: projection.completedCycleCount,
             projectionVersion: projection.projectionVersion,
             unlockedRewards: entitlements,
+            requestId: context.requestId,
           };
           await transaction.loyaltyOperationCommand.update({
             where: { id: replay.command.id },
@@ -828,6 +933,7 @@ export class LoyaltyOperationService {
           }
           const result = {
             operationPublicId: commandState.command.publicId,
+            commandId,
             replayed: false,
             redemptionPublicId: redemption.publicId,
             rewardStatus:
@@ -835,11 +941,13 @@ export class LoyaltyOperationService {
                 ? ("REDEEMED" as const)
                 : ("PARTIALLY_REDEEMED" as const),
             finalReward: final,
+            beforeProgress: membership.progress.currentCycleStampCount,
             progress: projection.currentCycleStampCount,
             goal: membership.enrollmentProgramVersion.stampRule.requiredStampCount,
             rewardReady: projection.rewardReady,
             completedCycles: projection.completedCycleCount,
             projectionVersion: projection.projectionVersion,
+            requestId: context.requestId,
           };
           await transaction.loyaltyOperationCommand.update({
             where: { id: commandState.command.id },
@@ -1103,12 +1211,14 @@ export class LoyaltyOperationService {
           );
           const result = {
             operationPublicId: commandState.command.publicId,
+            commandId,
             reversedOperationPublicId: original.publicId,
             replayed: false,
             progress: projection.currentCycleStampCount,
             rewardReady: projection.rewardReady,
             completedCycles: projection.completedCycleCount,
             projectionVersion: projection.projectionVersion,
+            requestId: context.requestId,
           };
           await transaction.loyaltyOperationCommand.update({
             where: { id: commandState.command.id },
@@ -1140,6 +1250,7 @@ export class LoyaltyOperationService {
       where: { publicId, organizationId: context.organizationId },
       select: {
         publicId: true,
+        idempotencyKey: true,
         operationType: true,
         status: true,
         resultProjectionVersion: true,
@@ -1150,7 +1261,89 @@ export class LoyaltyOperationService {
       },
     });
     if (!command) throw new AppError("OPERATION_NOT_FOUND", "Operation not found.", 404);
-    return command;
+    const safeResult = this.mobileSafeOperationResult(command);
+    return operationPublicStatusResultSchema.parse({
+      publicId: command.publicId,
+      operationPublicId: command.publicId,
+      commandId: command.idempotencyKey,
+      operationType: command.operationType,
+      status: command.status,
+      resultProjectionVersion: command.resultProjectionVersion,
+      resultPayload: safeResult,
+      safeFailureCode: command.safeFailureCode,
+      createdAt: command.createdAt.toISOString(),
+      completedAt: command.completedAt?.toISOString() ?? null,
+    });
+  }
+
+  async commandStatus(context: StaffOperationContext, commandId: string) {
+    const command = await this.prisma.client.loyaltyOperationCommand.findFirst({
+      where: {
+        organizationId: context.organizationId,
+        idempotencyKey: commandId,
+        actorDeviceId: context.deviceId,
+      },
+      select: {
+        publicId: true,
+        idempotencyKey: true,
+        operationType: true,
+        status: true,
+        resultPayload: true,
+        safeFailureCode: true,
+        createdAt: true,
+        completedAt: true,
+      },
+    });
+    if (!command) throw new AppError("OPERATION_NOT_FOUND", "Operation not found.", 404);
+    return operationCommandStatusResultSchema.parse({
+      commandId: command.idempotencyKey,
+      operationPublicId: command.publicId,
+      operationType: command.operationType,
+      status: command.status,
+      result: this.mobileSafeOperationResult(command),
+      safeFailureCode: command.safeFailureCode,
+      createdAt: command.createdAt.toISOString(),
+      completedAt: command.completedAt?.toISOString() ?? null,
+    });
+  }
+
+  private mobileSafeOperationResult(command: {
+    publicId: string;
+    idempotencyKey: string;
+    operationType: string;
+    resultPayload: Prisma.JsonValue | null;
+  }) {
+    const payload =
+      command.resultPayload &&
+      typeof command.resultPayload === "object" &&
+      !Array.isArray(command.resultPayload)
+        ? command.resultPayload
+        : null;
+    if (!payload) return null;
+    const candidate = {
+      ...payload,
+      operationPublicId: command.publicId,
+      commandId: command.idempotencyKey,
+      requestId: typeof payload.requestId === "string" ? payload.requestId : null,
+      ...(command.operationType === "ISSUE_STAMP" && typeof payload.beforeProgress !== "number"
+        ? { beforeProgress: typeof payload.progress === "number" ? payload.progress : 0 }
+        : {}),
+      ...(command.operationType === "REDEEM_REWARD" && typeof payload.beforeProgress !== "number"
+        ? { beforeProgress: typeof payload.progress === "number" ? payload.progress : 0 }
+        : {}),
+    };
+    const schema =
+      command.operationType === "ISSUE_STAMP"
+        ? stampOperationResultSchema
+        : command.operationType === "REDEEM_REWARD"
+          ? redemptionOperationResultSchema
+          : command.operationType === "REVERSE_STAMP" ||
+              command.operationType === "REVERSE_REDEMPTION"
+            ? reverseOperationResultSchema
+            : null;
+    if (!schema) return null;
+    const parsed = schema.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
   }
 
   async verifyProjection(

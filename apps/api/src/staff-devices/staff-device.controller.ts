@@ -202,6 +202,19 @@ export class StaffDevicePairingController {
   @Get("device-context")
   @StaffDeviceSigned()
   context(@Req() request: WafloRequest, @Headers("x-waflo-device-id") _deviceId: string) {
-    return request.staffDeviceContext;
+    const context = request.staffDeviceContext;
+    if (!context) throw new AppError("STAFF_DEVICE_NOT_ACTIVE", "Device context missing.", 401);
+    return {
+      organizationId: context.organizationId,
+      role: context.role,
+      locationId: context.locationId,
+      devicePublicId: context.devicePublicId,
+      deviceSessionId: context.deviceSessionId,
+      platform: context.platform,
+      appVersion: context.appVersion,
+      minimumSupportedAppVersion: context.minimumSupportedAppVersion,
+      appVersionSupported: context.appVersionSupported,
+      requestId: context.requestId,
+    };
   }
 }

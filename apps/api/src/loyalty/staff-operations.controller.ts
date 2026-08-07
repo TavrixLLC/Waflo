@@ -99,4 +99,9 @@ export class StaffOperationsController {
   status(@Req() request: WafloRequest, @Param("operationPublicId") publicId: string) {
     return this.operations.operationStatus(staffContext(request), parseUuid(publicId));
   }
+
+  @Get("operations/commands/:commandId")
+  commandStatus(@Req() request: WafloRequest, @Param("commandId") commandId: string) {
+    return this.operations.commandStatus(staffContext(request), parseOperationCommandId(commandId));
+  }
 }

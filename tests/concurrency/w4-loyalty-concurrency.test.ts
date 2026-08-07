@@ -156,6 +156,36 @@ describe.sequential("W4 PostgreSQL loyalty concurrency", () => {
     ).toBe(1);
   });
 
+  it("keeps command recovery safe while a stamp command is being claimed and completed", async () => {
+    const commandId = randomUUID();
+    const mutation = operations.issueStamps(
+      { ...context, requestId: "m2-command-race-mutation" },
+      commandId,
+      { qrPayload: zeroQrPayload, amount: 1 },
+      request,
+    );
+    const observations = await Promise.all(
+      Array.from({ length: 20 }, async () => {
+        try {
+          return (await operations.commandStatus(context, commandId)).status;
+        } catch (error) {
+          return error && typeof error === "object" && "code" in error
+            ? String(error.code)
+            : "UNKNOWN";
+        }
+      }),
+    );
+    const result = await mutation;
+    const recovered = await operations.commandStatus(context, commandId);
+    expect(result.commandId).toBe(commandId);
+    expect(recovered).toMatchObject({ commandId, status: "COMPLETED" });
+    expect(
+      observations.every((state) =>
+        ["OPERATION_NOT_FOUND", "PROCESSING", "COMPLETED"].includes(state),
+      ),
+    ).toBe(true);
+  });
+
   it("serializes different keys and creates at most one entitlement per threshold", async () => {
     await operations.issueStamps(
       { ...context, requestId: "milestone-prefill" },

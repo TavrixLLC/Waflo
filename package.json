@@ -47,6 +47,8 @@
     "w4:no-flutter": "node scripts/no-flutter-scan.mjs",
     "w4:process-cleanup": "node scripts/record-w4-process-cleanup.mjs",
     "w4:quality-gate": "node scripts/run-w4-quality-gate.mjs",
+    "m2:contracts": "pnpm --filter @waflo/contracts build && node scripts/generate-m2-mobile-contracts.mjs",
+    "m2:contracts:verify": "node scripts/verify-m2-mobile-contracts.mjs",
     "handoff:archive": "node scripts/create-portable-archive.mjs",
     "handoff:inspect": "node scripts/inspect-portable-archive.mjs",
     "handoff:verify": "node scripts/verify-w4-portable-archive.mjs",
@@ -76,6 +78,7 @@
     "tsx": "4.23.1",
     "turbo": "2.10.7",
     "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "zod": "4.4.3"
   }
 }

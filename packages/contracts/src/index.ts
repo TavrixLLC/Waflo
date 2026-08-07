@@ -7,6 +7,7 @@ export * from "./program-template-catalog.js";
 export * from "./w4-policy-backlog.js";
 export * from "./w3.js";
 export * from "./w4.js";
+export * from "./m2.js";
 
 export const locales = ["en", "ar"] as const;
 export type Locale = (typeof locales)[number];

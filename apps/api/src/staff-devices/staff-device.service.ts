@@ -8,6 +8,7 @@ import type {
 import type { Prisma } from "@waflo/database";
 import { createQrSvg } from "@waflo/qr-core";
 import {
+  assertStaffMobileAppVersion,
   createOpaqueDeviceSessionToken,
   createPairingToken,
   hashOpaqueDeviceToken,
@@ -348,6 +349,21 @@ export class StaffDeviceService {
         "STAFF_DEVICE_NOT_ACTIVE",
         "The development Staff Test Client is disabled.",
         HttpStatus.FORBIDDEN,
+      );
+    }
+    try {
+      assertStaffMobileAppVersion({
+        platform: input.platform,
+        appVersion: input.appVersion,
+        minimumVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+      });
+    } catch (error) {
+      throw new AppError(
+        error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : "STAFF_APP_VERSION_UNSUPPORTED",
+        "This Staff mobile app version is not supported.",
+        426,
       );
     }
     const publicKey = normalizeEd25519PublicKey(input.publicKey);

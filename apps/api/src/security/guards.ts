@@ -19,6 +19,7 @@ import { RateLimitService } from "./rate-limit.service.js";
 import { CustomerCardService } from "../customer/customer-card.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import {
+  assertStaffMobileAppVersion,
   assertBodyDigest,
   assertDeviceOperational,
   assertDeviceRequestTimestamp,
@@ -390,6 +391,11 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         nodeEnvironment: this.environment.values.NODE_ENV,
         testClientEnabled: this.environment.values.TEST_STAFF_CLIENT_ENABLED,
       });
+      assertStaffMobileAppVersion({
+        platform: session.staffDevice.platform,
+        appVersion: session.staffDevice.appVersion,
+        minimumVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+      });
       assertDeviceRequestTimestamp({
         timestamp,
         now: new Date(),
@@ -419,11 +425,19 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         {
           organizationId: session.organizationId,
           eventType: `staff_device.${code.toLocaleLowerCase("en-US")}`,
-          severity: code === "STAFF_DEVICE_CLOCK_SKEW" ? "MEDIUM" : "HIGH",
+          severity:
+            code === "STAFF_APP_VERSION_UNSUPPORTED"
+              ? "LOW"
+              : code === "STAFF_DEVICE_CLOCK_SKEW"
+                ? "MEDIUM"
+                : "HIGH",
           metadata: { devicePublicId, requestId },
         },
         request,
       );
+      if (code === "STAFF_APP_VERSION_UNSUPPORTED") {
+        throw new AppError(code, "This Staff mobile app version is no longer supported.", 426);
+      }
       const ruleCode =
         code === "STAFF_DEVICE_CLOCK_SKEW"
           ? "CLOCK_SKEW"
@@ -524,6 +538,9 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       devicePublicId: session.staffDevice.publicId,
       deviceSessionId: session.id,
       platform: session.staffDevice.platform,
+      appVersion: session.staffDevice.appVersion,
+      minimumSupportedAppVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+      appVersionSupported: true,
       requestId,
     };
     void this.prisma.client.staffDeviceSession

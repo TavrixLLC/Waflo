@@ -2,6 +2,12 @@ import { z } from "zod";
 
 export const operationCommandIdSchema = z.uuid();
 export const safeReasonSchema = z.string().trim().min(3).max(500);
+export const purchaseCurrencySchema = z
+  .string()
+  .trim()
+  .length(3)
+  .regex(/^[A-Za-z]{3}$/)
+  .transform((value) => value.toUpperCase());
 
 export const staffPairingLocationSchema = z
   .object({
@@ -73,12 +79,7 @@ export const issueStampSchema = z
     qrPayload: z.string().min(40).max(220),
     amount: z.number().int().min(1).max(30),
     purchaseAmountMinor: z.number().int().min(0).max(2_147_483_647).optional(),
-    purchaseCurrency: z
-      .string()
-      .trim()
-      .length(3)
-      .transform((value) => value.toUpperCase())
-      .optional(),
+    purchaseCurrency: purchaseCurrencySchema.optional(),
     merchantTransactionReference: z
       .string()
       .trim()

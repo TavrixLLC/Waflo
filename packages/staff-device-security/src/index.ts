@@ -17,7 +17,8 @@ export class StaffDeviceSecurityError extends Error {
     | "STAFF_DEVICE_CLOCK_SKEW"
     | "STAFF_DEVICE_NONCE_REPLAYED"
     | "STAFF_DEVICE_NOT_ACTIVE"
-    | "STAFF_DEVICE_BODY_DIGEST_INVALID";
+    | "STAFF_DEVICE_BODY_DIGEST_INVALID"
+    | "STAFF_APP_VERSION_UNSUPPORTED";
 
   constructor(
     code:
@@ -26,12 +27,52 @@ export class StaffDeviceSecurityError extends Error {
       | "STAFF_DEVICE_CLOCK_SKEW"
       | "STAFF_DEVICE_NONCE_REPLAYED"
       | "STAFF_DEVICE_NOT_ACTIVE"
-      | "STAFF_DEVICE_BODY_DIGEST_INVALID",
+      | "STAFF_DEVICE_BODY_DIGEST_INVALID"
+      | "STAFF_APP_VERSION_UNSUPPORTED",
     message: string,
   ) {
     super(message);
     this.code = code;
     this.name = "StaffDeviceSecurityError";
+  }
+}
+
+export function parseStaffMobileSemanticVersion(value: string): readonly [number, number, number] {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value.trim());
+  if (!match) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_APP_VERSION_UNSUPPORTED",
+      "A semantic mobile app version is required.",
+    );
+  }
+  const parts = match.slice(1).map(Number);
+  if (parts.some((part) => !Number.isSafeInteger(part) || part > 999_999)) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_APP_VERSION_UNSUPPORTED",
+      "The mobile app version is outside the supported range.",
+    );
+  }
+  return parts as unknown as readonly [number, number, number];
+}
+
+export function assertStaffMobileAppVersion(input: {
+  readonly platform: "IOS" | "ANDROID" | "TEST_CLIENT";
+  readonly appVersion: string;
+  readonly minimumVersion: string;
+}): void {
+  if (input.platform === "TEST_CLIENT") return;
+  const current = parseStaffMobileSemanticVersion(input.appVersion);
+  const minimum = parseStaffMobileSemanticVersion(input.minimumVersion);
+  for (let index = 0; index < 3; index += 1) {
+    const currentPart = current[index] ?? 0;
+    const minimumPart = minimum[index] ?? 0;
+    if (currentPart > minimumPart) return;
+    if (currentPart < minimumPart) {
+      throw new StaffDeviceSecurityError(
+        "STAFF_APP_VERSION_UNSUPPORTED",
+        "This Staff mobile app version is no longer supported.",
+      );
+    }
   }
 }
 

@@ -85,6 +85,10 @@ export const environmentSchema = z
     DEVICE_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     DEVICE_REQUEST_MAX_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     DEVICE_NONCE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
+    STAFF_MOBILE_MINIMUM_APP_VERSION: z
+      .string()
+      .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
+      .default("1.0.0"),
     STAFF_OWN_REVERSAL_WINDOW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     MANAGER_REVERSAL_WINDOW_MINUTES: z.coerce.number().int().min(1).max(10080).default(1440),
     MANAGER_APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(5),
