@@ -89,6 +89,7 @@ import {
   studioAreaForPublicationError,
   studioAreaForValidationPath,
   studioAreas,
+  studioOperationError,
 } from "./program-studio-presentation";
 import {
   type AssetItem,
@@ -382,10 +383,8 @@ export function ProgramStudioEditor({
   }
 
   useEffect(() => {
-    void load().catch((caught) =>
-      setError(caught instanceof Error ? caught.message : "Unable to open Loyalty Studio."),
-    );
-  }, [load]);
+    void load().catch(() => setError(studioOperationError("load", ar ? "ar" : "en")));
+  }, [ar, load]);
 
   useEffect(() => {
     if (!draft || !initializedRef.current || conflict) return;
@@ -420,12 +419,12 @@ export function ProgramStudioEditor({
           setSaveState("conflict");
         } else {
           setSaveState("failed");
-          setError(caught instanceof Error ? caught.message : "Autosave failed.");
+          setError(studioOperationError("save", ar ? "ar" : "en"));
         }
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [conflict, draft, organizationId, programId, revision]);
+  }, [ar, conflict, draft, organizationId, programId, revision]);
 
   const generatePreviews = useCallback(async () => {
     if (detail?.currentPublishedVersion || !draft) return;
@@ -442,10 +441,10 @@ export function ProgramStudioEditor({
       }
       setPreviews(Object.fromEntries(results.map((item) => [item.profile, item])));
       setPreviewLoadState("available");
-    } catch (caught) {
+    } catch {
       setPreviews({});
       setPreviewLoadState("unavailable");
-      setError(caught instanceof Error ? caught.message : "Preview generation failed.");
+      setError(studioOperationError("preview", ar ? "ar" : "en"));
     }
   }, [ar, detail?.currentPublishedVersion, draft, organizationId, programId, progress, saveState]);
 
@@ -497,8 +496,8 @@ export function ProgramStudioEditor({
       );
       setValidation(result);
       await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Validation failed.");
+    } catch {
+      setError(studioOperationError("readiness", ar ? "ar" : "en"));
     } finally {
       setWorking(false);
     }
@@ -513,8 +512,8 @@ export function ProgramStudioEditor({
       );
       setTestSession(session);
       setProgress(0);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to start Test Mode.");
+    } catch {
+      setError(studioOperationError("test-start", ar ? "ar" : "en"));
     } finally {
       setWorking(false);
     }
@@ -579,8 +578,8 @@ export function ProgramStudioEditor({
       setTestSession(refreshed);
       setProgress(refreshed.currentStampCount);
       await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Test Mode command failed.");
+    } catch {
+      setError(studioOperationError("test-action", ar ? "ar" : "en"));
     } finally {
       setWorking(false);
     }
@@ -679,16 +678,15 @@ export function ProgramStudioEditor({
       if (caught instanceof ApiClientError)
         setActiveArea(studioAreaForPublicationError(caught.code));
       if (
-        ar &&
         caught instanceof ApiClientError &&
         caught.code === "PROGRAM_PUBLICATION_STATE_BLOCKED" &&
         typeof caught.details?.programStatus === "string"
       )
         setError(
-          publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, true)
+          publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, ar)
             .message,
         );
-      else setError(caught instanceof Error ? caught.message : "Lifecycle action failed.");
+      else setError(studioOperationError("lifecycle", ar ? "ar" : "en"));
     } finally {
       setWorking(false);
     }
@@ -704,8 +702,8 @@ export function ProgramStudioEditor({
       await onChanged();
       setPublicationSuccess(null);
       setPublicationFailure(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create a draft.");
+    } catch {
+      setError(studioOperationError("create-draft", ar ? "ar" : "en"));
     } finally {
       setWorking(false);
     }
@@ -737,8 +735,8 @@ export function ProgramStudioEditor({
 
   if (!detail) {
     return (
-      <Card className="studio-loading">
-        <Clock3 /> {ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}
+      <Card className="studio-loading" role="status">
+        <Clock3 aria-hidden="true" /> {ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}
       </Card>
     );
   }
@@ -3571,8 +3569,8 @@ function ValidationPanel({
           >
             {result.errors.length === 0
               ? ar
-                ? "لا توجد مشكلة تمنع الانتقال إلى الاختبار."
-                : "Nothing here blocks you from moving to testing."
+                ? "اجتازت الفحوصات الآلية. يمكنك الانتقال إلى الاختبار."
+                : "Automated checks passed. You can move to testing."
               : ar
                 ? "افتح كل عنصر لإصلاحه في مكانه الصحيح."
                 : "Open each item to fix it in the right place."}

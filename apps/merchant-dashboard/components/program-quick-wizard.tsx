@@ -185,8 +185,12 @@ export function ProgramQuickWizard({
       });
       onCreated(created.id);
       onClose();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create the loyalty card.");
+    } catch {
+      setError(
+        ar
+          ? "تعذر إنشاء بطاقة الولاء. لم يتم حفظ بطاقة غير مكتملة. راجع الإعدادات وحاول مرة أخرى."
+          : "The loyalty card could not be created. No incomplete card was saved. Review the setup and try again.",
+      );
     } finally {
       setSaving(false);
     }

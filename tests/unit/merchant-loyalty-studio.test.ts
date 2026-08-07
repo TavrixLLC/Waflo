@@ -5,6 +5,7 @@ import {
   studioAreaForPublicationError,
   studioAreaForValidationPath,
   studioAreas,
+  studioOperationError,
 } from "../../apps/merchant-dashboard/components/program-studio-presentation.js";
 
 const baseLifecycleInput = {
@@ -21,6 +22,16 @@ const baseLifecycleInput = {
 };
 
 describe("merchant Loyalty Studio information architecture", () => {
+  it("uses safe task-oriented failure language without backend diagnostics", () => {
+    const english = studioOperationError("save", "en");
+    const arabic = studioOperationError("preview", "ar");
+
+    expect(english).toContain("last saved version is still safe");
+    expect(english).not.toMatch(/request|revision|enum|provider/iu);
+    expect(arabic).toContain("لم تتغير بطاقتك المحفوظة");
+    expect(arabic).not.toMatch(/request|revision|enum|provider/iu);
+  });
+
   it("exposes six task-oriented areas in the intended order", () => {
     expect(studioAreas).toEqual([
       "overview",

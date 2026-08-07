@@ -139,8 +139,12 @@ export function ProgramAssetPicker({
       );
       setFile(null);
       setCrop({ x: 0, y: 0, width: 1, height: 1, zoom: 1 });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Upload failed.");
+    } catch {
+      setError(
+        ar
+          ? "تعذر رفع الملف. التصميم المحفوظ حاليًا لم يتغير. تحقق من الملف وحاول مرة أخرى."
+          : "The file could not be uploaded. The currently saved design is unchanged. Check the file and try again.",
+      );
     } finally {
       setUploading(false);
     }

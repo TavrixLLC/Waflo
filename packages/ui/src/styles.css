@@ -574,7 +574,7 @@ select {
 .wf-language-switcher {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: 44px;
   padding-inline: 0.75rem;
   border-radius: var(--waflo-radius-pill);
   text-decoration: none;

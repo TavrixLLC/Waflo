@@ -80,6 +80,8 @@ const loyaltyCardCopy = {
     emptyDescription:
       "Choose a design, customize your reward, test the customer experience, and publish when you’re ready.",
     loading: "Loading loyalty cards…",
+    loadError:
+      "Loyalty cards could not be loaded. Your cards were not changed. Reload and try again.",
     libraryTitle: "Your loyalty cards",
     libraryDescription: "Open a card to review its setup, test it, or prepare the next update.",
     updated: "Updated",
@@ -100,7 +102,8 @@ const loyaltyCardCopy = {
     confirm: "Confirm",
     cancel: "Cancel",
     working: "Working…",
-    lifecycleError: "Unable to update this loyalty card.",
+    lifecycleError:
+      "The loyalty card status could not be updated. Its current status is unchanged. Try again.",
     lifecycleDescriptions: {
       pause: "The card will stop being live for customers until you resume it.",
       resume: "The card will become live for customers again.",
@@ -127,6 +130,7 @@ const loyaltyCardCopy = {
     emptyDescription:
       "اختر تصميمًا، وخصّص المكافأة، واختبر تجربة العميل، ثم انشر البطاقة عندما تصبح جاهزة.",
     loading: "جارٍ تحميل بطاقات الولاء…",
+    loadError: "تعذر تحميل بطاقات الولاء. لم تتغير بطاقاتك. أعد تحميل الصفحة وحاول مرة أخرى.",
     libraryTitle: "بطاقات الولاء الخاصة بك",
     libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو اختبارها أو تحضير التحديث التالي.",
     updated: "آخر تحديث",
@@ -147,7 +151,7 @@ const loyaltyCardCopy = {
     confirm: "تأكيد",
     cancel: "إلغاء",
     working: "جارٍ التنفيذ…",
-    lifecycleError: "تعذر تحديث بطاقة الولاء هذه.",
+    lifecycleError: "تعذر تحديث حالة بطاقة الولاء. حالتها الحالية لم تتغير. حاول مرة أخرى.",
     lifecycleDescriptions: {
       pause: "ستتوقف البطاقة عن الظهور مباشرة للعملاء حتى تستأنفها.",
       resume: "ستعود البطاقة مباشرة للعملاء.",
@@ -156,10 +160,6 @@ const loyaltyCardCopy = {
     },
   },
 } as const;
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof ApiClientError ? error.message : fallback;
-}
 
 function builderFlowError(error: unknown, locale: Locale): string {
   const ar = locale === "ar";
@@ -296,14 +296,12 @@ export function ProgramsScreen({
       setAssets(assetData.items);
       setAssetCursor(assetData.nextCursor);
       setBusinessCategory(organizationData.businessCategory);
-    } catch (caught) {
-      setError(
-        errorMessage(caught, ar ? "تعذر تحميل بطاقات الولاء." : "Unable to load loyalty cards."),
-      );
+    } catch {
+      setError(copy.loadError);
     } finally {
       setLoading(false);
     }
-  }, [ar, organizationId, view]);
+  }, [ar, copy.loadError, organizationId, view]);
 
   useEffect(() => {
     const key = `${view}:${organizationId}:${ar ? "AR" : "EN"}`;
@@ -352,9 +350,9 @@ export function ProgramsScreen({
       );
       setLifecycleConfirmation(null);
       await load();
-    } catch (caught) {
+    } catch {
       setLifecycleConfirmation(null);
-      setError(errorMessage(caught, copy.lifecycleError));
+      setError(copy.lifecycleError);
     } finally {
       setLifecycleWorking(false);
     }
@@ -594,7 +592,7 @@ export function ProgramsScreen({
       </section>
 
       {loading ? (
-        <Card className="programs-home__loading">
+        <Card className="programs-home__loading" role="status">
           <Layers3 size={24} aria-hidden="true" />
           {copy.loading}
         </Card>

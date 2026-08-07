@@ -67,6 +67,32 @@ interface WalletSyncJob {
   safeErrorCode: string | null;
 }
 
+type EnrollmentOperationErrorContext = "load" | "policy" | "slug" | "wallet-sync" | "wallet-status";
+
+function enrollmentOperationError(context: EnrollmentOperationErrorContext, ar: boolean): string {
+  const copy = ar
+    ? {
+        load: "تعذر تحميل إعدادات وصول العملاء. لم تتغير الإعدادات المحفوظة. أعد تحميل الصفحة وحاول مرة أخرى.",
+        policy: "تعذر حفظ إعدادات التسجيل. الإعدادات المحفوظة سابقًا لا تزال آمنة. حاول مرة أخرى.",
+        slug: "تعذر تحديث رابط البطاقة. الرابط الحالي لم يتغير. حاول مرة أخرى.",
+        "wallet-sync":
+          "تعذر تحديث حالة المحافظ. بطاقة العميل على الويب وإعداداتها المحفوظة لم تتأثر. حاول مرة أخرى.",
+        "wallet-status":
+          "تعذر تحميل حالة المحافظ. بطاقة العميل على الويب وإعداداتها المحفوظة لم تتأثر.",
+      }
+    : {
+        load: "Customer access settings could not be loaded. Saved settings have not changed. Reload and try again.",
+        policy:
+          "Enrollment settings could not be saved. The previously saved setup is still safe. Try again.",
+        slug: "The card link could not be updated. The current link is unchanged. Try again.",
+        "wallet-sync":
+          "Wallet status could not be refreshed. Customer Web and saved settings are unaffected. Try again.",
+        "wallet-status":
+          "Wallet status could not be loaded. Customer Web and saved settings are unaffected.",
+      };
+  return copy[context];
+}
+
 export function ProgramEnrollmentSettings({
   organizationId,
   programId,
@@ -108,11 +134,9 @@ export function ProgramEnrollmentSettings({
 
   useEffect(() => {
     void load()
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : "Unable to load enrollment settings."),
-      )
+      .catch(() => setError(enrollmentOperationError("load", ar)))
       .finally(() => setLoaded(true));
-  }, [load]);
+  }, [ar, load]);
 
   useEffect(() => {
     if (!walletSyncJobId) return;
@@ -135,19 +159,19 @@ export function ProgramEnrollmentSettings({
           return;
         }
         if (job.status === "DEAD_LETTER") {
-          setError(job.safeErrorCode ?? "Wallet reconciliation could not be completed.");
+          setError(enrollmentOperationError("wallet-sync", ar));
           setWalletSyncJobId(null);
           return;
         }
         setMessage(
           ar
-            ? `مزامنة Wallet: ${job.status} · تمت معالجة ${job.processedCount}`
-            : `Wallet reconciliation ${job.status.toLocaleLowerCase("en-US")} · ${job.processedCount} processed.`,
+            ? `جارٍ تحديث حالة المحافظ · تمت معالجة ${job.processedCount}`
+            : `Refreshing Wallet status · ${job.processedCount} processed.`,
         );
         timer = setTimeout(poll, 2_000);
-      } catch (caught) {
+      } catch {
         if (!active) return;
-        setError(caught instanceof Error ? caught.message : "Unable to read Wallet sync progress.");
+        setError(enrollmentOperationError("wallet-sync", ar));
         setWalletSyncJobId(null);
       }
     };
@@ -171,8 +195,8 @@ export function ProgramEnrollmentSettings({
       setMessage(ar ? "تم حفظ سياسة التسجيل في المسودة." : "Draft enrollment policy saved.");
       await load();
       await onChanged?.();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save enrollment policy.");
+    } catch {
+      setError(enrollmentOperationError("policy", ar));
     } finally {
       setBusy(null);
     }
@@ -190,8 +214,8 @@ export function ProgramEnrollmentSettings({
       setMessage(ar ? "تم تحديث رابط البطاقة العام." : "Public card URL updated.");
       await load();
       await onChanged?.();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to update public URL.");
+    } catch {
+      setError(enrollmentOperationError("slug", ar));
     } finally {
       setBusy(null);
     }
@@ -217,14 +241,10 @@ export function ProgramEnrollmentSettings({
         { method: "POST" },
       );
       setWalletSyncJobId(result.jobId);
-      setMessage(
-        ar
-          ? `تم إنشاء مهمة مزامنة Wallet بحالة ${result.status}.`
-          : `Wallet reconciliation job ${result.status.toLocaleLowerCase("en-US")}.`,
-      );
+      setMessage(ar ? "بدأ تحديث حالة المحافظ." : "Wallet status refresh started.");
       await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to reconcile Wallet.");
+    } catch {
+      setError(enrollmentOperationError("wallet-sync", ar));
     } finally {
       setBusy(null);
     }
@@ -558,16 +578,16 @@ export function ProgramWalletReadiness({
           setLoaded(true);
         }
       })
-      .catch((caught: unknown) => {
+      .catch(() => {
         if (active) {
-          setError(caught instanceof Error ? caught.message : "Unable to load Wallet readiness.");
+          setError(enrollmentOperationError("wallet-status", ar));
           setLoaded(true);
         }
       });
     return () => {
       active = false;
     };
-  }, [organizationId]);
+  }, [ar, organizationId]);
 
   return (
     <Card className="wallet-provider-health wallet-provider-health--launch">

@@ -11,6 +11,46 @@ export const studioAreas = [
 
 export type StudioArea = (typeof studioAreas)[number];
 
+export type StudioOperationErrorContext =
+  | "load"
+  | "save"
+  | "preview"
+  | "readiness"
+  | "test-start"
+  | "test-action"
+  | "lifecycle"
+  | "create-draft";
+
+const studioOperationErrorCopy = {
+  en: {
+    load: "Loyalty Studio could not be opened. Your saved card has not changed. Reload and try again.",
+    save: "Changes could not be saved. Your last saved version is still safe. Try saving again.",
+    preview: "The preview could not be refreshed. Your saved card is unchanged. Try again.",
+    readiness: "Readiness checks could not run. Your saved card is unchanged. Try again.",
+    "test-start": "Test Mode could not start. No real customer activity was created. Try again.",
+    "test-action":
+      "The test action could not be completed. Real customer activity is unaffected. Try again.",
+    lifecycle: "The card status could not be updated. Its current status is unchanged. Try again.",
+    "create-draft": "A change draft could not be created. The live card is unchanged. Try again.",
+  },
+  ar: {
+    load: "تعذر فتح استوديو الولاء. لم تتغير بطاقتك المحفوظة. أعد تحميل الصفحة وحاول مرة أخرى.",
+    save: "تعذر حفظ التغييرات. آخر نسخة محفوظة من بطاقتك لا تزال آمنة. حاول الحفظ مرة أخرى.",
+    preview: "تعذر تحديث المعاينة. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
+    readiness: "تعذر تشغيل فحوصات الجاهزية. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
+    "test-start": "تعذر بدء وضع الاختبار. لم يتم إنشاء أي نشاط حقيقي للعملاء. حاول مرة أخرى.",
+    "test-action": "تعذر إكمال إجراء الاختبار. نشاط العملاء الحقيقي لم يتأثر. حاول مرة أخرى.",
+    lifecycle: "تعذر تحديث حالة البطاقة. حالتها الحالية لم تتغير. حاول مرة أخرى.",
+    "create-draft": "تعذر إنشاء مسودة تغييرات. البطاقة المباشرة لم تتغير. حاول مرة أخرى.",
+  },
+} as const satisfies Readonly<
+  Record<Locale, Readonly<Record<StudioOperationErrorContext, string>>>
+>;
+
+export function studioOperationError(context: StudioOperationErrorContext, locale: Locale): string {
+  return studioOperationErrorCopy[locale][context];
+}
+
 export const studioAreaCopy = {
   en: {
     overview: { label: "Overview", description: "Card status and next step" },

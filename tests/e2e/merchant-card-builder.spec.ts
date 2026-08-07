@@ -485,15 +485,50 @@ test("reserves sticky-footer space and keeps active section navigation visible",
         ...(editor?.querySelectorAll<HTMLElement>("button, input, textarea, select") ?? []),
       ].filter((element) => element.getClientRects().length > 0);
       const lastControl = controls.at(-1);
+      const dashboardContent = document.querySelector<HTMLElement>(".dashboard-content");
       return {
+        bodyWidth: document.body.getBoundingClientRect().width,
+        clientWidth: document.documentElement.clientWidth,
+        dashboardContentBoxSizing: dashboardContent
+          ? getComputedStyle(dashboardContent).boxSizing
+          : "missing",
+        dashboardContentRect: dashboardContent
+          ? {
+              left: dashboardContent.getBoundingClientRect().left,
+              right: dashboardContent.getBoundingClientRect().right,
+              width: dashboardContent.getBoundingClientRect().width,
+            }
+          : null,
         footerTop: footer?.getBoundingClientRect().top ?? 0,
+        innerWidth: window.innerWidth,
         lastControlBottom: lastControl?.getBoundingClientRect().bottom ?? 0,
+        scrollX: window.scrollX,
         viewportHeight: window.innerHeight,
         documentOverflow:
           document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        overflowingElements: [...document.querySelectorAll<HTMLElement>("body *")]
+          .filter((element) => {
+            if (element.getClientRects().length === 0) return false;
+            const rect = element.getBoundingClientRect();
+            return rect.left < -0.5 || rect.right > document.documentElement.clientWidth + 0.5;
+          })
+          .slice(0, 12)
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              className: element.className,
+              left: Math.round(rect.left * 10) / 10,
+              right: Math.round(rect.right * 10) / 10,
+              tagName: element.tagName,
+              text: element.textContent?.trim().slice(0, 80) ?? "",
+            };
+          }),
       };
     });
-    expect(geometry.documentOverflow, `${width}px horizontal overflow`).toBe(false);
+    expect(
+      geometry.documentOverflow,
+      `${width}px horizontal overflow: ${JSON.stringify(geometry)}`,
+    ).toBe(false);
     expect(
       geometry.lastControlBottom <= geometry.footerTop - 4 ||
         geometry.footerTop >= geometry.viewportHeight,
