@@ -6,6 +6,8 @@ import {
   renderTemplateGalleryThumbnail,
 } from "../../apps/api/src/programs/template-gallery-preview.js";
 import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
+import { createBuilderDraft } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
+import { apiDraft } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { findProgramTemplate, latestProgramTemplates } from "../../packages/contracts/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
@@ -98,6 +100,8 @@ export async function mockTemplateGalleryApi(
     validationErrors = [],
     existingPrograms = [],
     fixtureLocations = [{ id: "gallery-location", name: "Gallery Main Branch", status: "ACTIVE" }],
+    seededProgram = false,
+    arabicEarningCopy = "present",
   }: {
     businessCategory?: string | null;
     onCreate?: (body: Record<string, unknown>) => void;
@@ -141,11 +145,35 @@ export async function mockTemplateGalleryApi(
     }>;
     existingPrograms?: Array<Record<string, unknown>>;
     fixtureLocations?: Array<{ id: string; name: string; status: string }>;
+    seededProgram?: boolean;
+    arabicEarningCopy?: "present" | "missing";
   } = {},
 ): Promise<void> {
+  await page.route("https://fonts.googleapis.com/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "text/css", body: "" });
+  });
+  await page.route("https://fonts.gstatic.com/**", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
   const filledAssetId = "55555555-5555-4555-8555-555555555555";
   const emptyAssetId = "66666666-6666-4666-8666-666666666666";
-  let storedDraft: Record<string, unknown> | null = null;
+  const seededTemplate = templateGalleryFixtures()[0];
+  let storedDraft: Record<string, unknown> | null =
+    seededProgram && seededTemplate
+      ? apiDraft(
+          createBuilderDraft(seededTemplate, fixtureLocations, { locale: "en", blank: false }),
+        )
+      : null;
+  if (storedDraft && arabicEarningCopy === "missing") {
+    const translations = storedDraft.translations as Record<"en" | "ar", Record<string, string>>;
+    storedDraft = {
+      ...storedDraft,
+      translations: {
+        ...translations,
+        ar: { ...translations.ar, shortDescription: "" },
+      },
+    };
+  }
   let revision = 1;
   let testStampCount = 0;
   let testCycleCount = 0;
@@ -466,7 +494,7 @@ export async function mockTemplateGalleryApi(
     };
   }
 
-  await page.route("http://localhost:4000/v1/**", async (route) => {
+  await page.route(/https?:\/\/(?:localhost:4000|api\.waflo\.app)\/v1\/.*/u, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;

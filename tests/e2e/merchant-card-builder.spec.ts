@@ -352,9 +352,12 @@ test("turns review into readiness and isolated Test Mode rather than a field dum
 }) => {
   const observedApiPaths: string[] = [];
   page.on("request", (request) => {
-    if (request.url().startsWith("http://localhost:4000/v1/")) {
-      observedApiPaths.push(new URL(request.url()).pathname);
-    }
+    const requestUrl = new URL(request.url());
+    if (
+      ["localhost", "api.waflo.app"].includes(requestUrl.hostname) &&
+      requestUrl.pathname.startsWith("/v1/")
+    )
+      observedApiPaths.push(requestUrl.pathname);
   });
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);

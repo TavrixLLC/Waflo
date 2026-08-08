@@ -41,6 +41,7 @@ import {
   TeamScreen,
 } from "./dashboard-screens";
 import { ProgramsScreen } from "./programs-screen";
+import type { StudioArea } from "./program-studio-presentation";
 import {
   CustomersOperationsScreen,
   DevicesOperationsScreen,
@@ -134,13 +135,17 @@ export function DashboardApplication({
   programsView = "library",
   legacyProgramCreate = false,
   builderProgramId,
+  studioProgramId,
+  studioArea,
   changeProgramId,
 }: {
   locale: Locale;
   section: DashboardSection;
-  programsView?: "library" | "gallery" | "builder";
+  programsView?: "library" | "gallery" | "builder" | "studio";
   legacyProgramCreate?: boolean;
   builderProgramId?: string;
+  studioProgramId?: string;
+  studioArea?: StudioArea;
   changeProgramId?: string;
 }) {
   const router = useRouter();
@@ -258,6 +263,8 @@ export function DashboardApplication({
       programsView={programsView}
       legacyProgramCreate={legacyProgramCreate}
       {...(builderProgramId ? { builderProgramId } : {})}
+      {...(studioProgramId ? { studioProgramId } : {})}
+      {...(studioArea ? { studioArea } : {})}
       {...(changeProgramId ? { changeProgramId } : {})}
     />
   );
@@ -330,15 +337,19 @@ function DashboardScreen({
   programsView,
   legacyProgramCreate,
   builderProgramId,
+  studioProgramId,
+  studioArea,
   changeProgramId,
 }: {
   section: DashboardSection;
   locale: Locale;
   membership: MembershipView;
   onOrganizationChanged: () => Promise<void>;
-  programsView: "library" | "gallery" | "builder";
+  programsView: "library" | "gallery" | "builder" | "studio";
   legacyProgramCreate: boolean;
   builderProgramId?: string;
+  studioProgramId?: string;
+  studioArea?: StudioArea;
   changeProgramId?: string;
 }) {
   if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
@@ -359,6 +370,8 @@ function DashboardScreen({
         view={programsView}
         legacyCreate={legacyProgramCreate}
         {...(builderProgramId ? { builderProgramId } : {})}
+        {...(studioProgramId ? { studioProgramId } : {})}
+        {...(studioArea ? { studioArea } : {})}
         {...(changeProgramId ? { changeProgramId } : {})}
       />
     );

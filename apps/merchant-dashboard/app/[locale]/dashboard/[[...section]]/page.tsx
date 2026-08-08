@@ -1,6 +1,7 @@
 import type { Locale } from "@waflo/contracts";
 import { notFound } from "next/navigation";
 import { DashboardApplication, type DashboardSection } from "../../../../components/dashboard";
+import type { StudioArea } from "../../../../components/program-studio-presentation";
 
 const dashboardSections = new Set<DashboardSection>([
   "overview",
@@ -19,6 +20,15 @@ const dashboardSections = new Set<DashboardSection>([
   "security",
 ]);
 
+const studioAreaSegments = new Map<string, StudioArea>([
+  ["overview", "overview"],
+  ["how-it-works", "how-it-works"],
+  ["customers-locations", "customers-locations"],
+  ["test", "test"],
+  ["launch", "launch"],
+  ["settings", "settings"],
+]);
+
 export default async function DashboardPage({
   params,
   searchParams,
@@ -35,7 +45,15 @@ export default async function DashboardPage({
     section?.[1] !== "new" &&
     section?.[2] === "edit" &&
     section.length === 3;
-  if ((section?.length ?? 0) > 1 && !programsGallery && !programsBuilder) notFound();
+  const studioAreaSegment = section?.[2] ?? "overview";
+  const programsStudio =
+    section?.[0] === "programs" &&
+    Boolean(section?.[1]) &&
+    section?.[1] !== "new" &&
+    !programsBuilder &&
+    (section.length === 2 || (section.length === 3 && studioAreaSegments.has(studioAreaSegment)));
+  if ((section?.length ?? 0) > 1 && !programsGallery && !programsBuilder && !programsStudio)
+    notFound();
 
   const selected = (section?.[0] ?? "overview") as DashboardSection;
   if (!dashboardSections.has(selected)) notFound();
@@ -44,9 +62,23 @@ export default async function DashboardPage({
     <DashboardApplication
       locale={locale}
       section={selected}
-      programsView={programsBuilder ? "builder" : programsGallery ? "gallery" : "library"}
+      programsView={
+        programsBuilder
+          ? "builder"
+          : programsGallery
+            ? "gallery"
+            : programsStudio
+              ? "studio"
+              : "library"
+      }
       legacyProgramCreate={query.create === "quick"}
       {...(programsBuilder && section?.[1] ? { builderProgramId: section[1] } : {})}
+      {...(programsStudio && section?.[1]
+        ? {
+            studioProgramId: section[1],
+            studioArea: studioAreaSegments.get(studioAreaSegment) ?? "overview",
+          }
+        : {})}
       {...(programsGallery && typeof query.changeFor === "string"
         ? { changeProgramId: query.changeFor }
         : {})}

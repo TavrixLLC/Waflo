@@ -40,7 +40,11 @@ test("W4 operational dashboard screens and dialogs have no serious accessibility
   }
 
   await page.goto("/en/dashboard/customers");
-  await page.getByRole("button", { name: "Noor Zero", exact: true }).click();
+  await page
+    .getByRole("table", { name: "Organization customers" })
+    .getByRole("button")
+    .first()
+    .click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Close" }).click();

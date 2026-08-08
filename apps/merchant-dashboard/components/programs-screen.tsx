@@ -28,6 +28,7 @@ import { ProgramCardBuilder } from "./program-card-builder";
 import { applyBuilderTemplate, createBuilderDraft } from "./program-card-builder-state";
 import { ProgramQuickWizard } from "./program-quick-wizard";
 import { ProgramStudioEditor } from "./program-studio-editor";
+import type { StudioArea } from "./program-studio-presentation";
 import type {
   AssetItem,
   LocationItem,
@@ -221,13 +222,17 @@ export function ProgramsScreen({
   view = "library",
   legacyCreate = false,
   builderProgramId,
+  studioProgramId: routedStudioProgramId,
+  studioArea = "overview",
   changeProgramId,
 }: {
   locale: Locale;
   membership: MembershipView;
-  view?: "library" | "gallery" | "builder";
+  view?: "library" | "gallery" | "builder" | "studio";
   legacyCreate?: boolean;
   builderProgramId?: string;
+  studioProgramId?: string;
+  studioArea?: StudioArea;
   changeProgramId?: string;
 }) {
   const router = useRouter();
@@ -243,7 +248,9 @@ export function ProgramsScreen({
   const [businessCategory, setBusinessCategory] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(legacyCreate);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
-  const [studioProgramId, setStudioProgramId] = useState<string | null>(null);
+  const [studioProgramId, setStudioProgramId] = useState<string | null>(
+    routedStudioProgramId ?? null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [builderError, setBuilderError] = useState("");
@@ -315,6 +322,10 @@ export function ProgramsScreen({
   useEffect(() => {
     if (legacyCreate) setWizardOpen(true);
   }, [legacyCreate]);
+
+  useEffect(() => {
+    setStudioProgramId(routedStudioProgramId ?? null);
+  }, [routedStudioProgramId]);
 
   async function loadMorePrograms() {
     if (!programCursor) return;
@@ -437,10 +448,32 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         ar={ar}
+        initialArea={studioArea}
+        onAreaChange={(area, options) => {
+          const targetPath = `/${locale}/dashboard/programs/${studioProgramId}${
+            area === "overview" ? "" : `/${area}`
+          }`;
+          router.push(targetPath);
+          if (options?.restoreFocus) {
+            let remainingFrames = 60;
+            const restoreFocus = () => {
+              const trigger = document.querySelector<HTMLButtonElement>(
+                `.studio-mobile-navigation > button[data-studio-area="${area}"]`,
+              );
+              if (window.location.pathname === targetPath && trigger) {
+                trigger.focus();
+                return;
+              }
+              remainingFrames -= 1;
+              if (remainingFrames > 0) window.requestAnimationFrame(restoreFocus);
+            };
+            window.requestAnimationFrame(restoreFocus);
+          }
+        }}
         builderHandoff={view === "builder" && studioProgramId === builderProgramId}
         onClose={() => {
           setStudioProgramId(null);
-          if (view === "gallery") router.replace(`/${locale}/dashboard/programs`);
+          router.push(`/${locale}/dashboard/programs`);
         }}
         onEditDesign={() => {
           const programId = studioProgramId;
@@ -471,7 +504,7 @@ export function ProgramsScreen({
         onChangeDesign={() =>
           router.push(`/${locale}/dashboard/programs/new?changeFor=${builderProgramId}`)
         }
-        onOpenStudio={() => setStudioProgramId(builderProgramId)}
+        onOpenStudio={() => router.push(`/${locale}/dashboard/programs/${builderProgramId}`)}
         onChanged={load}
       />
     );
@@ -521,7 +554,7 @@ export function ProgramsScreen({
       onCreated={(programId) => {
         setWizardOpen(false);
         setSelectedTemplate(null);
-        setStudioProgramId(programId);
+        router.push(`/${locale}/dashboard/programs/${programId}`);
         void load();
       }}
       ar={ar}
@@ -719,7 +752,7 @@ export function ProgramsScreen({
                         <Button
                           type="button"
                           aria-label={`${copy.open}: ${program.internalName}`}
-                          onClick={() => setStudioProgramId(program.id)}
+                          onClick={() => router.push(`/${locale}/dashboard/programs/${program.id}`)}
                         >
                           {copy.open}
                           <ArrowRight

@@ -61,7 +61,7 @@ async function mockMerchantApi(
   },
 ): Promise<void> {
   const statusByProgramId = new Map(programs.map((program) => [program.id, program.status]));
-  await page.route("http://localhost:4000/v1/**", async (route) => {
+  await page.route(/https?:\/\/(?:localhost:4000|api\.waflo\.app)\/v1\/.*/u, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/v1/auth/csrf") {
       await fulfill(route, { csrfToken: "merchant-loyalty-card-csrf" });

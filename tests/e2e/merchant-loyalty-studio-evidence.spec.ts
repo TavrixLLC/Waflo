@@ -25,39 +25,16 @@ async function openStudio(
     height = 1000,
   }: { locale?: "en" | "ar"; state?: StudioState; width?: number; height?: number } = {},
 ): Promise<void> {
-  await mockTemplateGalleryApi(page, { studioState: state });
+  await mockTemplateGalleryApi(page, { seededProgram: true, studioState: state });
   await page.setViewportSize({ width, height });
-  await page.goto(`/${locale}/dashboard/programs/new`);
-  await page
-    .locator(".template-gallery__section--recommended .template-gallery-card__preview")
-    .first()
-    .click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: locale === "ar" ? "استخدام هذا القالب" : "Use this template" })
-    .click();
-  await page
-    .getByRole("button", { name: locale === "ar" ? "مراجعة البطاقة" : "Review card" })
-    .click();
-  await expect(
-    page
-      .getByText(locale === "ar" ? "اجتازت البطاقة فحوصات الجاهزية" : "Readiness checks passed", {
-        exact: true,
-      })
-      .first(),
-  ).toBeVisible();
-  await page
-    .getByRole("button", {
-      name: locale === "ar" ? "المتابعة إلى الاستوديو" : "Continue to Studio",
-    })
-    .click();
+  await page.goto(`/${locale}/dashboard/programs/created-program-id`);
   await expect(page.locator(".studio-shell--p4")).toBeVisible();
-  await expect(page.locator(".studio-handoff")).toBeVisible();
-  await expect(
-    page.getByRole("img", {
-      name: locale === "ar" ? "معاينة بطاقة العميل" : "Customer card preview",
-    }),
-  ).toBeVisible();
+  const publishedSummary = ["LIVE", "PAUSED", "ARCHIVED", "SUSPENDED"].includes(state);
+  if (publishedSummary) {
+    await expect(page.locator(".studio-published-customer-preview")).toBeVisible();
+  } else {
+    await expect(page.locator(".studio-device-frame img")).toBeVisible();
+  }
 }
 
 async function capture(page: Page, filename: string, fullPage = true): Promise<void> {
@@ -70,6 +47,8 @@ async function capture(page: Page, filename: string, fullPage = true): Promise<v
 }
 
 async function openArea(page: Page, name: RegExp, locale: "en" | "ar" = "en"): Promise<void> {
+  const mobileTrigger = page.locator(".studio-mobile-navigation > button");
+  if (await mobileTrigger.isVisible()) await mobileTrigger.click();
   await page
     .getByRole("navigation", { name: locale === "ar" ? "أقسام الاستوديو" : "Studio sections" })
     .getByRole("button", { name })
@@ -147,7 +126,8 @@ test("captures exactly the focused repair evidence set", async ({ context }) => 
 
   const mobile = await context.newPage();
   await openStudio(mobile, { state: "READY", width: 390, height: 844 });
-  await expect(mobile.locator('.studio-journey [aria-current="step"]')).toBeVisible();
+  await expect(mobile.locator('.studio-journey [aria-current="page"]')).toBeVisible();
+  await expect(mobile.locator('.studio-journey [data-progression-state="current"]')).toBeVisible();
   await mobile.locator(".studio-mobile-navigation > button").click();
   await capture(mobile, "08-mobile-journey-navigation.png", false);
   await mobile.close();

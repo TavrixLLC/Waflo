@@ -123,6 +123,8 @@ const copy = {
     review: "Review card",
     continueStudio: "Continue to Studio",
     opening: "Opening your card builder…",
+    openingError:
+      "Card Builder could not open. No loyalty card data was changed. Return to Loyalty cards and try again.",
     selectedDesign: "Starting design",
     changeDesign: "Change design",
     changeTitle: "Change this design?",
@@ -216,6 +218,8 @@ const copy = {
     review: "مراجعة البطاقة",
     continueStudio: "المتابعة إلى الاستوديو",
     opening: "جارٍ فتح محرر البطاقة…",
+    openingError:
+      "تعذر فتح محرر البطاقة. لم تتغير أي بيانات لبطاقة الولاء. ارجع إلى بطاقات الولاء وحاول مرة أخرى.",
     selectedDesign: "التصميم الأساسي",
     changeDesign: "تغيير التصميم",
     changeTitle: "هل تريد تغيير التصميم؟",
@@ -423,8 +427,8 @@ export function ProgramCardBuilder({
     const key = `${organizationId}:${programId}:${locale}`;
     if (initialLoadKeyRef.current === key) return;
     initialLoadKeyRef.current = key;
-    void load().catch((caught) => setError(merchantError(caught, locale)));
-  }, [load, locale, organizationId, programId]);
+    void load().catch(() => setError(text.openingError));
+  }, [load, locale, organizationId, programId, text.openingError]);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -692,6 +696,23 @@ export function ProgramCardBuilder({
   );
 
   if (!detail) {
+    if (error) {
+      return (
+        <Card className="builder-loading builder-loading--unavailable" role="alert">
+          <CircleAlert size={24} aria-hidden="true" />
+          <div>
+            <strong>{text.needsAttention}</strong>
+            <p>{error}</p>
+          </div>
+          <div className="builder-loading__actions">
+            <Button type="button" variant="secondary" onClick={onBack}>
+              <ArrowLeft className="builder-logical-back" size={16} aria-hidden="true" />
+              {text.back}
+            </Button>
+          </div>
+        </Card>
+      );
+    }
     return (
       <Card className="builder-loading" role="status">
         <RefreshCcw className="studio-spin" size={20} aria-hidden="true" />

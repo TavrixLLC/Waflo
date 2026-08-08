@@ -142,31 +142,30 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await expectNoCriticalViolations(page);
 
   const studioNavigation = page.getByRole("navigation", { name: "Studio sections" });
-  await page.route(
-    "**/v1/organizations/*/programs/*",
-    async (route) => {
-      if (route.request().method() !== "PATCH") {
-        await route.continue();
-        return;
-      }
-      await route.fulfill({
-        status: 409,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: {
-            code: "STALE_PROGRAM_DRAFT",
-            message: "This draft changed in another editor.",
-            requestId: "a11y-conflict",
-            details: { expectedRevision: 2, receivedRevision: 1 },
-          },
-        }),
-      });
-    },
-    { times: 1 },
-  );
+  let remainingConflicts = 1;
+  await page.route("**/v1/organizations/*/programs/*", async (route) => {
+    if (route.request().method() !== "PATCH" || remainingConflicts === 0) {
+      await route.continue();
+      return;
+    }
+    remainingConflicts -= 1;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "STALE_PROGRAM_DRAFT",
+          message: "This draft changed in another editor.",
+          requestId: "a11y-conflict",
+          details: { expectedRevision: 2, receivedRevision: 1 },
+        },
+      }),
+    });
+  });
   await studioNavigation.getByRole("button", { name: /^How it works/u }).click();
+  await expect(page).toHaveURL(/\/how-it-works$/u);
   await page.getByText("Advanced earning and redemption rules", { exact: true }).click();
-  await page.getByLabel("Valid for (days)").first().fill("30");
+  await page.getByLabel("Valid for (days)").first().fill("31");
   const conflictDialog = page.getByRole("dialog").filter({ hasText: "Edited elsewhere" });
   await expect(conflictDialog).toBeVisible();
   await expect(page.getByText("Your local edits are preserved")).toBeVisible();
@@ -176,9 +175,11 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await expect(conflictDialog).toBeHidden();
 
   await studioNavigation.getByRole("button", { name: /^Customers & locations/u }).click();
+  await expect(page).toHaveURL(/\/customers-locations$/u);
   await expectNoCriticalViolations(page);
 
   await studioNavigation.getByRole("button", { name: /^Test/u }).click();
+  await expect(page).toHaveURL(/\/test$/u);
   await expectNoCriticalViolations(page);
   await page.getByRole("button", { name: "Start demo customer" }).click();
   const currentProgress = page.getByText("Current progress", { exact: true });
@@ -193,8 +194,10 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await expectNoCriticalViolations(page);
 
   await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+  await expect(page).toHaveURL(/\/launch$/u);
   await expectNoCriticalViolations(page);
   await studioNavigation.getByRole("button", { name: /^Settings/u }).click();
+  await expect(page).toHaveURL(/\/settings$/u);
   await expectNoCriticalViolations(page);
 
   const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");

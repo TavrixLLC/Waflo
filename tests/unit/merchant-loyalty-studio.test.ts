@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  selectStudioLocalizedProgramContent,
+  selectStudioLocalizedRewardContent,
+} from "../../apps/merchant-dashboard/components/program-studio-localization.js";
+import { createQuickDraft } from "../../apps/merchant-dashboard/components/program-studio-types.js";
+import {
   deriveStudioLifecyclePresentation,
   merchantStudioState,
   studioAreaForPublicationError,
   studioAreaForValidationPath,
   studioAreas,
   studioOperationError,
+  studioTestActionError,
 } from "../../apps/merchant-dashboard/components/program-studio-presentation.js";
 
 const baseLifecycleInput = {
@@ -22,6 +28,37 @@ const baseLifecycleInput = {
 };
 
 describe("merchant Loyalty Studio information architecture", () => {
+  it("uses requested Arabic customer content in Studio summaries", () => {
+    const draft = createQuickDraft("COFFEE");
+    const finalReward = draft.rewards.at(-1);
+    if (!finalReward) throw new Error("Coffee template requires a final reward.");
+    const content = selectStudioLocalizedProgramContent(draft, "ar");
+    const reward = selectStudioLocalizedRewardContent(finalReward, "ar");
+
+    expect(content.earningDescription).toBe("اجمع ختم كوب مع كل طلب قهوة مؤهل.");
+    expect(content.earningDescription).not.toContain(
+      "Collect a cup stamp with every qualifying coffee.",
+    );
+    expect(content.programName).toMatch(/مكافآت/u);
+    expect(reward.name).toBe(finalReward.translations.ar.name);
+  });
+
+  it("keeps the intentional English fallback when Arabic customer content is absent", () => {
+    const draft = createQuickDraft("COFFEE");
+    const finalReward = draft.rewards.at(-1);
+    if (!finalReward) throw new Error("Coffee template requires a final reward.");
+    draft.translations.ar.shortDescription = "";
+    draft.translations.ar.programName = "";
+    finalReward.translations.ar.name = "";
+
+    const content = selectStudioLocalizedProgramContent(draft, "ar");
+    const reward = selectStudioLocalizedRewardContent(finalReward, "ar");
+
+    expect(content.earningDescription).toBe("Collect a cup stamp with every qualifying coffee.");
+    expect(content.programName).toBe(draft.translations.en.programName);
+    expect(reward.name).toBe(finalReward.translations.en.name);
+  });
+
   it("uses safe task-oriented failure language without backend diagnostics", () => {
     const english = studioOperationError("save", "en");
     const arabic = studioOperationError("preview", "ar");
@@ -30,6 +67,14 @@ describe("merchant Loyalty Studio information architecture", () => {
     expect(english).not.toMatch(/request|revision|enum|provider/iu);
     expect(arabic).toContain("لم تتغير بطاقتك المحفوظة");
     expect(arabic).not.toMatch(/request|revision|enum|provider/iu);
+  });
+
+  it("explains known Test Mode policy blocks without exposing backend diagnostics", () => {
+    expect(studioTestActionError("DAILY_STAMP_LIMIT_REACHED", "en")).toContain("daily stamp limit");
+    expect(studioTestActionError("PURCHASE_CURRENCY_MISMATCH", "ar")).toMatch(/[\u0600-\u06ff]/u);
+    expect(studioTestActionError("UNKNOWN_CODE", "en")).toBe(
+      studioOperationError("test-action", "en"),
+    );
   });
 
   it("exposes six task-oriented areas in the intended order", () => {

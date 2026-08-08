@@ -22,7 +22,13 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "no-referrer" },
           {
             key: "Content-Security-Policy",
-            value: createNextContentSecurityPolicy(process.env.NODE_ENV, { googleFonts: true }),
+            value: createNextContentSecurityPolicy(process.env.NODE_ENV, {
+              ...(process.env.NEXT_PUBLIC_API_URL
+                ? { apiUrl: process.env.NEXT_PUBLIC_API_URL }
+                : {}),
+              allowLoopbackApi: process.env.WAFLO_LOCAL_PRODUCTION_SMOKE === "1",
+              googleFonts: true,
+            }),
           },
           ...(process.env.NODE_ENV === "production"
             ? [

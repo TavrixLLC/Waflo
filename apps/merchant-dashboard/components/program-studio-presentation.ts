@@ -51,6 +51,30 @@ export function studioOperationError(context: StudioOperationErrorContext, local
   return studioOperationErrorCopy[locale][context];
 }
 
+const studioTestActionErrorCopy = {
+  DAILY_STAMP_LIMIT_REACHED: {
+    en: "The demo customer reached the daily stamp limit. Real customers are unaffected. Change the simulated day or reset the demo customer.",
+    ar: "وصل العميل التجريبي إلى حد الأختام اليومي. لم يتأثر العملاء الحقيقيون. غيّر اليوم المحاكى أو أعد ضبط العميل التجريبي.",
+  },
+  PURCHASE_AMOUNT_REQUIRED: {
+    en: "Enter a purchase amount to continue this demo. Real customers are unaffected.",
+    ar: "أدخل مبلغ الشراء لمتابعة هذا الاختبار. لم يتأثر العملاء الحقيقيون.",
+  },
+  PURCHASE_CURRENCY_MISMATCH: {
+    en: "The demo purchase currency must match the card's configured currency. Real customers are unaffected.",
+    ar: "يجب أن تتطابق عملة الشراء التجريبي مع العملة المضبوطة للبطاقة. لم يتأثر العملاء الحقيقيون.",
+  },
+  PURCHASE_THRESHOLD_NOT_MET: {
+    en: "The demo purchase does not meet the card's minimum amount. Real customers are unaffected.",
+    ar: "لا يفي الشراء التجريبي بالحد الأدنى للبطاقة. لم يتأثر العملاء الحقيقيون.",
+  },
+} as const;
+
+export function studioTestActionError(code: string, locale: Locale): string {
+  const copy = studioTestActionErrorCopy[code as keyof typeof studioTestActionErrorCopy];
+  return copy?.[locale] ?? studioOperationError("test-action", locale);
+}
+
 export const studioAreaCopy = {
   en: {
     overview: { label: "Overview", description: "Card status and next step" },

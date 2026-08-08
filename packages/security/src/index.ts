@@ -203,7 +203,30 @@ export function privacyAwareIp(ip: string | undefined): string | null {
 }
 
 export interface NextContentSecurityPolicyOptions {
+  apiUrl?: string;
+  allowLoopbackApi?: boolean;
   googleFonts?: boolean;
+}
+
+function contentSecurityPolicyOrigin(
+  value: string | undefined,
+  allowLoopback: boolean,
+): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") return url.origin;
+    if (
+      allowLoopback &&
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+    ) {
+      return url.origin;
+    }
+  } catch {
+    // Invalid configuration is omitted from the policy rather than injected into a header.
+  }
+  return null;
 }
 
 export function createNextContentSecurityPolicy(
@@ -213,8 +236,22 @@ export function createNextContentSecurityPolicy(
   const developmentScriptSource = nodeEnvironment === "development" ? " 'unsafe-eval'" : "";
   const externalFontSource = options.googleFonts ? " https://fonts.gstatic.com" : "";
   const externalFontStyleSource = options.googleFonts ? " https://fonts.googleapis.com" : "";
+  const externalFontConnectSource = options.googleFonts
+    ? " https://fonts.googleapis.com https://fonts.gstatic.com"
+    : "";
 
-  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self' http://localhost:4000 https://api.waflo.app`;
+  const developmentConnectSource =
+    nodeEnvironment === "development" ? " http://localhost:4000" : "";
+  const configuredApiOrigin = contentSecurityPolicyOrigin(
+    options.apiUrl,
+    options.allowLoopbackApi === true,
+  );
+  const configuredApiSource =
+    configuredApiOrigin && configuredApiOrigin !== "https://api.waflo.app"
+      ? ` ${configuredApiOrigin}`
+      : "";
+
+  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource}${configuredApiSource} https://api.waflo.app`;
 }
 
 export const securityHeaders = {

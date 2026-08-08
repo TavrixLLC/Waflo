@@ -1381,6 +1381,12 @@ export function OperationalAnalyticsScreen({
   membership: MembershipView;
 }) {
   const ar = locale === "ar";
+  const dimensionLabels = {
+    programs: ar ? "بطاقات الولاء" : "Loyalty cards",
+    locations: ar ? "المواقع" : "Locations",
+    staff: ar ? "الموظفون" : "Staff",
+    cohorts: ar ? "المجموعات" : "Cohorts",
+  } as const;
   const [data, setData] = useState<AnalyticsOverview | null>(null);
   const [dimensionRows, setDimensionRows] = useState<Array<Record<string, unknown>>>([]);
   const [dimension, setDimension] = useState("");
@@ -1473,7 +1479,7 @@ export function OperationalAnalyticsScreen({
               <div className="dashboard-actions">
                 {(["programs", "locations", "staff", "cohorts"] as const).map((value) => (
                   <Button key={value} variant="secondary" onClick={() => void loadDimension(value)}>
-                    {value}
+                    {dimensionLabels[value]}
                   </Button>
                 ))}
               </div>
@@ -1492,13 +1498,22 @@ export function OperationalAnalyticsScreen({
                   : `${dimensionRows.length} results from ${dimensionRange?.from ?? "—"} to ${dimensionRange?.to ?? "—"}.`}
               </p>
               <Table
-                caption={ar ? `تحليلات ${dimension}` : `${dimension} analytics`}
+                caption={
+                  ar
+                    ? `تحليلات ${dimensionLabels[dimension as keyof typeof dimensionLabels]}`
+                    : `${dimensionLabels[dimension as keyof typeof dimensionLabels]} analytics`
+                }
                 headers={
                   dimension === "programs"
                     ? ar
-                      ? ["البرنامج والإصدار", "الاشتراكات", "عمليات الختم", "معدل الاسترداد"]
+                      ? [
+                          "بطاقة الولاء والإعداد المحفوظ",
+                          "الاشتراكات",
+                          "عمليات الختم",
+                          "معدل الاسترداد",
+                        ]
                       : [
-                          "Program and version",
+                          "Loyalty card and saved setup",
                           "Enrollments",
                           "Stamp operations",
                           "Redemption rate",
@@ -1518,7 +1533,9 @@ export function OperationalAnalyticsScreen({
                 rows={dimensionRows.map((row) =>
                   dimension === "programs"
                     ? [
-                        `${String(row.programName ?? "—")} · v${String(row.versionNumber ?? "—")}`,
+                        `${String(row.programName ?? "—")} · ${
+                          ar ? "الإعداد المحفوظ" : "Saved setup"
+                        } ${String(row.versionNumber ?? "—")}`,
                         String(row.enrollments ?? 0),
                         String(row.stampOperations ?? 0),
                         new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {

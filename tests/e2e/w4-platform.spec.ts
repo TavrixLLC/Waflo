@@ -31,6 +31,11 @@ async function login(page: Page, email = "owner@waflo.local") {
   await page.locator('input[name="password"]').fill("Waflo-Development-2026");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
+  if (email === "owner@waflo.local") {
+    const organizationSwitcher = page.locator(".wf-org-switcher select");
+    await organizationSwitcher.selectOption(organizationId);
+    await expect(organizationSwitcher).toHaveValue(organizationId);
+  }
 }
 
 async function searchCustomer(page: Page, query: string, name: string) {
@@ -41,24 +46,23 @@ async function searchCustomer(page: Page, query: string, name: string) {
 }
 
 async function openProgramTestMode(page: Page, programName: string) {
-  const program = page.locator(".program-list__card").filter({ hasText: programName });
-  await program.getByRole("button", { name: "Open card" }).click();
-  const testMode = page.locator(".studio-section-nav").getByRole("button", { name: /Test Mode/ });
-  const createDraft = page.getByRole("button", { name: "Create draft from live card" });
-  await expect
-    .poll(async () => (await createDraft.isVisible()) || (await testMode.isVisible()))
-    .toBe(true);
-  if (await createDraft.isVisible()) {
-    await createDraft.click();
-    await expect(testMode).toBeVisible();
+  const program = await prisma.loyaltyProgram.findFirstOrThrow({
+    where: { organizationId, internalName: programName },
+    select: { id: true },
+  });
+  await page.goto(`/en/dashboard/programs/${program.id}/test`);
+  const studioNavigation = page.getByRole("navigation", { name: "Studio sections" });
+  const createUpdate = page.getByRole("button", { name: "Create update" });
+  const startDemoCustomer = page.getByRole("button", { name: "Start demo customer" });
+  await expect(createUpdate.or(startDemoCustomer)).toBeVisible();
+  if (await createUpdate.isVisible()) {
+    await createUpdate.click();
+    await expect(startDemoCustomer).toBeVisible();
   }
-  await page
-    .locator(".studio-section-nav")
-    .getByRole("button", { name: /Validation/ })
-    .click();
-  await page.getByRole("button", { name: "Run validation" }).click();
-  await expect(page.getByText(/0 errors/)).toBeVisible();
-  await testMode.click();
+  await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+  await page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }).click();
+  await expect(page.getByText("Setup, asset, and preview checks passed.")).toBeVisible();
+  await studioNavigation.getByRole("button", { name: /^Test/u }).click();
 }
 
 test.describe
@@ -103,10 +107,25 @@ test.describe
           resolutionNote: null,
         },
       });
+      const policyProgramIds = [
+        "d0000000-0000-4000-8000-000000000001",
+        "e0000000-0000-4000-8000-000000000001",
+      ];
+      await prisma.loyaltyProgramVersion.updateMany({
+        where: {
+          programId: { in: policyProgramIds },
+          status: { in: ["DRAFT", "VALIDATED", "TEST_READY"] },
+        },
+        data: { status: "ABANDONED", abandonedAt: now },
+      });
+      await prisma.loyaltyProgram.updateMany({
+        where: { id: { in: policyProgramIds } },
+        data: { currentDraftVersionId: null },
+      });
       const policyPrograms = await prisma.loyaltyProgram.findMany({
         where: {
           id: {
-            in: ["d0000000-0000-4000-8000-000000000001", "e0000000-0000-4000-8000-000000000001"],
+            in: policyProgramIds,
           },
         },
         select: {
@@ -288,8 +307,8 @@ test.describe
       await expect(
         page.getByRole("main").getByRole("heading", { name: "Analytics" }),
       ).toBeVisible();
-      await page.getByRole("button", { name: "programs" }).click();
-      await expect(page.getByRole("table", { name: "programs analytics" })).toBeVisible();
+      await page.getByRole("button", { name: "Loyalty cards" }).click();
+      await expect(page.getByRole("table", { name: "Loyalty cards analytics" })).toBeVisible();
       await capture(page, "12-analytics-program-comparison");
 
       await page.goto("/en/dashboard/exports");
@@ -346,33 +365,45 @@ test.describe
       await login(page);
       await page.goto("/en/dashboard/programs");
       await openProgramTestMode(page, "Daily Coffee");
-      await page.getByRole("button", { name: "Start Test Mode" }).click();
+      await page.getByRole("button", { name: "Start demo customer" }).click();
       await page.getByRole("button", { name: "+5 stamps" }).click();
-      await page.getByRole("button", { name: "+1 stamp" }).click();
+      await page.getByRole("button", { name: "Add a stamp" }).click();
       await expect(
-        page.getByText("The membership has reached its daily stamp limit."),
+        page.getByText(
+          "The demo customer reached the daily stamp limit. Real customers are unaffected. Change the simulated day or reset the demo customer.",
+        ),
       ).toBeVisible();
       await capture(page, "37-daily-cap-blocked");
 
-      await page.getByRole("button", { name: "Loyalty Cards", exact: true }).first().click();
       await openProgramTestMode(page, "Qualifying Purchase");
-      await page.getByRole("button", { name: "Start Test Mode" }).click();
-      await page.getByRole("button", { name: "+1 stamp" }).click();
-      await expect(page.getByText("A purchase amount in minor units is required.")).toBeVisible();
+      await page.getByRole("button", { name: "Start demo customer" }).click();
+      await page.getByRole("button", { name: "Add a stamp" }).click();
+      await expect(
+        page.getByText(
+          "Enter a purchase amount to continue this demo. Real customers are unaffected.",
+        ),
+      ).toBeVisible();
       await capture(page, "38-purchase-amount-required");
 
-      await page.getByLabel("Purchase amount (minor units)").fill("10000");
+      await page.getByText("Demo purchase details", { exact: true }).click();
+      await page.getByLabel("Purchase amount").fill("10000");
       await page.getByLabel("Purchase currency").fill("USD");
-      await page.getByRole("button", { name: "+1 stamp" }).click();
+      await page.getByRole("button", { name: "Add a stamp" }).click();
       await expect(
-        page.getByText("The purchase currency does not match the program currency."),
+        page.getByText(
+          "The demo purchase currency must match the card's configured currency. Real customers are unaffected.",
+        ),
       ).toBeVisible();
       await capture(page, "39-purchase-currency-mismatch");
 
-      await page.getByLabel("Purchase amount (minor units)").fill("9999");
+      await page.getByLabel("Purchase amount").fill("9999");
       await page.getByLabel("Purchase currency").fill("IQD");
-      await page.getByRole("button", { name: "+1 stamp" }).click();
-      await expect(page.getByText("The purchase does not meet the minimum amount.")).toBeVisible();
+      await page.getByRole("button", { name: "Add a stamp" }).click();
+      await expect(
+        page.getByText(
+          "The demo purchase does not meet the card's minimum amount. Real customers are unaffected.",
+        ),
+      ).toBeVisible();
       await capture(page, "41-purchase-threshold-blocked");
     });
 

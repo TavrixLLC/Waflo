@@ -90,7 +90,13 @@ import {
   studioAreaForValidationPath,
   studioAreas,
   studioOperationError,
+  studioTestActionError,
 } from "./program-studio-presentation";
+import {
+  selectStudioLocalizedProgramContent,
+  selectStudioLocalizedRewardContent,
+  selectStudioLocalizedServerRewardName,
+} from "./program-studio-localization";
 import {
   type AssetItem,
   apiDraft,
@@ -248,6 +254,8 @@ export function ProgramStudioEditor({
   assets,
   onAssetUploaded,
   ar,
+  initialArea = "overview",
+  onAreaChange,
   onClose,
   onEditDesign,
   onOpenCustomers,
@@ -262,6 +270,8 @@ export function ProgramStudioEditor({
   onAssetUploaded: (asset: AssetItem) => void;
   ar: boolean;
   builderHandoff?: boolean;
+  initialArea?: StudioArea;
+  onAreaChange?: (area: StudioArea, options?: { restoreFocus?: boolean }) => void;
   onClose: () => void;
   onEditDesign: () => void;
   onOpenCustomers: () => void;
@@ -271,7 +281,7 @@ export function ProgramStudioEditor({
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [revision, setRevision] = useState(1);
-  const [activeArea, setActiveArea] = useState<StudioArea>("overview");
+  const [activeArea, setActiveArea] = useState<StudioArea>(initialArea);
   const [selectedProfile, setSelectedProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -309,11 +319,16 @@ export function ProgramStudioEditor({
   function selectArea(area: StudioArea) {
     const restoreMobileFocus = mobileNavigationOpen;
     setActiveArea(area);
+    onAreaChange?.(area, { restoreFocus: restoreMobileFocus });
     setMobileNavigationOpen(false);
-    if (restoreMobileFocus) {
+    if (restoreMobileFocus && !onAreaChange) {
       window.requestAnimationFrame(() => mobileNavigationTriggerRef.current?.focus());
     }
   }
+
+  useEffect(() => {
+    setActiveArea(initialArea);
+  }, [initialArea]);
 
   const load = useCallback(async () => {
     const [program, history, nextOrganization, access, providers, audit] = await Promise.all([
@@ -427,7 +442,7 @@ export function ProgramStudioEditor({
   }, [ar, conflict, draft, organizationId, programId, revision]);
 
   const generatePreviews = useCallback(async () => {
-    if (detail?.currentPublishedVersion || !draft) return;
+    if (!draft) return;
     if (saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current) return;
     setPreviewLoadState("loading");
     try {
@@ -446,7 +461,7 @@ export function ProgramStudioEditor({
       setPreviewLoadState("unavailable");
       setError(studioOperationError("preview", ar ? "ar" : "en"));
     }
-  }, [ar, detail?.currentPublishedVersion, draft, organizationId, programId, progress, saveState]);
+  }, [ar, draft, organizationId, programId, progress, saveState]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void generatePreviews(), 250);
@@ -578,8 +593,12 @@ export function ProgramStudioEditor({
       setTestSession(refreshed);
       setProgress(refreshed.currentStampCount);
       await load();
-    } catch {
-      setError(studioOperationError("test-action", ar ? "ar" : "en"));
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError
+          ? studioTestActionError(caught.code, ar ? "ar" : "en")
+          : studioOperationError("test-action", ar ? "ar" : "en"),
+      );
     } finally {
       setWorking(false);
     }
@@ -625,7 +644,7 @@ export function ProgramStudioEditor({
       setConfirmation(null);
       await load();
       await onChanged();
-      if (action === "archive") setActiveArea("settings");
+      if (action === "archive") selectArea("settings");
       const notices: Record<
         Exclude<LifecycleAction, "publish">,
         [string, string, string, string]
@@ -672,11 +691,10 @@ export function ProgramStudioEditor({
         const code = caught instanceof ApiClientError ? caught.code : "NETWORK_ERROR";
         setPublicationFailure({ code, presentation: publicationFailurePresentation(code, ar) });
         setConfirmation(null);
-        setActiveArea("launch");
+        selectArea("launch");
         return;
       }
-      if (caught instanceof ApiClientError)
-        setActiveArea(studioAreaForPublicationError(caught.code));
+      if (caught instanceof ApiClientError) selectArea(studioAreaForPublicationError(caught.code));
       if (
         caught instanceof ApiClientError &&
         caught.code === "PROGRAM_PUBLICATION_STATE_BLOCKED" &&
@@ -734,6 +752,25 @@ export function ProgramStudioEditor({
   const selectedPreview = previews[selectedProfile];
 
   if (!detail) {
+    if (error) {
+      return (
+        <Card className="builder-loading builder-loading--unavailable" role="alert">
+          <CircleAlert aria-hidden="true" />
+          <div>
+            <strong>{ar ? "تعذر فتح استوديو الولاء" : "Loyalty Studio could not open"}</strong>
+            <p>
+              {ar
+                ? "لم تتغير أي بيانات. ارجع إلى بطاقات الولاء وتحقق من البطاقة أو صلاحية الوصول."
+                : "No card data was changed. Return to Loyalty cards and check the card or your access."}
+            </p>
+          </div>
+          <Button variant="secondary" onClick={onClose}>
+            <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
+            {ar ? "بطاقات الولاء" : "Loyalty cards"}
+          </Button>
+        </Card>
+      );
+    }
     return (
       <Card className="studio-loading" role="status">
         <Clock3 aria-hidden="true" /> {ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}
@@ -872,7 +909,7 @@ export function ProgramStudioEditor({
               <Button
                 variant="secondary"
                 onClick={() => {
-                  setActiveArea("settings");
+                  selectArea("settings");
                   window.requestAnimationFrame(() =>
                     document.getElementById("studio-change-history")?.focus(),
                   );
@@ -892,6 +929,7 @@ export function ProgramStudioEditor({
           type="button"
           aria-expanded={mobileNavigationOpen}
           aria-controls="studio-mobile-navigation-menu"
+          data-studio-area={activeArea}
           onClick={() => setMobileNavigationOpen((open) => !open)}
         >
           <span>
@@ -958,9 +996,9 @@ export function ProgramStudioEditor({
             onEditDesign={onEditDesign}
             onOpenCustomers={onOpenCustomers}
             onOpenBilling={onOpenBilling}
-            onArea={setActiveArea}
+            onArea={selectArea}
             onValidate={() => void validate()}
-            onIssue={(issue) => setActiveArea(studioAreaForValidationPath(issue.path))}
+            onIssue={(issue) => selectArea(studioAreaForValidationPath(issue.path))}
             testSession={testSession}
             onStartTest={() => void startTest()}
             onTestCommand={(command) => void testCommand(command)}
@@ -1513,9 +1551,10 @@ function StudioOverview({
   const finalReward = [...displayDraft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
-  const rewardName =
-    finalReward?.translations[ar ? "ar" : "en"].name ??
-    displayDraft.translations[ar ? "ar" : "en"].rewardSummary;
+  const customerContent = selectStudioLocalizedProgramContent(displayDraft, ar ? "ar" : "en");
+  const rewardName = finalReward
+    ? selectStudioLocalizedRewardContent(finalReward, ar ? "ar" : "en").name
+    : customerContent.rewardSummary;
   const activeLocations = locations.filter((location) =>
     displayDraft.locationIds.includes(location.id),
   );
@@ -1630,7 +1669,7 @@ function StudioOverview({
             <strong>
               {displayDraft.requiredStampCount} {ar ? "أختام" : "stamps"} · {rewardName}
             </strong>
-            <p>{displayDraft.earningDescription}</p>
+            <p>{customerContent.earningDescription}</p>
           </div>
           <button type="button" onClick={() => onArea("how-it-works")}>
             {ar ? "فتح" : "Open"}
@@ -1902,11 +1941,13 @@ function PublishedCardSummary({
   progress: number;
   ar: boolean;
 }) {
-  const content = draft.translations[ar ? "ar" : "en"];
+  const content = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
   const reward = [...draft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
-  const rewardName = reward?.translations[ar ? "ar" : "en"].name ?? content.rewardSummary;
+  const rewardName = reward
+    ? selectStudioLocalizedRewardContent(reward, ar ? "ar" : "en").name
+    : content.rewardSummary;
   const stampSlots = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"].slice(
     0,
     Math.min(draft.requiredStampCount, 12),
@@ -1968,9 +2009,10 @@ function HowItWorksPanel({
   const reward = [...draft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
-  const rewardName =
-    reward?.translations[ar ? "ar" : "en"].name ??
-    draft.translations[ar ? "ar" : "en"].rewardSummary;
+  const content = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
+  const rewardName = reward
+    ? selectStudioLocalizedRewardContent(reward, ar ? "ar" : "en").name
+    : content.rewardSummary;
   return (
     <div className="studio-area-stack">
       <div className="studio-rule-summary">
@@ -1983,7 +2025,7 @@ function HowItWorksPanel({
             <h3>
               {draft.requiredStampCount} {ar ? "أختام" : "stamps"}
             </h3>
-            <p>{draft.earningDescription}</p>
+            <p>{content.earningDescription}</p>
           </div>
         </section>
         <section>
@@ -2076,7 +2118,7 @@ function RewardOperationsPanel({
         <h3>{ar ? "طريقة استخدام المكافآت" : "How rewards are used"}</h3>
       </div>
       {draft.rewards.map((reward) => {
-        const name = reward.translations[ar ? "ar" : "en"].name;
+        const name = selectStudioLocalizedRewardContent(reward, ar ? "ar" : "en").name;
         return (
           <Card key={reward.clientId} className="studio-operational-reward">
             <div className="studio-section-heading">
@@ -2255,6 +2297,7 @@ function StudioSettingsPanel({
   onCreateDraft: () => void;
   onLifecycle: (action: LifecycleAction) => void;
 }) {
+  const customerContent = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
   return (
     <div className="studio-area-stack">
       <section className="studio-settings-section">
@@ -2277,7 +2320,7 @@ function StudioSettingsPanel({
         <dl className="studio-settings-summary">
           <div>
             <dt>{ar ? "اسم البطاقة" : "Card name"}</dt>
-            <dd>{draft.translations[ar ? "ar" : "en"].programName}</dd>
+            <dd>{customerContent.programName}</dd>
           </div>
           <div>
             <dt>{ar ? "هدف الأختام" : "Stamp goal"}</dt>
@@ -3832,9 +3875,7 @@ function TestModePanel({
           const redeemed = redemptions.filter(
             (event) => event.rewardDefinitionId === reward.id,
           ).length;
-          const name =
-            reward.translations.find((translation) => translation.locale === (ar ? "AR" : "EN"))
-              ?.name ?? reward.internalName;
+          const name = selectStudioLocalizedServerRewardName(reward, ar ? "ar" : "en");
           return (
             <Card key={reward.id}>
               <Badge tone={earned > redeemed ? "success" : "neutral"}>

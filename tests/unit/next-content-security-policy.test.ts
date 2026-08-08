@@ -5,6 +5,9 @@ import dashboardConfig from "../../apps/merchant-dashboard/next.config";
 import { createNextContentSecurityPolicy } from "../../packages/security/src/index";
 
 const originalNodeEnvironment = process.env.NODE_ENV;
+const originalPublicApiUrl = process.env.NEXT_PUBLIC_API_URL;
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: P6 exercises an explicit local-only production smoke switch without changing provenance-bound turbo.json.
+const originalLocalProductionSmoke = process.env.WAFLO_LOCAL_PRODUCTION_SMOKE;
 
 const applicationConfigs = [
   ["marketing-web", marketingConfig],
@@ -19,12 +22,16 @@ const preservedDirectives = [
   "frame-ancestors 'none'",
   "form-action 'self'",
   "img-src 'self' data: blob:",
-  "connect-src 'self' http://localhost:4000 https://api.waflo.app",
 ] as const;
 
 afterEach(() => {
   if (originalNodeEnvironment === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = originalNodeEnvironment;
+  if (originalPublicApiUrl === undefined) delete process.env.NEXT_PUBLIC_API_URL;
+  else process.env.NEXT_PUBLIC_API_URL = originalPublicApiUrl;
+  // biome-ignore lint/suspicious/noUndeclaredEnvVars: restore the local-only smoke switch after each configuration test.
+  if (originalLocalProductionSmoke === undefined) delete process.env.WAFLO_LOCAL_PRODUCTION_SMOKE;
+  else process.env.WAFLO_LOCAL_PRODUCTION_SMOKE = originalLocalProductionSmoke;
 });
 
 async function contentSecurityPolicyFor(
@@ -53,6 +60,7 @@ describe("Next.js Content-Security-Policy", () => {
     const policy = createNextContentSecurityPolicy("development");
 
     expect(policy).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
+    expect(policy).toContain("connect-src 'self' http://localhost:4000 https://api.waflo.app");
     expect(policy.match(/'unsafe-eval'/g)).toHaveLength(1);
     expectPreservedSecurityDirectives(policy);
   });
@@ -62,6 +70,9 @@ describe("Next.js Content-Security-Policy", () => {
 
     expect(policy).toContain("font-src 'self' data: https://fonts.gstatic.com");
     expect(policy).toContain("style-src 'self' 'unsafe-inline' https://fonts.googleapis.com");
+    expect(policy).toContain(
+      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://api.waflo.app",
+    );
     expect(policy).not.toContain("'unsafe-eval'");
     expect(policy).not.toContain("*.googleapis.com");
     expect(policy).not.toContain("*.gstatic.com");
@@ -75,9 +86,37 @@ describe("Next.js Content-Security-Policy", () => {
 
       expect(policy).toContain("script-src 'self' 'unsafe-inline'");
       expect(policy).not.toContain("'unsafe-eval'");
+      expect(policy).toContain("connect-src 'self' https://api.waflo.app");
+      expect(policy).not.toContain("http://localhost:4000");
       expectPreservedSecurityDirectives(policy);
     },
   );
+
+  it("permits a loopback API only for an explicit local production smoke build", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "http://localhost:4000/v1";
+    process.env.WAFLO_LOCAL_PRODUCTION_SMOKE = "1";
+
+    const policy = await contentSecurityPolicyFor(dashboardConfig, "production");
+
+    expect(policy).toContain("connect-src 'self'");
+    expect(policy).toContain(" http://localhost:4000 https://api.waflo.app");
+    expect(policy).not.toContain("'unsafe-eval'");
+  });
+
+  it("rejects unsafe or malformed configured API origins", () => {
+    const insecure = createNextContentSecurityPolicy("production", {
+      apiUrl: "http://example.test:4000/header; injection",
+    });
+    const malformed = createNextContentSecurityPolicy("production", {
+      apiUrl: "not a URL; script-src *",
+      allowLoopbackApi: true,
+    });
+
+    expect(insecure).not.toContain("example.test");
+    expect(insecure).not.toContain("injection");
+    expect(malformed).not.toContain("not a URL");
+    expect(malformed).not.toContain("script-src *");
+  });
 
   for (const [applicationName, config] of applicationConfigs) {
     it(`${applicationName} permits eval in development and never in production or test`, async () => {
@@ -86,8 +125,11 @@ describe("Next.js Content-Security-Policy", () => {
       const testPolicy = await contentSecurityPolicyFor(config, "test");
 
       expect(developmentPolicy).toContain("'unsafe-eval'");
+      expect(developmentPolicy).toContain("http://localhost:4000");
       expect(productionPolicy).not.toContain("'unsafe-eval'");
+      expect(productionPolicy).not.toContain("http://localhost:4000");
       expect(testPolicy).not.toContain("'unsafe-eval'");
+      expect(testPolicy).not.toContain("http://localhost:4000");
       expectPreservedSecurityDirectives(developmentPolicy);
       expectPreservedSecurityDirectives(productionPolicy);
       expectPreservedSecurityDirectives(testPolicy);

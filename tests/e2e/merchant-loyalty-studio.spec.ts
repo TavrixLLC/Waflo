@@ -164,7 +164,7 @@ test("keeps the Studio responsive across every required breakpoint", async ({ pa
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     );
     expect(noOverflow, `${size.width}px viewport should not overflow`).toBe(true);
-    if (size.width <= 820) {
+    if (size.width <= 1100) {
       await expect(page.locator(".studio-mobile-navigation > button")).toBeVisible();
     } else {
       await expect(page.getByRole("navigation", { name: "Studio sections" })).toBeVisible();
