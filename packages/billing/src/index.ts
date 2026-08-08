@@ -239,6 +239,17 @@ export function enrollmentBillingDecision(status: BillingStatus): EnrollmentBill
   };
 }
 
+/** An elapsed local trial is never an entitlement, even if webhook delivery is delayed. */
+export function effectiveBillingStatus(
+  status: BillingStatus,
+  trialEnd: Date | null | undefined,
+  now = new Date(),
+): BillingStatus {
+  return status === "trialing" && trialEnd !== null && trialEnd !== undefined && trialEnd <= now
+    ? "past_due"
+    : status;
+}
+
 export function walletIncludedForPlan(_plan: PlanCode): boolean {
   return true;
 }

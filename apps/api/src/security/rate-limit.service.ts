@@ -34,8 +34,15 @@ export class RateLimitService implements OnModuleDestroy {
     if (this.redis) {
       try {
         if (this.redis.status === "wait") await this.redis.connect();
-        const count = await this.redis.incr(storageKey);
-        if (count === 1) await this.redis.expire(storageKey, windowSeconds);
+        // Keep the first increment and its expiry in one Redis operation. A process
+        // crash between INCR and EXPIRE must never create a permanent bucket.
+        const response = (await this.redis.eval(
+          "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
+          1,
+          storageKey,
+          windowSeconds,
+        )) as number;
+        const count = Number(response);
         return count <= limit;
       } catch {
         if (this.production) {

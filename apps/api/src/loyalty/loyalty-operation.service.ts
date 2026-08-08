@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
+import { effectiveBillingStatus } from "@waflo/billing";
 import type {
   IssueStampInput,
   MembershipResolveResult,
@@ -190,8 +191,12 @@ export class LoyaltyOperationService {
       assertOperationalEligibility(
         {
           organizationStatus: membership.organization.status,
-          billingStatus:
-            membership.organization.billingProfile?.subscriptionStatus ?? "PENDING_ACTIVATION",
+          billingStatus: effectiveBillingStatus(
+            (
+              membership.organization.billingProfile?.subscriptionStatus ?? "PENDING_ACTIVATION"
+            ).toLocaleLowerCase("en-US") as never,
+            membership.organization.billingProfile?.trialEnd,
+          ).toUpperCase(),
           programStatus: membership.program.status,
           membershipStatus: membership.status,
           credentialStatus: credential.status,
@@ -464,12 +469,10 @@ export class LoyaltyOperationService {
                       dailyCap: input.managerOverride.dailyCap,
                       purchasePolicy: input.managerOverride.purchasePolicy,
                       reason: input.managerOverride.reason,
-                      permitted: await this.managerOverrideValid(
-                        transaction,
-                        context,
-                        input.managerOverride.approvalPublicId,
-                        membership.id,
-                      ),
+                      // Operation approvals are redemption-only. Keep the historical
+                      // Staff payload shape, but never treat a REDEEM approval as a
+                      // stamp-policy authorization.
+                      permitted: false,
                     }
                   : null,
               },
@@ -2249,8 +2252,12 @@ export class LoyaltyOperationService {
       assertOperationalEligibility(
         {
           organizationStatus: membership.organization.status,
-          billingStatus:
-            membership.organization.billingProfile?.subscriptionStatus ?? "PENDING_ACTIVATION",
+          billingStatus: effectiveBillingStatus(
+            (
+              membership.organization.billingProfile?.subscriptionStatus ?? "PENDING_ACTIVATION"
+            ).toLocaleLowerCase("en-US") as never,
+            membership.organization.billingProfile?.trialEnd,
+          ).toUpperCase(),
           programStatus: membership.program.status,
           membershipStatus: membership.status,
           credentialStatus: membership.credentials[0]?.status ?? "MISSING",
@@ -2868,6 +2875,7 @@ export class LoyaltyOperationService {
         expiresAt: { gt: new Date() },
         ...(entitlementId ? { rewardEntitlementId: entitlementId } : {}),
         ...(requestFingerprint ? { requestFingerprint } : {}),
+        operationType: "REDEEM",
       },
       data: { status: "CONSUMED", consumedAt },
     });

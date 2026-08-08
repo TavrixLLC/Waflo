@@ -425,6 +425,7 @@ enum CustomerPrivacyRequestStatus {
   COMPLETED
   FAILED
   CANCELED
+  EXPIRED
   DEAD_LETTER
 }
 
@@ -1936,6 +1937,7 @@ model ManagerApprovalChallenge {
   staffDeviceId          String                @map("staff_device_id") @db.Uuid
   locationId             String                @map("location_id") @db.Uuid
   requestFingerprint     String                @map("request_fingerprint") @db.Char(64)
+  operationType          String                @default("REDEEM") @map("operation_type") @db.VarChar(32)
   status                 ManagerApprovalStatus @default(PENDING)
   requestedByMemberId    String                @map("requested_by_member_id") @db.Uuid
   approvedByUserId       String?               @map("approved_by_user_id") @db.Uuid
@@ -2132,6 +2134,7 @@ model CustomerPrivacyRequest {
   requestFingerprint   String                       @default("") @map("request_fingerprint") @db.Char(64)
   confirmationMetadata Json?                        @map("confirmation_metadata") @db.JsonB
   objectKey            String?                      @map("object_key") @db.VarChar(500)
+  expiresAt            DateTime?                    @map("expires_at") @db.Timestamptz(6)
   completedAt          DateTime?                    @map("completed_at") @db.Timestamptz(6)
   failureCode          String?                      @map("failure_code") @db.VarChar(120)
   leaseOwner           String?                      @map("lease_owner") @db.VarChar(120)

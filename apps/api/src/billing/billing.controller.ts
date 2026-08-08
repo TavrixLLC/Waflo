@@ -50,6 +50,16 @@ export class BillingController {
   ) {
     return this.billing.portal(user.id, parseUuid(organizationId), request);
   }
+
+  @Post("reconcile")
+  @RateLimit(5, 300)
+  reconcile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.reconcileOrganization(user.id, parseUuid(organizationId), request);
+  }
 }
 
 @Controller("v1/webhooks")

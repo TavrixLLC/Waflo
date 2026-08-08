@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import marketingConfig from "../../apps/marketing-web/next.config";
 import dashboardConfig from "../../apps/merchant-dashboard/next.config";
 import customerConfig from "../../apps/customer-web/next.config";
-import { serializeHttpRequest } from "../../apps/api/src/app";
+import { createApiApplication, serializeHttpRequest } from "../../apps/api/src/app";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service";
 import {
   renderNotificationHtml,
@@ -123,6 +123,22 @@ describe("repair-round security boundaries", () => {
           .flatMap((group) => group.headers)
           .some((header) => header.key === "Strict-Transport-Security"),
       ).toBe(false);
+    }
+  });
+
+  it("disables the vulnerable Next server-side image optimizer in every web app", () => {
+    for (const config of [marketingConfig, dashboardConfig, customerConfig]) {
+      expect(config.images?.unoptimized).toBe(true);
+    }
+  });
+
+  it("initializes non-production Swagger static assets through the Fastify adapter", async () => {
+    process.env.NODE_ENV = "test";
+    const app = await createApiApplication({ logger: false });
+    try {
+      expect(app.getHttpAdapter().getInstance().printRoutes()).toContain("docs");
+    } finally {
+      await app.close();
     }
   });
 

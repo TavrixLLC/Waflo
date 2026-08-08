@@ -491,6 +491,26 @@ export class TeamService {
         if (user.normalizedEmail !== invitation.normalizedEmail) {
           return { kind: "email_mismatch" as const };
         }
+        const inviter = await transaction.organizationMember.findUnique({
+          where: {
+            organizationId_userId: {
+              organizationId: invitation.organizationId,
+              userId: invitation.invitedByUserId,
+            },
+          },
+          select: { status: true, role: true },
+        });
+        if (
+          invitation.organization.status !== "ACTIVE" ||
+          inviter?.status !== "ACTIVE" ||
+          !["OWNER", "MANAGER"].includes(inviter.role)
+        ) {
+          await transaction.organizationInvitation.updateMany({
+            where: { id: invitation.id, status: "PENDING" },
+            data: { status: "CANCELED", canceledAt: now },
+          });
+          return { kind: "canceled" as const };
+        }
         const claim = await transaction.organizationInvitation.updateMany({
           where: {
             id: invitation.id,

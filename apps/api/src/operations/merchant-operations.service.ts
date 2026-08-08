@@ -496,6 +496,7 @@ export class MerchantOperationsService {
           staffDeviceId: device.id,
           locationId: input.locationId,
           requestFingerprint: input.requestFingerprint,
+          operationType: "REDEEM",
           requestedByMemberId: device.organizationMemberId,
           expiresAt: new Date(Date.now() + 5 * 60_000),
         },
@@ -1710,11 +1711,45 @@ export class MerchantOperationsService {
         requestType: true,
         status: true,
         completedAt: true,
+        expiresAt: true,
         failureCode: true,
         createdAt: true,
       },
     });
     if (!command) throw new AppError("PRIVACY_REQUEST_NOT_FOUND", "Request not found.", 404);
     return command;
+  }
+
+  async downloadPrivacyExport(userId: string, organizationId: string, publicId: string) {
+    await this.tenant.requireMembership(userId, organizationId, "customers.privacy_export");
+    const command = await this.prisma.client.customerPrivacyRequest.findFirst({
+      where: { publicId, organizationId, requestType: "EXPORT" },
+      select: { publicId: true, status: true, objectKey: true, expiresAt: true },
+    });
+    if (
+      command?.status !== "COMPLETED" ||
+      !command.objectKey ||
+      !command.expiresAt ||
+      command.expiresAt <= new Date()
+    ) {
+      throw new AppError("PRIVACY_EXPORT_NOT_READY", "Privacy export is not available.", 409);
+    }
+    const object = await this.objectStorage.send(
+      new GetObjectCommand({ Bucket: this.objectStorageBucket, Key: command.objectKey }),
+    );
+    if (!object.Body)
+      throw new AppError("PRIVACY_EXPORT_NOT_READY", "Privacy export is unavailable.", 409);
+    try {
+      return {
+        body: decryptPrivateObject(
+          Buffer.from(await object.Body.transformToByteArray()),
+          command.objectKey,
+          this.privateObjectSecret,
+        ),
+        filename: `waflo-privacy-export-${command.publicId}.json`,
+      };
+    } catch {
+      throw new AppError("PRIVACY_EXPORT_NOT_READY", "Privacy export is unavailable.", 409);
+    }
   }
 }

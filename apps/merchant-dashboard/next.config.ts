@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     "@waflo/contracts",
     "@waflo/i18n",
   ],
+  images: { unoptimized: true },
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {

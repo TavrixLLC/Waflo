@@ -1621,6 +1621,7 @@ export class OperationalWorker {
           leaseOwner: null,
           leaseExpiresAt: null,
           completedAt: new Date(),
+          expiresAt: new Date(Date.now() + this.environment.EXPORT_TTL_HOURS * 60 * 60 * 1_000),
         },
       });
       await transaction.auditLog.create({
@@ -2079,7 +2080,7 @@ export class OperationalWorker {
 
   async cleanupExpiredState() {
     const now = new Date();
-    const [pairings, approvals, nonces, exports] = await this.prisma.$transaction([
+    const [pairings, approvals, nonces, exports, privacyExports] = await this.prisma.$transaction([
       this.prisma.devicePairingSession.updateMany({
         where: { status: { in: ["PENDING", "CLAIMED"] }, expiresAt: { lte: now } },
         data: { status: "EXPIRED" },
@@ -2093,24 +2094,40 @@ export class OperationalWorker {
         where: { status: "COMPLETED", expiresAt: { lte: now } },
         select: { id: true, objectKey: true },
       }),
+      this.prisma.customerPrivacyRequest.findMany({
+        where: { requestType: "EXPORT", status: "COMPLETED", expiresAt: { lte: now } },
+        select: { id: true, objectKey: true },
+      }),
     ]);
-    for (const item of exports) {
+    for (const item of [...exports, ...privacyExports]) {
+      let deleted = !item.objectKey;
       if (item.objectKey) {
-        await this.objectStorage
+        deleted = await this.objectStorage
           .send(
             new DeleteObjectCommand({
               Bucket: this.environment.OBJECT_STORAGE_BUCKET,
               Key: item.objectKey,
             }),
           )
-          .catch(() => undefined);
+          .then(() => true)
+          .catch(() => false);
       }
-      await this.prisma.exportCommand.update({
-        where: { id: item.id },
-        data: { status: "EXPIRED", objectKey: null },
-      });
+      // Keep the authoritative reference when storage deletion fails so a later
+      // worker pass can retry instead of silently orphaning encrypted data.
+      if (!deleted) continue;
+      if (exports.some((exportItem) => exportItem.id === item.id)) {
+        await this.prisma.exportCommand.update({
+          where: { id: item.id },
+          data: { status: "EXPIRED", objectKey: null },
+        });
+      } else {
+        await this.prisma.customerPrivacyRequest.update({
+          where: { id: item.id },
+          data: { status: "EXPIRED", objectKey: null },
+        });
+      }
     }
-    return pairings.count + approvals.count + nonces.count + exports.length;
+    return pairings.count + approvals.count + nonces.count + exports.length + privacyExports.length;
   }
 }
 

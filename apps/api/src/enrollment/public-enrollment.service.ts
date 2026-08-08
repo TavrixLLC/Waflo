@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import { enrollmentBillingDecision, walletIncludedForPlan } from "@waflo/billing";
+import {
+  effectiveBillingStatus,
+  enrollmentBillingDecision,
+  walletIncludedForPlan,
+} from "@waflo/billing";
 import type { BillingStatus, EnrollmentInput } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
@@ -251,7 +255,12 @@ export class PublicEnrollmentService {
           );
         }
         const billing = organization.billingProfile
-          ? enrollmentBillingDecision(billingStatus(organization.billingProfile.subscriptionStatus))
+          ? enrollmentBillingDecision(
+              effectiveBillingStatus(
+                billingStatus(organization.billingProfile.subscriptionStatus),
+                organization.billingProfile.trialEnd,
+              ),
+            )
           : enrollmentBillingDecision("pending_activation");
         if (!billing.allowed) {
           throw new AppError(
@@ -712,7 +721,7 @@ export class PublicEnrollmentService {
     },
     organization: {
       id: string;
-      billingProfile: { subscriptionStatus: string } | null;
+      billingProfile: { subscriptionStatus: string; trialEnd: Date | null } | null;
     },
   ) {
     const version = program.currentPublishedVersion;
@@ -755,7 +764,12 @@ export class PublicEnrollmentService {
       height: preview.height,
     });
     const billing = organization.billingProfile
-      ? enrollmentBillingDecision(billingStatus(organization.billingProfile.subscriptionStatus))
+      ? enrollmentBillingDecision(
+          effectiveBillingStatus(
+            billingStatus(organization.billingProfile.subscriptionStatus),
+            organization.billingProfile.trialEnd,
+          ),
+        )
       : enrollmentBillingDecision("pending_activation");
     return {
       slug: program.publicSlug,

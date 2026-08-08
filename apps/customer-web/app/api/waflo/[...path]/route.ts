@@ -13,12 +13,41 @@ const hopByHop = new Set([
   "trailer",
   "transfer-encoding",
   "upgrade",
+  "x-forwarded-host",
 ]);
+
+function safeUpstreamPath(path: string[]): string {
+  if (path.length === 0) throw new Error("Missing API path");
+  for (const segment of path) {
+    const decoded = decodeURIComponent(segment);
+    if (
+      !segment ||
+      segment.includes("\\") ||
+      /%2f|%5c|%2e/i.test(segment) ||
+      decoded === "." ||
+      decoded === ".." ||
+      decoded.includes("/") ||
+      decoded.includes("\\")
+    ) {
+      throw new Error("Invalid API path");
+    }
+  }
+  return `/${path.join("/")}`;
+}
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   const apiUrl = process.env.API_PUBLIC_URL ?? "http://localhost:4000";
-  const upstream = new URL(`/${path.join("/")}`, apiUrl);
+  const configuredOrigin = new URL(apiUrl).origin;
+  let upstream: URL;
+  try {
+    upstream = new URL(safeUpstreamPath(path), apiUrl);
+  } catch {
+    return Response.json({ error: "Invalid API path" }, { status: 400 });
+  }
+  if (upstream.origin !== configuredOrigin) {
+    return Response.json({ error: "Invalid API path" }, { status: 400 });
+  }
   upstream.search = request.nextUrl.search;
   const requestHeaders = new Headers();
   for (const [key, value] of request.headers) {
@@ -45,7 +74,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     localTenantHost ??
       (directHost.includes(".localhost") || directHost.includes(".lvh.me")
         ? directHost
-        : (request.headers.get("x-forwarded-host") ?? directHost)),
+        : directHost),
   );
   const response = await fetch(upstream, {
     method: request.method,

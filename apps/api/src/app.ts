@@ -5,6 +5,8 @@ import fastifyMultipart from "@fastify/multipart";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { parseEnvironment } from "@waflo/config";
 import { sanitizeRequestUrl } from "@waflo/security";
 import type { FastifyRequest } from "fastify";
@@ -68,6 +70,12 @@ export async function createApiApplication(
     trustProxy: trustedProxies.length > 0 ? [...trustedProxies] : false,
     bodyLimit: 1024 * 1024,
     requestIdHeader: "x-request-id",
+    genReqId: (request: IncomingMessage) => {
+      const candidate = request.headers["x-request-id"];
+      return typeof candidate === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(candidate)
+        ? candidate
+        : randomUUID();
+    },
   });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     rawBody: true,
@@ -132,18 +140,20 @@ export async function createApiApplication(
     done();
   });
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle("Waflo Platform API")
-    .setDescription(
-      "Authoritative Waflo W4 API for merchant administration and signed Staff devices.",
-    )
-    .setVersion("1.0")
-    .addCookieAuth(environment.values.COOKIE_NAME)
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup("docs", app, document, {
-    jsonDocumentUrl: "docs/openapi.json",
-  });
+  if (environment.values.NODE_ENV !== "production") {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle("Waflo Platform API")
+      .setDescription(
+        "Authoritative Waflo W4 API for merchant administration and signed Staff devices.",
+      )
+      .setVersion("1.0")
+      .addCookieAuth(environment.values.COOKIE_NAME)
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup("docs", app, document, {
+      jsonDocumentUrl: "docs/openapi.json",
+    });
+  }
 
   await app.init();
   return app;

@@ -128,6 +128,137 @@ export class BillingService {
     };
   }
 
+  /**
+   * Re-read the provider's canonical subscription snapshot for one organization.
+   * This intentionally reuses the same locked apply path as webhooks, so it is
+   * safe to retry and cannot trust a browser-provided plan or billing status.
+   */
+  async reconcileOrganization(userId: string, organizationId: string, request: WafloRequest) {
+    await this.tenant.requireMembership(userId, organizationId, "billing.manage");
+    const local = await this.prisma.client.subscription.findFirst({
+      where: { organizationId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    if (!local) {
+      await this.audit.record(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "stripe.reconciliation_no_subscription",
+          targetType: "organization",
+          targetId: organizationId,
+        },
+        request,
+      );
+      return { reconciled: false, reason: "NO_LOCAL_SUBSCRIPTION" as const };
+    }
+    let snapshot: Stripe.Subscription;
+    try {
+      snapshot = await this.subscriptionProvider.retrieveSubscription(local.stripeSubscriptionId);
+    } catch (error) {
+      const missing =
+        (error instanceof Stripe.errors.StripeInvalidRequestError &&
+          error.code === "resource_missing") ||
+        (typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "resource_missing");
+      if (!missing) {
+        await this.audit.record(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "stripe.reconciliation_failed",
+            targetType: "subscription",
+            targetId: local.stripeSubscriptionId,
+            metadata: { reason: "PROVIDER_RETRIEVAL_FAILED" },
+          },
+          request,
+        );
+        throw new AppError(
+          "STRIPE_RECONCILIATION_FAILED",
+          "Billing reconciliation is unavailable.",
+          503,
+        );
+      }
+      await withOrganizationInvariantLock(
+        this.prisma.client,
+        organizationId,
+        async (transaction) => {
+          await transaction.subscription.update({
+            where: { id: local.id },
+            data: { status: "CANCELED", canceledAt: new Date(), lastProviderSyncAt: new Date() },
+          });
+          await transaction.organizationBillingProfile.update({
+            where: { organizationId },
+            data: { subscriptionStatus: "CANCELED" },
+          });
+          await transaction.auditLog.create({
+            data: {
+              organizationId,
+              actorUserId: userId,
+              action: "stripe.reconciliation_missing_subscription",
+              targetType: "subscription",
+              targetId: local.stripeSubscriptionId,
+              requestId: request.requestId,
+            },
+          });
+        },
+      );
+      return { reconciled: true, reason: "MISSING_CANCELED" as const };
+    }
+    const profile = await this.prisma.client.organizationBillingProfile.findUniqueOrThrow({
+      where: { organizationId },
+    });
+    const snapshotCustomerId =
+      typeof snapshot.customer === "string" ? snapshot.customer : snapshot.customer.id;
+    if (
+      snapshot.id !== local.stripeSubscriptionId ||
+      snapshot.metadata.organizationId !== organizationId ||
+      !profile.stripeCustomerId ||
+      snapshotCustomerId !== profile.stripeCustomerId
+    ) {
+      await this.audit.record(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "stripe.reconciliation_ownership_mismatch",
+          targetType: "subscription",
+          targetId: local.stripeSubscriptionId,
+        },
+        request,
+      );
+      throw new AppError(
+        "STRIPE_RECONCILIATION_OWNERSHIP_MISMATCH",
+        "The Stripe subscription does not belong to this organization.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const reconciliationEvent = {
+      id: `reconciliation:${snapshot.id}:${Math.floor(Date.now() / 1000)}`,
+      type: "customer.subscription.updated",
+      created: Math.floor(Date.now() / 1000),
+      data: { object: snapshot },
+    } as Stripe.Event;
+    await withInvariantLock(
+      this.prisma.client,
+      `stripe-subscription:${snapshot.id}`,
+      async (transaction) =>
+        this.applyStripeEvent(reconciliationEvent, transaction, request, snapshot),
+    );
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "stripe.reconciled",
+        targetType: "subscription",
+        targetId: snapshot.id,
+      },
+      request,
+    );
+    return { reconciled: true, reason: "APPLIED" as const };
+  }
+
   async selectPlan(userId: string, organizationId: string, plan: PlanCode, request: WafloRequest) {
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
     const selectedPlan = planToDb(plan);

@@ -525,6 +525,24 @@ export class MerchantOperationsController {
     return this.operations.privacyStatus(user.id, parseUuid(organizationId), parseUuid(requestId));
   }
 
+  @Get("privacy-requests/:requestId/download")
+  async downloadPrivacyExport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("requestId") requestId: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const file = await this.operations.downloadPrivacyExport(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(requestId),
+    );
+    reply.header("content-type", "application/json; charset=utf-8");
+    reply.header("content-disposition", `attachment; filename="${file.filename}"`);
+    reply.header("cache-control", "private, no-store");
+    return reply.send(file.body);
+  }
+
   private statusOperation(
     user: AuthenticatedUser,
     organizationId: string,

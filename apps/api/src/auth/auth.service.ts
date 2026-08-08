@@ -23,6 +23,11 @@ interface SessionResult {
   expiresAt: Date;
 }
 
+// A valid Argon2id hash for a fixed non-secret value. It makes unknown-account
+// login attempts pay the same password-verification cost as known accounts.
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,p=1,t=3$1Js4rUmnc8rXyGhwZFkaBw$/GV+BI9qUlTYSdBdh324GSbXQ/09bI3wotF112pYVIk";
+
 function localeFromDb(locale: "EN" | "AR"): Locale {
   return locale === "AR" ? "ar" : "en";
 }
@@ -61,15 +66,25 @@ export class AuthService {
 
   async register(input: RegisterInput, request: WafloRequest) {
     const normalizedEmail = normalizeEmail(input.email);
+    // Do this before checking existence to avoid a cheap registration oracle.
+    const passwordHash = await hashPassword(input.password);
     const existing = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
     if (existing) {
-      throw new AppError(
-        "REGISTRATION_UNAVAILABLE",
-        "This registration could not be completed. Try signing in or resetting your password.",
-        HttpStatus.CONFLICT,
-      );
+      // Deliberately match the successful public registration response so this
+      // endpoint cannot be used as an account-existence oracle.
+      if (!existing.emailVerifiedAt && existing.status === "ACTIVE") {
+        await this.issueVerification(
+          existing.id,
+          existing.email,
+          localeFromDb(existing.preferredLocale),
+          request,
+        );
+      }
+      return {
+        status: "verification_required",
+        email: input.email.replace(/^(.{2}).*(@.*)$/, "$1•••$2"),
+      };
     }
-    const passwordHash = await hashPassword(input.password);
     const legalAcceptedAt = new Date();
     const user = await this.prisma.client.user.create({
       data: {
@@ -209,7 +224,8 @@ export class AuthService {
   async login(emailInput: string, password: string, request: WafloRequest): Promise<SessionResult> {
     const normalizedEmail = normalizeEmail(emailInput);
     const user = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
-    if (!user || !(await verifyPassword(user.passwordHash, password))) {
+    const passwordValid = await verifyPassword(user?.passwordHash ?? DUMMY_PASSWORD_HASH, password);
+    if (!user || !passwordValid) {
       if (user) {
         await this.audit.security(
           {
@@ -226,18 +242,15 @@ export class AuthService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    if (!user.emailVerifiedAt) {
-      throw new AppError(
-        "EMAIL_VERIFICATION_REQUIRED",
-        "Verify your email before signing in.",
-        HttpStatus.FORBIDDEN,
+    if (!user.emailVerifiedAt || user.status !== "ACTIVE") {
+      await this.audit.security(
+        { userId: user.id, eventType: "login.denied", severity: "LOW" },
+        request,
       );
-    }
-    if (user.status !== "ACTIVE") {
       throw new AppError(
-        "ACCOUNT_UNAVAILABLE",
-        "This account is currently unavailable.",
-        HttpStatus.FORBIDDEN,
+        "INVALID_CREDENTIALS",
+        "The email or password is incorrect.",
+        HttpStatus.UNAUTHORIZED,
       );
     }
     const session = await this.createSession(user.id, request);

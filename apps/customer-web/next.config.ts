@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@waflo/ui", "@waflo/brand", "@waflo/i18n"],
+  images: { unoptimized: true },
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {

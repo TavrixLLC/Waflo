@@ -65,17 +65,19 @@ export class NoopErrorReporter implements ErrorReporter {
 }
 
 export class DynamicSentryErrorReporter implements ErrorReporter {
-  private readonly sentry: Promise<{
+  private sentry: {
     captureException(error: unknown, options?: unknown): string;
     captureMessage(message: string, options?: unknown): string;
     setUser(user: { id: string } | null): void;
     setContext(name: string, context: { id: string } | null): void;
     flush(timeout?: number): Promise<boolean>;
-  } | null>;
+  } | null = null;
 
   constructor(dsn: string) {
     const packageName = "@sentry/node";
-    this.sentry = import(packageName)
+    // Optional telemetry must never sit on the request path. Start loading in
+    // the background and act as a no-op until the adapter is ready.
+    void import(packageName)
       .then((module: Record<string, unknown>) => {
         const init = module.init;
         const captureException = module.captureException;
@@ -102,11 +104,14 @@ export class DynamicSentryErrorReporter implements ErrorReporter {
           flush: flush as (timeout?: number) => Promise<boolean>,
         };
       })
-      .catch(() => null);
+      .then((adapter) => {
+        this.sentry = adapter;
+      })
+      .catch(() => undefined);
   }
 
-  async captureException(error: unknown, context?: ErrorReportContext): Promise<void> {
-    const sentry = await this.sentry;
+  captureException(error: unknown, context?: ErrorReportContext): void {
+    const sentry = this.sentry;
     if (!sentry) return;
     try {
       sentry.captureException(sanitizeErrorForReporting(error), {
@@ -122,8 +127,8 @@ export class DynamicSentryErrorReporter implements ErrorReporter {
     } catch {}
   }
 
-  async captureMessage(message: string, context?: ErrorReportContext): Promise<void> {
-    const sentry = await this.sentry;
+  captureMessage(message: string, context?: ErrorReportContext): void {
+    const sentry = this.sentry;
     if (!sentry) return;
     try {
       sentry.captureMessage(sanitizeErrorForReporting(new Error(message)).message, {
@@ -140,15 +145,15 @@ export class DynamicSentryErrorReporter implements ErrorReporter {
     } catch {}
   }
 
-  async setUserContext(userId: string | null): Promise<void> {
-    const sentry = await this.sentry;
+  setUserContext(userId: string | null): void {
+    const sentry = this.sentry;
     try {
       sentry?.setUser(userId ? { id: userId.slice(0, 128) } : null);
     } catch {}
   }
 
-  async setOrganizationContext(organizationId: string | null): Promise<void> {
-    const sentry = await this.sentry;
+  setOrganizationContext(organizationId: string | null): void {
+    const sentry = this.sentry;
     try {
       sentry?.setContext(
         "organization",
@@ -157,8 +162,8 @@ export class DynamicSentryErrorReporter implements ErrorReporter {
     } catch {}
   }
 
-  async clearContext(): Promise<void> {
-    const sentry = await this.sentry;
+  clearContext(): void {
+    const sentry = this.sentry;
     try {
       sentry?.setUser(null);
       sentry?.setContext("organization", null);
@@ -166,7 +171,7 @@ export class DynamicSentryErrorReporter implements ErrorReporter {
   }
 
   async flush(timeoutMs = 2_000): Promise<boolean> {
-    const sentry = await this.sentry;
+    const sentry = this.sentry;
     try {
       return sentry ? await sentry.flush(timeoutMs) : true;
     } catch {
