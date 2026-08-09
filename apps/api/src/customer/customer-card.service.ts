@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { AppError } from "../common/app-error.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
@@ -12,6 +13,7 @@ import {
 } from "../programs/published-stamp-render.js";
 import { CustomerSecurityService } from "./customer-security.service.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
+import { WalletProviderRegistry } from "../wallet/wallet-provider.registry.js";
 
 const customerCardMembershipInclude = {
   organization: true,
@@ -55,6 +57,7 @@ export class CustomerCardService {
     private readonly security: CustomerSecurityService,
     private readonly hosts: HostResolutionService,
     private readonly audit: AuditService,
+    private readonly walletProviders: WalletProviderRegistry,
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
 
@@ -304,6 +307,116 @@ export class CustomerCardService {
     return { status: "logged_out" as const };
   }
 
+  async createPrivacyRequest(
+    request: WafloRequest,
+    input: { commandId: string; requestType: "EXPORT" | "ERASURE"; confirmation: string },
+    developmentOverride?: string,
+  ) {
+    const context = await this.requireSession(request, developmentOverride);
+    if (input.confirmation !== "CONFIRM") {
+      throw new AppError(
+        "PRIVACY_REQUEST_CONFIRMATION_REQUIRED",
+        "Confirm the privacy request to continue.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const organizationId = context.session.organizationId;
+    const customerId = context.session.membership.customerId;
+    const requestFingerprint = createHash("sha256")
+      .update(JSON.stringify({ customerId, requestType: input.requestType }), "utf8")
+      .digest("hex");
+    const now = new Date();
+    return withInvariantLock(
+      this.prisma.client,
+      `customer-privacy:${organizationId}:${input.commandId}`,
+      async (transaction) => {
+        const existing = await transaction.customerPrivacyRequest.findUnique({
+          where: {
+            organizationId_idempotencyKey: {
+              organizationId,
+              idempotencyKey: input.commandId,
+            },
+          },
+        });
+        if (existing) {
+          if (
+            existing.customerId !== customerId ||
+            existing.requestType !== input.requestType ||
+            existing.requestFingerprint !== requestFingerprint
+          ) {
+            throw new AppError(
+              "OPERATION_IDEMPOTENCY_CONFLICT",
+              "Command conflict.",
+              HttpStatus.CONFLICT,
+            );
+          }
+          return { publicId: existing.publicId, status: existing.status, replayed: true };
+        }
+        const privacy = await transaction.customerPrivacyRequest.create({
+          data: {
+            organizationId,
+            customerId,
+            requestType: input.requestType,
+            requestedByUserId: null,
+            requestedByCustomerSessionId: context.session.id,
+            identityValidatedAt: now,
+            idempotencyKey: input.commandId,
+            requestFingerprint,
+            confirmationMetadata: {
+              confirmed: true,
+              source: "CUSTOMER_AUTHENTICATED_SESSION",
+            },
+          },
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            action: "customer.privacy_request_received",
+            targetType: "customer_privacy_request",
+            targetId: privacy.id,
+            metadata: { requestType: input.requestType, identityValidated: true },
+          },
+          request,
+        );
+        return { publicId: privacy.publicId, status: privacy.status, replayed: false };
+      },
+    );
+  }
+
+  async privacyRequestStatus(
+    request: WafloRequest,
+    publicId: string,
+    developmentOverride?: string,
+  ) {
+    const context = await this.requireSession(request, developmentOverride);
+    const privacy = await this.prisma.client.customerPrivacyRequest.findFirst({
+      where: {
+        publicId,
+        organizationId: context.session.organizationId,
+        customerId: context.session.membership.customerId,
+      },
+      select: {
+        publicId: true,
+        requestType: true,
+        status: true,
+        outcomeDisposition: true,
+        retentionNoticeCode: true,
+        createdAt: true,
+        completedAt: true,
+        expiresAt: true,
+      },
+    });
+    if (!privacy) {
+      throw new AppError(
+        "PRIVACY_REQUEST_NOT_FOUND",
+        "Privacy request not found.",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return privacy;
+  }
+
   async requireSession(request: WafloRequest, developmentOverride?: string) {
     const rawToken = request.cookies[this.environment.values.CUSTOMER_COOKIE_NAME];
     if (!rawToken) {
@@ -358,10 +471,7 @@ export class CustomerCardService {
       | undefined,
     credentialActive: boolean,
   ) {
-    const mode =
-      provider === "APPLE"
-        ? this.environment.values.APPLE_WALLET_MODE
-        : this.environment.values.GOOGLE_WALLET_MODE;
+    const mode = this.walletProviders.get(provider).mode;
     return {
       mode,
       status:

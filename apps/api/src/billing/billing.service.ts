@@ -1004,6 +1004,9 @@ export class BillingService {
         lastAppliedStripeEventAt: eventCreatedAt,
         lastAppliedStripeEventId: event.id,
         lastProviderSyncAt: nowTs,
+        reconciliationLeaseOwner: null,
+        reconciliationLeaseExpiresAt: null,
+        reconciliationFailureCode: null,
       },
       create: {
         organizationId: profile.organizationId,

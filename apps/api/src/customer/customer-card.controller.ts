@@ -3,7 +3,7 @@ import { customerSessionRotateSchema } from "@waflo/contracts";
 import type { FastifyReply } from "fastify";
 import { CustomerCsrf, Public, RateLimit } from "../common/decorators.js";
 import type { WafloRequest } from "../common/request-context.js";
-import { parseInput } from "../common/validation.js";
+import { parseInput, parseUuid } from "../common/validation.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerCardService } from "./customer-card.service.js";
 
@@ -78,7 +78,7 @@ export class CustomerCardController {
     reply.setCookie(this.environment.values.CUSTOMER_COOKIE_NAME, result.sessionToken, {
       httpOnly: true,
       secure: this.environment.values.COOKIE_SECURE,
-      sameSite: "lax",
+      sameSite: this.environment.values.COOKIE_SAME_SITE === "NONE" ? "none" : "lax",
       path: "/",
       maxAge: this.environment.values.CUSTOMER_SESSION_TTL_DAYS * 24 * 60 * 60,
     });
@@ -97,5 +97,36 @@ export class CustomerCardController {
     reply.clearCookie(this.environment.values.CUSTOMER_COOKIE_NAME, { path: "/" });
     reply.clearCookie(this.environment.customerCsrfCookieName, { path: "/" });
     return result;
+  }
+
+  @Post("privacy-requests")
+  @CustomerCsrf()
+  @RateLimit(5, 3600)
+  createPrivacyRequest(
+    @Req() request: WafloRequest,
+    @Body() body: unknown,
+    @Query("tenant") tenant?: string,
+  ) {
+    const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const requestType = input.requestType === "ERASURE" ? "ERASURE" : "EXPORT";
+    return this.cards.createPrivacyRequest(
+      request,
+      {
+        commandId: parseUuid(typeof input.commandId === "string" ? input.commandId : ""),
+        requestType,
+        confirmation: typeof input.confirmation === "string" ? input.confirmation : "",
+      },
+      tenant,
+    );
+  }
+
+  @Get("privacy-requests/:requestId")
+  @RateLimit(30)
+  privacyRequestStatus(
+    @Req() request: WafloRequest,
+    @Param("requestId") requestId: string,
+    @Query("tenant") tenant?: string,
+  ) {
+    return this.cards.privacyRequestStatus(request, parseUuid(requestId), tenant);
   }
 }

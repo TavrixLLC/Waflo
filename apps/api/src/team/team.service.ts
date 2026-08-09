@@ -10,7 +10,10 @@ import { withOrganizationInvariantLock } from "../common/organization-transactio
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { NotificationService } from "../notifications/notification.service.js";
+import {
+  type NotificationMessage,
+  NotificationService,
+} from "../notifications/notification.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 
 function toPlanCode(plan: "STARTER" | "GROWTH" | "SCALE"): "starter" | "growth" | "scale" {
@@ -215,13 +218,18 @@ export class TeamService {
       },
     );
     const locale = invitation.organization.defaultLocale === "AR" ? "ar" : "en";
-    await this.notifications.send({
-      to: invitation.email,
-      locale,
-      kind: "team_invitation",
-      organizationName: invitation.organization.name,
-      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite#token=${encodeURIComponent(rawToken)}`,
-    });
+    await this.sendNotificationAfterCommit(
+      {
+        to: invitation.email,
+        locale,
+        kind: "team_invitation",
+        organizationName: invitation.organization.name,
+        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite#token=${encodeURIComponent(rawToken)}`,
+      },
+      organizationId,
+      userId,
+      request,
+    );
     await this.audit.record(
       {
         organizationId,
@@ -329,13 +337,18 @@ export class TeamService {
       },
     );
     const locale = invitation.organization.defaultLocale === "AR" ? "ar" : "en";
-    await this.notifications.send({
-      to: invitation.email,
-      locale,
-      kind: "team_invitation",
-      organizationName: invitation.organization.name,
-      actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite#token=${encodeURIComponent(rawToken)}`,
-    });
+    await this.sendNotificationAfterCommit(
+      {
+        to: invitation.email,
+        locale,
+        kind: "team_invitation",
+        organizationName: invitation.organization.name,
+        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/invite#token=${encodeURIComponent(rawToken)}`,
+      },
+      organizationId,
+      userId,
+      request,
+    );
     await this.audit.record(
       {
         organizationId,
@@ -575,12 +588,17 @@ export class TeamService {
       },
       request,
     );
-    await this.notifications.send({
-      to: invitation.invitedBy.email,
-      locale: invitation.invitedBy.preferredLocale === "AR" ? "ar" : "en",
-      kind: "invitation_accepted",
-      organizationName: invitation.organization.name,
-    });
+    await this.sendNotificationAfterCommit(
+      {
+        to: invitation.invitedBy.email,
+        locale: invitation.invitedBy.preferredLocale === "AR" ? "ar" : "en",
+        kind: "invitation_accepted",
+        organizationName: invitation.organization.name,
+      },
+      invitation.organizationId,
+      userId,
+      request,
+    );
     return { organizationId: invitation.organizationId, role: invitation.intendedRole };
   }
 
@@ -754,6 +772,31 @@ export class TeamService {
         "The final active Owner cannot be removed or demoted.",
         HttpStatus.CONFLICT,
       );
+    }
+  }
+
+  private async sendNotificationAfterCommit(
+    message: NotificationMessage,
+    organizationId: string,
+    actorUserId: string,
+    request: WafloRequest,
+  ) {
+    try {
+      await this.notifications.send(message);
+    } catch {
+      await this.audit
+        .record(
+          {
+            organizationId,
+            actorUserId,
+            action: "notification.delivery_failed",
+            targetType: "organization",
+            targetId: organizationId,
+            metadata: { kind: message.kind, businessMutationCommitted: true },
+          },
+          request,
+        )
+        .catch(() => undefined);
     }
   }
 }

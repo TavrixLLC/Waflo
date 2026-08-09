@@ -3,6 +3,7 @@ import { verifyPassword } from "@waflo/auth";
 import type { OrganizationInput } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { AppError } from "../common/app-error.js";
+import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -243,7 +244,7 @@ export class OrganizationsService {
   ) {
     await this.tenant.requireMembership(userId, organizationId, "organization.slug.change");
     const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!(await verifyPassword(user.passwordHash, password))) {
+    if (!user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
       throw new AppError(
         "SENSITIVE_ACTION_CONFIRMATION_FAILED",
         "Password confirmation failed.",
@@ -326,5 +327,116 @@ export class OrganizationsService {
       request,
     );
     return organization;
+  }
+
+  async close(
+    userId: string,
+    organizationId: string,
+    input: { confirmation: string; currentPassword: string; sessionId: string },
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireOwner(userId, organizationId);
+    if (input.confirmation !== "CLOSE ORGANIZATION") {
+      throw new AppError(
+        "SENSITIVE_ACTION_CONFIRMATION_FAILED",
+        "Organization confirmation did not match.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
+    const recentExternalSession = !user.passwordHash
+      ? await this.prisma.client.session.findFirst({
+          where: {
+            id: input.sessionId,
+            userId,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (
+      user.passwordHash
+        ? !(await verifyPassword(user.passwordHash, input.currentPassword))
+        : !recentExternalSession
+    ) {
+      throw new AppError(
+        "REAUTHENTICATION_REQUIRED",
+        "Re-enter your password to close this organization.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const now = new Date();
+    return withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const organization = await transaction.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+        });
+        if (organization.status === "ARCHIVED")
+          return { status: "ARCHIVED" as const, replayed: true };
+        await transaction.organization.update({
+          where: { id: organizationId },
+          data: { status: "ARCHIVED", archivedAt: now },
+        });
+        // Keep interactive-transaction queries sequential. Prisma owns one database
+        // connection for this invariant lock, so parallel client.query calls provide
+        // no useful concurrency and can trigger driver-level ordering warnings.
+        await transaction.organizationDomain.updateMany({
+          where: { organizationId },
+          data: { status: "SUSPENDED" },
+        });
+        await transaction.organizationMember.updateMany({
+          where: { organizationId, status: { not: "REMOVED" } },
+          data: { status: "REMOVED" },
+        });
+        await transaction.organizationInvitation.updateMany({
+          where: { organizationId, status: "PENDING" },
+          data: { status: "CANCELED", canceledAt: now },
+        });
+        await transaction.location.updateMany({
+          where: { organizationId, status: "ACTIVE" },
+          data: { status: "ARCHIVED" },
+        });
+        await transaction.loyaltyProgram.updateMany({
+          where: { organizationId, status: { not: "ARCHIVED" } },
+          data: { status: "ARCHIVED", archivedAt: now },
+        });
+        await transaction.staffDevice.updateMany({
+          where: { organizationId, status: { in: ["PENDING", "ACTIVE"] } },
+          data: { status: "REVOKED", revokedAt: now, revocationReason: "organization_closed" },
+        });
+        await transaction.staffDeviceSession.updateMany({
+          where: { organizationId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        await transaction.devicePairingSession.updateMany({
+          where: { organizationId, status: { in: ["PENDING", "CLAIMED"] } },
+          data: { status: "CANCELED" },
+        });
+        await transaction.membershipAccessSession.updateMany({
+          where: { organizationId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "organization.closed",
+            targetType: "organization",
+            targetId: organizationId,
+            metadata: {
+              operationalAuthorizationRevoked: true,
+              financialAndAuditHistoryRetained: true,
+            },
+          },
+          request,
+        );
+        return { status: "ARCHIVED" as const, replayed: false };
+      },
+    );
   }
 }

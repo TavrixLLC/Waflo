@@ -18,6 +18,18 @@ enum Locale {
 enum UserStatus {
   ACTIVE
   SUSPENDED
+  DEACTIVATED
+}
+
+enum MerchantAccountRequestType {
+  DEACTIVATION
+  DELETION
+}
+
+enum MerchantAccountRequestStatus {
+  PENDING
+  COMPLETED
+  FAILED
 }
 
 enum OrganizationStatus {
@@ -429,6 +441,12 @@ enum CustomerPrivacyRequestStatus {
   DEAD_LETTER
 }
 
+enum CustomerPrivacyDisposition {
+  DELETED
+  ANONYMIZED
+  RETAINED_BY_POLICY
+}
+
 enum RewardExpiryCommandStatus {
   PENDING
   PROCESSING
@@ -472,13 +490,23 @@ enum ManagerApprovalStatus {
   CONSUMED
 }
 
+enum ExternalIdentityProvider {
+  GOOGLE
+  APPLE
+}
+
+enum OAuthAuthorizationIntent {
+  SIGN_IN
+  LINK
+}
+
 model User {
   id                         String                   @id @default(uuid()) @db.Uuid
   displayName                String                   @db.VarChar(100)
   email                      String                   @db.VarChar(254)
   normalizedEmail            String                   @unique @map("normalized_email") @db.VarChar(254)
   emailVerifiedAt            DateTime?                @map("email_verified_at") @db.Timestamptz(6)
-  passwordHash               String                   @map("password_hash") @db.Text
+  passwordHash               String?                  @map("password_hash") @db.Text
   preferredLocale            Locale                   @default(EN) @map("preferred_locale")
   status                     UserStatus               @default(ACTIVE)
   termsVersion               String                   @map("terms_version") @db.VarChar(60)
@@ -488,7 +516,11 @@ model User {
   lastSelectedOrganizationId String?                  @map("last_selected_organization_id") @db.Uuid
   createdAt                  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                  DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deactivatedAt              DateTime?                @map("deactivated_at") @db.Timestamptz(6)
+  deletionRequestedAt        DateTime?                @map("deletion_requested_at") @db.Timestamptz(6)
   sessions                   Session[]
+  externalIdentities         ExternalIdentity[]
+  oauthAuthorizationRequests OAuthAuthorizationRequest[]
   verificationTokens         EmailVerificationToken[]
   passwordResetTokens        PasswordResetToken[]
   memberships                OrganizationMember[]
@@ -501,8 +533,68 @@ model User {
   createdMerchantAssets      MerchantAsset[]           @relation("AssetCreator")
   createdValidationRuns      ProgramValidationRun[]     @relation("ValidationCreator")
   createdTestSessions        ProgramTestSession[]       @relation("TestSessionCreator")
+  accountLifecycleRequests   MerchantAccountLifecycleRequest[]
 
   @@map("users")
+}
+
+model MerchantAccountLifecycleRequest {
+  id                  String                       @id @default(uuid()) @db.Uuid
+  userId              String                       @map("user_id") @db.Uuid
+  requestType         MerchantAccountRequestType   @map("request_type")
+  status              MerchantAccountRequestStatus @default(PENDING)
+  idempotencyKey      String                       @map("idempotency_key") @db.VarChar(255)
+  identityValidatedAt DateTime                     @map("identity_validated_at") @db.Timestamptz(6)
+  requestedAt         DateTime                     @default(now()) @map("requested_at") @db.Timestamptz(6)
+  completedAt         DateTime?                    @map("completed_at") @db.Timestamptz(6)
+  outcomeDisposition  CustomerPrivacyDisposition? @map("outcome_disposition")
+  retentionNoticeCode String?                      @map("retention_notice_code") @db.VarChar(120)
+  safeFailureCode     String?                      @map("safe_failure_code") @db.VarChar(120)
+  user                User                         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, idempotencyKey])
+  @@index([status, requestedAt])
+  @@map("merchant_account_lifecycle_requests")
+}
+
+model ExternalIdentity {
+  id              String                   @id @default(uuid()) @db.Uuid
+  provider        ExternalIdentityProvider
+  issuer          String                   @db.VarChar(255)
+  providerSubject String                   @map("provider_subject") @db.VarChar(255)
+  userId          String                   @map("user_id") @db.Uuid
+  providerEmail   String?                  @map("provider_email") @db.VarChar(254)
+  emailVerified   Boolean                  @default(false) @map("email_verified")
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt      DateTime                 @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, issuer, providerSubject])
+  @@unique([userId, provider])
+  @@index([providerEmail])
+  @@map("external_identities")
+}
+
+model OAuthAuthorizationRequest {
+  id                       String                    @id @default(uuid()) @db.Uuid
+  stateHash                String                    @unique @map("state_hash") @db.Char(64)
+  provider                 ExternalIdentityProvider
+  intent                   OAuthAuthorizationIntent
+  userId                   String?                   @map("user_id") @db.Uuid
+  reauthenticatedSessionId String?                   @map("reauthenticated_session_id") @db.Uuid
+  nonceHash                String                    @map("nonce_hash") @db.Char(64)
+  codeVerifierCiphertext   String                    @map("code_verifier_ciphertext") @db.Text
+  allowRegistration       Boolean                   @default(false) @map("allow_registration")
+  locale                   Locale                    @default(EN)
+  expiresAt                DateTime                  @map("expires_at") @db.Timestamptz(6)
+  consumedAt               DateTime?                 @map("consumed_at") @db.Timestamptz(6)
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user                     User?                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([provider, expiresAt, consumedAt])
+  @@index([userId, createdAt])
+  @@index([reauthenticatedSessionId])
+  @@map("oauth_authorization_requests")
 }
 
 model Session {
@@ -736,12 +828,17 @@ model Subscription {
   lastAppliedStripeEventAt DateTime?     @map("last_applied_stripe_event_at") @db.Timestamptz(6)
   lastAppliedStripeEventId String?       @map("last_applied_stripe_event_id") @db.VarChar(255)
   lastProviderSyncAt       DateTime?     @map("last_provider_sync_at") @db.Timestamptz(6)
+  reconciliationLeaseOwner String?       @map("reconciliation_lease_owner") @db.VarChar(120)
+  reconciliationLeaseExpiresAt DateTime? @map("reconciliation_lease_expires_at") @db.Timestamptz(6)
+  reconciliationAttemptCount Int         @default(0) @map("reconciliation_attempt_count")
+  reconciliationFailureCode String?      @map("reconciliation_failure_code") @db.VarChar(120)
   createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
+  @@index([reconciliationLeaseExpiresAt, lastProviderSyncAt])
   @@map("subscriptions")
 }
 
@@ -2129,7 +2226,11 @@ model CustomerPrivacyRequest {
   customerId           String                       @map("customer_id") @db.Uuid
   requestType          CustomerPrivacyRequestType   @map("request_type")
   status               CustomerPrivacyRequestStatus @default(PENDING)
-  requestedByUserId    String                       @map("requested_by_user_id") @db.Uuid
+  requestedByUserId    String?                      @map("requested_by_user_id") @db.Uuid
+  requestedByCustomerSessionId String?              @map("requested_by_customer_session_id") @db.Uuid
+  identityValidatedAt  DateTime?                    @map("identity_validated_at") @db.Timestamptz(6)
+  outcomeDisposition   CustomerPrivacyDisposition? @map("outcome_disposition")
+  retentionNoticeCode  String?                      @map("retention_notice_code") @db.VarChar(120)
   idempotencyKey       String                       @map("idempotency_key") @db.VarChar(255)
   requestFingerprint   String                       @default("") @map("request_fingerprint") @db.Char(64)
   confirmationMetadata Json?                        @map("confirmation_metadata") @db.JsonB
@@ -2147,6 +2248,23 @@ model CustomerPrivacyRequest {
   @@index([customerId, createdAt(sort: Desc)])
   @@index([status, createdAt])
   @@map("customer_privacy_requests")
+}
+
+model WorkerHeartbeat {
+  workerCode          String    @id @map("worker_code") @db.VarChar(60)
+  instanceId          String    @map("instance_id") @db.VarChar(120)
+  startedAt           DateTime  @map("started_at") @db.Timestamptz(6)
+  lastLoopAt          DateTime  @map("last_loop_at") @db.Timestamptz(6)
+  lastSuccessAt       DateTime? @map("last_success_at") @db.Timestamptz(6)
+  lastFailureAt       DateTime? @map("last_failure_at") @db.Timestamptz(6)
+  safeFailureCode     String?   @map("safe_failure_code") @db.VarChar(120)
+  backlogCount        Int?      @map("backlog_count")
+  oldestBacklogAt     DateTime? @map("oldest_backlog_at") @db.Timestamptz(6)
+  stoppingAt          DateTime? @map("stopping_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([lastLoopAt])
+  @@map("worker_heartbeats")
 }
 
 model ProjectionRebuildCommand {

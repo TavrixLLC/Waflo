@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { constantTimeTokenEquals } from "@waflo/customer-security";
 import { appleAuthorizationToken } from "@waflo/wallet-apple";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
@@ -246,8 +245,9 @@ export class AppleUpdateService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    const expected = this.security.appleAuthenticationToken(pass.record.id, serialNumber);
-    if (!constantTimeTokenEquals(expected, suppliedToken)) {
+    if (
+      !this.security.verifyAppleAuthenticationToken(pass.record.id, serialNumber, suppliedToken)
+    ) {
       await this.authFailure(request, pass.record.organizationId);
       throw new AppError(
         "APPLE_PASS_UNAUTHORIZED",

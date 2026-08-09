@@ -1091,20 +1091,54 @@ interface SecurityEvent {
   createdAt: string;
 }
 
-export function SecurityScreen({ locale }: { locale: Locale; membership: MembershipView }) {
+interface ExternalIdentityView {
+  provider: "GOOGLE" | "APPLE";
+  providerEmail: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
+interface ExternalIdentitySettings {
+  passwordEnabled: boolean;
+  identities: ExternalIdentityView[];
+}
+
+interface ExternalProviderCapabilities {
+  googleSignInAvailable: boolean;
+  appleSignInAvailable: boolean;
+}
+
+export function SecurityScreen({
+  locale,
+  membership,
+}: {
+  locale: Locale;
+  membership: MembershipView;
+}) {
   const ar = locale === "ar";
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [identitySettings, setIdentitySettings] = useState<ExternalIdentitySettings | null>(null);
+  const [providerCapabilities, setProviderCapabilities] = useState<ExternalProviderCapabilities>({
+    googleSignInAvailable: false,
+    appleSignInAvailable: false,
+  });
+  const [identityPassword, setIdentityPassword] = useState("");
+  const [dangerConfirmation, setDangerConfirmation] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const load = useCallback(async () => {
     try {
-      const [sessionData, eventData] = await Promise.all([
+      const [sessionData, eventData, identityData, capabilities] = await Promise.all([
         apiFetch<SessionItem[]>("/v1/auth/sessions"),
         apiFetch<{ items: SecurityEvent[] }>("/v1/security/events"),
+        apiFetch<ExternalIdentitySettings>("/v1/auth/external/identities"),
+        apiFetch<ExternalProviderCapabilities>("/v1/auth/external/providers"),
       ]);
       setSessions(sessionData);
       setEvents(eventData.items);
+      setIdentitySettings(identityData);
+      setProviderCapabilities(capabilities);
     } catch (caught) {
       setError(
         message(caught, ar ? "تعذر تحميل إعدادات الأمان." : "Unable to load security settings."),
@@ -1162,6 +1196,85 @@ export function SecurityScreen({ locale }: { locale: Locale; membership: Members
       await load();
     } catch (caught) {
       setError(message(caught, ar ? "تعذر تغيير كلمة المرور." : "Unable to change password."));
+    }
+  }
+  async function linkIdentity(provider: "google" | "apple") {
+    setError("");
+    try {
+      const result = await apiFetch<{ authorizationUrl: string }>(
+        `/v1/auth/external/${provider}/link`,
+        {
+          method: "POST",
+          body: JSON.stringify({ currentPassword: identityPassword, locale }),
+        },
+      );
+      window.location.assign(result.authorizationUrl);
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar ? "تعذر بدء ربط طريقة تسجيل الدخول." : "Unable to start account linking.",
+        ),
+      );
+    }
+  }
+  async function unlinkIdentity(provider: "google" | "apple") {
+    setError("");
+    try {
+      await apiFetch(`/v1/auth/external/${provider}`, {
+        method: "DELETE",
+        body: JSON.stringify({ currentPassword: identityPassword }),
+      });
+      setNotice(ar ? "تم فصل طريقة تسجيل الدخول بأمان." : "Sign-in method disconnected safely.");
+      setIdentityPassword("");
+      await load();
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar ? "تعذر فصل طريقة تسجيل الدخول." : "Unable to disconnect sign-in method.",
+        ),
+      );
+    }
+  }
+  async function accountLifecycle(type: "deactivate" | "deletion-request") {
+    const confirmation = type === "deactivate" ? "DEACTIVATE" : "REQUEST DELETION";
+    if (dangerConfirmation !== confirmation) return;
+    setError("");
+    try {
+      await apiFetch(`/v1/auth/me/${type}`, {
+        method: "POST",
+        body: JSON.stringify({
+          commandId: crypto.randomUUID(),
+          confirmation,
+          currentPassword: identityPassword,
+        }),
+      });
+      resetCsrf();
+      window.location.assign(`/${locale}/logged-out`);
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar ? "تعذر إكمال طلب دورة حياة الحساب." : "Unable to complete the account request.",
+        ),
+      );
+    }
+  }
+  async function closeOrganization() {
+    if (dangerConfirmation !== "CLOSE ORGANIZATION") return;
+    setError("");
+    try {
+      await apiFetch(`/v1/organizations/${membership.organization.id}/close`, {
+        method: "POST",
+        body: JSON.stringify({
+          confirmation: dangerConfirmation,
+          currentPassword: identityPassword,
+        }),
+      });
+      window.location.assign(`/${locale}`);
+    } catch (caught) {
+      setError(message(caught, ar ? "تعذر إغلاق المؤسسة." : "Unable to close the organization."));
     }
   }
   return (
@@ -1246,6 +1359,83 @@ export function SecurityScreen({ locale }: { locale: Locale; membership: Members
           </form>
         </Card>
         <Card className="dashboard-form-card" style={{ gridColumn: "1 / -1" }}>
+          <h2>{ar ? "طرق تسجيل الدخول" : "Sign-in methods"}</h2>
+          <p style={{ color: "var(--waflo-muted)", maxWidth: "68ch" }}>
+            {ar
+              ? "اربط حساب Google أو Apple بهوية وافلو الحالية. البريد الوارد من المزود هو بيانات وصفية وليس معرّف الحساب."
+              : "Connect Google or Apple to this Waflo identity. Provider email is metadata, never your permanent account identifier."}
+          </p>
+          {identitySettings?.passwordEnabled ? (
+            <FormField label={ar ? "كلمة المرور الحالية للتأكيد" : "Current password to confirm"}>
+              <PasswordInput
+                value={identityPassword}
+                onChange={(event) => setIdentityPassword(event.currentTarget.value)}
+                autoComplete="current-password"
+              />
+            </FormField>
+          ) : (
+            <p style={{ color: "var(--waflo-muted)" }}>
+              {ar
+                ? "للحسابات الخارجية فقط، يلزم تسجيل دخول حديث قبل إضافة طريقة أخرى."
+                : "OAuth-only accounts require a recent sign-in before another method can be connected."}
+            </p>
+          )}
+          <div className="dashboard-form__row">
+            {(["google", "apple"] as const).map((provider) => {
+              const code = provider.toUpperCase() as "GOOGLE" | "APPLE";
+              const linked = identitySettings?.identities.find((item) => item.provider === code);
+              const available =
+                provider === "google"
+                  ? providerCapabilities.googleSignInAvailable
+                  : providerCapabilities.appleSignInAvailable;
+              const label = provider === "google" ? "Google" : "Apple";
+              return (
+                <Card key={provider} style={{ padding: "1rem", flex: "1 1 18rem" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "1rem",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <strong>{label}</strong>
+                      <div style={{ color: "var(--waflo-muted)", marginTop: ".25rem" }}>
+                        {linked
+                          ? (linked.providerEmail ?? (ar ? "مرتبط" : "Connected"))
+                          : available
+                            ? ar
+                              ? "متاح للربط"
+                              : "Available to connect"
+                            : ar
+                              ? "غير مهيأ"
+                              : "Not configured"}
+                      </div>
+                    </div>
+                    {linked ? (
+                      <Button variant="ghost" onClick={() => void unlinkIdentity(provider)}>
+                        {ar ? "فصل" : "Disconnect"}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="secondary"
+                        disabled={
+                          !available ||
+                          (Boolean(identitySettings?.passwordEnabled) && !identityPassword)
+                        }
+                        onClick={() => void linkIdentity(provider)}
+                      >
+                        {ar ? "ربط" : "Connect"}
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </Card>
+        <Card className="dashboard-form-card" style={{ gridColumn: "1 / -1" }}>
           <h2>{ar ? "أحداث الأمان الحديثة" : "Recent security events"}</h2>
           {events.length ? (
             <Table
@@ -1274,6 +1464,46 @@ export function SecurityScreen({ locale }: { locale: Locale; membership: Members
               {ar ? "لا توجد أحداث أمان حديثة." : "No recent security events."}
             </p>
           )}
+        </Card>
+        <Card className="dashboard-form-card" style={{ gridColumn: "1 / -1" }}>
+          <h2>{ar ? "إجراءات حساسة" : "Sensitive account actions"}</h2>
+          <p style={{ color: "var(--waflo-muted)", maxWidth: "72ch" }}>
+            {ar
+              ? "اكتب DEACTIVATE لتعطيل الحساب، أو REQUEST DELETION لتسجيل طلب حذف ومراجعته وفق السياسة. مالك المؤسسة يمكنه كتابة CLOSE ORGANIZATION لإيقاف العمليات مع الاحتفاظ بسجل التدقيق."
+              : "Type DEACTIVATE to disable your account, REQUEST DELETION to record a policy-reviewed deletion request, or—if you are the owner—CLOSE ORGANIZATION to stop operations while retaining audit history."}
+          </p>
+          <FormField label={ar ? "عبارة التأكيد" : "Confirmation phrase"}>
+            <TextInput
+              value={dangerConfirmation}
+              onChange={(event) => setDangerConfirmation(event.currentTarget.value)}
+              autoComplete="off"
+            />
+          </FormField>
+          <div className="dashboard-form__row">
+            <Button
+              variant="secondary"
+              disabled={dangerConfirmation !== "DEACTIVATE"}
+              onClick={() => void accountLifecycle("deactivate")}
+            >
+              {ar ? "تعطيل الحساب" : "Deactivate account"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={dangerConfirmation !== "REQUEST DELETION"}
+              onClick={() => void accountLifecycle("deletion-request")}
+            >
+              {ar ? "طلب حذف الحساب" : "Request account deletion"}
+            </Button>
+            {membership.role === "OWNER" ? (
+              <Button
+                variant="secondary"
+                disabled={dangerConfirmation !== "CLOSE ORGANIZATION"}
+                onClick={() => void closeOrganization()}
+              >
+                {ar ? "إغلاق المؤسسة" : "Close organization"}
+              </Button>
+            ) : null}
+          </div>
         </Card>
       </div>
     </>

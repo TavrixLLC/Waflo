@@ -862,28 +862,44 @@ export class TransferService {
     token: string,
     request: WafloRequest,
   ) {
-    await this.notifications.send({
-      to: this.security.decryptEmail(email),
-      locale,
-      kind: "membership_transfer_confirmation",
-      organizationName,
-      programName,
-      ...(command.confirmationExpiresAt ? { expiresAt: command.confirmationExpiresAt } : {}),
-      actionUrl: transferActionUrl(
-        this.environment.values.CUSTOMER_WEB_URL,
-        merchantSlug,
-        command.publicTransferId,
-        token,
-      ),
-    });
-    await this.audit.record(
-      {
-        organizationId: command.organizationId,
-        action: "membership.transfer_email_sent",
-        targetType: "membership_transfer_command",
-        targetId: command.id,
-      },
-      request,
-    );
+    try {
+      await this.notifications.send({
+        to: this.security.decryptEmail(email),
+        locale,
+        kind: "membership_transfer_confirmation",
+        organizationName,
+        programName,
+        ...(command.confirmationExpiresAt ? { expiresAt: command.confirmationExpiresAt } : {}),
+        actionUrl: transferActionUrl(
+          this.environment.values.CUSTOMER_WEB_URL,
+          merchantSlug,
+          command.publicTransferId,
+          token,
+        ),
+      });
+      await this.audit.record(
+        {
+          organizationId: command.organizationId,
+          action: "membership.transfer_email_sent",
+          targetType: "membership_transfer_command",
+          targetId: command.id,
+        },
+        request,
+      );
+    } catch {
+      // The transfer command is already committed. Preserve truthful mutation
+      // semantics and leave it pending so the existing resend path can retry.
+      await this.audit
+        .security(
+          {
+            organizationId: command.organizationId,
+            eventType: "membership.transfer_confirmation_email_failed",
+            severity: "MEDIUM",
+            metadata: { retryAvailable: true },
+          },
+          request,
+        )
+        .catch(() => undefined);
+    }
   }
 }

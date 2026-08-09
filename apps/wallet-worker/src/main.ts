@@ -4,7 +4,7 @@ import { connect as connectHttp2 } from "node:http2";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { parseEnvironment, type Environment } from "@waflo/config";
+import { parseEnvironment, parseVersionedSecretEntries, type Environment } from "@waflo/config";
 import {
   decodeSecret,
   createCustomerDataKeyring,
@@ -107,15 +107,19 @@ function textFromSource(value: string): string {
 
 function serviceAccount(value: string | undefined): GoogleServiceAccount | undefined {
   if (!value) return undefined;
-  const parsed = JSON.parse(textFromSource(value)) as Partial<GoogleServiceAccount>;
-  if (!parsed.client_email || !parsed.private_key) {
-    throw new Error("Google Wallet service-account configuration is incomplete.");
+  try {
+    const parsed = JSON.parse(textFromSource(value)) as Partial<GoogleServiceAccount>;
+    if (!parsed.client_email || !parsed.private_key?.includes("PRIVATE KEY")) {
+      return undefined;
+    }
+    return {
+      client_email: parsed.client_email,
+      private_key: parsed.private_key,
+      ...(parsed.token_uri ? { token_uri: parsed.token_uri } : {}),
+    };
+  } catch {
+    return undefined;
   }
-  return {
-    client_email: parsed.client_email,
-    private_key: parsed.private_key,
-    ...(parsed.token_uri ? { token_uri: parsed.token_uri } : {}),
-  };
 }
 
 function providers(environment: Environment): ReadonlyMap<WalletProviderCode, WalletProvider> {
@@ -128,19 +132,40 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
     environment.APPLE_PASS_CERTIFICATE_PASSWORD &&
     environment.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
   ) {
-    signer = new Pkcs7ApplePassSigner(
-      bytesFromSource(environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
-      environment.APPLE_PASS_CERTIFICATE_PASSWORD,
-      textFromSource(environment.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64),
-    );
+    try {
+      signer = new Pkcs7ApplePassSigner(
+        bytesFromSource(environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
+        environment.APPLE_PASS_CERTIFICATE_PASSWORD,
+        textFromSource(environment.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64),
+      );
+    } catch {
+      signer = undefined;
+    }
   }
+  const appleReady =
+    environment.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
+    (environment.APPLE_WALLET_MODE === "REAL" &&
+      Boolean(
+        signer &&
+          environment.APPLE_PASS_TYPE_IDENTIFIER &&
+          environment.APPLE_TEAM_IDENTIFIER &&
+          environment.APPLE_PASS_WEB_SERVICE_URL,
+      ));
+  const appleMode = appleReady ? environment.APPLE_WALLET_MODE : "DISABLED";
+  const appleSecrets = parseVersionedSecretEntries(
+    environment.APPLE_PASS_AUTH_SECRETS_JSON,
+    environment.APPLE_PASS_AUTH_SECRET_V1,
+  );
+  const activeAppleSecret = appleSecrets[environment.APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION];
+  if (!activeAppleSecret)
+    throw new Error("Active Apple pass authentication secret is unavailable.");
   const appleSecret = {
     version: environment.APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION,
-    secret: decodeSecret(environment.APPLE_PASS_AUTH_SECRET_V1),
+    secret: decodeSecret(activeAppleSecret),
   };
   const apple = new AppleWalletProvider({
-    mode: environment.APPLE_WALLET_MODE,
-    ...(environment.APPLE_WALLET_MODE === "DISABLED"
+    mode: appleMode,
+    ...(appleMode === "DISABLED"
       ? {}
       : {
           configuration: {
@@ -166,8 +191,12 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
   const issuerId =
     environment.GOOGLE_WALLET_ISSUER_ID ??
     (environment.GOOGLE_WALLET_MODE === "TEST_ADAPTER" ? "test-issuer" : undefined);
+  const googleReady =
+    environment.GOOGLE_WALLET_MODE === "TEST_ADAPTER" ||
+    (environment.GOOGLE_WALLET_MODE === "REAL" &&
+      Boolean(issuerId && account && environment.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL));
   const google = new GoogleWalletProvider({
-    mode: environment.GOOGLE_WALLET_MODE,
+    mode: googleReady ? environment.GOOGLE_WALLET_MODE : "DISABLED",
     ...(issuerId ? { issuerId } : {}),
     ...(account ? { serviceAccount: account } : {}),
     allowedOrigins: environment.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",")
@@ -182,15 +211,15 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
 }
 
 function credentialPayload(pass: PassRecord, environment: Environment): string {
-  if (
-    pass.membershipCredential.secretVersion !==
-    environment.MEMBERSHIP_CREDENTIAL_ACTIVE_SECRET_VERSION
-  ) {
-    throw new Error("Membership credential secret version is unavailable.");
-  }
+  const configured = parseVersionedSecretEntries(
+    environment.MEMBERSHIP_CREDENTIAL_SECRETS_JSON,
+    environment.MEMBERSHIP_CREDENTIAL_SECRET_V1,
+  );
+  const secret = configured[pass.membershipCredential.secretVersion];
+  if (!secret) throw new Error("Membership credential secret version is unavailable.");
   const versionedSecret = {
-    version: environment.MEMBERSHIP_CREDENTIAL_ACTIVE_SECRET_VERSION,
-    secret: decodeSecret(environment.MEMBERSHIP_CREDENTIAL_SECRET_V1),
+    version: pass.membershipCredential.secretVersion,
+    secret: decodeSecret(secret),
   };
   return formatMembershipQrPayload({
     publicCredentialId: pass.membershipCredential.publicCredentialId,
@@ -294,9 +323,13 @@ export class WalletWorker {
     providerOverrides?: ReadonlyMap<WalletProviderCode, WalletProvider>,
   ) {
     this.providerMap = providerOverrides ?? providers(environment);
-    this.customerKeyring = createCustomerDataKeyring(environment.CUSTOMER_DATA_ACTIVE_KEY_VERSION, {
-      1: environment.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
-    });
+    this.customerKeyring = createCustomerDataKeyring(
+      environment.CUSTOMER_DATA_ACTIVE_KEY_VERSION,
+      parseVersionedSecretEntries(
+        environment.CUSTOMER_DATA_ENCRYPTION_KEYS_JSON,
+        environment.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
+      ),
+    );
     this.objectStorage = new S3Client({
       endpoint: environment.OBJECT_STORAGE_ENDPOINT,
       region: environment.OBJECT_STORAGE_REGION,
@@ -317,6 +350,23 @@ export class WalletWorker {
     const providerHealth = await Promise.all(
       [...this.providerMap.values()].map((provider) => provider.healthCheck()),
     );
+    const now = new Date();
+    await this.prisma.workerHeartbeat.upsert({
+      where: { workerCode: "WALLET_WORKER" },
+      create: {
+        workerCode: "WALLET_WORKER",
+        instanceId: this.workerId,
+        startedAt: now,
+        lastLoopAt: now,
+      },
+      update: {
+        instanceId: this.workerId,
+        startedAt: now,
+        lastLoopAt: now,
+        stoppingAt: null,
+        safeFailureCode: null,
+      },
+    });
     return { status: "ready" as const, providerHealth };
   }
 
@@ -362,6 +412,10 @@ export class WalletWorker {
 
   async stop() {
     this.stopping = true;
+    await this.prisma.workerHeartbeat.updateMany({
+      where: { workerCode: "WALLET_WORKER", instanceId: this.workerId },
+      data: { stoppingAt: new Date() },
+    });
   }
 
   async processCommandById(commandId: string, slot = 0): Promise<boolean> {
@@ -373,12 +427,43 @@ export class WalletWorker {
 
   private async dispatchLoop() {
     while (!this.stopping) {
-      const synced = await this.processOneProgramSyncJob();
-      if (synced) workerLog("program_wallet_sync_batch_processed", synced);
-      const queued = await this.dispatch();
-      if (queued > 0) workerLog("commands_queued", { count: queued });
+      try {
+        const synced = await this.processOneProgramSyncJob();
+        if (synced) workerLog("program_wallet_sync_batch_processed", synced);
+        const queued = await this.dispatch();
+        if (queued > 0) workerLog("commands_queued", { count: queued });
+        await this.recordHeartbeat(true);
+      } catch {
+        await this.recordHeartbeat(false, "DISPATCH_LOOP_FAILED").catch(() => undefined);
+        workerLog("dispatch_loop_failed", { safeFailureCode: "DISPATCH_LOOP_FAILED" });
+      }
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
+  }
+
+  private async recordHeartbeat(success: boolean, safeFailureCode?: string) {
+    const now = new Date();
+    const [backlogCount, oldest] = await Promise.all([
+      this.prisma.walletCommand.count({
+        where: { status: { in: ["PENDING", "FAILED", "PROCESSING"] } },
+      }),
+      this.prisma.walletCommand.findFirst({
+        where: { status: { in: ["PENDING", "FAILED", "PROCESSING"] } },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
+      }),
+    ]);
+    await this.prisma.workerHeartbeat.updateMany({
+      where: { workerCode: "WALLET_WORKER", instanceId: this.workerId },
+      data: {
+        lastLoopAt: now,
+        ...(success
+          ? { lastSuccessAt: now, safeFailureCode: null }
+          : { lastFailureAt: now, safeFailureCode: safeFailureCode ?? "WALLET_LOOP_FAILED" }),
+        backlogCount,
+        oldestBacklogAt: oldest?.createdAt ?? null,
+      },
+    });
   }
 
   async processOneProgramSyncJob(jobId?: string): Promise<Record<string, unknown> | null> {
@@ -1241,9 +1326,8 @@ async function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  void main().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Wallet worker failed.";
-    process.stderr.write(`${message}\n`);
+  void main().catch(() => {
+    process.stderr.write("Wallet worker failed.\n");
     process.exitCode = 1;
   });
 }

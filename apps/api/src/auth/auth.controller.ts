@@ -175,12 +175,60 @@ export class AuthController {
     return result;
   }
 
+  @Post("me/deactivate")
+  deactivate(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentSession() sessionId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    return this.lifecycle(user.id, sessionId, "DEACTIVATION", body, request, reply);
+  }
+
+  @Post("me/deletion-request")
+  requestDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentSession() sessionId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    return this.lifecycle(user.id, sessionId, "DELETION", body, request, reply);
+  }
+
+  private async lifecycle(
+    userId: string,
+    sessionId: string,
+    type: "DEACTIVATION" | "DELETION",
+    body: unknown,
+    request: WafloRequest,
+    reply: FastifyReply,
+  ) {
+    const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const result = await this.auth.requestAccountLifecycle(
+      userId,
+      type,
+      {
+        commandId: parseUuid(typeof input.commandId === "string" ? input.commandId : ""),
+        sessionId,
+        confirmation: typeof input.confirmation === "string" ? input.confirmation : "",
+        ...(typeof input.currentPassword === "string"
+          ? { currentPassword: input.currentPassword }
+          : {}),
+      },
+      request,
+    );
+    this.clearSessionCookie(reply);
+    return result;
+  }
+
   private setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date): void {
     reply.setCookie(this.environment.values.COOKIE_NAME, token, {
       path: "/",
       httpOnly: true,
       secure: this.environment.values.COOKIE_SECURE,
-      sameSite: "lax",
+      sameSite: this.environment.values.COOKIE_SAME_SITE === "NONE" ? "none" : "lax",
       expires: expiresAt,
     });
   }

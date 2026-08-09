@@ -12,6 +12,7 @@ import { EnvironmentService } from "../../apps/api/src/config/environment.servic
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import type { NotificationService } from "../../apps/api/src/notifications/notification.service.js";
 import { TenantService } from "../../apps/api/src/tenancy/tenant.service.js";
+import { OperationalWorker } from "../../apps/operational-worker/src/main.js";
 
 const PRICE_STARTER = "price_reconcile_starter";
 const PRICE_GROWTH = "price_reconcile_growth";
@@ -142,6 +143,14 @@ describe.sequential("production Stripe subscription reconciliation", () => {
     return { retrieveSubscription: vi.fn(async () => value) };
   }
 
+  function scheduledWorker(retrieve: (subscriptionId: string) => Promise<Stripe.Subscription>) {
+    const worker = new OperationalWorker(prisma.client, environment.values);
+    Object.defineProperty(worker, "stripe", {
+      value: { subscriptions: { retrieve } },
+    });
+    return worker;
+  }
+
   it("requires billing.manage", async () => {
     const item = await fixture();
     await expect(
@@ -258,5 +267,131 @@ describe.sequential("production Stripe subscription reconciliation", () => {
         where: { organizationId: item.organizationId, action: "stripe.reconciliation_failed" },
       }),
     ).toBe(1);
+  });
+
+  it("periodically reconciles a bounded stale subscription, records health, and reruns idempotently", async () => {
+    await prisma.client.subscription.updateMany({ data: { lastProviderSyncAt: new Date() } });
+    const item = await fixture("PAST_DUE");
+    const retrieve = vi.fn(async () => snapshot(item, "active"));
+    const worker = scheduledWorker(retrieve);
+    await worker.readiness();
+    expect(await worker.reconcileStripeSubscriptions()).toBe(1);
+    expect(await worker.reconcileStripeSubscriptions()).toBe(0);
+    const local = await prisma.client.subscription.findUniqueOrThrow({
+      where: { stripeSubscriptionId: item.subscriptionId },
+    });
+    expect(local.status).toBe("ACTIVE");
+    expect(local.lastProviderSyncAt).not.toBeNull();
+    expect(local.reconciliationLeaseOwner).toBeNull();
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(
+      await prisma.client.auditLog.count({
+        where: { organizationId: item.organizationId, action: "stripe.scheduled_reconciled" },
+      }),
+    ).toBe(1);
+    await worker.stop();
+    expect(
+      (
+        await prisma.client.workerHeartbeat.findUniqueOrThrow({
+          where: { workerCode: "OPERATIONAL_WORKER" },
+        })
+      ).stoppingAt,
+    ).not.toBeNull();
+  });
+
+  it("scheduled reconciliation safely cancels a provider-missing subscription", async () => {
+    await prisma.client.subscription.updateMany({ data: { lastProviderSyncAt: new Date() } });
+    const item = await fixture("ACTIVE");
+    const worker = scheduledWorker(async () => {
+      throw Object.assign(new Error("not returned by provider"), { code: "resource_missing" });
+    });
+    expect(await worker.reconcileStripeSubscriptions()).toBe(1);
+    expect(
+      (
+        await prisma.client.subscription.findUniqueOrThrow({
+          where: { stripeSubscriptionId: item.subscriptionId },
+        })
+      ).status,
+    ).toBe("CANCELED");
+    expect(
+      await prisma.client.auditLog.count({
+        where: {
+          organizationId: item.organizationId,
+          action: "stripe.scheduled_reconciliation_missing_subscription",
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("scheduled provider failure preserves local state and records only a safe diagnostic", async () => {
+    await prisma.client.subscription.updateMany({ data: { lastProviderSyncAt: new Date() } });
+    const item = await fixture("ACTIVE");
+    const rawProviderMessage = "provider failed with sk_live_should_never_be_stored";
+    const worker = scheduledWorker(async () => {
+      throw new Error(rawProviderMessage);
+    });
+    expect(await worker.reconcileStripeSubscriptions()).toBe(0);
+    const local = await prisma.client.subscription.findUniqueOrThrow({
+      where: { stripeSubscriptionId: item.subscriptionId },
+    });
+    expect(local.status).toBe("ACTIVE");
+    expect(local.reconciliationFailureCode).toBe("PROVIDER_RETRIEVAL_FAILED");
+    const auditEntry = await prisma.client.auditLog.findFirstOrThrow({
+      where: {
+        organizationId: item.organizationId,
+        action: "stripe.scheduled_reconciliation_failed",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(JSON.stringify(auditEntry)).not.toContain(rawProviderMessage);
+  });
+
+  it("bounded retention cleanup removes only expired security material after its policy window", async () => {
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    const session = await prisma.client.session.create({
+      data: {
+        userId: ownerId,
+        tokenHash: randomUUID().replaceAll("-", "").padEnd(64, "a"),
+        expiresAt: old,
+      },
+    });
+    const verification = await prisma.client.emailVerificationToken.create({
+      data: {
+        userId: ownerId,
+        tokenHash: randomUUID().replaceAll("-", "").padEnd(64, "b"),
+        expiresAt: old,
+      },
+    });
+    const reset = await prisma.client.passwordResetToken.create({
+      data: {
+        userId: ownerId,
+        tokenHash: randomUUID().replaceAll("-", "").padEnd(64, "c"),
+        expiresAt: old,
+      },
+    });
+    const oauth = await prisma.client.oAuthAuthorizationRequest.create({
+      data: {
+        stateHash: randomUUID().replaceAll("-", "").padEnd(64, "d"),
+        provider: "GOOGLE",
+        intent: "SIGN_IN",
+        nonceHash: randomUUID().replaceAll("-", "").padEnd(64, "e"),
+        codeVerifierCiphertext: "expired-and-no-longer-usable",
+        expiresAt: old,
+      },
+    });
+    const worker = scheduledWorker(async () => {
+      throw new Error("not used by cleanup");
+    });
+    expect(await worker.cleanupExpiredState()).toBeGreaterThanOrEqual(4);
+    expect(await prisma.client.session.findUnique({ where: { id: session.id } })).toBeNull();
+    expect(
+      await prisma.client.emailVerificationToken.findUnique({ where: { id: verification.id } }),
+    ).toBeNull();
+    expect(
+      await prisma.client.passwordResetToken.findUnique({ where: { id: reset.id } }),
+    ).toBeNull();
+    expect(
+      await prisma.client.oAuthAuthorizationRequest.findUnique({ where: { id: oauth.id } }),
+    ).toBeNull();
   });
 });

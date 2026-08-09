@@ -5,6 +5,8 @@ import { AuditController } from "./audit/audit.controller.js";
 import { AuditService } from "./audit/audit.service.js";
 import { AuthController } from "./auth/auth.controller.js";
 import { AuthService } from "./auth/auth.service.js";
+import { ExternalAuthController } from "./auth/external-auth.controller.js";
+import { ExternalAuthService } from "./auth/external-auth.service.js";
 import { BillingController, WebhooksController } from "./billing/billing.controller.js";
 import { BillingService } from "./billing/billing.service.js";
 import { EnvelopeInterceptor } from "./common/request-context.js";
@@ -13,6 +15,7 @@ import { ERROR_REPORTER } from "./common/error-reporter.js";
 import { EnvironmentService } from "./config/environment.service.js";
 import { PrismaService } from "./database/prisma.service.js";
 import { HealthController } from "./health/health.controller.js";
+import { CapabilitiesController } from "./health/capabilities.controller.js";
 import { LocationsController } from "./locations/locations.controller.js";
 import { LocationsService } from "./locations/locations.service.js";
 import { NotificationService } from "./notifications/notification.service.js";
@@ -64,6 +67,7 @@ import { MerchantOperationsService } from "./operations/merchant-operations.serv
 @Module({
   controllers: [
     AuthController,
+    ExternalAuthController,
     OrganizationsController,
     LocationsController,
     TeamController,
@@ -73,6 +77,7 @@ import { MerchantOperationsService } from "./operations/merchant-operations.serv
     AuditController,
     PublicController,
     HealthController,
+    CapabilitiesController,
     ProgramsController,
     AssetsController,
     EnrollmentSettingsController,
@@ -95,6 +100,7 @@ import { MerchantOperationsService } from "./operations/merchant-operations.serv
     RateLimitService,
     TenantService,
     AuthService,
+    ExternalAuthService,
     OrganizationsService,
     LocationsService,
     TeamService,

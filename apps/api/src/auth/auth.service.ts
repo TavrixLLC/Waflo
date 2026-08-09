@@ -15,7 +15,10 @@ import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { NotificationService } from "../notifications/notification.service.js";
+import {
+  type NotificationMessage,
+  NotificationService,
+} from "../notifications/notification.service.js";
 
 interface SessionResult {
   rawToken: string;
@@ -139,12 +142,16 @@ export class AuthService {
       },
     );
     const url = `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/verify-email#token=${encodeURIComponent(rawToken)}`;
-    await this.notifications.send({
-      to: email,
-      locale,
-      kind: "email_verification",
-      actionUrl: url,
-    });
+    await this.sendNotificationAfterCommit(
+      {
+        to: email,
+        locale,
+        kind: "email_verification",
+        actionUrl: url,
+      },
+      userId,
+      request,
+    );
     await this.audit.record(
       {
         actorUserId: userId,
@@ -297,17 +304,34 @@ export class AuthService {
   ): Promise<SessionResult> {
     const rawToken = createOpaqueToken();
     const expiresAt = sessionExpiresAt(new Date(), this.environment.values.SESSION_TTL_DAYS);
-    const session = await this.prisma.client.session.create({
-      data: {
-        userId,
-        tokenHash: hashOpaqueToken(rawToken),
-        expiresAt,
-        userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
-        deviceLabel: deviceLabel(request.headers["user-agent"]),
-        ipMetadata: null,
-        rotatedFromId: rotatedFromId ?? null,
+    const session = await withInvariantLock(
+      this.prisma.client,
+      `user-auth-lifecycle:${userId}`,
+      async (transaction) => {
+        const user = await transaction.user.findUnique({
+          where: { id: userId },
+          select: { status: true },
+        });
+        if (user?.status !== "ACTIVE") {
+          throw new AppError(
+            "AUTHENTICATION_FAILED",
+            "Sign-in could not be completed.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        return transaction.session.create({
+          data: {
+            userId,
+            tokenHash: hashOpaqueToken(rawToken),
+            expiresAt,
+            userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
+            deviceLabel: deviceLabel(request.headers["user-agent"]),
+            ipMetadata: null,
+            rotatedFromId: rotatedFromId ?? null,
+          },
+        });
       },
-    });
+    );
     return { rawToken, sessionId: session.id, expiresAt };
   }
 
@@ -350,12 +374,16 @@ export class AuthService {
           });
         },
       );
-      await this.notifications.send({
-        to: user.email,
-        locale: localeFromDb(user.preferredLocale),
-        kind: "password_reset",
-        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
-      });
+      await this.sendNotificationAfterCommit(
+        {
+          to: user.email,
+          locale: localeFromDb(user.preferredLocale),
+          kind: "password_reset",
+          actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
+        },
+        user.id,
+        request,
+      );
       await this.audit.record(
         {
           actorUserId: user.id,
@@ -434,11 +462,15 @@ export class AuthService {
       },
       request,
     );
-    await this.notifications.send({
-      to: result.token.user.email,
-      locale: localeFromDb(result.token.user.preferredLocale),
-      kind: "password_changed",
-    });
+    await this.sendNotificationAfterCommit(
+      {
+        to: result.token.user.email,
+        locale: localeFromDb(result.token.user.preferredLocale),
+        kind: "password_changed",
+      },
+      result.token.userId,
+      request,
+    );
     return { status: "password_reset" };
   }
 
@@ -450,7 +482,7 @@ export class AuthService {
     request: WafloRequest,
   ): Promise<SessionResult> {
     const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!(await verifyPassword(user.passwordHash, currentPassword))) {
+    if (!user.passwordHash || !(await verifyPassword(user.passwordHash, currentPassword))) {
       throw new AppError(
         "CURRENT_PASSWORD_INVALID",
         "The current password is incorrect.",
@@ -484,11 +516,15 @@ export class AuthService {
       { userId, eventType: "password.changed", severity: "MEDIUM" },
       request,
     );
-    await this.notifications.send({
-      to: user.email,
-      locale: localeFromDb(user.preferredLocale),
-      kind: "password_changed",
-    });
+    await this.sendNotificationAfterCommit(
+      {
+        to: user.email,
+        locale: localeFromDb(user.preferredLocale),
+        kind: "password_changed",
+      },
+      userId,
+      request,
+    );
     return newSession;
   }
 
@@ -638,5 +674,168 @@ export class AuthService {
       request,
     );
     return { revoked: result.count };
+  }
+
+  async requestAccountLifecycle(
+    userId: string,
+    requestType: "DEACTIVATION" | "DELETION",
+    input: {
+      commandId: string;
+      sessionId: string;
+      confirmation: string;
+      currentPassword?: string | undefined;
+    },
+    request: WafloRequest,
+  ) {
+    const expected = requestType === "DELETION" ? "REQUEST DELETION" : "DEACTIVATE";
+    if (input.confirmation !== expected) {
+      throw new AppError(
+        "SENSITIVE_ACTION_CONFIRMATION_FAILED",
+        "Account confirmation did not match.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
+    const recentExternalSession = !user.passwordHash
+      ? await this.prisma.client.session.findFirst({
+          where: {
+            id: input.sessionId,
+            userId,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (
+      user.passwordHash
+        ? !input.currentPassword ||
+          !(await verifyPassword(user.passwordHash, input.currentPassword))
+        : !recentExternalSession
+    ) {
+      throw new AppError(
+        "REAUTHENTICATION_REQUIRED",
+        "Re-enter your password to continue.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const existing = await this.prisma.client.merchantAccountLifecycleRequest.findUnique({
+      where: { userId_idempotencyKey: { userId, idempotencyKey: input.commandId } },
+    });
+    if (existing) {
+      if (existing.requestType !== requestType) {
+        throw new AppError(
+          "OPERATION_IDEMPOTENCY_CONFLICT",
+          "Command conflict.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      return {
+        publicId: existing.id,
+        status: existing.status,
+        outcomeDisposition: existing.outcomeDisposition,
+        retentionNoticeCode: existing.retentionNoticeCode,
+        replayed: true,
+      };
+    }
+    const now = new Date();
+    const created = await withInvariantLock(
+      this.prisma.client,
+      `user-auth-lifecycle:${userId}`,
+      async (transaction) => {
+        const lifecycle = await transaction.merchantAccountLifecycleRequest.create({
+          data: {
+            userId,
+            requestType,
+            idempotencyKey: input.commandId,
+            identityValidatedAt: now,
+          },
+        });
+        await transaction.user.update({
+          where: { id: userId },
+          data: {
+            status: "DEACTIVATED",
+            deactivatedAt: now,
+            ...(requestType === "DELETION" ? { deletionRequestedAt: now } : {}),
+          },
+        });
+        await transaction.session.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: now, revocationReason: "account_deactivated" },
+        });
+        await transaction.oAuthAuthorizationRequest.updateMany({
+          where: { userId, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        await transaction.emailVerificationToken.updateMany({
+          where: { userId, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        await transaction.passwordResetToken.updateMany({
+          where: { userId, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        const finalized = await transaction.merchantAccountLifecycleRequest.update({
+          where: { id: lifecycle.id },
+          data: {
+            status: "COMPLETED",
+            completedAt: now,
+            ...(requestType === "DELETION"
+              ? {
+                  outcomeDisposition: "RETAINED_BY_POLICY",
+                  retentionNoticeCode: "ACCOUNT_DISABLED_PENDING_POLICY_PROCESSING",
+                }
+              : {}),
+          },
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            actorUserId: userId,
+            action:
+              requestType === "DELETION" ? "account.deletion_requested" : "account.deactivated",
+            targetType: "user",
+            targetId: userId,
+            metadata: {
+              sessionsRevoked: true,
+              externalIdentitiesRetainedAsRevokedAccountTombstones: true,
+            },
+          },
+          request,
+        );
+        return finalized;
+      },
+    );
+    return {
+      publicId: created.id,
+      status: created.status,
+      outcomeDisposition: created.outcomeDisposition,
+      retentionNoticeCode: created.retentionNoticeCode,
+      replayed: false,
+    };
+  }
+
+  private async sendNotificationAfterCommit(
+    message: NotificationMessage,
+    userId: string,
+    request: WafloRequest,
+  ): Promise<void> {
+    try {
+      await this.notifications.send(message);
+    } catch {
+      await this.audit
+        .record(
+          {
+            actorUserId: userId,
+            action: "notification.delivery_failed",
+            targetType: "user",
+            targetId: userId,
+            metadata: { kind: message.kind, businessMutationCommitted: true },
+          },
+          request,
+        )
+        .catch(() => undefined);
+    }
   }
 }

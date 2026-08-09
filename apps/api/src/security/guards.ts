@@ -54,7 +54,15 @@ export class SessionGuard implements CanActivate {
       where: { tokenHash: hashOpaqueToken(token) },
       include: { user: true },
     });
-    if (!session || !isSessionActive(session) || session.user.status !== "ACTIVE") {
+    const idleCutoff = new Date(
+      Date.now() - this.environment.values.SESSION_IDLE_TTL_MINUTES * 60 * 1000,
+    );
+    if (
+      !session ||
+      !isSessionActive(session) ||
+      session.lastActiveAt <= idleCutoff ||
+      session.user.status !== "ACTIVE"
+    ) {
       throw new AppError(
         "SESSION_EXPIRED",
         "Your session has expired. Please sign in again.",

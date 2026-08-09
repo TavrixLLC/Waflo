@@ -101,7 +101,8 @@ export async function createApiApplication(
         frameAncestors: ["'none'"],
         formAction: ["'self'"],
         imgSrc: ["'self'", "data:"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc:
+          environment.values.NODE_ENV === "production" ? ["'self'"] : ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
       },
     },

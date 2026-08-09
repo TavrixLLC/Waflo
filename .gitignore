@@ -10,6 +10,8 @@ test-results/
 .env
 .env.local
 !.env.example
+!.env.staging.example
+!.env.production.example
 *.log
 *.pid
 tmp/

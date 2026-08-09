@@ -12,11 +12,14 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1095.0",
     "@waflo/config": "workspace:*",
+    "@waflo/billing": "workspace:*",
+    "@waflo/contracts": "workspace:*",
     "@waflo/customer-security": "workspace:*",
     "@waflo/database": "workspace:*",
     "@waflo/loyalty-ledger": "workspace:*",
     "@waflo/loyalty-policy": "workspace:*",
-    "@waflo/operational-analytics": "workspace:*"
+    "@waflo/operational-analytics": "workspace:*",
+    "stripe": "22.3.2"
   },
   "devDependencies": {
     "@types/node": "26.1.1",

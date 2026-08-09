@@ -23,20 +23,25 @@ function textFromSource(value: string): string {
 
 function googleServiceAccount(value: string | undefined): GoogleServiceAccount | undefined {
   if (!value) return undefined;
-  const parsed = JSON.parse(textFromSource(value)) as Partial<GoogleServiceAccount>;
-  if (!parsed.client_email || !parsed.private_key) {
-    throw new Error("Google Wallet service-account configuration is incomplete.");
+  try {
+    const parsed = JSON.parse(textFromSource(value)) as Partial<GoogleServiceAccount>;
+    if (!parsed.client_email || !parsed.private_key?.includes("PRIVATE KEY")) {
+      return undefined;
+    }
+    return {
+      client_email: parsed.client_email,
+      private_key: parsed.private_key,
+      ...(parsed.token_uri ? { token_uri: parsed.token_uri } : {}),
+    };
+  } catch {
+    return undefined;
   }
-  return {
-    client_email: parsed.client_email,
-    private_key: parsed.private_key,
-    ...(parsed.token_uri ? { token_uri: parsed.token_uri } : {}),
-  };
 }
 
 @Injectable()
 export class WalletProviderRegistry {
   private readonly providers: ReadonlyMap<WalletProviderCode, WalletProvider>;
+  private readonly configured: Readonly<Record<WalletProviderCode, boolean>>;
 
   constructor(environment: EnvironmentService, security: CustomerSecurityService) {
     const values = environment.values;
@@ -49,14 +54,28 @@ export class WalletProviderRegistry {
       values.APPLE_PASS_CERTIFICATE_PASSWORD &&
       values.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
     ) {
-      appleSigner = new Pkcs7ApplePassSigner(
-        bytesFromSource(values.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
-        values.APPLE_PASS_CERTIFICATE_PASSWORD,
-        textFromSource(values.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64),
-      );
+      try {
+        appleSigner = new Pkcs7ApplePassSigner(
+          bytesFromSource(values.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
+          values.APPLE_PASS_CERTIFICATE_PASSWORD,
+          textFromSource(values.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64),
+        );
+      } catch {
+        appleSigner = undefined;
+      }
     }
+    const appleReady =
+      values.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
+      (values.APPLE_WALLET_MODE === "REAL" &&
+        Boolean(
+          appleSigner &&
+            values.APPLE_PASS_TYPE_IDENTIFIER &&
+            values.APPLE_TEAM_IDENTIFIER &&
+            values.APPLE_PASS_WEB_SERVICE_URL,
+        ));
+    const effectiveAppleMode = appleReady ? values.APPLE_WALLET_MODE : "DISABLED";
     const appleConfiguration =
-      values.APPLE_WALLET_MODE === "DISABLED"
+      effectiveAppleMode === "DISABLED"
         ? undefined
         : {
             passTypeIdentifier: values.APPLE_PASS_TYPE_IDENTIFIER ?? "pass.app.waflo.test-adapter",
@@ -70,7 +89,7 @@ export class WalletProviderRegistry {
       values.GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64,
     );
     const apple = new AppleWalletProvider({
-      mode: values.APPLE_WALLET_MODE,
+      mode: effectiveAppleMode,
       ...(appleConfiguration ? { configuration: appleConfiguration } : {}),
       ...(appleSigner ? { signer: appleSigner } : {}),
       authenticationToken: (input) =>
@@ -80,8 +99,13 @@ export class WalletProviderRegistry {
     const googleIssuerId =
       values.GOOGLE_WALLET_ISSUER_ID ??
       (values.GOOGLE_WALLET_MODE === "TEST_ADAPTER" ? "test-issuer" : undefined);
+    const googleReady =
+      values.GOOGLE_WALLET_MODE === "TEST_ADAPTER" ||
+      (values.GOOGLE_WALLET_MODE === "REAL" &&
+        Boolean(googleIssuerId && googleAccount && values.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL));
+    const effectiveGoogleMode = googleReady ? values.GOOGLE_WALLET_MODE : "DISABLED";
     const google = new GoogleWalletProvider({
-      mode: values.GOOGLE_WALLET_MODE,
+      mode: effectiveGoogleMode,
       ...(googleIssuerId ? { issuerId: googleIssuerId } : {}),
       ...(googleAccount ? { serviceAccount: googleAccount } : {}),
       allowedOrigins: values.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",")
@@ -93,6 +117,7 @@ export class WalletProviderRegistry {
       ["APPLE", apple],
       ["GOOGLE", google],
     ]);
+    this.configured = { APPLE: appleReady, GOOGLE: googleReady };
   }
 
   get(provider: WalletProviderCode): WalletProvider {
@@ -103,5 +128,18 @@ export class WalletProviderRegistry {
 
   all(): readonly WalletProvider[] {
     return [...this.providers.values()];
+  }
+
+  isConfigured(provider: WalletProviderCode): boolean {
+    return this.configured[provider];
+  }
+
+  publicCapabilities() {
+    return {
+      googleWalletAvailable: this.configured.GOOGLE,
+      appleWalletAvailable: this.configured.APPLE,
+      googleWallet: this.configured.GOOGLE ? "AVAILABLE" : "NOT_CONFIGURED",
+      appleWallet: this.configured.APPLE ? "AVAILABLE" : "NOT_CONFIGURED",
+    } as const;
   }
 }

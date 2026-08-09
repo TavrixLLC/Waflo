@@ -8,6 +8,7 @@
     "predev": "pnpm --filter @waflo/database build",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
+    "readiness": "tsx src/readiness.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
@@ -40,6 +41,7 @@
     "@waflo/wallet-google": "workspace:*",
     "fastify": "5.10.0",
     "ioredis": "5.11.1",
+    "jose": "6.2.3",
     "nodemailer": "9.0.3",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
@@ -52,6 +54,7 @@
     "@types/node": "26.1.1",
     "@types/nodemailer": "8.0.1",
     "typescript": "5.9.3",
+    "tsx": "4.23.1",
     "vitest": "4.1.10"
   }
 }

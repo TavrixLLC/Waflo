@@ -12,7 +12,7 @@ import {
 } from "@waflo/ui";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
-import { apiFetch, ApiClientError, resetCsrf } from "../lib/api-client";
+import { apiFetch, ApiClientError, apiUrl, resetCsrf } from "../lib/api-client";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiClientError ? error.message : fallback;
@@ -25,7 +25,7 @@ interface MeResponse {
   }[];
 }
 
-async function destinationAfterLogin(locale: Locale): Promise<string> {
+export async function destinationAfterLogin(locale: Locale): Promise<string> {
   const me = await apiFetch<MeResponse>("/v1/auth/me");
   if (me.memberships.length === 0) return `/${locale}/onboarding/business`;
   const membership =
@@ -38,11 +38,104 @@ async function destinationAfterLogin(locale: Locale): Promise<string> {
   return `/${locale}/dashboard`;
 }
 
+interface ExternalCapabilities {
+  googleSignInAvailable: boolean;
+  appleSignInAvailable: boolean;
+}
+
+function ExternalAuthRail({
+  locale,
+  registration = false,
+  legalAccepted = true,
+}: {
+  locale: Locale;
+  registration?: boolean;
+  legalAccepted?: boolean;
+}) {
+  const ar = locale === "ar";
+  const [capabilities, setCapabilities] = useState<ExternalCapabilities | null>(null);
+  useEffect(() => {
+    void apiFetch<ExternalCapabilities>("/v1/auth/external/providers")
+      .then(setCapabilities)
+      .catch(() => setCapabilities({ googleSignInAvailable: false, appleSignInAvailable: false }));
+  }, []);
+  const providers = [
+    {
+      code: "google",
+      available: capabilities?.googleSignInAvailable === true,
+      label: ar ? "المتابعة باستخدام Google" : "Continue with Google",
+      mark: "G",
+    },
+    {
+      code: "apple",
+      available: capabilities?.appleSignInAvailable === true,
+      label: ar ? "المتابعة باستخدام Apple" : "Continue with Apple",
+      mark: "●",
+    },
+  ].filter((provider) => provider.available);
+  if (providers.length === 0) return null;
+  return (
+    <fieldset className="external-auth">
+      <legend className="external-auth__legend">
+        {ar ? "خيارات تسجيل الدخول" : "Sign-in options"}
+      </legend>
+      <div className="external-auth__providers">
+        {providers.map((provider) => {
+          const query = new URLSearchParams({ locale });
+          if (registration) {
+            query.set("registration", "true");
+            query.set("termsAccepted", "true");
+            query.set("privacyAccepted", "true");
+          }
+          const disabled = registration && !legalAccepted;
+          return disabled ? (
+            <button className="external-auth__button" disabled key={provider.code} type="button">
+              <span
+                aria-hidden="true"
+                className={`external-auth__mark external-auth__mark--${provider.code}`}
+              >
+                {provider.mark}
+              </span>
+              {provider.label}
+            </button>
+          ) : (
+            <a
+              className="external-auth__button"
+              href={`${apiUrl}/v1/auth/external/${provider.code}/start?${query.toString()}`}
+              key={provider.code}
+            >
+              <span
+                aria-hidden="true"
+                className={`external-auth__mark external-auth__mark--${provider.code}`}
+              >
+                {provider.mark}
+              </span>
+              {provider.label}
+            </a>
+          );
+        })}
+      </div>
+      {registration && !legalAccepted ? (
+        <p className="external-auth__hint">
+          {ar
+            ? "وافق على الشروط وسياسة الخصوصية للمتابعة."
+            : "Accept the Terms and Privacy Policy to continue."}
+        </p>
+      ) : null}
+      <div className="external-auth__separator">
+        <span>{ar ? "أو" : "or"}</span>
+      </div>
+    </fieldset>
+  );
+}
+
 export function SignupForm({ locale }: { locale: Locale }) {
   const ar = locale === "ar";
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,6 +179,11 @@ export function SignupForm({ locale }: { locale: Locale }) {
           : "Start setting up now. Your free trial will not begin until you publish your first loyalty card."}
       </p>
       {error ? <Alert tone="danger" title={error} /> : null}
+      <ExternalAuthRail
+        locale={locale}
+        registration
+        legalAccepted={termsAccepted && privacyAccepted}
+      />
       <form className="auth-form" onSubmit={submit}>
         <FormField label={ar ? "الاسم الكامل" : "Full name"} required>
           <TextInput
@@ -128,6 +226,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
         <Checkbox
           name="terms"
           required
+          checked={termsAccepted}
+          onChange={(event) => setTermsAccepted(event.currentTarget.checked)}
           label={
             ar ? (
               <>
@@ -155,6 +255,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
         <Checkbox
           name="privacy"
           required
+          checked={privacyAccepted}
+          onChange={(event) => setPrivacyAccepted(event.currentTarget.checked)}
           label={
             ar ? (
               <>
@@ -231,6 +333,7 @@ export function LoginForm({ locale }: { locale: Locale }) {
           : "Sign in to manage your organization, locations, and team."}
       </p>
       {error ? <Alert tone="danger" title={error} /> : null}
+      <ExternalAuthRail locale={locale} />
       <form className="auth-form" onSubmit={submit}>
         <FormField label={ar ? "البريد الإلكتروني" : "Email address"} required>
           <EmailInput name="email" required />

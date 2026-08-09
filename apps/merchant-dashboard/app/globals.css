@@ -119,6 +119,112 @@ body {
   gap: 1rem;
 }
 
+.external-auth {
+  min-width: 0;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border: 0;
+}
+
+.external-auth__legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.external-auth__providers {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.external-auth__button {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr 1.5rem;
+  align-items: center;
+  min-height: 3rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--waflo-ink) 18%, transparent);
+  border-radius: 0.8rem;
+  background: var(--waflo-cloud);
+  color: var(--waflo-ink);
+  font: inherit;
+  font-weight: 750;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.external-auth__button:hover:not(:disabled),
+.external-auth__button:focus-visible {
+  border-color: var(--waflo-coral);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--waflo-coral) 18%, transparent);
+  transform: translateY(-1px);
+}
+
+.external-auth__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.external-auth__mark {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  font-weight: 850;
+}
+
+.external-auth__mark--google {
+  border: 1px solid #d8dde8;
+  background: #fff;
+  color: #3769d6;
+}
+
+.external-auth__mark--apple {
+  background: var(--waflo-ink);
+  color: #fff;
+  font-size: 0.7rem;
+}
+
+.external-auth__hint {
+  margin: 0.55rem 0 0;
+  color: var(--waflo-muted);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.external-auth__separator {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  color: var(--waflo-muted);
+  font-size: 0.78rem;
+}
+
+.external-auth__separator::before,
+.external-auth__separator::after {
+  height: 1px;
+  background: color-mix(in srgb, var(--waflo-ink) 13%, transparent);
+  content: "";
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .external-auth__button {
+    transition: none;
+  }
+}
+
 .auth-form__row {
   display: grid;
   grid-template-columns: 1fr 1fr;

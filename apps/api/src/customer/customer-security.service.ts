@@ -20,6 +20,7 @@ import {
   type VersionedSecret,
 } from "@waflo/customer-security";
 import { formatMembershipQrPayload, parseMembershipQrPayload } from "@waflo/qr-core";
+import { parseVersionedSecretEntries } from "@waflo/config";
 import type { Prisma } from "@waflo/database";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -27,8 +28,10 @@ import { PrismaService } from "../database/prisma.service.js";
 @Injectable()
 export class CustomerSecurityService {
   private readonly customerKeyring;
-  private readonly credentialSecret: VersionedSecret;
-  private readonly appleAuthenticationSecret: VersionedSecret;
+  private readonly credentialSecrets: ReadonlyMap<number, VersionedSecret>;
+  private readonly appleAuthenticationSecrets: ReadonlyMap<number, VersionedSecret>;
+  private readonly activeCredentialSecret: VersionedSecret;
+  private readonly activeAppleAuthenticationSecret: VersionedSecret;
   private readonly contactLookupKey: Buffer;
   private readonly sessionSecret: Buffer;
 
@@ -38,18 +41,33 @@ export class CustomerSecurityService {
   ) {
     this.customerKeyring = createCustomerDataKeyring(
       environment.values.CUSTOMER_DATA_ACTIVE_KEY_VERSION,
-      {
-        1: environment.values.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
-      },
+      parseVersionedSecretEntries(
+        environment.values.CUSTOMER_DATA_ENCRYPTION_KEYS_JSON,
+        environment.values.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
+      ),
     );
-    this.credentialSecret = {
-      version: environment.values.MEMBERSHIP_CREDENTIAL_ACTIVE_SECRET_VERSION,
-      secret: decodeSecret(environment.values.MEMBERSHIP_CREDENTIAL_SECRET_V1),
-    };
-    this.appleAuthenticationSecret = {
-      version: environment.values.APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION,
-      secret: decodeSecret(environment.values.APPLE_PASS_AUTH_SECRET_V1),
-    };
+    this.credentialSecrets = this.createSecretMap(
+      parseVersionedSecretEntries(
+        environment.values.MEMBERSHIP_CREDENTIAL_SECRETS_JSON,
+        environment.values.MEMBERSHIP_CREDENTIAL_SECRET_V1,
+      ),
+    );
+    this.appleAuthenticationSecrets = this.createSecretMap(
+      parseVersionedSecretEntries(
+        environment.values.APPLE_PASS_AUTH_SECRETS_JSON,
+        environment.values.APPLE_PASS_AUTH_SECRET_V1,
+      ),
+    );
+    this.activeCredentialSecret = this.requireSecret(
+      this.credentialSecrets,
+      environment.values.MEMBERSHIP_CREDENTIAL_ACTIVE_SECRET_VERSION,
+      "membership credential",
+    );
+    this.activeAppleAuthenticationSecret = this.requireSecret(
+      this.appleAuthenticationSecrets,
+      environment.values.APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION,
+      "Apple pass authentication",
+    );
     this.contactLookupKey = decodeSecret(environment.values.CUSTOMER_CONTACT_LOOKUP_HMAC_KEY);
     this.sessionSecret = decodeSecret(environment.values.CUSTOMER_SESSION_SECRET);
   }
@@ -122,19 +140,19 @@ export class CustomerSecurityService {
     const secret = deriveMembershipCredentialSecret(
       publicCredentialId,
       credentialVersion,
-      this.credentialSecret,
+      this.activeCredentialSecret,
     );
     return {
       publicCredentialId,
-      secretVersion: this.credentialSecret.version,
+      secretVersion: this.activeCredentialSecret.version,
       secretHash: membershipCredentialHash(
         publicCredentialId,
         credentialVersion,
-        this.credentialSecret,
+        this.activeCredentialSecret,
       ),
       payload: formatMembershipQrPayload({
         publicCredentialId,
-        secretVersion: this.credentialSecret.version,
+        secretVersion: this.activeCredentialSecret.version,
         secret,
       }),
     };
@@ -249,8 +267,38 @@ export class CustomerSecurityService {
     return deriveAppleAuthenticationToken(
       walletPassInstanceId,
       serialNumber,
-      this.appleAuthenticationSecret,
+      this.activeAppleAuthenticationSecret,
     );
+  }
+
+  verifyAppleAuthenticationToken(
+    walletPassInstanceId: string,
+    serialNumber: string,
+    suppliedToken: string,
+  ): boolean {
+    return [...this.appleAuthenticationSecrets.values()].some((secret) =>
+      constantTimeTokenEquals(
+        deriveAppleAuthenticationToken(walletPassInstanceId, serialNumber, secret),
+        suppliedToken,
+      ),
+    );
+  }
+
+  keyVersionSummary() {
+    return {
+      customerData: {
+        active: this.customerKeyring.activeVersion,
+        readable: [...this.customerKeyring.keys.keys()].sort((left, right) => left - right),
+      },
+      membershipCredential: {
+        active: this.activeCredentialSecret.version,
+        verifiable: [...this.credentialSecrets.keys()].sort((left, right) => left - right),
+      },
+      applePassAuthentication: {
+        active: this.activeAppleAuthenticationSecret.version,
+        verifiable: [...this.appleAuthenticationSecrets.keys()].sort((left, right) => left - right),
+      },
+    };
   }
 
   customerSessionExpiresAt(): Date {
@@ -267,9 +315,31 @@ export class CustomerSecurityService {
   }
 
   private secretForCredentialVersion(version: number): VersionedSecret {
-    if (version !== 1 || this.credentialSecret.version !== version) {
+    const secret = this.credentialSecrets.get(version);
+    if (!secret) {
       throw new Error("Membership credential secret version is unavailable.");
     }
-    return this.credentialSecret;
+    return secret;
+  }
+
+  private createSecretMap(
+    entries: Readonly<Record<number, string>>,
+  ): ReadonlyMap<number, VersionedSecret> {
+    return new Map(
+      Object.entries(entries).map(([version, secret]) => {
+        const parsedVersion = Number(version);
+        return [parsedVersion, { version: parsedVersion, secret: decodeSecret(secret) }] as const;
+      }),
+    );
+  }
+
+  private requireSecret(
+    secrets: ReadonlyMap<number, VersionedSecret>,
+    version: number,
+    purpose: string,
+  ): VersionedSecret {
+    const secret = secrets.get(version);
+    if (!secret) throw new Error(`The active ${purpose} secret version is not configured.`);
+    return secret;
   }
 }

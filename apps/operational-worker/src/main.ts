@@ -3,7 +3,8 @@ import { createCipheriv, createHash, randomBytes, randomUUID } from "node:crypto
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { type Environment, parseEnvironment } from "@waflo/config";
+import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
+import { type BillingStatus, type PlanCode } from "@waflo/contracts";
 import { createCustomerDataKeyring, decryptCustomerValue } from "@waflo/customer-security";
 import {
   createPrismaClient,
@@ -26,8 +27,32 @@ import {
   type OperationalExportType,
   operationalDateBucket,
 } from "@waflo/operational-analytics";
+import Stripe from "stripe";
 
 const LEASE_SECONDS = 90;
+
+function stripeStatus(status: Stripe.Subscription.Status): BillingStatus {
+  if (status === "active") return "active";
+  if (status === "trialing") return "trialing";
+  if (status === "past_due" || status === "unpaid") return "past_due";
+  if (status === "paused") return "suspended";
+  return "canceled";
+}
+
+function dbBillingStatus(status: BillingStatus) {
+  return status.toUpperCase() as
+    | "PENDING_ACTIVATION"
+    | "TRIALING"
+    | "ACTIVE"
+    | "PAST_DUE"
+    | "GRACE_PERIOD"
+    | "SUSPENDED"
+    | "CANCELED";
+}
+
+function dbPlanCode(plan: PlanCode) {
+  return plan.toUpperCase() as "STARTER" | "GROWTH" | "SCALE";
+}
 
 function log(event: string, metadata: Record<string, unknown> = {}) {
   process.stdout.write(
@@ -131,6 +156,7 @@ export class OperationalWorker {
   private readonly workerId = `operations-${randomUUID()}`;
   private readonly objectStorage: S3Client;
   private readonly customerKeyring;
+  private readonly stripe: Stripe | null;
   private stopping = false;
 
   constructor(
@@ -146,26 +172,62 @@ export class OperationalWorker {
         secretAccessKey: environment.OBJECT_STORAGE_SECRET_ACCESS_KEY,
       },
     });
-    this.customerKeyring = createCustomerDataKeyring(environment.CUSTOMER_DATA_ACTIVE_KEY_VERSION, {
-      1: environment.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
-    });
+    this.customerKeyring = createCustomerDataKeyring(
+      environment.CUSTOMER_DATA_ACTIVE_KEY_VERSION,
+      parseVersionedSecretEntries(
+        environment.CUSTOMER_DATA_ENCRYPTION_KEYS_JSON,
+        environment.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
+      ),
+    );
+    this.stripe = environment.STRIPE_SECRET_KEY
+      ? new Stripe(environment.STRIPE_SECRET_KEY, {
+          appInfo: { name: "Waflo Operational Worker", version: "1.0.0" },
+        })
+      : null;
   }
 
   async readiness() {
     await this.prisma.$queryRaw`SELECT 1`;
+    const now = new Date();
+    await this.prisma.workerHeartbeat.upsert({
+      where: { workerCode: "OPERATIONAL_WORKER" },
+      create: {
+        workerCode: "OPERATIONAL_WORKER",
+        instanceId: this.workerId,
+        startedAt: now,
+        lastLoopAt: now,
+      },
+      update: {
+        instanceId: this.workerId,
+        startedAt: now,
+        lastLoopAt: now,
+        stoppingAt: null,
+        safeFailureCode: null,
+      },
+    });
     return { status: "ready" as const };
   }
 
   async stop() {
     this.stopping = true;
+    await this.prisma.workerHeartbeat.updateMany({
+      where: { workerCode: "OPERATIONAL_WORKER", instanceId: this.workerId },
+      data: { stoppingAt: new Date() },
+    });
   }
 
   async run() {
     await this.readiness();
     log("ready");
     while (!this.stopping) {
-      const result = await this.runOnce();
-      if (Object.values(result).some((value) => value > 0)) log("batch_processed", result);
+      try {
+        const result = await this.runOnce();
+        if (Object.values(result).some((value) => value > 0)) log("batch_processed", result);
+        await this.recordHeartbeat(true);
+      } catch {
+        await this.recordHeartbeat(false, "LOOP_FAILED").catch(() => undefined);
+        log("loop_failed", { safeFailureCode: "LOOP_FAILED" });
+      }
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
     }
   }
@@ -176,9 +238,245 @@ export class OperationalWorker {
       analyticsRows: await this.processIncrementalAnalytics(),
       exportsProcessed: (await this.processOneExport()) ? 1 : 0,
       privacyRequestsProcessed: (await this.processOnePrivacyRequest()) ? 1 : 0,
+      stripeSubscriptionsReconciled: await this.reconcileStripeSubscriptions(),
       integrityFindings: await this.sampleProjectionIntegrity(),
       cleanupItems: await this.cleanupExpiredState(),
     };
+  }
+
+  async reconcileStripeSubscriptions(): Promise<number> {
+    if (!this.stripe) return 0;
+    const now = new Date();
+    const dueBefore = new Date(
+      now.getTime() - this.environment.STRIPE_RECONCILIATION_INTERVAL_MINUTES * 60 * 1000,
+    );
+    const candidates = await this.prisma.subscription.findMany({
+      where: {
+        organization: { status: "ACTIVE" },
+        OR: [{ lastProviderSyncAt: null }, { lastProviderSyncAt: { lte: dueBefore } }],
+        AND: [
+          {
+            OR: [
+              { reconciliationLeaseExpiresAt: null },
+              { reconciliationLeaseExpiresAt: { lte: now } },
+            ],
+          },
+        ],
+      },
+      orderBy: [{ lastProviderSyncAt: "asc" }, { createdAt: "asc" }],
+      take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
+    });
+    let reconciled = 0;
+    for (const candidate of candidates) {
+      const leaseExpiresAt = new Date(Date.now() + LEASE_SECONDS * 1000);
+      const claim = await this.prisma.subscription.updateMany({
+        where: {
+          id: candidate.id,
+          OR: [
+            { reconciliationLeaseExpiresAt: null },
+            { reconciliationLeaseExpiresAt: { lte: new Date() } },
+          ],
+        },
+        data: {
+          reconciliationLeaseOwner: this.workerId,
+          reconciliationLeaseExpiresAt: leaseExpiresAt,
+          reconciliationAttemptCount: { increment: 1 },
+          reconciliationFailureCode: null,
+        },
+      });
+      if (claim.count !== 1) continue;
+      try {
+        const canonical = await this.stripe.subscriptions.retrieve(candidate.stripeSubscriptionId, {
+          expand: ["items.data.price"],
+        });
+        await this.applyStripeReconciliation(candidate.id, canonical, leaseExpiresAt);
+        reconciled += 1;
+      } catch (error) {
+        const missing =
+          (error instanceof Stripe.errors.StripeInvalidRequestError &&
+            error.code === "resource_missing") ||
+          (typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "resource_missing");
+        if (missing) {
+          await this.applyMissingStripeSubscription(candidate.id, leaseExpiresAt);
+          reconciled += 1;
+        } else {
+          const retryAt = new Date(
+            Date.now() +
+              Math.min(30, Math.max(5, candidate.reconciliationAttemptCount + 1) * 5) * 60 * 1000,
+          );
+          await this.prisma.$transaction(async (transaction) => {
+            await transaction.subscription.updateMany({
+              where: {
+                id: candidate.id,
+                reconciliationLeaseOwner: this.workerId,
+                reconciliationLeaseExpiresAt: leaseExpiresAt,
+              },
+              data: {
+                reconciliationLeaseOwner: null,
+                reconciliationLeaseExpiresAt: retryAt,
+                reconciliationFailureCode: "PROVIDER_RETRIEVAL_FAILED",
+              },
+            });
+            await transaction.auditLog.create({
+              data: {
+                organizationId: candidate.organizationId,
+                action: "stripe.scheduled_reconciliation_failed",
+                targetType: "subscription",
+                targetId: candidate.stripeSubscriptionId,
+                requestId: `stripe-reconcile:${candidate.id}`,
+                metadata: { safeFailureCode: "PROVIDER_RETRIEVAL_FAILED", retryAt },
+              },
+            });
+          });
+        }
+      }
+    }
+    return reconciled;
+  }
+
+  private async applyStripeReconciliation(
+    subscriptionId: string,
+    canonical: Stripe.Subscription,
+    leaseExpiresAt: Date,
+  ) {
+    const price = canonical.items.data[0]?.price;
+    const plan = this.planForStripePrice(price?.id);
+    const customerId =
+      typeof canonical.customer === "string" ? canonical.customer : canonical.customer.id;
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT 1::int AS locked
+        FROM pg_advisory_xact_lock(hashtextextended(${`stripe-subscription:${canonical.id}`}, 0))
+      `;
+      const local = await transaction.subscription.findFirstOrThrow({
+        where: {
+          id: subscriptionId,
+          reconciliationLeaseOwner: this.workerId,
+          reconciliationLeaseExpiresAt: leaseExpiresAt,
+        },
+      });
+      const profile = await transaction.organizationBillingProfile.findUniqueOrThrow({
+        where: { organizationId: local.organizationId },
+      });
+      if (
+        canonical.id !== local.stripeSubscriptionId ||
+        canonical.metadata.organizationId !== local.organizationId ||
+        !profile.stripeCustomerId ||
+        profile.stripeCustomerId !== customerId
+      ) {
+        throw new Error("STRIPE_RECONCILIATION_OWNERSHIP_MISMATCH");
+      }
+      const status = dbBillingStatus(stripeStatus(canonical.status));
+      await transaction.subscription.update({
+        where: { id: local.id },
+        data: {
+          stripePriceId: price?.id ?? local.stripePriceId,
+          planCode: dbPlanCode(plan),
+          status,
+          currentPeriodStart: canonical.items.data[0]?.current_period_start
+            ? new Date(canonical.items.data[0].current_period_start * 1000)
+            : null,
+          currentPeriodEnd: canonical.items.data[0]?.current_period_end
+            ? new Date(canonical.items.data[0].current_period_end * 1000)
+            : null,
+          cancelAtPeriodEnd: canonical.cancel_at_period_end,
+          canceledAt: canonical.canceled_at ? new Date(canonical.canceled_at * 1000) : null,
+          lastProviderSyncAt: new Date(),
+          reconciliationLeaseOwner: null,
+          reconciliationLeaseExpiresAt: null,
+          reconciliationFailureCode: null,
+        },
+      });
+      await transaction.organizationBillingProfile.update({
+        where: { organizationId: local.organizationId },
+        data: { subscriptionStatus: status, selectedPlan: dbPlanCode(plan) },
+      });
+      await transaction.organization.update({
+        where: { id: local.organizationId },
+        data: { selectedPlan: dbPlanCode(plan) },
+      });
+      await transaction.auditLog.create({
+        data: {
+          organizationId: local.organizationId,
+          action: "stripe.scheduled_reconciled",
+          targetType: "subscription",
+          targetId: canonical.id,
+          requestId: `stripe-reconcile:${local.id}`,
+          metadata: { canonicalProviderState: true },
+        },
+      });
+    });
+  }
+
+  private async applyMissingStripeSubscription(subscriptionId: string, leaseExpiresAt: Date) {
+    await this.prisma.$transaction(async (transaction) => {
+      const local = await transaction.subscription.findFirstOrThrow({
+        where: {
+          id: subscriptionId,
+          reconciliationLeaseOwner: this.workerId,
+          reconciliationLeaseExpiresAt: leaseExpiresAt,
+        },
+      });
+      await transaction.subscription.update({
+        where: { id: local.id },
+        data: {
+          status: "CANCELED",
+          canceledAt: new Date(),
+          lastProviderSyncAt: new Date(),
+          reconciliationLeaseOwner: null,
+          reconciliationLeaseExpiresAt: null,
+          reconciliationFailureCode: null,
+        },
+      });
+      await transaction.organizationBillingProfile.update({
+        where: { organizationId: local.organizationId },
+        data: { subscriptionStatus: "CANCELED" },
+      });
+      await transaction.auditLog.create({
+        data: {
+          organizationId: local.organizationId,
+          action: "stripe.scheduled_reconciliation_missing_subscription",
+          targetType: "subscription",
+          targetId: local.stripeSubscriptionId,
+          requestId: `stripe-reconcile:${local.id}`,
+        },
+      });
+    });
+  }
+
+  private planForStripePrice(priceId: string | undefined): PlanCode {
+    if (priceId === this.environment.STRIPE_STARTER_MONTHLY_PRICE_ID) return "starter";
+    if (priceId === this.environment.STRIPE_GROWTH_MONTHLY_PRICE_ID) return "growth";
+    if (priceId === this.environment.STRIPE_SCALE_MONTHLY_PRICE_ID) return "scale";
+    throw new Error("STRIPE_PRICE_UNKNOWN");
+  }
+
+  private async recordHeartbeat(success: boolean, safeFailureCode?: string) {
+    const now = new Date();
+    const [backlogCount, oldest] = await Promise.all([
+      this.prisma.customerPrivacyRequest.count({
+        where: { status: { in: ["PENDING", "FAILED"] } },
+      }),
+      this.prisma.customerPrivacyRequest.findFirst({
+        where: { status: { in: ["PENDING", "FAILED"] } },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
+      }),
+    ]);
+    await this.prisma.workerHeartbeat.updateMany({
+      where: { workerCode: "OPERATIONAL_WORKER", instanceId: this.workerId },
+      data: {
+        lastLoopAt: now,
+        ...(success
+          ? { lastSuccessAt: now, safeFailureCode: null }
+          : { lastFailureAt: now, safeFailureCode: safeFailureCode ?? "LOOP_FAILED" }),
+        backlogCount,
+        oldestBacklogAt: oldest?.createdAt ?? null,
+      },
+    });
   }
 
   async expireRewards() {
@@ -244,7 +542,7 @@ export class OperationalWorker {
       if (claimed.count !== 1) continue;
       try {
         expired += await this.executeRewardExpiry(command.id);
-      } catch (error) {
+      } catch {
         const attempts = command.attemptCount + 1;
         const deadLetter = attempts >= 5;
         await this.prisma.$transaction(async (transaction) => {
@@ -271,7 +569,7 @@ export class OperationalWorker {
         });
         log("reward_expiry_failed", {
           commandPublicId: command.publicId,
-          diagnostic: error instanceof Error ? error.message.slice(0, 160) : "unknown",
+          safeFailureCode: "REWARD_EXPIRY_FAILED",
         });
       }
     }
@@ -529,7 +827,7 @@ export class OperationalWorker {
         },
       });
       return contributions.length;
-    } catch (error) {
+    } catch {
       const attemptCount = checkpoint.attemptCount + 1;
       await this.prisma.operationalAnalyticsCheckpoint.update({
         where: { id: checkpoint.id },
@@ -543,7 +841,7 @@ export class OperationalWorker {
       });
       log("analytics_increment_failed", {
         sourceKind,
-        diagnostic: error instanceof Error ? error.message.slice(0, 160) : "unknown",
+        safeFailureCode: "ANALYTICS_INCREMENT_FAILED",
       });
       return 0;
     }
@@ -909,7 +1207,7 @@ export class OperationalWorker {
           },
         });
       });
-    } catch (error) {
+    } catch {
       const attemptCount = candidate.attemptCount + 1;
       const deadLetter = attemptCount >= 5;
       await this.prisma.$transaction(async (transaction) => {
@@ -935,7 +1233,7 @@ export class OperationalWorker {
       });
       log("analytics_rebuild_failed", {
         jobPublicId: candidate.publicId,
-        diagnostic: error instanceof Error ? error.message.slice(0, 160) : "unknown",
+        safeFailureCode: "ANALYTICS_REBUILD_FAILED",
       });
     }
     return true;
@@ -1214,7 +1512,7 @@ export class OperationalWorker {
           error instanceof Error && error.message === "EXPORT_ROW_LIMIT_EXCEEDED"
             ? error.message
             : "EXPORT_BUILD_FAILED",
-        diagnostic: error instanceof Error ? error.message.slice(0, 240) : "unknown",
+        safeFailureCode: "EXPORT_BUILD_FAILED",
       });
       const safeFailureCode =
         error instanceof Error && error.message === "EXPORT_ROW_LIMIT_EXCEEDED"
@@ -1510,7 +1808,7 @@ export class OperationalWorker {
       } else {
         await this.eraseCustomer(candidate);
       }
-    } catch (error) {
+    } catch {
       const attemptCount = candidate.attemptCount + 1;
       const deadLetter = attemptCount >= 5;
       await this.prisma.$transaction(async (transaction) => {
@@ -1537,7 +1835,7 @@ export class OperationalWorker {
       });
       log("privacy_processing_failed", {
         requestPublicId: candidate.publicId,
-        diagnostic: error instanceof Error ? error.message.slice(0, 160) : "unknown",
+        safeFailureCode: "PRIVACY_PROCESSING_FAILED",
       });
     }
     return true;
@@ -1761,6 +2059,8 @@ export class OperationalWorker {
           leaseOwner: null,
           leaseExpiresAt: null,
           completedAt: now,
+          outcomeDisposition: "ANONYMIZED",
+          retentionNoticeCode: "FINANCIAL_AND_AUDIT_HISTORY_RETAINED",
         },
       });
       await transaction.auditLog.create({
@@ -2080,25 +2380,122 @@ export class OperationalWorker {
 
   async cleanupExpiredState() {
     const now = new Date();
-    const [pairings, approvals, nonces, exports, privacyExports] = await this.prisma.$transaction([
-      this.prisma.devicePairingSession.updateMany({
-        where: { status: { in: ["PENDING", "CLAIMED"] }, expiresAt: { lte: now } },
+    const batch = this.environment.CLEANUP_BATCH_SIZE;
+    const retentionCutoff = new Date(
+      now.getTime() - this.environment.SECURITY_TOKEN_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const pairings = await this.prisma.devicePairingSession.findMany({
+      where: { status: { in: ["PENDING", "CLAIMED"] }, expiresAt: { lte: now } },
+      select: { id: true },
+      take: batch,
+    });
+    const approvals = await this.prisma.managerApprovalChallenge.findMany({
+      where: { status: { in: ["PENDING", "APPROVED"] }, expiresAt: { lte: now } },
+      select: { id: true },
+      take: batch,
+    });
+    const nonces = await this.prisma.deviceRequestNonce.findMany({
+      where: { expiresAt: { lte: now } },
+      select: { staffDeviceId: true, nonce: true },
+      take: batch,
+    });
+    const invitations = await this.prisma.organizationInvitation.findMany({
+      where: { status: "PENDING", expiresAt: { lte: now } },
+      select: { id: true },
+      take: batch,
+    });
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        OR: [{ expiresAt: { lte: retentionCutoff } }, { revokedAt: { lte: retentionCutoff } }],
+      },
+      select: { id: true },
+      take: batch,
+    });
+    const verificationTokens = await this.prisma.emailVerificationToken.findMany({
+      where: {
+        OR: [{ expiresAt: { lte: retentionCutoff } }, { consumedAt: { lte: retentionCutoff } }],
+      },
+      select: { id: true },
+      take: batch,
+    });
+    const resetTokens = await this.prisma.passwordResetToken.findMany({
+      where: {
+        OR: [{ expiresAt: { lte: retentionCutoff } }, { consumedAt: { lte: retentionCutoff } }],
+      },
+      select: { id: true },
+      take: batch,
+    });
+    const oauthFlows = await this.prisma.oAuthAuthorizationRequest.findMany({
+      where: {
+        OR: [{ expiresAt: { lte: retentionCutoff } }, { consumedAt: { lte: retentionCutoff } }],
+      },
+      select: { id: true },
+      take: batch,
+    });
+    const exports = await this.prisma.exportCommand.findMany({
+      where: { status: "COMPLETED", expiresAt: { lte: now } },
+      select: { id: true, objectKey: true },
+      take: batch,
+    });
+    const privacyExports = await this.prisma.customerPrivacyRequest.findMany({
+      where: { requestType: "EXPORT", status: "COMPLETED", expiresAt: { lte: now } },
+      select: { id: true, objectKey: true },
+      take: batch,
+    });
+    const mutationCounts = await this.prisma.$transaction(async (transaction) => {
+      const pairingResult = await transaction.devicePairingSession.updateMany({
+        where: {
+          id: { in: pairings.map((item) => item.id) },
+          status: { in: ["PENDING", "CLAIMED"] },
+          expiresAt: { lte: now },
+        },
         data: { status: "EXPIRED" },
-      }),
-      this.prisma.managerApprovalChallenge.updateMany({
-        where: { status: { in: ["PENDING", "APPROVED"] }, expiresAt: { lte: now } },
+      });
+      const approvalResult = await transaction.managerApprovalChallenge.updateMany({
+        where: {
+          id: { in: approvals.map((item) => item.id) },
+          status: { in: ["PENDING", "APPROVED"] },
+          expiresAt: { lte: now },
+        },
         data: { status: "EXPIRED" },
-      }),
-      this.prisma.deviceRequestNonce.deleteMany({ where: { expiresAt: { lte: now } } }),
-      this.prisma.exportCommand.findMany({
-        where: { status: "COMPLETED", expiresAt: { lte: now } },
-        select: { id: true, objectKey: true },
-      }),
-      this.prisma.customerPrivacyRequest.findMany({
-        where: { requestType: "EXPORT", status: "COMPLETED", expiresAt: { lte: now } },
-        select: { id: true, objectKey: true },
-      }),
-    ]);
+      });
+      const nonceResult = await transaction.deviceRequestNonce.deleteMany({
+        where: {
+          OR: nonces.map((item) => ({ staffDeviceId: item.staffDeviceId, nonce: item.nonce })),
+        },
+      });
+      const invitationResult = await transaction.organizationInvitation.updateMany({
+        where: {
+          id: { in: invitations.map((item) => item.id) },
+          status: "PENDING",
+          expiresAt: { lte: now },
+        },
+        data: { status: "EXPIRED" },
+      });
+      const sessionResult = await transaction.session.deleteMany({
+        where: { id: { in: sessions.map((item) => item.id) } },
+      });
+      const verificationResult = await transaction.emailVerificationToken.deleteMany({
+        where: { id: { in: verificationTokens.map((item) => item.id) } },
+      });
+      const resetResult = await transaction.passwordResetToken.deleteMany({
+        where: { id: { in: resetTokens.map((item) => item.id) } },
+      });
+      const oauthResult = await transaction.oAuthAuthorizationRequest.deleteMany({
+        where: { id: { in: oauthFlows.map((item) => item.id) } },
+      });
+      return (
+        pairingResult.count +
+        approvalResult.count +
+        nonceResult.count +
+        invitationResult.count +
+        sessionResult.count +
+        verificationResult.count +
+        resetResult.count +
+        oauthResult.count
+      );
+    });
+    let cleanedObjects = 0;
     for (const item of [...exports, ...privacyExports]) {
       let deleted = !item.objectKey;
       if (item.objectKey) {
@@ -2114,7 +2511,13 @@ export class OperationalWorker {
       }
       // Keep the authoritative reference when storage deletion fails so a later
       // worker pass can retry instead of silently orphaning encrypted data.
-      if (!deleted) continue;
+      if (!deleted) {
+        log("cleanup_object_delete_failed", {
+          targetId: item.id,
+          safeFailureCode: "OBJECT_DELETE_FAILED",
+        });
+        continue;
+      }
       if (exports.some((exportItem) => exportItem.id === item.id)) {
         await this.prisma.exportCommand.update({
           where: { id: item.id },
@@ -2126,8 +2529,9 @@ export class OperationalWorker {
           data: { status: "EXPIRED", objectKey: null },
         });
       }
+      cleanedObjects += 1;
     }
-    return pairings.count + approvals.count + nonces.count + exports.length + privacyExports.length;
+    return mutationCounts + cleanedObjects;
   }
 }
 
@@ -2150,10 +2554,8 @@ async function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  void main().catch((error: unknown) => {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : "Operational worker failed."}\n`,
-    );
+  void main().catch(() => {
+    process.stderr.write("Operational worker failed.\n");
     process.exitCode = 1;
   });
 }

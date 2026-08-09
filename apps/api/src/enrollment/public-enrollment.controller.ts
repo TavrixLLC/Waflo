@@ -59,7 +59,7 @@ export class PublicEnrollmentController {
     reply.setCookie(this.environment.values.CUSTOMER_COOKIE_NAME, result.sessionToken, {
       httpOnly: true,
       secure: this.environment.values.COOKIE_SECURE,
-      sameSite: "lax",
+      sameSite: this.environment.values.COOKIE_SAME_SITE === "NONE" ? "none" : "lax",
       path: "/",
       maxAge: this.environment.values.CUSTOMER_SESSION_TTL_DAYS * 24 * 60 * 60,
     });

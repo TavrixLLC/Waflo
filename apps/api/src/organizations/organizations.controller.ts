@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { organizationSchema, organizationUpdateSchema, slugChangeSchema } from "@waflo/contracts";
-import { CurrentUser, RateLimit } from "../common/decorators.js";
+import { CurrentSession, CurrentUser, RateLimit } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { parseInput, parseUuid } from "../common/validation.js";
 import { OrganizationsService } from "./organizations.service.js";
@@ -84,5 +84,26 @@ export class OrganizationsController {
     @Req() request: WafloRequest,
   ) {
     return this.organizations.completeOnboarding(user.id, parseUuid(organizationId), request);
+  }
+
+  @Post(":organizationId/close")
+  close(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentSession() sessionId: string,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    return this.organizations.close(
+      user.id,
+      parseUuid(organizationId),
+      {
+        confirmation: typeof input.confirmation === "string" ? input.confirmation : "",
+        currentPassword: typeof input.currentPassword === "string" ? input.currentPassword : "",
+        sessionId,
+      },
+      request,
+    );
   }
 }

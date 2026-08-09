@@ -41,16 +41,28 @@ class SmtpNotificationProvider implements NotificationProvider {
       connectionTimeout: 5_000,
       greetingTimeout: 5_000,
       socketTimeout: 10_000,
+      ...(environment.values.SMTP_USER && environment.values.SMTP_PASSWORD
+        ? {
+            auth: {
+              user: environment.values.SMTP_USER,
+              pass: environment.values.SMTP_PASSWORD,
+            },
+          }
+        : {}),
     });
   }
 
   async send(message: { to: string; subject: string; html: string }): Promise<void> {
     await this.transporter.sendMail({
-      from: this.environment.values.EMAIL_FROM,
+      from: this.environment.values.SMTP_FROM || this.environment.values.EMAIL_FROM,
       to: message.to,
       subject: message.subject,
       html: message.html,
     });
+  }
+
+  async verify(): Promise<void> {
+    await this.transporter.verify();
   }
 }
 
@@ -170,7 +182,7 @@ export class NotificationService {
   private readonly provider: NotificationProvider;
   private readonly allowedActionOrigins: readonly string[];
 
-  constructor(environment: EnvironmentService) {
+  constructor(private readonly environment: EnvironmentService) {
     this.provider = new SmtpNotificationProvider(environment);
     const customer = new URL(environment.values.CUSTOMER_WEB_URL);
     this.allowedActionOrigins = [
@@ -181,10 +193,31 @@ export class NotificationService {
   }
 
   async send(message: NotificationMessage): Promise<void> {
-    await this.provider.send({
+    const rendered = {
       to: message.to,
       subject: subjects[message.locale][message.kind],
       html: renderNotificationHtml(message, this.allowedActionOrigins),
-    });
+    };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await this.provider.send(rendered);
+        return;
+      } catch {
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+      }
+    }
+    throw new Error("Notification delivery failed.");
+  }
+
+  configurationStatus() {
+    return this.environment.values.SMTP_HOST &&
+      (this.environment.values.DEPLOYMENT_ENVIRONMENT === "development" ||
+        (this.environment.values.SMTP_USER && this.environment.values.SMTP_PASSWORD))
+      ? "READY"
+      : "NOT_CONFIGURED";
+  }
+
+  async verifyProvider(): Promise<void> {
+    if (this.provider instanceof SmtpNotificationProvider) await this.provider.verify();
   }
 }
