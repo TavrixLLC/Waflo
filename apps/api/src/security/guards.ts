@@ -438,10 +438,17 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       if (code === "STAFF_APP_VERSION_UNSUPPORTED") {
         throw new AppError(code, "This Staff mobile app version is no longer supported.", 426);
       }
+      const deviceLifecycleCodes = new Set([
+        "STAFF_DEVICE_COMPROMISED",
+        "STAFF_DEVICE_REVOKED",
+        "STAFF_DEVICE_MEMBER_INACTIVE",
+        "STAFF_DEVICE_SESSION_EXPIRED",
+        "STAFF_DEVICE_NOT_ACTIVE",
+      ]);
       const ruleCode =
         code === "STAFF_DEVICE_CLOCK_SKEW"
           ? "CLOCK_SKEW"
-          : code === "STAFF_DEVICE_NOT_ACTIVE"
+          : deviceLifecycleCodes.has(code)
             ? "DEVICE_NOT_ACTIVE"
             : "SIGNATURE_FAILURE";
       await this.persistDeviceRisk(

@@ -511,16 +511,65 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     expect(responseCode(response)).toBe("STAFF_APP_VERSION_UNSUPPORTED");
   });
 
-  it("enforces immediate device revocation", async () => {
+  it("returns distinct safe codes for revoked, compromised, and expired devices", async () => {
+    const staff = await prisma.client.organizationMember.findFirstOrThrow({
+      where: { organizationId: ORGANIZATION_ID, userId: STAFF_USER_ID },
+    });
+    await prisma.client.devicePairingSession.updateMany({
+      where: {
+        intendedStaffMemberId: staff.id,
+        status: { in: ["PENDING", "CLAIMED"] },
+      },
+      data: { status: "CANCELED" },
+    });
+    const compromisedClient = await pairDevice({
+      organizationId: ORGANIZATION_ID,
+      organizationMemberId: staff.id,
+      locationId: LOCATION_ID,
+      label: "m2-compromised-http-client",
+    });
+    const expiredClient = await pairDevice({
+      organizationId: ORGANIZATION_ID,
+      organizationMemberId: staff.id,
+      locationId: LOCATION_ID,
+      label: "m2-expired-http-client",
+    });
+
     await prisma.client.staffDevice.update({
       where: { publicId: client.devicePublicId },
       data: { status: "REVOKED", revokedAt: new Date(), revocationReason: "HTTP boundary test" },
     });
-    const denied = await signedStaffInject(app, client, {
+    const revoked = await signedStaffInject(app, client, {
       method: "GET",
       url: "/v1/staff/device-context",
     });
-    expect(denied.statusCode).toBe(401);
-    expect(responseCode(denied)).toBe("STAFF_DEVICE_NOT_ACTIVE");
+    expect(revoked.statusCode).toBe(401);
+    expect(responseCode(revoked)).toBe("STAFF_DEVICE_REVOKED");
+
+    await prisma.client.staffDevice.update({
+      where: { publicId: compromisedClient.devicePublicId },
+      data: {
+        status: "COMPROMISED",
+        revokedAt: new Date(),
+        revocationReason: "HTTP boundary test",
+      },
+    });
+    const compromised = await signedStaffInject(app, compromisedClient, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(compromised.statusCode).toBe(401);
+    expect(responseCode(compromised)).toBe("STAFF_DEVICE_COMPROMISED");
+
+    await prisma.client.staffDeviceSession.update({
+      where: { id: expiredClient.deviceSessionId },
+      data: { expiresAt: new Date(Date.now() - 1_000) },
+    });
+    const expired = await signedStaffInject(app, expiredClient, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(expired.statusCode).toBe(401);
+    expect(responseCode(expired)).toBe("STAFF_DEVICE_SESSION_EXPIRED");
   });
 });

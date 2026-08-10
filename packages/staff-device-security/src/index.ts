@@ -17,6 +17,10 @@ export class StaffDeviceSecurityError extends Error {
     | "STAFF_DEVICE_CLOCK_SKEW"
     | "STAFF_DEVICE_NONCE_REPLAYED"
     | "STAFF_DEVICE_NOT_ACTIVE"
+    | "STAFF_DEVICE_COMPROMISED"
+    | "STAFF_DEVICE_REVOKED"
+    | "STAFF_DEVICE_MEMBER_INACTIVE"
+    | "STAFF_DEVICE_SESSION_EXPIRED"
     | "STAFF_DEVICE_BODY_DIGEST_INVALID"
     | "STAFF_APP_VERSION_UNSUPPORTED";
 
@@ -27,6 +31,10 @@ export class StaffDeviceSecurityError extends Error {
       | "STAFF_DEVICE_CLOCK_SKEW"
       | "STAFF_DEVICE_NONCE_REPLAYED"
       | "STAFF_DEVICE_NOT_ACTIVE"
+      | "STAFF_DEVICE_COMPROMISED"
+      | "STAFF_DEVICE_REVOKED"
+      | "STAFF_DEVICE_MEMBER_INACTIVE"
+      | "STAFF_DEVICE_SESSION_EXPIRED"
       | "STAFF_DEVICE_BODY_DIGEST_INVALID"
       | "STAFF_APP_VERSION_UNSUPPORTED",
     message: string,
@@ -372,15 +380,28 @@ export function assertDeviceOperational(input: {
   readonly memberStatus: string;
   readonly now: Date;
 }): void {
-  if (
-    input.deviceStatus !== "ACTIVE" ||
-    input.sessionRevokedAt !== null ||
-    input.sessionExpiresAt.getTime() <= input.now.getTime() ||
-    input.memberStatus !== "ACTIVE"
-  ) {
+  if (input.deviceStatus === "COMPROMISED") {
+    throw new StaffDeviceSecurityError("STAFF_DEVICE_COMPROMISED", "Staff device is compromised.");
+  }
+  if (input.deviceStatus === "REVOKED") {
+    throw new StaffDeviceSecurityError("STAFF_DEVICE_REVOKED", "Staff device is revoked.");
+  }
+  if (input.deviceStatus !== "ACTIVE" || input.sessionRevokedAt !== null) {
     throw new StaffDeviceSecurityError(
       "STAFF_DEVICE_NOT_ACTIVE",
       "Staff device session is not active.",
+    );
+  }
+  if (input.sessionExpiresAt.getTime() <= input.now.getTime()) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_DEVICE_SESSION_EXPIRED",
+      "Staff device session has expired.",
+    );
+  }
+  if (input.memberStatus !== "ACTIVE") {
+    throw new StaffDeviceSecurityError(
+      "STAFF_DEVICE_MEMBER_INACTIVE",
+      "Staff member is not active.",
     );
   }
 }
