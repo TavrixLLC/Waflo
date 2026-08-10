@@ -4,9 +4,11 @@ import { expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/loyalty-studio-p4b-repair-round-1");
+const evidenceDirectory = path.resolve(
+  "test-results/evidence/uiux/loyalty-studio-p4b-repair-round-1",
+);
 const finalPreviewEvidenceDirectory = path.resolve(
-  "artifacts/uiux/loyalty-studio-p4b-final-micro-repair",
+  "test-results/evidence/uiux/loyalty-studio-p4b-final-micro-repair",
 );
 
 async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {

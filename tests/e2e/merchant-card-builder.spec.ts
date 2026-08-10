@@ -574,7 +574,7 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
 
 test("captures the P3 builder journey and old-wizard comparison evidence", async ({ page }) => {
   test.setTimeout(300_000);
-  const evidenceDirectory = "artifacts/uiux/create-card-p3";
+  const evidenceDirectory = "test-results/evidence/uiux/create-card-p3";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { patchDelayMs: 1_200 });
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -822,7 +822,7 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
 
 test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   test.setTimeout(240_000);
-  const evidenceDirectory = "artifacts/uiux/create-card-p3-repair-round1";
+  const evidenceDirectory = "test-results/evidence/uiux/create-card-p3-repair-round1";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { patchDelayMs: 350 });
   await page.setViewportSize({ width: 1440, height: 1000 });

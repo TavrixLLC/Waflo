@@ -8,8 +8,8 @@ import {
   test,
 } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-w3-round-2/screenshots";
-const evidence = "artifacts/handoff-w3-round-2/evidence";
+const screenshots = "test-results/evidence/handoff-w3-round-2/screenshots";
+const evidence = "test-results/evidence/handoff-w3-round-2/evidence";
 const runId = randomUUID().slice(0, 8);
 const programName = `W3 Browser Circle ${runId}`;
 const programSlug = `w3-browser-${runId}`;

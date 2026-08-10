@@ -50,6 +50,7 @@ function render(environment) {
       "NODE_ENV=production",
       `DEPLOYMENT_ENVIRONMENT=${environment}`,
       "SUPPORT_EMAIL=support@example.invalid",
+      `LEGAL_EFFECTIVE_DATE=${staging ? "" : "2026-08-10"}`,
       "GOOGLE_WALLET_MODE=REAL",
       "GOOGLE_WALLET_ISSUER_ID=1234567890123456789",
       "GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64=/run/waflo-provider-secrets/google-wallet-service-account.json",
@@ -107,7 +108,6 @@ function render(environment) {
     NEXT_PUBLIC_API_URL: staging ? "https://api.staging.waflo.app" : "https://api.waflo.app",
     NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app.staging.waflo.app" : "https://app.waflo.app",
     NEXT_PUBLIC_MARKETING_URL: "https://waflo.app",
-    NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE: "2026-08-10",
   };
   const result = spawnSync(
     "docker",

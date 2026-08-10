@@ -178,10 +178,22 @@ describe("public launch surfaces", () => {
     expect(configuredLegalEffectiveDate("en", "REPLACE_AFTER_LEGAL_REVIEW")).toBe(
       "To be confirmed after legal review",
     );
+    expect(configuredLegalEffectiveDate("en", "LEGAL_REVIEW_REQUIRED")).toBe(
+      "To be confirmed after legal review",
+    );
     expect(configuredLegalEffectiveDate("ar", "REPLACE_AFTER_LEGAL_REVIEW")).toBe(
       "يُحدد بعد المراجعة القانونية",
     );
     expect(configuredLegalEffectiveDate("en", "2026-09-01")).toBe("2026-09-01");
+
+    const originalRuntimeDate = process.env.LEGAL_EFFECTIVE_DATE;
+    try {
+      process.env.LEGAL_EFFECTIVE_DATE = "2026-09-02";
+      expect(configuredLegalEffectiveDate("en")).toBe("2026-09-02");
+    } finally {
+      if (originalRuntimeDate === undefined) delete process.env.LEGAL_EFFECTIVE_DATE;
+      else process.env.LEGAL_EFFECTIVE_DATE = originalRuntimeDate;
+    }
   });
 
   it("ships valid icon and social-image references without recreating artifacts", () => {

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-w2-round-5/screenshots";
+const screenshots = "test-results/evidence/handoff-w2-round-5/screenshots";
 const runId = randomUUID().slice(0, 8);
 const ownerEmail = `browser-owner-${runId}@waflo.local`;
 const staffEmail = `browser-staff-${runId}@waflo.local`;

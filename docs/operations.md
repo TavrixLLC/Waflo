@@ -32,11 +32,10 @@ Copy `.env.example` to `.env`. Validation happens at API startup. Empty Stripe/S
 | `SENTRY_DSN` | Optional | Future error-monitoring adapter |
 | `LOG_LEVEL` | Yes | Structured API log level |
 | `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION` | Yes | Accepted legal document versions |
-| `LEGAL_EFFECTIVE_DATE` | Yes | Displayed legal effective-date text |
+| `LEGAL_EFFECTIVE_DATE` | Production deploy | Runtime legal effective date; staging may remain empty pending review, production requires approved `YYYY-MM-DD` |
 | `NEXT_PUBLIC_API_URL` | Web build optional | Browser-visible API URL; defaults to local API |
 | `NEXT_PUBLIC_DASHBOARD_URL` | Web build optional | Marketing-to-dashboard links; defaults to the local dashboard |
 | `NEXT_PUBLIC_MARKETING_URL` | Web build optional | Canonical marketing metadata/auth back-link origin |
-| `NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE` | Web build optional | Build-time legal effective-date display override |
 
 Never commit `.env`. Store production values in the deployment platform's encrypted secret/config service.
 

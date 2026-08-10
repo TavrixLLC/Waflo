@@ -158,10 +158,15 @@ export function configuredSupportEmail(value = process.env.SUPPORT_EMAIL): strin
 
 export function configuredLegalEffectiveDate(
   locale: Locale,
-  value = process.env.NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE,
+  value = process.env.LEGAL_EFFECTIVE_DATE,
 ): string {
   const candidate = value?.trim() ?? "";
-  if (!candidate || candidate.startsWith("REPLACE_")) {
+  if (
+    !candidate ||
+    candidate === "LEGAL_REVIEW_REQUIRED" ||
+    candidate === "To be confirmed after legal review" ||
+    candidate.startsWith("REPLACE_")
+  ) {
     return locale === "ar" ? "يُحدد بعد المراجعة القانونية" : "To be confirmed after legal review";
   }
   return candidate;

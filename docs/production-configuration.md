@@ -26,9 +26,12 @@ prints credentials.
   `CUSTOMER_WEB_URL`, `API_PUBLIC_URL`, `WALLET_PUBLIC_BASE_URL`, and the exact
   comma-separated `ALLOWED_ORIGINS`.
 - web build-time public URLs: `NEXT_PUBLIC_API_URL` for Merchant Web,
-  `NEXT_PUBLIC_DASHBOARD_URL` and `NEXT_PUBLIC_MARKETING_URL` for public links,
-  plus the counsel-approved `NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE`. These values are
-  public by design, but must still be exact and environment-specific.
+  `NEXT_PUBLIC_DASHBOARD_URL` and `NEXT_PUBLIC_MARKETING_URL` for public links.
+  These values are public by design, but must still be exact and environment-specific.
+- legal runtime config: leave `LEGAL_EFFECTIVE_DATE` empty in staging while review is pending;
+  production requires the counsel-approved `YYYY-MM-DD` value and fails before deployment
+  mutation when it is absent or invalid. Do not use a GitHub variable or image build argument for
+  legal approval state.
 - edge/session policy: `TRUSTED_PROXIES`, `COOKIE_SECURE=true`,
   `COOKIE_SAME_SITE`, `COOKIE_NAME=__Host-waflo_session`,
   `CUSTOMER_COOKIE_NAME=__Host-waflo_customer`, `SESSION_TTL_DAYS`, and

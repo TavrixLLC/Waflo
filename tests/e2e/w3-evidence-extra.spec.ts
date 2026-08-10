@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 
-const screenshotDirectory = "artifacts/handoff-w3-round-2/screenshots";
+const screenshotDirectory = "test-results/evidence/handoff-w3-round-2/screenshots";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 async function connectPrisma() {

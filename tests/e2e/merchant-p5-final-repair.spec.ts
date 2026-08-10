@@ -5,7 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/p5-final-repair");
+const evidenceDirectory = path.resolve("test-results/evidence/uiux/p5-final-repair");
 
 async function openGallery(
   page: Page,

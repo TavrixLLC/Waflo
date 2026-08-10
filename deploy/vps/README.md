@@ -12,7 +12,8 @@ The initial VPS is a single failure domain. It is not high availability: losing 
 
 Release source lives at `/opt/waflo-platform/releases/<full-git-sha>`. Environment pointers are `/opt/waflo-platform/current/staging` and `/opt/waflo-platform/current/production`; they may point at different releases. Live source is never edited and deployment never performs `git pull` over a running release.
 
-Images are environment-qualified because Next.js public variables are compiled into its browser bundles:
+Images keep the existing environment-qualified Compose tags because Next.js public variables are
+compiled into browser bundles:
 
 ```text
 <registry>/waflo-api:<git-sha>-<environment>
@@ -26,6 +27,13 @@ Images are environment-qualified because Next.js public variables are compiled i
 
 Every image also has the OCI revision label and `RELEASE_SHA`. The Dockerfile uses Node 24.14.1, pnpm 11.5.2, a frozen workspace lockfile, one cached build graph, production deploy subsets for Node services, Next standalone output, and non-root runtime users. No `.env`, Git metadata, or secret is copied into images.
 
+GitHub Actions builds API, migration, and both workers once and assigns the identical manifest both
+environment tags. Merchant, Customer, and Marketing Web receive distinct staging and production
+builds from the same SHA. Staging noindex behavior is therefore preserved without duplicating the
+environment-invariant builds. See
+[`docs/release/github-actions-deployment.md`](../../docs/release/github-actions-deployment.md) for
+the exact GHCR matrix and operator setup.
+
 ## Host layout
 
 ```text
@@ -36,6 +44,7 @@ Every image also has the OCI revision label and `RELEASE_SHA`. The Dockerfile us
   secrets/{staging,production}/{application.env,provider-files/}
   data/{staging,production}/{postgres,redis,object-storage}/
   backups/{staging,production}/{postgres,restore-drills}/
+  deploy-logs/{staging,production}/
   scripts/
 ```
 
@@ -62,15 +71,18 @@ All replicas in one environment receive exactly the same active and legacy versi
 
 ## First staging deploy
 
-1. Review and commit the release outside this task, then create a clean archive named by its full SHA.
-2. Install that immutable archive into `/opt/waflo-platform/releases/<sha>`.
+1. Review and commit the release, configure the GitHub staging environment, and push the protected
+   `release/production-v1` branch.
+2. The workflow streams only the non-secret `deploy/vps` descriptor into a new immutable
+   `/opt/waflo-platform/releases/<sha>` directory through the dedicated staging identity.
 3. Copy staging templates, populate all secrets, use Google Demo Mode, Stripe TEST mode, and the
    real Apple Pass Type ID certificate with production Wallet APNs, then apply restrictive
    permissions.
 4. Configure the remotely managed `waflo-staging` tunnel routes from [CLOUDFLARE.md](CLOUDFLARE.md).
 5. Run Compose validation and the production configuration readiness command.
-6. Build or pull the immutable images.
-7. Run `deploy.sh staging <sha>`. The script starts state, initializes the private bucket/user, migrates once, waits for application health, then advances the staging current pointer.
+6. The release job pulls the immutable GHCR images; it never builds source on the VPS.
+7. `deploy.sh staging <sha>` starts state, initializes the private bucket/user, migrates once, waits
+   for internal and public health, then advances the staging current pointer.
 8. Perform external HTTPS, OAuth, Stripe webhook, SMTP, and Wallet verification. A successful build is not external verification.
 
 ## Staging update
@@ -83,11 +95,17 @@ Repeat the staging process with production templates and completely separate cre
 
 ## Production update
 
-Prepare and validate a new immutable release, take an off-server-confirmed backup, run one forward migration through `deploy.sh`, wait for `/ready`, then perform domain/provider smoke tests. Do not run concurrent builds on this shared 11 GiB host; `build-images.sh` deliberately builds service targets sequentially.
+Prepare and validate a new immutable release, take an off-server-confirmed backup, pull the approved
+GHCR image set, run one forward migration through `deploy.sh`, wait for internal and public
+readiness, then perform domain/provider smoke tests. Production promotion reuses images already
+built from the staging-approved SHA and never builds source on the VPS.
 
 ## Rollback
 
-Run `rollback.sh <environment> <previous-sha>`. It changes application images and the current pointer only. It never invokes Prisma and never reverses schema. If the new schema is not backward-compatible, application rollback is blocked and must be handled as an incident with a forward database repair.
+Run `rollback.sh <environment> <previous-sha>`. It pulls and changes application images and the
+current pointer only after health checks. It never invokes Prisma and never reverses schema. If the
+new schema is not backward-compatible, application rollback is blocked and must be handled as an
+incident with a forward database repair.
 
 ## Provider readiness
 

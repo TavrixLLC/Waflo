@@ -1,24 +1,37 @@
-name: Waflo CI
+name: Waflo CI and Release
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - release/production-v1
+    tags:
+      - "v*"
 
 permissions:
   contents: read
 
-concurrency:
-  group: waflo-ci-${{ github.ref }}
-  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: 24.14.1
+  PNPM_VERSION: 11.5.2
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    name: Authoritative validation
+    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: waflo-validation-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     services:
       postgres:
-        image: postgres:17.6-alpine
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
         env:
           POSTGRES_DB: waflo
           POSTGRES_USER: waflo
@@ -31,7 +44,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
       redis:
-        image: redis:8.2-alpine
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
         ports:
           - 6379:6379
         options: >-
@@ -69,26 +82,49 @@ jobs:
       LEGAL_EFFECTIVE_DATE: CI only
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          version: 11.5.2
+          fetch-depth: 2
 
-      - uses: actions/setup-node@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          node-version: 24
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Install
+      - name: Restore safe Turborepo cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+
+      - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Static release safety
+        run: |
+          git diff --check
+          git show --check --format= HEAD
+          node scripts/w3-secret-scan.mjs RELEASE
+          pnpm m2:contracts:verify
+
+      - name: Production dependency audit policy
+        run: pnpm audit:production
 
       - name: Validate test environment and Prisma schema
         run: |
           pnpm env:validate:test
           pnpm db:validate
 
-      - name: Migrate and seed
+      - name: Apply all migrations and seed
         run: |
           pnpm db:migrate:deploy
           pnpm db:seed
@@ -101,34 +137,159 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit, integration, HTTP, and concurrency tests
-        run: |
-          pnpm test:unit
-          pnpm test:integration
-          pnpm test:http
-          pnpm test:concurrency
+      - name: Unit, integration, HTTP, concurrency, and failure tests
+        run: pnpm test
 
       - name: Production build
         run: pnpm build
 
+      - name: Deployment assertions
+        run: pnpm deploy:validate
+
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Browser flows
+      - id: browser
+        name: Browser flows
         run: pnpm test:e2e
 
-      - name: Accessibility
+      - id: accessibility
+        name: Accessibility
         run: pnpm test:a11y
 
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload failed browser diagnostics only
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playwright-artifacts
+          name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 3
           path: |
-            artifacts/handoff-round-3/screenshots/
-            artifacts/handoff-round-3/raw-test-output/
             playwright-report/
             test-results/
+            !test-results/evidence/**
+
+  publish_release_images:
+    name: Publish immutable GHCR images
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: waflo-release-image-publish
+      cancel-in-progress: true
+    steps:
+      - name: Check out the approved release SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Authenticate GHCR with the job token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: coordinates
+        name: Resolve lowercase GHCR namespace
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          registry="ghcr.io/${REPOSITORY_OWNER,,}"
+          echo "registry=${registry}" >>"${GITHUB_OUTPUT}"
+
+      - name: Build missing targets once and publish both environment variants
+        env:
+          IMAGE_REGISTRY: ${{ steps.coordinates.outputs.registry }}
+          RELEASE_SHA: ${{ github.sha }}
+          OCI_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          IMAGE_PLATFORM: ${{ vars.RELEASE_IMAGE_PLATFORM || 'linux/amd64' }}
+        run: deploy/vps/scripts/publish-images.sh
+
+  deploy_staging:
+    name: Deploy staging
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
+    needs: publish_release_images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: https://app.staging.waflo.app
+    concurrency:
+      group: waflo-deploy-staging
+      cancel-in-progress: false
+    steps:
+      - name: Check out the deployed release descriptor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Deploy through the dedicated SSH identity
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_SSH_HOST_KEY: ${{ secrets.VPS_SSH_HOST_KEY }}
+        run: deploy/vps/scripts/deploy-from-github.sh staging "${GITHUB_SHA}"
+
+  deploy_production:
+    name: Promote approved images to production
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: https://app.waflo.app
+    concurrency:
+      group: waflo-deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Check out the tagged release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify deliberate tag and release-branch ancestry
+        run: |
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          git fetch --no-tags origin release/production-v1
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/release/production-v1
+
+      - name: Configure Docker Buildx for manifest verification
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Authenticate GHCR read-only with the job token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: coordinates
+        name: Resolve lowercase GHCR namespace
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          registry="ghcr.io/${REPOSITORY_OWNER,,}"
+          echo "registry=${registry}" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify the exact production image set already exists
+        env:
+          IMAGE_REGISTRY: ${{ steps.coordinates.outputs.registry }}
+        run: deploy/vps/scripts/verify-release-images.sh production "${GITHUB_SHA}"
+
+      - name: Deploy through the dedicated SSH identity
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_SSH_HOST_KEY: ${{ secrets.VPS_SSH_HOST_KEY }}
+        run: deploy/vps/scripts/deploy-from-github.sh production "${GITHUB_SHA}"

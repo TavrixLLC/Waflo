@@ -25,9 +25,11 @@ Set the non-secret `SUPPORT_EMAIL` value in each deployed
 incoming merchant/customer support mail. When it is absent or still a `REPLACE_` value, Marketing
 does not render a fabricated email address and instead links existing merchants to sign in.
 
-Set `NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE` in each environment's `compose.env` only after counsel has
-approved the public Privacy Policy and Terms of Service. Both documents remain
-`LEGAL_REVIEW_REQUIRED` until that approval occurs.
+Set the runtime `LEGAL_EFFECTIVE_DATE` in each environment's `application.env` only after counsel
+has approved the public Privacy Policy and Terms of Service. Staging may leave it empty and will
+render explicit review-pending text. Production deployment requires the approved `YYYY-MM-DD`
+value and fails closed without it. Both documents remain `LEGAL_REVIEW_REQUIRED` until substantive
+approval occurs.
 
 ## Google Search Console after production deployment
 

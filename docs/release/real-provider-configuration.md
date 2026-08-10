@@ -286,37 +286,15 @@ networks. `pnpm readiness:production` is an operator-only command and now report
 Only safe mode/status/certification metadata is printed; no credential value or file content is
 included.
 
-## Future GitHub pipeline inventory
+## GitHub release pipeline boundary
 
-No workflow is created in this release-preparation round.
+The cost-controlled workflow and exact GitHub/VPS setup are documented in
+[`github-actions-deployment.md`](github-actions-deployment.md). GitHub stores only the dedicated
+environment deployment SSH identity and pinned host key. `GITHUB_TOKEN` publishes GHCR images; no
+registry PAT is stored in Actions.
 
-Repository variables needed later:
-
-- `NODE_VERSION=24.14.1`, `PNPM_VERSION=11.5.2`
-- container registry owner/names and immutable full-SHA release naming policy
-- non-secret deployment script/path conventions
-
-Repository secrets needed later:
-
-- container registry authentication if GitHub's scoped token is insufficient
-- SSH/deployment transport identity only if the future deployment design uses it
-
-Staging environment variables:
-
-- all tracked staging `compose.env` values
-- all tracked staging `application.env` NON_SECRET_CONFIG values, including issuer/identifier,
-  Wallet URLs/modes, Stripe Price/Portal IDs, and reconciliation settings
-
-Staging environment secrets:
-
-- values from staging `application.secrets.env`, including `STRIPE_SECRET_KEY`,
-  `STRIPE_WEBHOOK_SECRET`, `APPLE_PASS_CERTIFICATE_PASSWORD`, and the versioned Apple pass-auth
-  keyring
-
-Production environment variables and secrets use the same names with production domains, Google
-`PUBLISHING`, Stripe LIVE values, and completely separate credentials.
-
-Server-side files that must not be embedded in workflow YAML are each environment's
-`google-wallet-service-account.json`, `apple-wallet-pass.p12`, and `apple-wwdr.pem`. Prefer
-pre-provisioning/secret-manager delivery directly to the VPS provider directory; never print or
-base64-inline them in workflow source or logs.
+All provider/application values listed in this document remain in the existing server-side
+`compose.env`, `application.env`, and `secrets/<environment>` contracts. In particular,
+`google-wallet-service-account.json`, `apple-wallet-pass.p12`, `apple-wwdr.pem`, Stripe secrets,
+Apple pass-auth keyrings, OAuth/SMTP credentials, Cloudflare tokens, and encryption keys are never
+embedded in workflow YAML, workflow secrets, image layers, or BuildKit cache.

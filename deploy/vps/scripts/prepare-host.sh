@@ -15,6 +15,7 @@ install -d -m 0755 \
   "${PLATFORM_ROOT}/current" \
   "${PLATFORM_ROOT}/env" \
   "${PLATFORM_ROOT}/backups" \
+  "${PLATFORM_ROOT}/deploy-logs" \
   "${PLATFORM_ROOT}/scripts"
 
 for environment in staging production; do
@@ -28,6 +29,7 @@ for environment in staging production; do
     "${PLATFORM_ROOT}/data/${environment}/object-storage" \
     "${PLATFORM_ROOT}/backups/${environment}/postgres" \
     "${PLATFORM_ROOT}/backups/${environment}/restore-drills"
+  install -d -m 0700 "${PLATFORM_ROOT}/deploy-logs/${environment}"
 done
 
 printf 'Prepared %s without changing Docker, host ports, or unrelated services.\n' "${PLATFORM_ROOT}"

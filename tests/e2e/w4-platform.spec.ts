@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-w4-round-1/screenshots";
+const screenshots = "test-results/evidence/handoff-w4-round-1/screenshots";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const disposableCustomerId = randomUUID();
 const disposableMembershipId = randomUUID();

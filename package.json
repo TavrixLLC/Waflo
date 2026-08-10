@@ -19,6 +19,7 @@
     "dev:operational-worker": "pnpm --filter @waflo/operational-worker dev",
     "readiness:production": "pnpm --filter @waflo/api readiness",
     "deploy:validate": "node deploy/vps/scripts/validate-compose.mjs",
+    "audit:production": "node scripts/check-production-audit.mjs",
     "env:validate:test": "tsx -e \"import { parseEnvironment } from './packages/config/src/index.ts'; parseEnvironment(process.env); console.log('test environment valid')\"",
     "format": "biome format --write .",
     "format:check": "biome format .",

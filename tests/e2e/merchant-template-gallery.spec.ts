@@ -391,7 +391,7 @@ test("keeps visual discovery lazy, console-clean, and within practical browser b
 
 test("captures P2.1R visual evidence and differentiated contact sheets", async ({ page }) => {
   test.setTimeout(240_000);
-  const evidenceDirectory = "artifacts/uiux/template-library-p21r";
+  const evidenceDirectory = "test-results/evidence/uiux/template-library-p21r";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { businessCategory: "Cafe" });
   await page.setViewportSize({ width: 1440, height: 1000 });

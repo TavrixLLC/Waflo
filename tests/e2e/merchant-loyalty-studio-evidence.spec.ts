@@ -4,7 +4,9 @@ import { expect, type BrowserContext, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/loyalty-studio-p4a-repair-round1");
+const evidenceDirectory = path.resolve(
+  "test-results/evidence/uiux/loyalty-studio-p4a-repair-round1",
+);
 
 type StudioState =
   | "DRAFT"

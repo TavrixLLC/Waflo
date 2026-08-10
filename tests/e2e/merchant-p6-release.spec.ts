@@ -5,7 +5,7 @@ import { expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/handoff-p6-final");
+const evidenceDirectory = path.resolve("test-results/evidence/handoff-p6-final");
 const programId = "created-program-id";
 
 const visualFiles = [

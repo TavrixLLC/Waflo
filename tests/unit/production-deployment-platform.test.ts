@@ -14,6 +14,21 @@ const productionApplication = readFileSync(
   resolve(deploymentRoot, "templates/production/application.env.example"),
   "utf8",
 );
+const workflowRoot = resolve(root, ".github/workflows");
+const workflow = readFileSync(resolve(workflowRoot, "ci.yml"), "utf8");
+const bake = readFileSync(resolve(deploymentRoot, "docker-bake.hcl"), "utf8");
+const common = readFileSync(resolve(deploymentRoot, "scripts/common.sh"), "utf8");
+const deploy = readFileSync(resolve(deploymentRoot, "scripts/deploy.sh"), "utf8");
+const publishImages = readFileSync(resolve(deploymentRoot, "scripts/publish-images.sh"), "utf8");
+const rollback = readFileSync(resolve(deploymentRoot, "scripts/rollback.sh"), "utf8");
+const deployFromGitHub = readFileSync(
+  resolve(deploymentRoot, "scripts/deploy-from-github.sh"),
+  "utf8",
+);
+const releaseEntrypoint = readFileSync(
+  resolve(deploymentRoot, "scripts/release-deploy-entrypoint.sh"),
+  "utf8",
+);
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
 
@@ -89,5 +104,73 @@ describe("production deployment platform", () => {
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/redis`);
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/object-storage`);
     expect(compose).toContain(`secrets/${deploymentEnvironmentVariable}`);
+  });
+
+  it("uses one authoritative, immutable-action release workflow without duplicated test gates", () => {
+    expect(readdirSync(workflowRoot).filter((name) => /\.ya?ml$/u.test(name))).toEqual(["ci.yml"]);
+    expect(workflow).toContain("release/production-v1");
+    expect(workflow).toContain("needs: verify");
+    expect(workflow).toContain("run: pnpm test");
+    expect(workflow).not.toMatch(/run: pnpm test:(unit|integration|http|concurrency)/u);
+    expect(workflow).toContain("run: pnpm audit:production");
+    expect(workflow).toContain("run: pnpm deploy:validate");
+    expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d/u);
+    expect(workflow).not.toContain("artifacts/");
+    expect(workflow).toContain("retention-days: 3");
+  });
+
+  it("builds invariant services once and preserves distinct Web environment outputs", () => {
+    for (const target of ["migrate", "api", "operational-worker", "wallet-worker"]) {
+      const section = bake.slice(bake.indexOf(`target "${target}"`));
+      expect(section.slice(0, section.indexOf("\n}"))).toContain("-staging");
+      expect(section.slice(0, section.indexOf("\n}"))).toContain("-production");
+    }
+    expect(bake).toContain('target "merchant-staging"');
+    expect(bake).toContain('target "merchant-production"');
+    expect(bake).toContain('DEPLOYMENT_ENVIRONMENT          = "staging"');
+    expect(bake).toContain('DEPLOYMENT_ENVIRONMENT          = "production"');
+    expect(bake).toContain('"type=provenance,mode=max"');
+    expect(bake).toContain('"type=sbom"');
+    expect(bake).not.toMatch(/SECRET|PASSWORD|PRIVATE_KEY|SERVICE_ACCOUNT/u);
+  });
+
+  it("keeps legal approval runtime-scoped and fails closed before production mutation", () => {
+    expect(workflow).not.toContain("NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE");
+    expect(bake).not.toContain("LEGAL_EFFECTIVE_DATE");
+    expect(publishImages).not.toContain("LEGAL_EFFECTIVE_DATE");
+    expect(stagingApplication).toContain("LEGAL_EFFECTIVE_DATE=");
+    expect(productionApplication).toContain("LEGAL_EFFECTIVE_DATE=");
+    expect(common).toContain("assert_legal_release_state");
+    expect(common).toContain("Production requires the counsel-approved LEGAL_EFFECTIVE_DATE");
+    expect(deploy.indexOf("assert_legal_release_state")).toBeLessThan(
+      deploy.indexOf("pull_release_images"),
+    );
+    expect(rollback.indexOf("assert_legal_release_state")).toBeLessThan(
+      rollback.indexOf("compose pull"),
+    );
+  });
+
+  it("serializes deployments and promotes production without rebuilding", () => {
+    expect(workflow).toContain("group: waflo-deploy-staging");
+    expect(workflow).toContain("group: waflo-deploy-production");
+    expect(workflow.match(/cancel-in-progress: false/g)).toHaveLength(2);
+    expect(workflow).toContain("verify-release-images.sh production");
+    const productionJob = workflow.slice(workflow.indexOf("  deploy_production:"));
+    expect(productionJob).not.toContain("publish-images.sh");
+    expect(productionJob).not.toContain("pnpm test");
+  });
+
+  it("uses pinned SSH identity and advances the release only after migration and health", () => {
+    expect(deployFromGitHub).toContain("StrictHostKeyChecking=yes");
+    expect(deployFromGitHub).not.toContain("StrictHostKeyChecking=no");
+    expect(deployFromGitHub).toContain("VPS_SSH_HOST_KEY");
+    expect(releaseEntrypoint).toContain('expected_sudo_user="waflo-deploy-$' + '{environment}"');
+    expect(deploy.indexOf("pull_release_images")).toBeLessThan(
+      deploy.indexOf("compose run --rm migrate"),
+    );
+    expect(deploy.indexOf("compose run --rm migrate")).toBeLessThan(
+      deploy.indexOf("compose up -d --no-build --wait"),
+    );
+    expect(deploy.indexOf("assert_public_health")).toBeLessThan(deploy.indexOf("ln -sfn"));
   });
 });

@@ -5,7 +5,7 @@ import { expect, type BrowserContext, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/p5-end-to-end-polish");
+const evidenceDirectory = path.resolve("test-results/evidence/uiux/p5-end-to-end-polish");
 
 type StudioState =
   | "DRAFT"

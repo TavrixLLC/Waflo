@@ -8,7 +8,10 @@ import process from "node:process";
 import { parse as parseDotenv } from "dotenv";
 
 const root = path.resolve(import.meta.dirname, "..");
-const localEnvironment = parseDotenv(readFileSync(path.join(root, ".env"), "utf8"));
+const localEnvironmentPath = path.join(root, ".env");
+const localEnvironment = existsSync(localEnvironmentPath)
+  ? parseDotenv(readFileSync(localEnvironmentPath, "utf8"))
+  : {};
 for (const [key, value] of Object.entries(localEnvironment)) {
   process.env[key] ??= value;
 }
@@ -33,7 +36,7 @@ const isW4 = project.startsWith("w4");
 const usesWalletOperations = isW3 || isW4;
 const providerDisabled = project === "w3-provider-disabled";
 
-const logDirectory = path.join(root, "artifacts", "handoff-w4-round-1", "raw-test-output");
+const logDirectory = path.join(root, "test-results", "waflo-logs");
 await mkdir(logDirectory, { recursive: true });
 
 const commands = [
