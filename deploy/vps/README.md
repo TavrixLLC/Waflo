@@ -33,7 +33,7 @@ Every image also has the OCI revision label and `RELEASE_SHA`. The Dockerfile us
   releases/<git-sha>/
   current/{staging,production} -> release
   env/{staging,production}/{compose.env,application.env}
-  secrets/{staging,production}/
+  secrets/{staging,production}/{application.env,provider-files/}
   data/{staging,production}/{postgres,redis,object-storage}/
   backups/{staging,production}/{postgres,restore-drills}/
   scripts/
@@ -47,7 +47,12 @@ Before selecting the example subnets, inspect `docker network ls` and `docker ne
 
 Copy the matching tracked templates to the paths above. `compose.env` and `application.env` are non-sensitive and mode `0640` is suitable. The entire environment secret directory and every file within it must be restricted; deployment enforces mode `0600` for files.
 
-`secrets/<environment>/application.env` holds secret application values. Individual Docker secret files are described in [templates/secrets/README.md](templates/secrets/README.md). PostgreSQL, Redis, object-storage application credentials, encryption keyrings, OAuth secrets, Wallet credentials, Stripe secrets, SMTP password, Sentry DSN, and the Cloudflare token never belong in Git.
+`secrets/<environment>/application.env` holds secret application values. Individual Docker and
+provider secret files are described in [templates/secrets/README.md](templates/secrets/README.md).
+The API and Wallet worker receive the provider directory through a read-only bind mount; browser
+applications do not. PostgreSQL, Redis, object-storage application credentials, encryption
+keyrings, OAuth secrets, Wallet credentials, Stripe secrets, SMTP password, Sentry DSN, and the
+Cloudflare token never belong in Git.
 
 All replicas in one environment receive exactly the same active and legacy versioned keyrings. Rotate by adding the new version to each JSON keyring, deploying it everywhere, changing the active version only after every participant can read the new key, and retaining legacy versions until their data is re-encrypted or expired. Do not generate per-node application encryption identities.
 
@@ -59,7 +64,9 @@ All replicas in one environment receive exactly the same active and legacy versi
 
 1. Review and commit the release outside this task, then create a clean archive named by its full SHA.
 2. Install that immutable archive into `/opt/waflo-platform/releases/<sha>`.
-3. Copy staging templates, populate all secrets, use test/sandbox provider credentials, and apply restrictive permissions.
+3. Copy staging templates, populate all secrets, use Google Demo Mode, Stripe TEST mode, and the
+   real Apple Pass Type ID certificate with production Wallet APNs, then apply restrictive
+   permissions.
 4. Configure the remotely managed `waflo-staging` tunnel routes from [CLOUDFLARE.md](CLOUDFLARE.md).
 5. Run Compose validation and the production configuration readiness command.
 6. Build or pull the immutable images.

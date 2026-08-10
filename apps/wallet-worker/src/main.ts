@@ -50,6 +50,7 @@ import {
 import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
+import { classifyApplePushResponse } from "./apple-push.js";
 
 const QUEUE_KEY = "waflo:wallet:commands";
 const SIGNAL_TTL_SECONDS = 180;
@@ -998,33 +999,53 @@ export class WalletWorker {
           purpose: "apple-push-token",
           keyring: this.customerKeyring,
         });
-        const status = await new Promise<number>((resolve, reject) => {
-          const push = client.request({
-            ":method": "POST",
-            ":path": `/3/device/${encodeURIComponent(token)}`,
-            "apns-topic": this.environment.APPLE_PASS_TYPE_IDENTIFIER as string,
-            "content-type": "application/json",
-          });
-          let responseStatus = 0;
-          push.on("response", (headers) => {
-            responseStatus = Number(headers[":status"] ?? 0);
-          });
-          push.on("error", reject);
-          push.on("end", () => resolve(responseStatus));
-          push.end("{}");
-        });
-        if (status === 410 || status === 400) {
+        const response = await new Promise<{ status: number; reason?: string }>(
+          (resolve, reject) => {
+            const push = client.request({
+              ":method": "POST",
+              ":path": `/3/device/${encodeURIComponent(token)}`,
+              "apns-topic": this.environment.APPLE_PASS_TYPE_IDENTIFIER as string,
+              "apns-push-type": "background",
+              "apns-priority": "5",
+              "content-type": "application/json",
+            });
+            let responseStatus = 0;
+            const responseBody: Buffer[] = [];
+            push.on("response", (headers) => {
+              responseStatus = Number(headers[":status"] ?? 0);
+            });
+            push.on("data", (chunk: Buffer | string) => {
+              responseBody.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            });
+            push.on("error", reject);
+            push.on("end", () => {
+              let reason: string | undefined;
+              try {
+                const body = JSON.parse(Buffer.concat(responseBody).toString("utf8")) as {
+                  reason?: unknown;
+                };
+                if (typeof body.reason === "string") reason = body.reason;
+              } catch {
+                // Successful APNs responses have no body; malformed error bodies stay redacted.
+              }
+              resolve({ status: responseStatus, ...(reason ? { reason } : {}) });
+            });
+            push.end("{}");
+          },
+        );
+        const disposition = classifyApplePushResponse(response.status, response.reason);
+        if (disposition === "INVALID_TOKEN") {
           await this.prisma.applePassRegistration.update({
             where: { id: registration.id },
             data: { unregisteredAt: new Date() },
           });
           continue;
         }
-        if (status < 200 || status >= 300) {
+        if (disposition !== "SUCCESS") {
           const error = new Error("APNs rejected the Wallet update.") as Error & {
             status?: number;
           };
-          error.status = status || 503;
+          error.status = disposition === "RETRY" ? response.status || 503 : response.status || 400;
           throw error;
         }
       }

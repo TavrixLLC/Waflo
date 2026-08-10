@@ -382,24 +382,41 @@ export class GoogleWalletProvider implements WalletProvider {
     };
   }
 
+  private async upsertProviderResource(
+    resourcePath: string,
+    collectionPath: string,
+    intended: unknown,
+  ): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.request(resourcePath);
+      await this.client.request(resourcePath, { method: "PATCH", body: intended });
+    } catch (error) {
+      if (!(error instanceof WalletProviderError) || error.category !== "NOT_FOUND") throw error;
+      try {
+        await this.client.request(collectionPath, { method: "POST", body: intended });
+      } catch (createError) {
+        if (
+          !(createError instanceof WalletProviderError) ||
+          createError.category !== "ALREADY_EXISTS"
+        ) {
+          throw createError;
+        }
+        await this.client.request(resourcePath, { method: "PATCH", body: intended });
+      }
+    }
+  }
+
   async ensureProgramTemplate(input: WalletProgramInput): Promise<WalletProgramTemplateResult> {
     const issuerId = this.requireIssuer();
     const classId = googleLoyaltyClassId(issuerId, input.programVersionId);
     const intended = mapGoogleLoyaltyClass(input, classId);
     if (this.mode === "REAL" && this.client) {
-      try {
-        await this.client.request(`loyaltyClass/${encodeURIComponent(classId)}`);
-        await this.client.request(`loyaltyClass/${encodeURIComponent(classId)}`, {
-          method: "PATCH",
-          body: intended,
-        });
-      } catch (error) {
-        if (error instanceof WalletProviderError && error.category === "NOT_FOUND") {
-          await this.client.request("loyaltyClass", { method: "POST", body: intended });
-        } else {
-          throw error;
-        }
-      }
+      await this.upsertProviderResource(
+        `loyaltyClass/${encodeURIComponent(classId)}`,
+        "loyaltyClass",
+        intended,
+      );
     }
     return {
       providerTemplateId: classId,
@@ -413,19 +430,11 @@ export class GoogleWalletProvider implements WalletProvider {
     const classId = googleLoyaltyClassId(issuerId, input.programVersionId);
     const object = mapGoogleLoyaltyObject(input, input.providerIdentity, classId);
     if (this.mode === "REAL" && this.client) {
-      try {
-        await this.client.request(`loyaltyObject/${encodeURIComponent(input.providerIdentity)}`);
-        await this.client.request(`loyaltyObject/${encodeURIComponent(input.providerIdentity)}`, {
-          method: "PATCH",
-          body: object,
-        });
-      } catch (error) {
-        if (error instanceof WalletProviderError && error.category === "NOT_FOUND") {
-          await this.client.request("loyaltyObject", { method: "POST", body: object });
-        } else {
-          throw error;
-        }
-      }
+      await this.upsertProviderResource(
+        `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
+        "loyaltyObject",
+        object,
+      );
     }
     return {
       providerObjectId: input.providerIdentity,
@@ -480,10 +489,11 @@ export class GoogleWalletProvider implements WalletProvider {
       classId,
     );
     if (this.mode === "REAL" && this.client) {
-      await this.client.request(`loyaltyObject/${encodeURIComponent(input.providerIdentity)}`, {
-        method: "PATCH",
-        body: { state: "INACTIVE", textModulesData: inactive.textModulesData },
-      });
+      await this.upsertProviderResource(
+        `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
+        "loyaltyObject",
+        inactive,
+      );
     }
     return { state: "INACTIVE" };
   }

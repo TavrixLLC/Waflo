@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { classifyApplePushResponse } from "../../apps/wallet-worker/src/apple-push.js";
 import { ExternalAuthService } from "../../apps/api/src/auth/external-auth.service.js";
 import type { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { CustomerSecurityService } from "../../apps/api/src/customer/customer-security.service.js";
@@ -169,6 +170,54 @@ describe("production environment and provider boundaries", () => {
         STRIPE_PUBLISHABLE_KEY: "pk_live_forbidden",
       }),
     ).toThrow("Staging accepts Stripe test-mode keys only");
+  });
+
+  it("requires complete environment-isolated Stripe configuration", () => {
+    expect(() =>
+      parseEnvironment({
+        NODE_ENV: "production",
+        DEPLOYMENT_ENVIRONMENT: "staging",
+        STRIPE_SECRET_KEY: "sk_test_partial",
+      }),
+    ).toThrow("all three Price IDs must be complete or absent");
+    expect(() =>
+      parseEnvironment({
+        NODE_ENV: "production",
+        DEPLOYMENT_ENVIRONMENT: "production",
+        STRIPE_SECRET_KEY: "sk_test_wrong_environment",
+        STRIPE_WEBHOOK_SECRET: "whsec_test",
+        STRIPE_STARTER_MONTHLY_PRICE_ID: "price_starter",
+        STRIPE_GROWTH_MONTHLY_PRICE_ID: "price_growth",
+        STRIPE_SCALE_MONTHLY_PRICE_ID: "price_scale",
+      }),
+    ).toThrow("Production accepts Stripe live-mode keys only");
+  });
+
+  it("requires the production APNs host for real Wallet passes in staging", () => {
+    expect(() =>
+      parseEnvironment({
+        NODE_ENV: "production",
+        DEPLOYMENT_ENVIRONMENT: "staging",
+        APPLE_WALLET_MODE: "REAL",
+        APPLE_PASS_TYPE_IDENTIFIER: "pass.app.waflo",
+        APPLE_TEAM_IDENTIFIER: "TEAM123456",
+        APPLE_PASS_CERTIFICATE_PATH_OR_BASE64: "/run/waflo-provider-secrets/pass.p12",
+        APPLE_PASS_CERTIFICATE_PASSWORD: "password",
+        APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64: "/run/waflo-provider-secrets/wwdr.pem",
+        APPLE_PASS_WEB_SERVICE_URL: "https://api.staging.waflo.app/v1/apple-wallet",
+        APPLE_APNS_ENVIRONMENT: "sandbox",
+      }),
+    ).toThrow("pass updates require the production APNs endpoint");
+  });
+
+  it("cleans up only APNs responses that prove a Wallet push token is invalid", () => {
+    expect(classifyApplePushResponse(200)).toBe("SUCCESS");
+    expect(classifyApplePushResponse(410, "Unregistered")).toBe("INVALID_TOKEN");
+    expect(classifyApplePushResponse(400, "BadDeviceToken")).toBe("INVALID_TOKEN");
+    expect(classifyApplePushResponse(400, "BadTopic")).toBe("REJECTED");
+    expect(classifyApplePushResponse(403, "ExpiredProviderToken")).toBe("REJECTED");
+    expect(classifyApplePushResponse(429, "TooManyRequests")).toBe("RETRY");
+    expect(classifyApplePushResponse(503, "Shutdown")).toBe("RETRY");
   });
 
   it("rejects insecure deployed origins and arbitrary OAuth callback origins", () => {

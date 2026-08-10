@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { unzipSync } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createCustomerDataKeyring,
   decryptCustomerValue,
@@ -32,6 +32,7 @@ import {
   walletCommandIdempotencyKey,
   type WalletMembershipInput,
 } from "../../packages/wallet-core/src/index.js";
+import { WalletProviderError } from "../../packages/wallet-core/dist/index.js";
 import { parseEnvironment } from "../../packages/config/src/index.js";
 import {
   enrollmentBillingDecision,
@@ -239,6 +240,72 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       origins: ["https://merchant.waflo.app"],
       payload: { loyaltyObjects: [{ id: "issuer.object" }] },
     });
+  });
+
+  it("converges a concurrent Google object create race onto the deterministic identity", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new WalletProviderError("NOT_FOUND", "missing", { retryable: false }))
+      .mockRejectedValueOnce(
+        new WalletProviderError("ALREADY_EXISTS", "raced", { retryable: false }),
+      )
+      .mockResolvedValueOnce({ value: {} });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer-1",
+      allowedOrigins: ["https://card.example.test"],
+      testActionBaseUrl: "https://card.example.test/wallet-test/google",
+      client: { request } as never,
+    });
+
+    await expect(provider.issueMembershipPass(walletInput)).resolves.toMatchObject({
+      providerObjectId: walletInput.providerIdentity,
+      state: "ACTIVE",
+    });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "loyaltyObject",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      `loyaltyObject/${encodeURIComponent(walletInput.providerIdentity)}`,
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("creates the complete inactive Google object when invalidation finds no provider object", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new WalletProviderError("NOT_FOUND", "missing", { retryable: false }))
+      .mockResolvedValueOnce({ value: {} });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer-1",
+      allowedOrigins: ["https://card.example.test"],
+      testActionBaseUrl: "https://card.example.test/wallet-test/google",
+      client: { request } as never,
+    });
+
+    await expect(
+      provider.invalidateMembershipPass(walletInput, "MEMBERSHIP_TRANSFERRED"),
+    ).resolves.toEqual({ state: "INACTIVE" });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "loyaltyObject",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.objectContaining({
+          id: walletInput.providerIdentity,
+          state: "INACTIVE",
+          barcode: {
+            type: "QR_CODE",
+            value: walletInput.credentialPayload,
+            alternateText: "No longer valid",
+          },
+        }),
+      }),
+    );
   });
 
   it("classifies provider failures and makes command identity deterministic", () => {

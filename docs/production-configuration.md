@@ -79,22 +79,23 @@ notification fails; delivery failure is retried and audited.
 
 ## Stripe — REQUIRED_ONLY_IF_BILLING_IS_ENABLED
 
-Create separate Stripe test and live products/prices, portal configuration,
-restricted server key, publishable key, and webhook endpoint
-`https://<api-origin>/v1/billing/webhooks/stripe`. Set
-`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, the
-three `STRIPE_*_MONTHLY_PRICE_ID` values,
+Create separate Stripe TEST and LIVE Prices, portal configuration, server key,
+and webhook endpoint `https://<api-origin>/v1/webhooks/stripe`. Set
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, the three
+`STRIPE_*_MONTHLY_PRICE_ID` values,
 `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID`,
 `STRIPE_RECONCILIATION_INTERVAL_MINUTES`, and
 `STRIPE_RECONCILIATION_BATCH_SIZE`. Staging rejects live keys; production
-rejects test keys. Verify checkout, signed webhook, entitlement, and canonical
-scheduled reconciliation. Never commit keys or webhook secrets.
+rejects test keys. The current browser UI does not use a publishable key and
+Product IDs are not configuration inputs. Verify checkout, signed webhook,
+entitlement, and canonical scheduled reconciliation. Never commit keys or
+webhook secrets. See the exact environment contract and procedures in
+[`docs/release/real-provider-configuration.md`](release/real-provider-configuration.md).
 
 ## Google Wallet — REQUIRED_ONLY_IF_FEATURE_ENABLED
 
-Create separate Google Wallet issuers and service accounts for staging/demo and
-production publishing. Grant only the Wallet issuer permissions required by
-the worker. Set `GOOGLE_WALLET_MODE=REAL`, `GOOGLE_WALLET_ISSUER_ID`,
+Use the operator's Google Wallet issuer and a server-side service account with
+issuer access. Set `GOOGLE_WALLET_MODE=REAL`, `GOOGLE_WALLET_ISSUER_ID`,
 `GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64`,
 `GOOGLE_WALLET_ALLOWED_ORIGINS`, `GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL`, and
 `GOOGLE_WALLET_PUBLISHING_MODE`. Production requires `PUBLISHING`; automated
@@ -104,13 +105,15 @@ commit service-account JSON/private keys.
 
 ## Apple Wallet — REQUIRED_ONLY_IF_FEATURE_ENABLED
 
-Create a Pass Type ID, Wallet certificate/private key, Apple WWDR intermediate,
-and APNs-capable provider material for each environment. Set
+Use the operator's existing Pass Type ID, Wallet certificate/private key, Apple
+WWDR intermediate, and APNs-capable provider material. Set
 `APPLE_WALLET_MODE=REAL`, `APPLE_PASS_TYPE_IDENTIFIER`,
 `APPLE_TEAM_IDENTIFIER`, `APPLE_PASS_CERTIFICATE_PATH_OR_BASE64`,
 `APPLE_PASS_CERTIFICATE_PASSWORD`,
 `APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64`, `APPLE_PASS_WEB_SERVICE_URL`, and
-`APPLE_APNS_ENVIRONMENT`. Production requires production APNs. Verify a signed
+`APPLE_APNS_ENVIRONMENT`, `APPLE_PASS_AUTH_SECRETS_JSON`, and
+`APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION`. Real Wallet pass updates require the
+production APNs host in staging and production. Verify a signed
 `.pkpass`, device registration, progress update, and invalidation on a physical
 iPhone. Never commit certificates containing private material, private keys,
 passwords, or pass authentication secrets.

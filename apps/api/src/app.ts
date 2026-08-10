@@ -144,6 +144,7 @@ export async function createApiApplication(
     reply.header("x-request-id", request.id);
     reply.header("cache-control", "no-store");
     reply.header("referrer-policy", "no-referrer");
+    reply.header("x-robots-tag", "noindex, nofollow, noarchive");
     done();
   });
 

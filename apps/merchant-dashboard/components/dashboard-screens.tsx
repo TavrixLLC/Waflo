@@ -21,8 +21,8 @@ import {
   TextInput,
   UsageMeter,
 } from "@waflo/ui";
-import { BarChart3, CalendarClock, Copy, Gift, MapPin, Plus, Users } from "lucide-react";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { CalendarClock, Copy, Gift, MapPin, Plus } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiClientError, resetCsrf } from "../lib/api-client";
 import type { DashboardSection, MembershipView } from "./dashboard";
 
@@ -187,12 +187,15 @@ export function OverviewScreen({
           <h2>{ar ? "الخطوة التالية" : "Next step"}</h2>
           <p style={{ color: "var(--waflo-muted)", lineHeight: 1.65 }}>
             {ar
-              ? "راجع مواقعك وفريقك الآن. إنشاء بطاقات الولاء يصل في W2."
-              : "Review locations and team now. Loyalty-card creation arrives in W2."}
+              ? "أنشئ بطاقة ولاء أو تابع إدارة بطاقاتك المنشورة."
+              : "Create a loyalty card or continue managing your published cards."}
           </p>
-          <Button disabled>
-            {ar ? "إنشاء بطاقة ولاء — قريباً" : "Create loyalty card — coming soon"}
-          </Button>
+          <a
+            className="wf-button wf-button--primary dashboard-action-link"
+            href={`/${locale}/dashboard/programs`}
+          >
+            {ar ? "إدارة بطاقات الولاء" : "Manage loyalty cards"}
+          </a>
         </Card>
         {membership.role === "OWNER" ? (
           <Card className="dashboard-card dashboard-card--full">
@@ -856,8 +859,8 @@ export function BillingScreen({
           </div>
           <Alert tone="info" title={ar ? "التجربة لم تبدأ" : "Trial remains pending"}>
             {ar
-              ? "لن تبدأ Waflo التجربة في Stripe أو محلياً خلال W1."
-              : "Waflo does not start the product trial locally or in Stripe during W1."}
+              ? "لا تبدأ التجربة عند اختيار الخطة أو فتح Stripe؛ تبدأ عند نشر أول بطاقة ولاء."
+              : "The trial does not start when you select a plan or open Stripe; it starts when your first loyalty card is published."}
           </Alert>
         </>
       ) : (
@@ -1510,60 +1513,21 @@ export function SecurityScreen({
   );
 }
 
-export function FutureScreen({ locale, section }: { locale: Locale; section: DashboardSection }) {
+export function FutureScreen({ locale }: { locale: Locale; section: DashboardSection }) {
   const ar = locale === "ar";
-  const details: Record<string, { icon: ReactNode; en: [string, string]; ar: [string, string] }> = {
-    programs: {
-      icon: <Gift />,
-      en: [
-        "Loyalty cards arrive in W2",
-        "Quick Mode, Pro Mode, and card publishing are intentionally not part of this foundation phase.",
-      ],
-      ar: [
-        "بطاقات الولاء تصل في W2",
-        "الوضع السريع والاحترافي ونشر البطاقات مؤجلة عمداً إلى مرحلة الأساس التالية.",
-      ],
-    },
-    customers: {
-      icon: <Users />,
-      en: [
-        "Customer records are not active yet",
-        "Enrollment and customer memberships will be introduced after loyalty-card foundations exist.",
-      ],
-      ar: [
-        "سجلات العملاء غير مفعلة بعد",
-        "سيصل الانضمام وعضويات العملاء بعد اكتمال أساس بطاقات الولاء.",
-      ],
-    },
-    analytics: {
-      icon: <BarChart3 />,
-      en: [
-        "Analytics needs real loyalty activity",
-        "Waflo will not show fabricated charts before customer and transaction data exists.",
-      ],
-      ar: [
-        "التحليلات تحتاج نشاط ولاء حقيقياً",
-        "لن تعرض Waflo مخططات وهمية قبل وجود بيانات عملاء وعمليات فعلية.",
-      ],
-    },
-  };
-  const view = details[section] ?? details.analytics;
-  if (!view) return null;
-  const [title, description] = ar ? view.ar : view.en;
+  const title = ar ? "هذا القسم غير متاح" : "This section is unavailable";
+  const description = ar
+    ? "استخدم قائمة لوحة التحكم للعودة إلى قسم متاح."
+    : "Use the dashboard navigation to return to an available section.";
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "ميزة مستقبلية" : "Future area"}
+        eyebrow={ar ? "لوحة التحكم" : "Dashboard"}
         title={title}
         description={description}
       />
       <Card>
-        <EmptyState
-          icon={view.icon}
-          title={title}
-          description={description}
-          action={<Button disabled>{ar ? "قريباً" : "Coming in W2"}</Button>}
-        />
+        <EmptyState icon={<Gift />} title={title} description={description} />
       </Card>
     </>
   );

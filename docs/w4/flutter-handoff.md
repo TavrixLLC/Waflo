@@ -1,7 +1,8 @@
 # Flutter handoff
 
 M1-M4 may consume the OpenAPI document, `packages/contracts/src/w4.ts`, the canonical signature
-functions in `@waflo/staff-device-security`, and fixtures in the W4 provider-artifacts handoff.
+functions in `@waflo/staff-device-security`, and the durable M2 compatibility bundle in
+[`docs/contracts/m2`](../contracts/m2).
 
 The mobile client must generate and protect an Ed25519 private key, scan the pairing QR, sign the
 challenge, store opaque session credentials in platform secure storage, and sign every sensitive

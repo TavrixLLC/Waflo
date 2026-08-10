@@ -2,6 +2,7 @@
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": [
     "NODE_ENV",
+    "DEPLOYMENT_ENVIRONMENT",
     "WAFLO_MANAGED_SERVERS",
     "TRUSTED_PROXIES",
     "DATABASE_URL",
@@ -76,7 +77,12 @@
     "M2_OUTPUT_DIRECTORY",
     "M2_EXPECTED_BACKEND_COMMIT",
     "WAFLO_TEST_DATABASE_NAME",
-    "RATE_LIMIT_NAMESPACE"
+    "RATE_LIMIT_NAMESPACE",
+    "NEXT_PUBLIC_API_URL",
+    "NEXT_PUBLIC_DASHBOARD_URL",
+    "NEXT_PUBLIC_MARKETING_URL",
+    "NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE",
+    "SUPPORT_EMAIL"
   ],
   "tasks": {
     "build": {

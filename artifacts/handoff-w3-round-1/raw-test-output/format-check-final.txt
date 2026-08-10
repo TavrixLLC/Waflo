@@ -1,4 +1,0 @@
-$ biome format .
-Checked 245 files in 69ms. No fixes applied.
-
-EXIT_CODE=0

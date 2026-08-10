@@ -349,6 +349,13 @@ export const environmentSchema = z
           "Real Google Wallet mode requires issuer, service-account, and public asset configuration.",
       });
     }
+    if (value.APPLE_WALLET_MODE === "REAL" && value.APPLE_APNS_ENVIRONMENT !== "production") {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_APNS_ENVIRONMENT"],
+        message: "Real Apple Wallet pass updates require the production APNs endpoint.",
+      });
+    }
     if (value.DEPLOYMENT_ENVIRONMENT === "production") {
       if (
         value.GOOGLE_WALLET_MODE === "REAL" &&
@@ -358,13 +365,6 @@ export const environmentSchema = z
           code: "custom",
           path: ["GOOGLE_WALLET_PUBLISHING_MODE"],
           message: "Production Google Wallet requires publishing mode.",
-        });
-      }
-      if (value.APPLE_WALLET_MODE === "REAL" && value.APPLE_APNS_ENVIRONMENT !== "production") {
-        context.addIssue({
-          code: "custom",
-          path: ["APPLE_APNS_ENVIRONMENT"],
-          message: "Production Apple Wallet requires production APNs.",
         });
       }
     }
@@ -524,9 +524,25 @@ export const environmentSchema = z
     }
     const stripeKey = value.STRIPE_SECRET_KEY ?? "";
     const stripePublishable = value.STRIPE_PUBLISHABLE_KEY ?? "";
+    const stripeCore = [
+      value.STRIPE_SECRET_KEY,
+      value.STRIPE_WEBHOOK_SECRET,
+      value.STRIPE_STARTER_MONTHLY_PRICE_ID,
+      value.STRIPE_GROWTH_MONTHLY_PRICE_ID,
+      value.STRIPE_SCALE_MONTHLY_PRICE_ID,
+    ];
+    if (stripeCore.some(Boolean) && !stripeCore.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_SECRET_KEY"],
+        message:
+          "Stripe secret, webhook secret, and all three Price IDs must be complete or absent.",
+      });
+    }
     if (
       value.DEPLOYMENT_ENVIRONMENT === "staging" &&
-      (stripeKey.startsWith("sk_live_") || stripePublishable.startsWith("pk_live_"))
+      ((stripeKey && !stripeKey.startsWith("sk_test_")) ||
+        (stripePublishable && !stripePublishable.startsWith("pk_test_")))
     ) {
       context.addIssue({
         code: "custom",
@@ -543,6 +559,36 @@ export const environmentSchema = z
         code: "custom",
         path: ["STRIPE_SECRET_KEY"],
         message: "Production accepts Stripe live-mode keys only.",
+      });
+    }
+    if (value.STRIPE_WEBHOOK_SECRET && !value.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_WEBHOOK_SECRET"],
+        message: "Stripe webhook secrets must use the whsec_ endpoint-secret format.",
+      });
+    }
+    for (const key of [
+      "STRIPE_STARTER_MONTHLY_PRICE_ID",
+      "STRIPE_GROWTH_MONTHLY_PRICE_ID",
+      "STRIPE_SCALE_MONTHLY_PRICE_ID",
+    ] as const) {
+      if (value[key] && !value[key].startsWith("price_")) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Stripe billing plans require Price IDs in price_ format.",
+        });
+      }
+    }
+    if (
+      value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID &&
+      !value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID.startsWith("bpc_")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID"],
+        message: "Stripe customer portal configuration IDs must use bpc_ format.",
       });
     }
   });

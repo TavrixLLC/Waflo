@@ -2522,7 +2522,7 @@ function StudioSectionContent({
             }
           />
         </FormField>
-        <Alert tone="info" title={ar ? "سياسة عمليات W4" : "W4 operations policy"}>
+        <Alert tone="info" title={ar ? "سياسة العمليات" : "Operations policy"}>
           {ar
             ? "تُطبّق حدود العملية واليوم وسياسة الشراء من إصدار البرنامج المثبت للعضوية."
             : "Operation limits, daily caps, purchase policy, and reset behavior follow the setup each customer joined under."}
@@ -3426,7 +3426,9 @@ function PreviewSettings({
     return (
       <div className="studio-section-content">
         <Alert tone="info" title="Preview only">
-          {ar ? "لا يتم إصدار بطاقة Apple Wallet حقيقية." : "No Apple Wallet pass is issued in W2."}
+          {ar
+            ? "لا يؤدي تعديل هذه المعاينة إلى إصدار بطاقة Apple Wallet."
+            : "Editing this preview does not issue an Apple Wallet pass."}
         </Alert>
         <CapabilitySummary platform="APPLE_WALLET" />
         {(
@@ -3478,8 +3480,8 @@ function PreviewSettings({
       <div className="studio-section-content">
         <Alert tone="info" title="Preview only">
           {ar
-            ? "لا يتم إنشاء كائن Google Wallet حقيقي."
-            : "No Google Wallet object is created in W2."}
+            ? "لا يؤدي تعديل هذه المعاينة إلى إنشاء كائن Google Wallet."
+            : "Editing this preview does not create a Google Wallet object."}
         </Alert>
         <CapabilitySummary platform="GOOGLE_WALLET" />
         {(

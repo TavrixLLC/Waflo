@@ -137,6 +137,8 @@ describe("repair-round security boundaries", () => {
     const app = await createApiApplication({ logger: false });
     try {
       expect(app.getHttpAdapter().getInstance().printRoutes()).toContain("docs");
+      const response = await app.inject({ method: "GET", url: "/route-that-does-not-exist" });
+      expect(response.headers["x-robots-tag"]).toBe("noindex, nofollow, noarchive");
     } finally {
       await app.close();
     }

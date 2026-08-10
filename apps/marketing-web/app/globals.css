@@ -51,6 +51,14 @@ body {
   font-weight: 650;
 }
 
+.marketing-button-link {
+  text-decoration: none;
+}
+
+.marketing-button-link--full {
+  width: 100%;
+}
+
 .marketing-nav a:hover,
 .marketing-footer a:hover {
   color: var(--waflo-brick);
@@ -300,6 +308,36 @@ body {
   line-height: 1.7;
 }
 
+.marketing-faq {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.marketing-faq details {
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-lg);
+  background: white;
+}
+
+.marketing-faq summary {
+  cursor: pointer;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.marketing-faq p {
+  margin: 0.9rem 0 0;
+  color: var(--waflo-muted);
+  line-height: 1.7;
+}
+
+.marketing-contact-link {
+  color: var(--waflo-brick);
+  font-weight: 750;
+}
+
 .marketing-plans {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -416,12 +454,24 @@ body {
   }
 
   .marketing-feature-grid,
-  .marketing-plans {
+  .marketing-plans,
+  .marketing-faq {
     grid-template-columns: 1fr;
   }
 
   .marketing-cta {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-shell *,
+  .marketing-shell *::before,
+  .marketing-shell *::after {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
   }
 }
 

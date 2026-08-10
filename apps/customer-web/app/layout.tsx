@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Waflo",
-  description: "A merchant experience powered by Waflo.",
+  description: "A customer loyalty-card experience powered by Waflo.",
   manifest: "/site.webmanifest",
   icons: {
     icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],

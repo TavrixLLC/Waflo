@@ -444,32 +444,28 @@ test("captures P2.1R visual evidence and differentiated contact sheets", async (
   await dialog.screenshot({ path: `${evidenceDirectory}/17-dark-customer-preview.png` });
   await dialog.getByRole("button", { name: "Close template preview" }).click();
 
-  const beforeSheet = await sharp("artifacts/uiux/template-library-p21/21-contact-sheet.png")
-    .resize({ width: 760 })
-    .png()
-    .toBuffer();
-  const afterSheet = await sharp(afterGallery).resize({ width: 760 }).png().toBuffer();
-  const [beforeMetadata, afterMetadata] = await Promise.all([
-    sharp(beforeSheet).metadata(),
-    sharp(afterSheet).metadata(),
-  ]);
-  const comparisonHeight = Math.max(beforeMetadata.height ?? 0, afterMetadata.height ?? 0);
+  const gallerySheet = await sharp(afterGallery).resize({ width: 1520 }).png().toBuffer();
+  const galleryMetadata = await sharp(gallerySheet).metadata();
   await sharp({
-    create: { width: 1568, height: comparisonHeight + 64, channels: 4, background: "#FCFBFA" },
+    create: {
+      width: 1552,
+      height: (galleryMetadata.height ?? 0) + 64,
+      channels: 4,
+      background: "#FCFBFA",
+    },
   })
     .composite([
       {
         input: Buffer.from(
-          '<svg xmlns="http://www.w3.org/2000/svg" width="1568" height="64"><text x="16" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#241916">Before · P2.1</text><text x="808" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#241916">After · P2.1R</text></svg>',
+          '<svg xmlns="http://www.w3.org/2000/svg" width="1552" height="64"><text x="16" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#241916">Current template gallery · P2.1R</text></svg>',
         ),
         left: 0,
         top: 0,
       },
-      { input: beforeSheet, left: 16, top: 64 },
-      { input: afterSheet, left: 808, top: 64 },
+      { input: gallerySheet, left: 16, top: 64 },
     ])
     .png()
-    .toFile(`${evidenceDirectory}/22-before-after-contact-sheet.png`);
+    .toFile(`${evidenceDirectory}/22-current-gallery-contact-sheet.png`);
 
   await page.goto("/ar/dashboard/programs/new");
   await page.addStyleTag({

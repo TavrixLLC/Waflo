@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
@@ -824,7 +823,6 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
 test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   test.setTimeout(240_000);
   const evidenceDirectory = "artifacts/uiux/create-card-p3-repair-round1";
-  const previousCustomerPreview = "artifacts/uiux/create-card-p3/12-customer-live-preview.png";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { patchDelayMs: 350 });
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -973,33 +971,29 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
     .png()
     .toFile(`${evidenceDirectory}/13-wallet-mapping-evidence.png`);
 
-  const after = await sharp(`${evidenceDirectory}/02-customer-preview-0-of-8.png`)
+  const currentPreview = await sharp(`${evidenceDirectory}/02-customer-preview-0-of-8.png`)
     .resize({ width: 600 })
     .png()
     .toBuffer();
-  const beforeSource = existsSync(previousCustomerPreview)
-    ? previousCustomerPreview
-    : `${evidenceDirectory}/02-customer-preview-0-of-8.png`;
-  const before = await sharp(beforeSource).resize({ width: 600 }).png().toBuffer();
-  const [beforeMetadata, afterMetadata] = await Promise.all([
-    sharp(before).metadata(),
-    sharp(after).metadata(),
-  ]);
-  const comparisonHeight = Math.max(beforeMetadata.height ?? 0, afterMetadata.height ?? 0);
+  const currentMetadata = await sharp(currentPreview).metadata();
   await sharp({
-    create: { width: 1240, height: comparisonHeight + 72, channels: 4, background: "#FCFBFA" },
+    create: {
+      width: 640,
+      height: (currentMetadata.height ?? 0) + 72,
+      channels: 4,
+      background: "#FCFBFA",
+    },
   })
     .composite([
       {
         input: Buffer.from(
-          '<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="72"><text x="20" y="44" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#241916">Before · sparse debug fixture</text><text x="640" y="44" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#241916">After · shared renderer truth</text></svg>',
+          '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="72"><text x="20" y="44" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#241916">Current · shared renderer truth</text></svg>',
         ),
         left: 0,
         top: 0,
       },
-      { input: before, left: 20, top: 72 },
-      { input: after, left: 640, top: 72 },
+      { input: currentPreview, left: 20, top: 72 },
     ])
     .png()
-    .toFile(`${evidenceDirectory}/14-before-after-repair-contact-sheet.png`);
+    .toFile(`${evidenceDirectory}/14-current-repair-contact-sheet.png`);
 });

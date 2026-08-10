@@ -3,13 +3,8 @@
   "short_name": "Waflo",
   "icons": [
     {
-      "src": "/android-chrome-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/android-chrome-512.png",
-      "sizes": "512x512",
+      "src": "/apple-touch-icon-180.png",
+      "sizes": "180x180",
       "type": "image/png"
     }
   ],

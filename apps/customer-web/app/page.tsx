@@ -125,7 +125,15 @@ export default async function MerchantProgramsPage({
   );
 }
 
-export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant?: string }) {
+export function CustomerHeader({
+  locale,
+  tenant,
+  languagePath = "/",
+}: {
+  locale: "en" | "ar";
+  tenant?: string;
+  languagePath?: string;
+}) {
   const nextLocale = locale === "ar" ? "en" : "ar";
   const homeParams = new URLSearchParams({ lang: locale });
   const languageParams = new URLSearchParams({ lang: nextLocale });
@@ -145,7 +153,7 @@ export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant
           priority
         />
       </Link>
-      <Link className="customer-language" href={`/?${languageParams.toString()}`}>
+      <Link className="customer-language" href={`${languagePath}?${languageParams.toString()}`}>
         {locale === "ar" ? "English" : "العربية"}
       </Link>
     </header>

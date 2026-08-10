@@ -26,6 +26,11 @@ The Marketing Web image still runs in staging for architectural parity and healt
 | `api.waflo.app` | `http://api:4000` |
 | fallback | HTTP 404 |
 
+The application returns a permanent `308` from `www.waflo.app` to the canonical
+`https://waflo.app` origin while preserving the path and query string. Keep both hostnames routed
+to Marketing Web, or enforce the same redirect at Cloudflare before the tunnel. Do not serve
+separate indexable copies on both hosts.
+
 Do not add host port publications for these origins. Keep Cloudflare SSL mode, HTTPS redirects, DNS records, access policy, caching exclusions for authenticated/API traffic, and upload/body limits consistent with Waflo's API controls. Do not cache API, dashboard, card-session, OAuth callback, or Wallet update-service responses.
 
 The API trusts only the configured Waflo edge subnet as its immediate proxy. If Compose subnets change, change `TRUSTED_PROXIES` in the same release. Never trust all forwarded headers or all RFC1918 space without an explicit network review.

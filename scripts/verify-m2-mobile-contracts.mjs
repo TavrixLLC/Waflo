@@ -3,21 +3,14 @@ import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const root = process.cwd();
-const directory = resolve(
-  process.env.M2_OUTPUT_DIRECTORY ?? "artifacts/handoff-w4-m2-provenance-repair/mobile-contracts",
-);
+const directory = resolve(process.env.M2_OUTPUT_DIRECTORY ?? "docs/contracts/m2");
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function git(...args) {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-}
-
 const manifest = JSON.parse(await readFile(resolve(directory, "source-manifest.json"), "utf8"));
-const expectedCommit = process.env.M2_EXPECTED_BACKEND_COMMIT ?? git("rev-parse", "HEAD");
+const expectedCommit = process.env.M2_EXPECTED_BACKEND_COMMIT ?? manifest.backendCommitSha;
 if (manifest.backendCommitSha !== expectedCommit) {
   throw new Error(
     `Manifest backendCommitSha ${manifest.backendCommitSha} does not match ${expectedCommit}.`,

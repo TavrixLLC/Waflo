@@ -10,6 +10,11 @@ export const metadata: Metadata = {
     template: "%s · Waflo",
   },
   description: "Secure merchant administration for Waflo.",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+  },
   manifest: "/site.webmanifest",
   icons: {
     icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],

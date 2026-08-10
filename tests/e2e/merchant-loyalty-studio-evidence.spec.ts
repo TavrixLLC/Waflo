@@ -199,50 +199,32 @@ test("captures exactly the focused repair evidence set", async ({ context }) => 
     .png()
     .toFile(path.join(evidenceDirectory, "10-history-and-test-spacing.png"));
 
-  const comparisons = [
-    [
-      "Live",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/03-studio-overview-live-desktop.png"),
-      path.join(evidenceDirectory, "03-live-correct.png"),
-    ],
-    [
-      "Paused",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/14-paused-state.png"),
-      path.join(evidenceDirectory, "04-paused-correct.png"),
-    ],
-    [
-      "Archived",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/15-archived-state.png"),
-      path.join(evidenceDirectory, "05-archived-correct.png"),
-    ],
-    [
-      "Launch",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/07-launch-readiness.png"),
-      path.join(evidenceDirectory, "06-launch-status-consistency.png"),
-    ],
+  const lifecycleStates = [
+    ["Live", path.join(evidenceDirectory, "03-live-correct.png")],
+    ["Paused", path.join(evidenceDirectory, "04-paused-correct.png")],
+    ["Archived", path.join(evidenceDirectory, "05-archived-correct.png")],
+    ["Launch", path.join(evidenceDirectory, "06-launch-status-consistency.png")],
   ] as const;
-  const comparisonPanels: Buffer[] = [];
-  for (const [label, before, after] of comparisons) {
-    comparisonPanels.push(await labeledPanel(before, `${label} · before`, 760, 470));
-    comparisonPanels.push(await labeledPanel(after, `${label} · repaired`, 760, 470));
-  }
+  const lifecyclePanels = await Promise.all(
+    lifecycleStates.map(([label, source]) => labeledPanel(source, label, 760, 470)),
+  );
   const comparisonWidth = 760;
   const comparisonHeight = 528;
   await sharp({
     create: {
       width: comparisonWidth * 2,
-      height: comparisonHeight * 4,
+      height: comparisonHeight * 2,
       channels: 4,
       background: "#e9ecee",
     },
   })
     .composite(
-      comparisonPanels.map((input, index) => ({
+      lifecyclePanels.map((input, index) => ({
         input,
         top: Math.floor(index / 2) * comparisonHeight,
         left: (index % 2) * comparisonWidth,
       })),
     )
     .png()
-    .toFile(path.join(evidenceDirectory, "11-before-after-lifecycle-contact-sheet.png"));
+    .toFile(path.join(evidenceDirectory, "11-current-lifecycle-contact-sheet.png"));
 });

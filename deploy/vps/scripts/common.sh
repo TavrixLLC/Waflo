@@ -43,10 +43,34 @@ compose() {
 
 assert_secret_permissions() {
   local secret_directory="${PLATFORM_ROOT}/secrets/${DEPLOYMENT_ENVIRONMENT}"
+  local provider_directory="${secret_directory}/provider-files"
   local insecure
   insecure="$(find "${secret_directory}" -maxdepth 1 -type f ! -perm 0600 -print)"
   if [[ -n "${insecure}" ]]; then
     printf 'Secret files must be mode 0600:\n%s\n' "${insecure}" >&2
     return 2
+  fi
+  if [[ "$(stat -c '%a:%u:%g' "${provider_directory}")" != "750:0:10001" ]]; then
+    printf 'Provider secret directory must be mode 0750 and owned by root:10001.\n' >&2
+    return 2
+  fi
+  insecure="$(find "${provider_directory}" -maxdepth 1 -type f \
+    \( ! -perm 0440 -o ! -uid 0 -o ! -gid 10001 \) -print)"
+  if [[ -n "${insecure}" ]]; then
+    printf 'Provider secret files must be mode 0440 and owned by root:10001:\n%s\n' "${insecure}" >&2
+    return 2
+  fi
+  if grep -qx 'GOOGLE_WALLET_MODE=REAL' "${WAFLO_ENV_FILE}" && \
+    [[ ! -f "${provider_directory}/google-wallet-service-account.json" ]]; then
+    printf 'Real Google Wallet requires google-wallet-service-account.json.\n' >&2
+    return 2
+  fi
+  if grep -qx 'APPLE_WALLET_MODE=REAL' "${WAFLO_ENV_FILE}"; then
+    for required in apple-wallet-pass.p12 apple-wwdr.pem; do
+      if [[ ! -f "${provider_directory}/${required}" ]]; then
+        printf 'Real Apple Wallet requires %s.\n' "${required}" >&2
+        return 2
+      fi
+    done
   fi
 }

@@ -6,7 +6,7 @@ import sharp from "../apps/api/node_modules/sharp/dist/index.mjs";
 const root = process.cwd();
 const handoffDirectory = resolve(root, "artifacts/handoff-w4-round-1");
 const screenshotDirectory = resolve(handoffDirectory, "screenshots");
-const acceptedFoundationDirectory = resolve(root, "artifacts/handoff-w4/screenshots");
+const acceptedFoundationDirectory = process.argv[2] ? resolve(root, process.argv[2]) : null;
 const contactSheet = resolve(screenshotDirectory, "00-contact-sheet.png");
 const manifest = resolve(handoffDirectory, "SCREENSHOT-MANIFEST.md");
 
@@ -76,6 +76,11 @@ let files = (await readdir(screenshotDirectory))
 
 for (const [, name] of coverage) {
   if (files.includes(name)) continue;
+  if (!acceptedFoundationDirectory) {
+    throw new Error(
+      `Missing ${name}. Generate it in this run or pass a foundation screenshot directory as the first argument.`,
+    );
+  }
   const acceptedFoundationSource = resolve(acceptedFoundationDirectory, name);
   await access(acceptedFoundationSource);
   await copyFile(acceptedFoundationSource, resolve(screenshotDirectory, name));

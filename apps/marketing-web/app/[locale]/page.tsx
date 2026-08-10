@@ -3,12 +3,18 @@ import { notFound } from "next/navigation";
 import { Building2, CreditCard, Smartphone, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { messages, isLocale } from "@waflo/i18n";
-import { Button, Card } from "@waflo/ui";
+import { Card } from "@waflo/ui";
 import { MarketingShell } from "../../components/marketing-shell";
+import { createMarketingMetadata, marketingStructuredData } from "../../lib/seo";
 
-export const metadata: Metadata = {
-  title: "Wallet-first loyalty for local businesses",
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return isLocale(locale) ? createMarketingMetadata(locale, "home") : {};
+}
 
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
@@ -75,11 +81,17 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
               : "Waflo is a wallet-first loyalty platform that gives local businesses a flexible digital experience—without asking customers to install another app."}
           </p>
           <div className="marketing-hero__actions">
-            <a href={`${dashboardUrl}/${locale}/signup`}>
-              <Button>{ar ? "ابدأ تجربتك المجانية" : "Start your free trial"}</Button>
+            <a
+              className="wf-button wf-button--primary marketing-button-link"
+              href={`${dashboardUrl}/${locale}/signup`}
+            >
+              {ar ? "ابدأ تجربتك المجانية" : "Start your free trial"}
             </a>
-            <a href={`/${locale}/pricing`}>
-              <Button variant="secondary">{ar ? "استكشف الأسعار" : "Explore pricing"}</Button>
+            <a
+              className="wf-button wf-button--secondary marketing-button-link"
+              href={`/${locale}/pricing`}
+            >
+              {ar ? "استكشف الأسعار" : "Explore pricing"}
             </a>
           </div>
           <p className="marketing-trial-note">
@@ -124,7 +136,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
         </div>
       </section>
 
-      <section className="marketing-section marketing-section--warm">
+      <section className="marketing-section marketing-section--warm" id="features">
         <div className="marketing-container">
           <div className="marketing-section__heading">
             <h2>
@@ -163,7 +175,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           <div className="marketing-feature-grid">
             <Card className="marketing-feature">
               <span className="marketing-feature__number">
-                <Building2 size={22} />
+                <Building2 size={22} aria-hidden="true" />
               </span>
               <h3>{ar ? "أنشطة محلية" : "Local businesses"}</h3>
               <p>
@@ -174,7 +186,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             </Card>
             <Card className="marketing-feature">
               <span className="marketing-feature__number">
-                <Smartphone size={22} />
+                <Smartphone size={22} aria-hidden="true" />
               </span>
               <h3>{ar ? "لا تطبيق للعميل" : "No customer app"}</h3>
               <p>
@@ -185,7 +197,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             </Card>
             <Card className="marketing-feature">
               <span className="marketing-feature__number">
-                <CreditCard size={22} />
+                <CreditCard size={22} aria-hidden="true" />
               </span>
               <h3>{ar ? "فوترة واضحة" : "Clear billing"}</h3>
               <p>
@@ -194,6 +206,92 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
                   : "Selected plan, subscription state, and trial status remain clearly distinct."}
               </p>
             </Card>
+          </div>
+        </div>
+      </section>
+
+      <section className="marketing-section marketing-section--warm" id="faq">
+        <div className="marketing-container">
+          <div className="marketing-section__heading">
+            <h2>{ar ? "أسئلة شائعة" : "Frequently asked questions"}</h2>
+            <p>
+              {ar
+                ? "إجابات مباشرة عن تجربة الولاء للتاجر والعميل."
+                : "Straight answers about the merchant and customer loyalty experience."}
+            </p>
+          </div>
+          <div className="marketing-faq">
+            {(ar
+              ? [
+                  {
+                    question: "ما هي Waflo؟",
+                    answer:
+                      "Waflo منصة ولاء رقمية تساعد الأعمال المحلية على إنشاء بطاقات ولاء وإدارة الفروع والفريق وتقدم العملاء.",
+                  },
+                  {
+                    question: "كيف تعمل بطاقات الولاء؟",
+                    answer:
+                      "ينضم العميل من الويب ويحصل على بطاقة بعضوية فريدة. يمسح الموظف رمز العضوية لإضافة الأختام أو استبدال المكافأة وفق إعدادات البرنامج.",
+                  },
+                  {
+                    question: "هل يحتاج العميل إلى تثبيت تطبيق؟",
+                    answer:
+                      "لا. يعمل المسار المعتاد عبر ويب العميل، ويمكن للعميل إضافة البطاقة إلى محفظته الرقمية عندما تكون خدمة المحفظة مهيأة.",
+                  },
+                  {
+                    question: "هل تدعم Waflo ‏Apple Wallet وGoogle Wallet؟",
+                    answer:
+                      "Waflo مهيأة لإصدار وتحديث بطاقات Apple Wallet وGoogle Wallet. يعتمد التوفر على إعداد مزود الخدمة وبرنامج التاجر.",
+                  },
+                  {
+                    question: "كيف يضيف الموظفون الأختام؟",
+                    answer:
+                      "يستخدم الموظف المخوّل تطبيق Waflo للموظفين لمسح رمز العضوية ثم تنفيذ إضافة ختم أو استبدال مكافأة.",
+                  },
+                  {
+                    question: "هل يمكن إدارة أكثر من فرع؟",
+                    answer:
+                      "نعم. تعتمد حدود الفروع ومقاعد الفريق وبرامج الولاء على الخطة المختارة.",
+                  },
+                ]
+              : [
+                  {
+                    question: "What is Waflo?",
+                    answer:
+                      "Waflo is a digital loyalty platform that helps local businesses create loyalty cards and manage locations, teams, and customer progress.",
+                  },
+                  {
+                    question: "How do loyalty cards work?",
+                    answer:
+                      "A customer joins on the web and receives a card with a unique membership. Staff scan its credential to add stamps or redeem a reward under the program rules.",
+                  },
+                  {
+                    question: "Does the customer need to install an app?",
+                    answer:
+                      "No. The normal customer journey runs through Customer Web, with an option to add the card to a digital wallet when that provider is configured.",
+                  },
+                  {
+                    question: "Does Waflo support Apple Wallet and Google Wallet?",
+                    answer:
+                      "Waflo is built to issue and update Apple Wallet and Google Wallet passes. Availability depends on provider configuration and the merchant program.",
+                  },
+                  {
+                    question: "How do staff issue stamps?",
+                    answer:
+                      "Authorized staff use the Waflo Staff app to scan the membership credential, then issue a stamp or redeem a reward.",
+                  },
+                  {
+                    question: "Can a merchant manage multiple locations?",
+                    answer:
+                      "Yes. Location, team-seat, and loyalty-program limits depend on the selected plan.",
+                  },
+                ]
+            ).map((item) => (
+              <details key={item.question}>
+                <summary>{item.question}</summary>
+                <p>{item.answer}</p>
+              </details>
+            ))}
           </div>
         </div>
       </section>
@@ -208,11 +306,20 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
                 : "Set up now. Your trial will not start until your first loyalty program is published."}
             </p>
           </div>
-          <a href={`${dashboardUrl}/${locale}/signup`}>
-            <Button>{ar ? "إنشاء حساب تاجر" : "Create merchant account"}</Button>
+          <a
+            className="wf-button wf-button--primary marketing-button-link"
+            href={`${dashboardUrl}/${locale}/signup`}
+          >
+            {ar ? "إنشاء حساب تاجر" : "Create merchant account"}
           </a>
         </div>
       </section>
+      <script
+        type="application/ld+json"
+        // The static payload contains only visible, verified Waflo organization/site facts.
+      >
+        {JSON.stringify(marketingStructuredData()).replaceAll("<", "\\u003c")}
+      </script>
     </MarketingShell>
   );
 }

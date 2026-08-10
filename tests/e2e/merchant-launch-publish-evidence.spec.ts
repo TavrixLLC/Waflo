@@ -5,7 +5,6 @@ import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
 const evidenceDirectory = path.resolve("artifacts/uiux/loyalty-studio-p4b-repair-round-1");
-const originalEvidenceDirectory = path.resolve("artifacts/uiux/loyalty-studio-p4b");
 const finalPreviewEvidenceDirectory = path.resolve(
   "artifacts/uiux/loyalty-studio-p4b-final-micro-repair",
 );
@@ -66,26 +65,22 @@ async function capture(page: Page, filename: string, fullPage = false): Promise<
 }
 
 async function createContactSheet(): Promise<void> {
-  const pairs = [
+  const captures = [
     {
       label: "Paused sharing",
-      before: path.join(originalEvidenceDirectory, "11-paused-post-launch.png"),
-      after: path.join(evidenceDirectory, "03-paused-share-disabled.png"),
+      source: path.join(evidenceDirectory, "03-paused-share-disabled.png"),
     },
     {
       label: "Archived sharing",
-      before: path.join(originalEvidenceDirectory, "12-archived-post-launch.png"),
-      after: path.join(evidenceDirectory, "04-archived-share-disabled.png"),
+      source: path.join(evidenceDirectory, "04-archived-share-disabled.png"),
     },
     {
       label: "Published preview with saved changes",
-      before: path.join(originalEvidenceDirectory, "07-saved-changes-not-live.png"),
-      after: path.join(evidenceDirectory, "05-live-preview-with-unpublished-changes.png"),
+      source: path.join(evidenceDirectory, "05-live-preview-with-unpublished-changes.png"),
     },
     {
       label: "Publication dialog placement",
-      before: path.join(originalEvidenceDirectory, "02-first-launch-confirmation.png"),
-      after: path.join(evidenceDirectory, "06-first-launch-dialog-centered-desktop.png"),
+      source: path.join(evidenceDirectory, "06-first-launch-dialog-centered-desktop.png"),
     },
   ];
   const cellWidth = 680;
@@ -95,44 +90,40 @@ async function createContactSheet(): Promise<void> {
   const rowLabelHeight = 38;
   const canvasWidth = cellWidth * 2 + gutter * 3;
   const canvasHeight =
-    headingHeight + pairs.length * (cellHeight + rowLabelHeight + gutter) + gutter;
+    headingHeight +
+    Math.ceil(captures.length / 2) * (cellHeight + rowLabelHeight + gutter) +
+    gutter;
   const composites: Array<{ input: Buffer; top: number; left: number }> = [];
 
   const header = Buffer.from(`
     <svg width="${canvasWidth}" height="${headingHeight}">
       <rect width="100%" height="100%" fill="#efe9e1"/>
-      <text x="${gutter}" y="40" font-family="Arial" font-size="25" font-weight="700" fill="#25343a">Before</text>
-      <text x="${cellWidth + gutter * 2}" y="40" font-family="Arial" font-size="25" font-weight="700" fill="#25343a">Repaired</text>
+      <text x="${gutter}" y="40" font-family="Arial" font-size="25" font-weight="700" fill="#25343a">Current post-launch states</text>
     </svg>
   `);
   composites.push({ input: header, top: 0, left: 0 });
 
-  for (const [index, pair] of pairs.entries()) {
-    const top = headingHeight + index * (cellHeight + rowLabelHeight + gutter);
+  for (const [index, capture] of captures.entries()) {
+    const row = Math.floor(index / 2);
+    const column = index % 2;
+    const left = gutter + column * (cellWidth + gutter);
+    const top = headingHeight + row * (cellHeight + rowLabelHeight + gutter);
     const label = Buffer.from(`
-      <svg width="${canvasWidth}" height="${rowLabelHeight}">
+      <svg width="${cellWidth}" height="${rowLabelHeight}">
         <rect width="100%" height="100%" fill="#efe9e1"/>
-        <text x="${gutter}" y="27" font-family="Arial" font-size="18" font-weight="700" fill="#8c3f2d">${pair.label}</text>
+        <text x="0" y="27" font-family="Arial" font-size="18" font-weight="700" fill="#8c3f2d">${capture.label}</text>
       </svg>
     `);
-    const [before, after] = await Promise.all(
-      [pair.before, pair.after].map((source) =>
-        sharp(source)
-          .resize({
-            width: cellWidth,
-            height: cellHeight,
-            fit: "contain",
-            background: "#ffffff",
-          })
-          .png()
-          .toBuffer(),
-      ),
-    );
-    composites.push(
-      { input: label, top, left: 0 },
-      { input: before, top: top + rowLabelHeight, left: gutter },
-      { input: after, top: top + rowLabelHeight, left: cellWidth + gutter * 2 },
-    );
+    const image = await sharp(capture.source)
+      .resize({
+        width: cellWidth,
+        height: cellHeight,
+        fit: "contain",
+        background: "#ffffff",
+      })
+      .png()
+      .toBuffer();
+    composites.push({ input: label, top, left }, { input: image, top: top + rowLabelHeight, left });
   }
 
   await sharp({
@@ -145,7 +136,7 @@ async function createContactSheet(): Promise<void> {
   })
     .composite(composites)
     .png()
-    .toFile(path.join(evidenceDirectory, "12-before-after-post-launch-contact-sheet.png"));
+    .toFile(path.join(evidenceDirectory, "12-current-post-launch-contact-sheet.png"));
 }
 
 test("captures the focused P4B Repair Round 1 evidence set", async ({ page }) => {

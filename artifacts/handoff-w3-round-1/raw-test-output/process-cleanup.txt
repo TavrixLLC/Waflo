@@ -1,4 +1,0 @@
-﻿Waflo managed port cleanup check
-Checked ports: 3000, 3001, 3002, 4000
-Listeners found: 0
-EXIT_CODE=0

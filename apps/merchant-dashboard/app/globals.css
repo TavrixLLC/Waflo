@@ -114,6 +114,32 @@ body {
   line-height: 1.65;
 }
 
+.auth-not-found__code {
+  margin: 2rem 0 0.5rem;
+  color: var(--waflo-brick);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.auth-not-found__action {
+  text-decoration: none;
+}
+
+.dashboard-action-link,
+.onboarding-action-link {
+  text-decoration: none;
+}
+
+.onboarding-action-link {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.onboarding-action-link--first {
+  margin-top: 1.25rem;
+}
+
 .auth-form {
   display: grid;
   gap: 1rem;

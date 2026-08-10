@@ -238,7 +238,7 @@ test.describe
       });
       await screenshot(page, "10-onboarding-completion");
 
-      await page.getByRole("button", { name: "Continue to dashboard" }).click();
+      await page.getByRole("link", { name: "Continue to dashboard" }).click();
       await expect(page).toHaveURL(/\/en\/dashboard/);
       await expect(page.getByText("Not started yet")).toBeVisible();
       await expect(page.getByText("pending_activation")).toBeVisible();
@@ -866,7 +866,7 @@ test.describe
       await expect(page).toHaveURL(/\/en\/onboarding\/complete/);
       const round4OrganizationId = new URL(page.url()).searchParams.get("organization");
       expect(round4OrganizationId).toBeTruthy();
-      await page.getByRole("button", { name: "Continue to dashboard" }).click();
+      await page.getByRole("link", { name: "Continue to dashboard" }).click();
       await page.goto("/en/dashboard/programs");
 
       await page.getByRole("button", { name: "Create loyalty card" }).click();

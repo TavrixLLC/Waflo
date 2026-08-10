@@ -355,7 +355,7 @@ export function CompletionOnboarding({
   return (
     <OnboardingShell locale={locale} step={4}>
       <span className="wf-eyebrow">{ar ? "اكتمل الإعداد" : "Setup complete"}</span>
-      <h1>{ar ? "مؤسستك جاهزة للمرحلة التالية." : "Your organization foundation is ready."}</h1>
+      <h1>{ar ? "اكتمل إعداد مؤسستك." : "Your organization is ready."}</h1>
       <p>
         {ar
           ? "حفظنا مؤسستك وموقعك والخطة المختارة. لم تبدأ التجربة المجانية ولم يتم تحصيل أي مبلغ."
@@ -388,17 +388,21 @@ export function CompletionOnboarding({
           </div>
           <Alert tone="info" title={ar ? "تجربتك المجانية محفوظة" : "Your free trial is waiting"}>
             {ar
-              ? "ستبدأ مدة 15 يوماً عند نشر أول بطاقة ولاء. هذه الوظيفة ستتوفر في المرحلة W2."
-              : "Your 15 days begin when you publish your first loyalty card. Publishing arrives in Phase W2."}
+              ? "ستبدأ مدة 15 يوماً عند نشر أول بطاقة ولاء."
+              : "Your 15 days begin when you publish your first loyalty card."}
           </Alert>
-          <a href={`/${locale}/dashboard`}>
-            <Button style={{ width: "100%", marginTop: "1.25rem" }}>
-              {ar ? "متابعة إلى لوحة التحكم" : "Continue to dashboard"}
-            </Button>
+          <a
+            className="wf-button wf-button--secondary onboarding-action-link onboarding-action-link--first"
+            href={`/${locale}/dashboard`}
+          >
+            {ar ? "متابعة إلى لوحة التحكم" : "Continue to dashboard"}
           </a>
-          <Button variant="secondary" disabled style={{ width: "100%", marginTop: ".75rem" }}>
-            {ar ? "إنشاء أول بطاقة ولاء — قريباً" : "Create first loyalty card — coming in W2"}
-          </Button>
+          <a
+            className="wf-button wf-button--primary onboarding-action-link"
+            href={`/${locale}/dashboard/programs/new`}
+          >
+            {ar ? "إنشاء أول بطاقة ولاء" : "Create first loyalty card"}
+          </a>
         </>
       ) : (
         <p>{ar ? "جارٍ تحميل الملخص…" : "Loading your setup summary…"}</p>

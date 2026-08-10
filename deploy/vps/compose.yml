@@ -27,6 +27,7 @@ x-build: &application-build
   dockerfile: deploy/vps/Dockerfile
   args:
     RELEASE_SHA: "${RELEASE_SHA:?RELEASE_SHA is required}"
+    DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT:?DEPLOYMENT_ENVIRONMENT is required}"
     NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}"
     NEXT_PUBLIC_DASHBOARD_URL: "${NEXT_PUBLIC_DASHBOARD_URL:?NEXT_PUBLIC_DASHBOARD_URL is required}"
     NEXT_PUBLIC_MARKETING_URL: "${NEXT_PUBLIC_MARKETING_URL:?NEXT_PUBLIC_MARKETING_URL is required}"
@@ -199,6 +200,11 @@ services:
     environment:
       DATABASE_POOL_MAX: "${API_DATABASE_POOL_MAX:-10}"
       WAFLO_SERVICE: waflo-api
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
+        target: /run/waflo-provider-secrets
+        read_only: true
     tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
     depends_on:
       postgres:
@@ -328,6 +334,11 @@ services:
     environment:
       DATABASE_POOL_MAX: "${WALLET_WORKER_DATABASE_POOL_MAX:-5}"
       WAFLO_SERVICE: waflo-wallet-worker
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
+        target: /run/waflo-provider-secrets
+        read_only: true
     tmpfs: [/tmp:rw,noexec,nosuid,size=192m]
     depends_on:
       postgres:

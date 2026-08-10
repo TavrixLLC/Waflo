@@ -1,13 +1,24 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isLocale } from "@waflo/i18n";
 import { MarketingShell } from "../../../components/marketing-shell";
+import { configuredLegalEffectiveDate, createMarketingMetadata } from "../../../lib/seo";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return isLocale(locale) ? createMarketingMetadata(locale, "privacy") : {};
+}
 
 export default async function PrivacyPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const ar = locale === "ar";
   return (
-    <MarketingShell locale={locale}>
+    <MarketingShell locale={locale} path="/privacy">
       <article className="marketing-container marketing-content">
         <span className="marketing-kicker">{ar ? "الخصوصية" : "Privacy"}</span>
         <h1>{ar ? "سياسة خصوصية Waflo" : "Waflo Privacy Policy"}</h1>
@@ -19,8 +30,7 @@ export default async function PrivacyPage({ params }: { params: Promise<{ locale
         <div className="marketing-legal">
           <p>
             <strong>{ar ? "تاريخ السريان:" : "Effective date:"}</strong>{" "}
-            {process.env.NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE ??
-              (ar ? "يُحدد بعد المراجعة القانونية" : "To be confirmed after legal review")}
+            {configuredLegalEffectiveDate(locale)}
           </p>
           <h2>{ar ? "الجهة المسؤولة" : "Who operates Waflo"}</h2>
           <p>
@@ -43,8 +53,9 @@ export default async function PrivacyPage({ params }: { params: Promise<{ locale
           <h2>{ar ? "التواصل" : "Contact"}</h2>
           <p>
             {ar
-              ? "ستُنشر وسيلة تواصل قانونية معتمدة قبل الإطلاق العام، من دون اختلاق عنوان لشركة Tavrix LLC."
-              : "A verified legal contact channel will be published before public launch; no Tavrix LLC address is fabricated here."}
+              ? "يمكنك استخدام صفحة التواصل العامة للوصول إلى قناة Waflo المعتمدة عند تهيئتها."
+              : "Use the public contact page to reach Waflo through the configured support channel."}{" "}
+            <a href={`/${locale}/contact`}>{ar ? "تواصل مع Waflo" : "Contact Waflo"}</a>
           </p>
         </div>
       </article>
