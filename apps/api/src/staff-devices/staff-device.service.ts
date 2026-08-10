@@ -489,6 +489,7 @@ export class StaffDeviceService {
       pairingPublicId: session.publicId,
       challenge,
       challengeExpiresAt: session.challengeExpiresAt,
+      signatureAlgorithm: "Ed25519",
       message: pairingMessage(session.publicId, challenge, session.claimedInstallationId),
     };
   }

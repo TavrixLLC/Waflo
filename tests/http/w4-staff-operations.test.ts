@@ -8,8 +8,8 @@ import { createPairingToken } from "../../packages/staff-device-security/src/ind
 import {
   createEphemeralStaffDeviceKeypair,
   type PairedStaffTestClient,
-  signPairingMessage,
   signedStaffInject,
+  signPairingMessage,
 } from "../helpers/w4-staff-test-client.js";
 
 const ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -33,13 +33,17 @@ function responseCode(response: { json(): unknown }): string | undefined {
   return body.error?.code ?? body.code;
 }
 
+type PairedStaffContractClient = PairedStaffTestClient & {
+  readonly pairingChallengeSignatureAlgorithm: string;
+};
+
 describe.sequential("W4 signed Staff HTTP operations", () => {
   let app: NestFastifyApplication;
   let prisma: PrismaService;
   let customerSecurity: CustomerSecurityService;
-  let client: PairedStaffTestClient;
-  let otherDeviceClient: PairedStaffTestClient;
-  let otherOrganizationClient: PairedStaffTestClient;
+  let client: PairedStaffContractClient;
+  let otherDeviceClient: PairedStaffContractClient;
+  let otherOrganizationClient: PairedStaffContractClient;
   let membershipQr = "";
   let membershipId = "";
   let membershipPublicId = "";
@@ -52,7 +56,7 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     organizationMemberId: string;
     locationId: string;
     label: string;
-  }): Promise<PairedStaffTestClient> {
+  }): Promise<PairedStaffContractClient> {
     const pairingPublicId = randomUUID();
     const pairing = createPairingToken({
       publicId: pairingPublicId,
@@ -93,11 +97,29 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
       },
     });
     expect(claim.statusCode).toBe(200);
-    const challenge = responseData<{
+    const claimed = responseData<{
       pairingPublicId: string;
       challenge: string;
       message: string;
     }>(claim);
+    const recovery = await app.inject({
+      method: "POST",
+      url: "/v1/staff/devices/pairing/challenge",
+      headers: { "content-type": "application/json" },
+      payload: { pairingPublicId: claimed.pairingPublicId },
+    });
+    expect(recovery.statusCode).toBe(200);
+    const challenge = responseData<{
+      pairingPublicId: string;
+      challenge: string;
+      message: string;
+      signatureAlgorithm: string;
+    }>(recovery);
+    expect(challenge).toMatchObject({
+      pairingPublicId: claimed.pairingPublicId,
+      challenge: claimed.challenge,
+      message: claimed.message,
+    });
     const complete = await app.inject({
       method: "POST",
       url: "/v1/staff/devices/pairing/complete",
@@ -122,6 +144,7 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
       accessToken: paired.session.token,
       organizationId: paired.context.organizationId,
       locationId: paired.context.locationId,
+      pairingChallengeSignatureAlgorithm: challenge.signatureAlgorithm,
     };
   }
 
@@ -236,7 +259,9 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     await app?.close();
   });
 
-  it("pairs an ephemeral key and resolves localized mobile-safe operational data", async () => {
+  it("pairs through canonical Ed25519 challenge recovery and resolves localized data", async () => {
+    expect(client.pairingChallengeSignatureAlgorithm).toBe("Ed25519");
+
     const context = await signedStaffInject(app, client, {
       method: "GET",
       url: "/v1/staff/device-context",
