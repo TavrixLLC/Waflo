@@ -267,6 +267,11 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
       url: "/v1/staff/device-context",
     });
     expect(context.statusCode).toBe(200);
+    const contextEnvelope = context.json() as {
+      data: { requestId: string };
+      requestId: string;
+    };
+    expect(contextEnvelope.data.requestId).toBe(contextEnvelope.requestId);
     expect(responseData<Record<string, unknown>>(context)).toMatchObject({
       locationId: LOCATION_ID,
       appVersion: "1.0.0",

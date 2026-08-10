@@ -529,6 +529,7 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       );
     }
 
+    request.requestId = requestId;
     request.staffDeviceContext = {
       organizationId: session.organizationId,
       organizationMemberId: session.organizationMemberId,
