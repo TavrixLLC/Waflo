@@ -8,10 +8,24 @@ export const environmentSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DEPLOYMENT_ENVIRONMENT: z.enum(["development", "staging", "production"]).default("development"),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+    RELEASE_SHA: z
+      .string()
+      .regex(/^(?:development|unknown|[0-9a-f]{7,40})$/)
+      .default("unknown"),
+    SERVICE_INSTANCE_ID: z.string().min(1).max(120).default("local"),
     DATABASE_URL: z
       .string()
       .min(1)
       .default("postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public"),
+    DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+    DATABASE_POOL_CONNECTION_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(120_000)
+      .default(10_000),
+    DATABASE_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
+    DATABASE_POOL_MAX_LIFETIME_SECONDS: z.coerce.number().int().min(30).max(86_400).default(1_800),
     REDIS_URL: optionalUrl,
     RATE_LIMIT_NAMESPACE: z.string().min(1).default("waflo"),
     TRUSTED_PROXIES: z.string().default(""),
@@ -32,6 +46,7 @@ export const environmentSchema = z
     OBJECT_STORAGE_ACCESS_KEY_ID: z.string().min(1).default("waflo_local"),
     OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(8).default("waflo_local_password"),
     OBJECT_STORAGE_FORCE_PATH_STYLE: z.stringbool().default(true),
+    OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: z.stringbool().default(false),
     OBJECT_STORAGE_SIGNING_SECRET: z
       .string()
       .min(32)
@@ -388,11 +403,18 @@ export const environmentSchema = z
         message: "Production requires dedicated object-storage credentials and a signing secret.",
       });
     }
-    if (!value.OBJECT_STORAGE_ENDPOINT.startsWith("https://")) {
+    const objectStorageUrl = new URL(value.OBJECT_STORAGE_ENDPOINT);
+    const explicitlyPrivateMinio =
+      value.OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL &&
+      objectStorageUrl.protocol === "http:" &&
+      objectStorageUrl.hostname === "minio" &&
+      objectStorageUrl.port === "9000";
+    if (!value.OBJECT_STORAGE_ENDPOINT.startsWith("https://") && !explicitlyPrivateMinio) {
       context.addIssue({
         code: "custom",
         path: ["OBJECT_STORAGE_ENDPOINT"],
-        message: "Production object storage must use HTTPS.",
+        message:
+          "Production object storage must use HTTPS unless it is the explicitly enabled private Compose MinIO endpoint.",
       });
     }
     if (value.SMTP_HOST === "localhost" || value.SMTP_HOST === "127.0.0.1") {
@@ -457,6 +479,10 @@ export const environmentSchema = z
       new URL(value.MERCHANT_DASHBOARD_URL).origin,
       new URL(value.CUSTOMER_WEB_URL).origin,
     ]);
+    if (value.DEPLOYMENT_ENVIRONMENT === "production") {
+      const marketing = new URL(value.MARKETING_WEB_URL);
+      if (marketing.hostname === "waflo.app") exactOrigins.add("https://www.waflo.app");
+    }
     if (
       origins.some((origin) => !exactOrigins.has(origin)) ||
       origins.length !== new Set(origins).size
@@ -554,6 +580,7 @@ export function parseVersionedSecretEntries(
 export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
   const result = environmentSchema.safeParse({
     ...source,
+    SERVICE_INSTANCE_ID: source.SERVICE_INSTANCE_ID ?? source.HOSTNAME ?? "local",
     DEPLOYMENT_ENVIRONMENT:
       source.DEPLOYMENT_ENVIRONMENT ??
       (source.NODE_ENV === "production" ? "production" : "development"),

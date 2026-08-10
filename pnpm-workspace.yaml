@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "deploy/vps/migrate"
 
 overrides:
   "brace-expansion@5.0.8": "5.0.9"

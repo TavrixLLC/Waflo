@@ -1,0 +1,33 @@
+# Cloudflare edge runbook
+
+Waflo uses a dedicated remotely managed tunnel container per environment. It does not read, edit, restart, or share the host's historical system cloudflared configuration. The token is a mode-`0600` file mounted at `/run/secrets/cloudflare_tunnel_token`; cloudflared 2026.7.2 reads it through `--token-file`. The token is absent from the image, Compose command line, container environment, and normal logs.
+
+Configure ingress in the Cloudflare dashboard for the environment's tunnel. Origins are private Compose service DNS names:
+
+## Staging tunnel `waflo-staging`
+
+| Public hostname | Origin service |
+|---|---|
+| `app.staging.waflo.app` | `http://merchant-web:3001` |
+| `card.staging.waflo.app` | `http://customer-web:3002` |
+| `api.staging.waflo.app` | `http://api:4000` |
+| fallback | HTTP 404 |
+
+The Marketing Web image still runs in staging for architectural parity and health verification, but no staging marketing hostname was specified. Staging dashboard links therefore use the public `https://waflo.app`; add a dedicated hostname and change only configuration if a separately routed staging marketing site is required.
+
+## Production tunnel
+
+| Public hostname | Origin service |
+|---|---|
+| `waflo.app` | `http://marketing-web:3000` |
+| `www.waflo.app` | `http://marketing-web:3000` |
+| `app.waflo.app` | `http://merchant-web:3001` |
+| `card.waflo.app` | `http://customer-web:3002` |
+| `api.waflo.app` | `http://api:4000` |
+| fallback | HTTP 404 |
+
+Do not add host port publications for these origins. Keep Cloudflare SSL mode, HTTPS redirects, DNS records, access policy, caching exclusions for authenticated/API traffic, and upload/body limits consistent with Waflo's API controls. Do not cache API, dashboard, card-session, OAuth callback, or Wallet update-service responses.
+
+The API trusts only the configured Waflo edge subnet as its immediate proxy. If Compose subnets change, change `TRUSTED_PROXIES` in the same release. Never trust all forwarded headers or all RFC1918 space without an explicit network review.
+
+For multiple servers, run a connector/origin per application node and use Cloudflare Load Balancing or an equivalent health-checked load balancer. Check API `/ready` and real Web pages, add a healthy node before removing an old one, and keep two connectors during cloudflared upgrades. State remains shared and no session affinity is configured.

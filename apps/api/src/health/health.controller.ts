@@ -3,12 +3,14 @@ import { Public } from "../common/decorators.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { RateLimitService } from "../security/rate-limit.service.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
+import { EnvironmentService } from "../config/environment.service.js";
 
 @Controller()
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rateLimits: RateLimitService,
+    private readonly environment: EnvironmentService,
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
 
@@ -18,6 +20,9 @@ export class HealthController {
     return {
       status: "ok",
       service: "waflo-api",
+      environment: this.environment.values.DEPLOYMENT_ENVIRONMENT,
+      release: this.environment.values.RELEASE_SHA,
+      instance: this.environment.values.SERVICE_INSTANCE_ID,
       timestamp: new Date().toISOString(),
     };
   }
@@ -34,6 +39,10 @@ export class HealthController {
       ]);
       return {
         status: "ready",
+        service: "waflo-api",
+        environment: this.environment.values.DEPLOYMENT_ENVIRONMENT,
+        release: this.environment.values.RELEASE_SHA,
+        instance: this.environment.values.SERVICE_INSTANCE_ID,
         dependencies: {
           database: "ready",
           rateLimitStorage: "ready",

@@ -13,7 +13,12 @@ const hopByHop = new Set([
   "trailer",
   "transfer-encoding",
   "upgrade",
+  "forwarded",
+  "x-forwarded-for",
   "x-forwarded-host",
+  "x-forwarded-port",
+  "x-forwarded-proto",
+  "cf-connecting-ip",
 ]);
 
 function safeUpstreamPath(path: string[]): string {
@@ -37,7 +42,8 @@ function safeUpstreamPath(path: string[]): string {
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
-  const apiUrl = process.env.API_PUBLIC_URL ?? "http://localhost:4000";
+  const apiUrl =
+    process.env.API_INTERNAL_URL ?? process.env.API_PUBLIC_URL ?? "http://localhost:4000";
   const configuredOrigin = new URL(apiUrl).origin;
   let upstream: URL;
   try {
@@ -53,6 +59,13 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   for (const [key, value] of request.headers) {
     if (!hopByHop.has(key.toLowerCase())) requestHeaders.set(key, value);
   }
+  // This BFF is reachable only through Waflo's tunnel/network, but it still
+  // rebuilds forwarding metadata instead of relaying caller-controlled chains.
+  const cloudflareClientIp = request.headers.get("cf-connecting-ip");
+  if (cloudflareClientIp && /^[0-9a-f:.]{2,64}$/i.test(cloudflareClientIp)) {
+    requestHeaders.set("x-forwarded-for", cloudflareClientIp);
+  }
+  requestHeaders.set("x-forwarded-proto", "https");
   const directHost = request.headers.get("host") ?? "";
   const normalizedHost = directHost.toLocaleLowerCase("en-US").split(":")[0] ?? "";
   const localSuffix = [".localhost", ".lvh.me"].find((suffix) => normalizedHost.endsWith(suffix));

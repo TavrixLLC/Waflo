@@ -1,7 +1,10 @@
 import { createNextContentSecurityPolicy } from "@waflo/security";
+import { join } from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+  outputFileTracingRoot: join(import.meta.dirname, "../.."),
   transpilePackages: ["@waflo/ui", "@waflo/brand", "@waflo/billing", "@waflo/i18n"],
   images: { unoptimized: true },
   poweredByHeader: false,

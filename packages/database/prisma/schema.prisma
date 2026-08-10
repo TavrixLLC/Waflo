@@ -2251,7 +2251,7 @@ model CustomerPrivacyRequest {
 }
 
 model WorkerHeartbeat {
-  workerCode          String    @id @map("worker_code") @db.VarChar(60)
+  workerCode          String    @map("worker_code") @db.VarChar(60)
   instanceId          String    @map("instance_id") @db.VarChar(120)
   startedAt           DateTime  @map("started_at") @db.Timestamptz(6)
   lastLoopAt          DateTime  @map("last_loop_at") @db.Timestamptz(6)
@@ -2263,6 +2263,8 @@ model WorkerHeartbeat {
   stoppingAt          DateTime? @map("stopping_at") @db.Timestamptz(6)
   updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  @@id([workerCode, instanceId])
+  @@index([workerCode, lastLoopAt])
   @@index([lastLoopAt])
   @@map("worker_heartbeats")
 }

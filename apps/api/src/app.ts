@@ -42,6 +42,12 @@ export async function createApiApplication(
         ? false
         : {
             level: parsedEnvironment.LOG_LEVEL,
+            base: {
+              service: "waflo-api",
+              environment: parsedEnvironment.DEPLOYMENT_ENVIRONMENT,
+              release: parsedEnvironment.RELEASE_SHA,
+              instance: parsedEnvironment.SERVICE_INSTANCE_ID,
+            },
             redact: {
               paths: [
                 "req.headers.cookie",

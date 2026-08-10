@@ -56,7 +56,15 @@ function dbPlanCode(plan: PlanCode) {
 
 function log(event: string, metadata: Record<string, unknown> = {}) {
   process.stdout.write(
-    `${JSON.stringify({ level: "info", component: "operational-worker", event, ...metadata })}\n`,
+    `${JSON.stringify({
+      level: "info",
+      service: "waflo-operational-worker",
+      environment: process.env.DEPLOYMENT_ENVIRONMENT ?? "development",
+      release: process.env.RELEASE_SHA ?? "unknown",
+      instance: process.env.SERVICE_INSTANCE_ID ?? process.env.HOSTNAME ?? "local",
+      event,
+      ...metadata,
+    })}\n`,
   );
 }
 
@@ -190,7 +198,12 @@ export class OperationalWorker {
     await this.prisma.$queryRaw`SELECT 1`;
     const now = new Date();
     await this.prisma.workerHeartbeat.upsert({
-      where: { workerCode: "OPERATIONAL_WORKER" },
+      where: {
+        workerCode_instanceId: {
+          workerCode: "OPERATIONAL_WORKER",
+          instanceId: this.workerId,
+        },
+      },
       create: {
         workerCode: "OPERATIONAL_WORKER",
         instanceId: this.workerId,
@@ -198,7 +211,6 @@ export class OperationalWorker {
         lastLoopAt: now,
       },
       update: {
-        instanceId: this.workerId,
         startedAt: now,
         lastLoopAt: now,
         stoppingAt: null,
@@ -214,6 +226,10 @@ export class OperationalWorker {
       where: { workerCode: "OPERATIONAL_WORKER", instanceId: this.workerId },
       data: { stoppingAt: new Date() },
     });
+  }
+
+  close() {
+    this.objectStorage.destroy();
   }
 
   async run() {
@@ -2537,20 +2553,33 @@ export class OperationalWorker {
 
 async function main() {
   const environment = parseEnvironment(process.env);
-  const prisma = createPrismaClient(environment.DATABASE_URL);
+  const prisma = createPrismaClient(environment.DATABASE_URL, {
+    max: environment.DATABASE_POOL_MAX,
+    connectionTimeoutMillis: environment.DATABASE_POOL_CONNECTION_TIMEOUT_MS,
+    idleTimeoutMillis: environment.DATABASE_POOL_IDLE_TIMEOUT_MS,
+    maxLifetimeSeconds: environment.DATABASE_POOL_MAX_LIFETIME_SECONDS,
+  });
   const worker = new OperationalWorker(prisma, environment);
-  const shutdown = async () => {
-    await worker.stop();
-    await prisma.$disconnect();
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    void worker.stop();
   };
-  process.once("SIGTERM", () => void shutdown());
-  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
   if (process.argv.includes("--once")) {
     log("one_shot_completed", await worker.runOnce());
     await prisma.$disconnect();
+    worker.close();
     return;
   }
-  await worker.run();
+  try {
+    await worker.run();
+  } finally {
+    await prisma.$disconnect();
+    worker.close();
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

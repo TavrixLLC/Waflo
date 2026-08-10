@@ -3,7 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { connect as connectHttp2 } from "node:http2";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { parseEnvironment, parseVersionedSecretEntries, type Environment } from "@waflo/config";
 import {
   decodeSecret,
@@ -52,7 +57,15 @@ const LEASE_SECONDS = 90;
 
 function workerLog(event: string, metadata: Record<string, unknown> = {}) {
   process.stdout.write(
-    `${JSON.stringify({ level: "info", component: "wallet-worker", event, ...metadata })}\n`,
+    `${JSON.stringify({
+      level: "info",
+      service: "waflo-wallet-worker",
+      environment: process.env.DEPLOYMENT_ENVIRONMENT ?? "development",
+      release: process.env.RELEASE_SHA ?? "unknown",
+      instance: process.env.SERVICE_INSTANCE_ID ?? process.env.HOSTNAME ?? "local",
+      event,
+      ...metadata,
+    })}\n`,
   );
 }
 
@@ -352,7 +365,12 @@ export class WalletWorker {
     );
     const now = new Date();
     await this.prisma.workerHeartbeat.upsert({
-      where: { workerCode: "WALLET_WORKER" },
+      where: {
+        workerCode_instanceId: {
+          workerCode: "WALLET_WORKER",
+          instanceId: this.workerId,
+        },
+      },
       create: {
         workerCode: "WALLET_WORKER",
         instanceId: this.workerId,
@@ -360,7 +378,6 @@ export class WalletWorker {
         lastLoopAt: now,
       },
       update: {
-        instanceId: this.workerId,
         startedAt: now,
         lastLoopAt: now,
         stoppingAt: null,
@@ -416,6 +433,10 @@ export class WalletWorker {
       where: { workerCode: "WALLET_WORKER", instanceId: this.workerId },
       data: { stoppingAt: new Date() },
     });
+  }
+
+  close() {
+    this.objectStorage.destroy();
   }
 
   async processCommandById(commandId: string, slot = 0): Promise<boolean> {
@@ -1298,31 +1319,42 @@ export class WalletWorker {
   }
 
   private async objectStorageReady() {
-    const endpoint = this.environment.OBJECT_STORAGE_ENDPOINT.replace(/\/+$/, "");
-    const response = await fetch(`${endpoint}/minio/health/ready`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) throw new Error("Object storage is unavailable.");
+    await this.objectStorage.send(
+      new HeadBucketCommand({ Bucket: this.environment.OBJECT_STORAGE_BUCKET }),
+      { requestTimeout: 5_000 },
+    );
   }
 }
 
 async function main() {
   const environment = parseEnvironment(process.env);
   if (!environment.REDIS_URL) throw new Error("REDIS_URL is required for the Wallet worker.");
-  const prisma = createPrismaClient(environment.DATABASE_URL);
+  const prisma = createPrismaClient(environment.DATABASE_URL, {
+    max: environment.DATABASE_POOL_MAX,
+    connectionTimeoutMillis: environment.DATABASE_POOL_CONNECTION_TIMEOUT_MS,
+    idleTimeoutMillis: environment.DATABASE_POOL_IDLE_TIMEOUT_MS,
+    maxLifetimeSeconds: environment.DATABASE_POOL_MAX_LIFETIME_SECONDS,
+  });
   const redis = new Redis(environment.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
   });
   const worker = new WalletWorker(prisma, redis, environment);
-  const shutdown = async () => {
-    await worker.stop();
-    await redis.quit();
-    await prisma.$disconnect();
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    void worker.stop();
   };
-  process.once("SIGTERM", () => void shutdown());
-  process.once("SIGINT", () => void shutdown());
-  await worker.run();
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+  try {
+    await worker.run();
+  } finally {
+    await redis.quit().catch(() => redis.disconnect());
+    await prisma.$disconnect();
+    worker.close();
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

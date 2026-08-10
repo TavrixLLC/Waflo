@@ -767,13 +767,13 @@ describe.sequential("production external identity and lifecycle", () => {
       value: { send: vi.fn(async () => ({})) },
     });
     expect(await worker.readiness()).toMatchObject({ status: "ready", providerHealth: [] });
-    let heartbeat = await prisma.client.workerHeartbeat.findUniqueOrThrow({
+    let heartbeat = await prisma.client.workerHeartbeat.findFirstOrThrow({
       where: { workerCode: "WALLET_WORKER" },
     });
     expect(heartbeat.safeFailureCode).toBeNull();
     expect(heartbeat.stoppingAt).toBeNull();
     await worker.stop();
-    heartbeat = await prisma.client.workerHeartbeat.findUniqueOrThrow({
+    heartbeat = await prisma.client.workerHeartbeat.findFirstOrThrow({
       where: { workerCode: "WALLET_WORKER" },
     });
     expect(heartbeat.stoppingAt).not.toBeNull();

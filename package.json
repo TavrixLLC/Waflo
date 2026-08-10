@@ -18,6 +18,7 @@
     "dev:wallet-worker": "pnpm --filter @waflo/wallet-worker dev",
     "dev:operational-worker": "pnpm --filter @waflo/operational-worker dev",
     "readiness:production": "pnpm --filter @waflo/api readiness",
+    "deploy:validate": "node deploy/vps/scripts/validate-compose.mjs",
     "env:validate:test": "tsx -e \"import { parseEnvironment } from './packages/config/src/index.ts'; parseEnvironment(process.env); console.log('test environment valid')\"",
     "format": "biome format --write .",
     "format:check": "biome format .",

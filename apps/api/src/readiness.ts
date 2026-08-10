@@ -54,18 +54,30 @@ async function main() {
   });
   const now = Date.now();
   const workerStatus = async (workerCode: "OPERATIONAL_WORKER" | "WALLET_WORKER") => {
-    const heartbeat = await prisma.client.workerHeartbeat.findUnique({ where: { workerCode } });
-    if (!heartbeat) return { status: "NOT_CONFIGURED" as const };
-    const stale =
-      now - heartbeat.lastLoopAt.getTime() > environment.WORKER_DEGRADED_AFTER_SECONDS * 1000;
-    return {
-      status: stale || heartbeat.safeFailureCode ? ("DEGRADED" as const) : ("READY" as const),
-      metadata: {
+    const heartbeats = await prisma.client.workerHeartbeat.findMany({
+      where: { workerCode },
+      orderBy: { lastLoopAt: "desc" },
+    });
+    if (heartbeats.length === 0) return { status: "NOT_CONFIGURED" as const };
+    const instances = heartbeats.map((heartbeat) => {
+      const stale =
+        now - heartbeat.lastLoopAt.getTime() > environment.WORKER_DEGRADED_AFTER_SECONDS * 1000;
+      return {
+        instanceId: heartbeat.instanceId,
+        status: stale || heartbeat.safeFailureCode || heartbeat.stoppingAt ? "DEGRADED" : "READY",
         lastLoopAt: heartbeat.lastLoopAt.toISOString(),
         lastSuccessAt: heartbeat.lastSuccessAt?.toISOString() ?? null,
         safeFailureCode: heartbeat.safeFailureCode,
         backlogCount: heartbeat.backlogCount,
         oldestBacklogAt: heartbeat.oldestBacklogAt?.toISOString() ?? null,
+      };
+    });
+    return {
+      status: instances.some((instance) => instance.status === "READY")
+        ? ("READY" as const)
+        : ("DEGRADED" as const),
+      metadata: {
+        instances,
       },
     };
   };

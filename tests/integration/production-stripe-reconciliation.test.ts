@@ -292,7 +292,7 @@ describe.sequential("production Stripe subscription reconciliation", () => {
     await worker.stop();
     expect(
       (
-        await prisma.client.workerHeartbeat.findUniqueOrThrow({
+        await prisma.client.workerHeartbeat.findFirstOrThrow({
           where: { workerCode: "OPERATIONAL_WORKER" },
         })
       ).stoppingAt,

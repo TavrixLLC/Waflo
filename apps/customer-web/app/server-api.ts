@@ -54,7 +54,8 @@ export function localeForRequest(
 }
 
 export async function fetchCustomerApi<T>(path: string, host: string, tenant?: string): Promise<T> {
-  const apiUrl = process.env.API_PUBLIC_URL ?? "http://localhost:4000";
+  const apiUrl =
+    process.env.API_INTERNAL_URL ?? process.env.API_PUBLIC_URL ?? "http://localhost:4000";
   const url = new URL(path, apiUrl);
   const normalizedHost = host.toLocaleLowerCase("en-US").split(":")[0] ?? "";
   const localSuffix = [".localhost", ".lvh.me"].find((suffix) => normalizedHost.endsWith(suffix));

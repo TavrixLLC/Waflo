@@ -1,0 +1,419 @@
+name: "waflo-${DEPLOYMENT_ENVIRONMENT:?DEPLOYMENT_ENVIRONMENT is required}"
+
+x-application-environment: &application-environment
+  env_file:
+    - path: "${WAFLO_ENV_FILE:-/opt/waflo-platform/env/${DEPLOYMENT_ENVIRONMENT}/application.env}"
+      required: true
+    - path: "${WAFLO_SECRET_ENV_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/application.env}"
+      required: true
+
+x-application-runtime: &application-runtime
+  <<: *application-environment
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  read_only: true
+  networks: [edge, backend]
+  logging: &bounded-logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-build: &application-build
+  context: ../..
+  dockerfile: deploy/vps/Dockerfile
+  args:
+    RELEASE_SHA: "${RELEASE_SHA:?RELEASE_SHA is required}"
+    NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}"
+    NEXT_PUBLIC_DASHBOARD_URL: "${NEXT_PUBLIC_DASHBOARD_URL:?NEXT_PUBLIC_DASHBOARD_URL is required}"
+    NEXT_PUBLIC_MARKETING_URL: "${NEXT_PUBLIC_MARKETING_URL:?NEXT_PUBLIC_MARKETING_URL is required}"
+    NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE: "${NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE:?NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE is required}"
+
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB is required}"
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER is required}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - "max_connections=${POSTGRES_MAX_CONNECTIONS:-100}"
+      - -c
+      - "shared_buffers=${POSTGRES_SHARED_BUFFERS:-384MB}"
+      - -c
+      - "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1GB}"
+      - -c
+      - "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-64MB}"
+      - -c
+      - "work_mem=${POSTGRES_WORK_MEM:-4MB}"
+      - -c
+      - wal_compression=on
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - log_min_duration_statement=1000
+    secrets:
+      - source: postgres_password
+        mode: 0440
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/data/${DEPLOYMENT_ENVIRONMENT}/postgres"
+        target: /var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: "${POSTGRES_MEMORY_LIMIT:-1280m}"
+    cpus: "${POSTGRES_CPU_LIMIT:-1.50}"
+    logging: *bounded-logging
+
+  redis:
+    image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+    restart: unless-stopped
+    stop_grace_period: 20s
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        exec redis-server \
+          --appendonly yes \
+          --appendfsync everysec \
+          --save 900 1 \
+          --save 300 10 \
+          --maxmemory ${REDIS_MAXMEMORY:-192mb} \
+          --maxmemory-policy noeviction \
+          --requirepass "$$(cat /run/secrets/redis_password)"
+    secrets:
+      - source: redis_password
+        mode: 0440
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/data/${DEPLOYMENT_ENVIRONMENT}/redis"
+        target: /data
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/redis_password)\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: "${REDIS_MEMORY_LIMIT:-256m}"
+    cpus: "${REDIS_CPU_LIMIT:-0.35}"
+    logging: *bounded-logging
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    stop_grace_period: 30s
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        export MINIO_ROOT_USER="$$(cat /run/secrets/minio_root_user)"
+        export MINIO_ROOT_PASSWORD="$$(cat /run/secrets/minio_root_password)"
+        exec minio server /data --address :9000 --console-address :9001
+    secrets:
+      - source: minio_root_user
+        mode: 0440
+      - source: minio_root_password
+        mode: 0440
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/data/${DEPLOYMENT_ENVIRONMENT}/object-storage"
+        target: /data
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, "curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: "${OBJECT_STORAGE_MEMORY_LIMIT:-512m}"
+    cpus: "${OBJECT_STORAGE_CPU_LIMIT:-0.60}"
+    logging: *bounded-logging
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT}"
+      OBJECT_STORAGE_BUCKET: "${OBJECT_STORAGE_BUCKET:?OBJECT_STORAGE_BUCKET is required}"
+    entrypoint: [/bin/sh, /opt/waflo-platform/minio-init.sh]
+    secrets:
+      - source: minio_root_user
+        mode: 0440
+      - source: minio_root_password
+        mode: 0440
+      - source: object_storage_access_key
+        mode: 0440
+      - source: object_storage_secret_key
+        mode: 0440
+    configs:
+      - source: minio_init_script
+        target: /opt/waflo-platform/minio-init.sh
+        mode: 0550
+    networks: [backend]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *bounded-logging
+
+  migrate:
+    <<: *application-environment
+    image: "${IMAGE_REGISTRY:-local}/waflo-migrate:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: migrate
+    profiles: [tools]
+    restart: "no"
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+    networks: [backend]
+    environment:
+      DATABASE_POOL_MAX: "2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *bounded-logging
+
+  api:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-api:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: api
+    environment:
+      DATABASE_POOL_MAX: "${API_DATABASE_POOL_MAX:-10}"
+      WAFLO_SERVICE: waflo-api
+    tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    mem_limit: "${API_MEMORY_LIMIT:-640m}"
+    cpus: "${API_CPU_LIMIT:-1.00}"
+    labels:
+      app.waflo.service: api
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+  merchant-web:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-merchant:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: merchant-web
+    environment:
+      WAFLO_SERVICE: waflo-merchant
+    networks: [edge]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/merchant-dashboard/.next/cache:rw,noexec,nosuid,size=64m]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/en/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    mem_limit: "${MERCHANT_MEMORY_LIMIT:-288m}"
+    cpus: "${MERCHANT_CPU_LIMIT:-0.50}"
+    labels:
+      app.waflo.service: merchant-web
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+  customer-web:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-customer:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: customer-web
+    environment:
+      API_INTERNAL_URL: http://api:4000
+      WAFLO_SERVICE: waflo-customer
+    networks: [edge]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/customer-web/.next/cache:rw,noexec,nosuid,size=64m]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3002/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    mem_limit: "${CUSTOMER_MEMORY_LIMIT:-288m}"
+    cpus: "${CUSTOMER_CPU_LIMIT:-0.50}"
+    labels:
+      app.waflo.service: customer-web
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+  marketing-web:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-marketing:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: marketing-web
+    environment:
+      WAFLO_SERVICE: waflo-marketing
+    networks: [edge]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/marketing-web/.next/cache:rw,noexec,nosuid,size=64m]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/en').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    mem_limit: "${MARKETING_MEMORY_LIMIT:-256m}"
+    cpus: "${MARKETING_CPU_LIMIT:-0.40}"
+    labels:
+      app.waflo.service: marketing-web
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+  operational-worker:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-operational-worker:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: operational-worker
+    environment:
+      DATABASE_POOL_MAX: "${OPERATIONAL_WORKER_DATABASE_POOL_MAX:-5}"
+      WAFLO_SERVICE: waflo-operational-worker
+    tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    mem_limit: "${OPERATIONAL_WORKER_MEMORY_LIMIT:-512m}"
+    cpus: "${OPERATIONAL_WORKER_CPU_LIMIT:-0.60}"
+    labels:
+      app.waflo.service: operational-worker
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+  wallet-worker:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-wallet-worker:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: wallet-worker
+    environment:
+      DATABASE_POOL_MAX: "${WALLET_WORKER_DATABASE_POOL_MAX:-5}"
+      WAFLO_SERVICE: waflo-wallet-worker
+    tmpfs: [/tmp:rw,noexec,nosuid,size=192m]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    mem_limit: "${WALLET_WORKER_MEMORY_LIMIT:-640m}"
+    cpus: "${WALLET_WORKER_CPU_LIMIT:-0.80}"
+    labels:
+      app.waflo.service: wallet-worker
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - info
+      - --metrics
+      - 0.0.0.0:2000
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    secrets:
+      - source: cloudflare_tunnel_token
+        mode: 0400
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+      merchant-web:
+        condition: service_healthy
+      customer-web:
+        condition: service_healthy
+      marketing-web:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, cloudflared, tunnel, --metrics, 127.0.0.1:2000, ready]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: "${CLOUDFLARED_MEMORY_LIMIT:-128m}"
+    cpus: "${CLOUDFLARED_CPU_LIMIT:-0.20}"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *bounded-logging
+    labels:
+      app.waflo.service: cloudflared
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
+networks:
+  edge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "${WAFLO_EDGE_SUBNET:?WAFLO_EDGE_SUBNET is required}"
+  backend:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: "${WAFLO_BACKEND_SUBNET:?WAFLO_BACKEND_SUBNET is required}"
+
+configs:
+  minio_init_script:
+    file: ./scripts/minio-init.sh
+
+secrets:
+  postgres_password:
+    file: "${POSTGRES_PASSWORD_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/postgres_password}"
+  redis_password:
+    file: "${REDIS_PASSWORD_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/redis_password}"
+  minio_root_user:
+    file: "${MINIO_ROOT_USER_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/minio_root_user}"
+  minio_root_password:
+    file: "${MINIO_ROOT_PASSWORD_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/minio_root_password}"
+  object_storage_access_key:
+    file: "${OBJECT_STORAGE_ACCESS_KEY_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/object_storage_access_key}"
+  object_storage_secret_key:
+    file: "${OBJECT_STORAGE_SECRET_KEY_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/object_storage_secret_key}"
+  cloudflare_tunnel_token:
+    file: "${CLOUDFLARE_TUNNEL_TOKEN_FILE:-/opt/waflo-platform/secrets/${DEPLOYMENT_ENVIRONMENT}/cloudflare_tunnel_token}"
