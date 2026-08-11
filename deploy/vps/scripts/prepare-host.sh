@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 umask 077
 
-readonly PLATFORM_ROOT="${PLATFORM_ROOT:-/opt/waflo-platform}"
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "${script_directory}/common.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
   printf 'Run this host-directory preparation script with sudo.\n' >&2
@@ -23,8 +24,8 @@ for environment in staging production; do
   install -d -m 0700 "${PLATFORM_ROOT}/secrets/${environment}"
   install -d -o root -g 10001 -m 0750 \
     "${PLATFORM_ROOT}/secrets/${environment}/provider-files"
+  prepare_postgres_bind "${environment}"
   install -d -m 0750 \
-    "${PLATFORM_ROOT}/data/${environment}/postgres" \
     "${PLATFORM_ROOT}/data/${environment}/redis" \
     "${PLATFORM_ROOT}/data/${environment}/object-storage" \
     "${PLATFORM_ROOT}/backups/${environment}/postgres" \

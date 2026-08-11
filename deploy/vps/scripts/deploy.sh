@@ -13,6 +13,8 @@ assert_secret_permissions
 exec 9>"${PLATFORM_ROOT}/deploy-${environment}.lock"
 flock -n 9 || { printf 'Another %s deployment is active.\n' "${environment}" >&2; exit 3; }
 
+prepare_postgres_bind "${environment}"
+
 deployment_failed() {
   local status=$?
   trap - ERR

@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 readonly PLATFORM_ROOT="${PLATFORM_ROOT:-/opt/waflo-platform}"
+readonly POSTGRES_CONTAINER_UID=70
+readonly POSTGRES_CONTAINER_GID=70
 readonly -a INFRASTRUCTURE_SERVICES=(postgres redis minio minio-init)
 readonly -a APPLICATION_SERVICES=(
   api
@@ -25,6 +27,45 @@ require_release_sha() {
     printf 'Release must be a full 40-character lowercase Git SHA.\n' >&2
     return 2
   fi
+}
+
+prepare_postgres_bind() {
+  local environment="${1:-}"
+  local postgres_bind
+  local pgdata
+
+  require_environment "${environment}"
+  if [[ "${EUID}" -ne 0 ]]; then
+    printf 'PostgreSQL bind preparation must run as root.\n' >&2
+    return 2
+  fi
+
+  postgres_bind="${PLATFORM_ROOT}/data/${environment}/postgres"
+  pgdata="${postgres_bind}/pgdata"
+  if [[ -L "${postgres_bind}" ]]; then
+    printf 'PostgreSQL bind path may not be a symbolic link: %s\n' "${postgres_bind}" >&2
+    return 2
+  fi
+
+  install -d -o "${POSTGRES_CONTAINER_UID}" -g "${POSTGRES_CONTAINER_GID}" -m 0750 \
+    "${postgres_bind}"
+  if [[ -L "${pgdata}" || ( -e "${pgdata}" && ! -d "${pgdata}" ) ]]; then
+    printf 'PostgreSQL PGDATA must be a real directory: %s\n' "${pgdata}" >&2
+    return 2
+  fi
+  install -d -o "${POSTGRES_CONTAINER_UID}" -g "${POSTGRES_CONTAINER_GID}" -m 0700 \
+    "${pgdata}"
+
+  # PostgreSQL owns every cluster entry. -xdev and --no-dereference keep this
+  # repair inside the dedicated bind even if it contains a mount or symlink.
+  find "${postgres_bind}" -xdev \
+    \( ! -user "${POSTGRES_CONTAINER_UID}" -o ! -group "${POSTGRES_CONTAINER_GID}" \) \
+    -exec chown --no-dereference \
+      "${POSTGRES_CONTAINER_UID}:${POSTGRES_CONTAINER_GID}" {} +
+  chmod 0750 "${postgres_bind}"
+  chmod 0700 "${pgdata}"
+  printf 'PostgreSQL bind is prepared for container identity %s:%s at %s.\n' \
+    "${POSTGRES_CONTAINER_UID}" "${POSTGRES_CONTAINER_GID}" "${postgres_bind}"
 }
 
 configure_release() {

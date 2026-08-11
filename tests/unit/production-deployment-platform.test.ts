@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -19,6 +19,8 @@ const workflow = readFileSync(resolve(workflowRoot, "ci.yml"), "utf8");
 const bake = readFileSync(resolve(deploymentRoot, "docker-bake.hcl"), "utf8");
 const common = readFileSync(resolve(deploymentRoot, "scripts/common.sh"), "utf8");
 const deploy = readFileSync(resolve(deploymentRoot, "scripts/deploy.sh"), "utf8");
+const prepareHost = readFileSync(resolve(deploymentRoot, "scripts/prepare-host.sh"), "utf8");
+const minioInit = readFileSync(resolve(deploymentRoot, "scripts/minio-init.sh"), "utf8");
 const publishImages = readFileSync(resolve(deploymentRoot, "scripts/publish-images.sh"), "utf8");
 const rollback = readFileSync(resolve(deploymentRoot, "scripts/rollback.sh"), "utf8");
 const deployFromGitHub = readFileSync(
@@ -31,6 +33,10 @@ const releaseEntrypoint = readFileSync(
 );
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
+const postgresBindVariable = "$" + "{postgres_bind}";
+const pgdataVariable = "$" + "{pgdata}";
+const environmentVariable = "$" + "{environment}";
+const mcConfigDirectoryVariable = "$" + "{MC_CONFIG_DIR}";
 
 function deploymentFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -104,6 +110,32 @@ describe("production deployment platform", () => {
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/redis`);
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/object-storage`);
     expect(compose).toContain(`secrets/${deploymentEnvironmentVariable}`);
+  });
+
+  it("prepares the PostgreSQL bind for the pinned image identity before startup", () => {
+    const preparationCall = `prepare_postgres_bind "${environmentVariable}"`;
+    expect(common).toContain("readonly POSTGRES_CONTAINER_UID=70");
+    expect(common).toContain("readonly POSTGRES_CONTAINER_GID=70");
+    expect(common).toContain("prepare_postgres_bind()");
+    expect(common).toContain(`find "${postgresBindVariable}" -xdev`);
+    expect(common).toContain("chown --no-dereference");
+    expect(common).toContain(`chmod 0700 "${pgdataVariable}"`);
+    expect(prepareHost).toContain(preparationCall);
+    expect(deploy).toContain(preparationCall);
+    expect(deploy.indexOf(preparationCall)).toBeLessThan(
+      deploy.indexOf("compose up -d --no-build postgres redis minio"),
+    );
+  });
+
+  it("uses only ephemeral writable MinIO client configuration", () => {
+    expect(minioInit).toContain("MC_CONFIG_DIR=/tmp/.mc");
+    expect(minioInit).toContain("export MC_CONFIG_DIR");
+    expect(minioInit).toContain(`mkdir -p "${mcConfigDirectoryVariable}"`);
+    expect(minioInit).toContain(`rm -rf "${mcConfigDirectoryVariable}"`);
+    expect(compose).not.toContain("target: /root/.mc");
+    expect(compose).not.toContain("target: /tmp/.mc");
+    expect(compose).not.toContain("privileged: true");
+    expect(compose).toContain("security_opt: [no-new-privileges:true]");
   });
 
   it("uses one authoritative, immutable-action release workflow without duplicated test gates", () => {
