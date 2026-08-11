@@ -64,9 +64,27 @@ developer team, register the HTTPS domain, and register exactly
 `https://<api-origin>/v1/auth/external/apple/callback`. Set
 `APPLE_SIGNIN_CLIENT_ID`, `APPLE_SIGNIN_TEAM_ID`, `APPLE_SIGNIN_KEY_ID`,
 `APPLE_SIGNIN_REDIRECT_URI`, and either `APPLE_SIGNIN_PRIVATE_KEY` or
-`APPLE_SIGNIN_PRIVATE_KEY_BASE64`. Verify readiness, then test first consent,
-private relay, and a later login where Apple omits email. Never commit the
-private key, client secret JWT, authorization code, or ID token.
+`APPLE_SIGNIN_PRIVATE_KEY_BASE64`. Apple lifecycle tokens use a dedicated
+AES-256-GCM keyring: set `EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON` to a JSON
+object whose values are base64, base64url, or hex encoded 32-byte keys, and set
+`EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION` to a present version. The optional
+`EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1` is a single-key development/transition
+fallback; the versioned JSON keyring is the deployment form. Retain old key
+versions until all stored credentials and revocation jobs have rotated or been
+cleared.
+
+Register the server-to-server notification URL for the environment:
+
+- staging: `https://api.staging.waflo.app/v1/auth/external/apple/notifications`
+- production: `https://api.waflo.app/v1/auth/external/apple/notifications`
+
+The API verifies Apple's signed JWS and handles `email-enabled`,
+`email-disabled`, `consent-revoked`, and `account-deleted`. The operational
+worker durably revokes authorization on unlink and Waflo deletion requests.
+Verify readiness, then test first consent, private relay, repeat login, unlink,
+deletion, notification delivery, and retry behavior. Never commit the private
+key, token-encryption keyring, client secret JWT, authorization code, ID token,
+access token, or refresh token.
 
 Provider subject plus issuer is the durable identity. Provider email is mutable
 metadata. A matching email never auto-links an existing Waflo account.

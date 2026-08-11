@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { hashPassword } from "../../packages/auth/src/index.js";
 import {
   createLocalJWKSet,
   exportJWK,
   exportPKCS8,
   generateKeyPair,
-  SignJWT,
   type KeyLike,
+  SignJWT,
 } from "jose";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app.js";
@@ -15,10 +14,12 @@ import { AuthService } from "../../apps/api/src/auth/auth.service.js";
 import { ExternalAuthService } from "../../apps/api/src/auth/external-auth.service.js";
 import type { WafloRequest } from "../../apps/api/src/common/request-context.js";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
+import { CustomerCardService } from "../../apps/api/src/customer/customer-card.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import { OrganizationsService } from "../../apps/api/src/organizations/organizations.service.js";
-import { CustomerCardService } from "../../apps/api/src/customer/customer-card.service.js";
+import { OperationalWorker } from "../../apps/operational-worker/src/main.js";
 import { WalletWorker } from "../../apps/wallet-worker/src/main.js";
+import { hashPassword } from "../../packages/auth/src/index.js";
 import {
   createW3CustomerWalletFixture,
   w3EnrollmentBase,
@@ -67,6 +68,10 @@ describe.sequential("production external identity and lifecycle", () => {
     process.env.APPLE_SIGNIN_PRIVATE_KEY = await exportPKCS8(appleClientKeys.privateKey);
     process.env.APPLE_SIGNIN_REDIRECT_URI = "http://localhost:4000/v1/auth/external/apple/callback";
     process.env.OAUTH_FLOW_SECRET = "oauth-flow-test-secret-which-is-long-enough";
+    process.env.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON = JSON.stringify({
+      1: Buffer.alloc(32, 9).toString("base64"),
+    });
+    process.env.EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION = "1";
 
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
@@ -98,6 +103,7 @@ describe.sequential("production external identity and lifecycle", () => {
     return {
       state: requiredQueryParameter(url, "state"),
       nonce: requiredQueryParameter(url, "nonce"),
+      browserBinding: result.browserBinding.value,
       url,
     };
   }
@@ -126,14 +132,64 @@ describe.sequential("production external identity and lifecycle", () => {
       .sign(providerPrivateKey);
   }
 
-  function returnToken(token: string) {
+  function returnToken(token: string, options: { omitRefreshToken?: boolean } = {}) {
     external.providerFetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ id_token: token }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({
+            id_token: token,
+            access_token: `access-${randomUUID()}`,
+            ...(options.omitRefreshToken ? {} : { refresh_token: `refresh-${randomUUID()}` }),
+            expires_in: 3600,
+            token_type: "Bearer",
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
     ) as unknown as typeof fetch;
+  }
+
+  async function createApplePasswordMerchant(label: string) {
+    const flow = await start("apple", true);
+    const subject = `${label}-${randomUUID()}`;
+    const email = `${randomUUID()}@privaterelay.appleid.com`;
+    returnToken(
+      await idToken({
+        issuer: APPLE_ISSUER,
+        audience: APPLE_CLIENT_ID,
+        subject,
+        nonce: flow.nonce,
+        email,
+        emailVerified: true,
+      }),
+    );
+    const completed = await external.complete(
+      {
+        provider: "apple",
+        state: flow.state,
+        code: `${label}-code`,
+        browserBinding: flow.browserBinding,
+      },
+      request,
+    );
+    const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
+      where: {
+        provider_issuer_providerSubject: {
+          provider: "APPLE",
+          issuer: APPLE_ISSUER,
+          providerSubject: subject,
+        },
+      },
+      include: { appleCredential: true },
+    });
+    const password = `Apple lifecycle ${randomUUID()}!`;
+    await prisma.client.user.update({
+      where: { id: identity.userId },
+      data: { passwordHash: await hashPassword(password) },
+    });
+    return { completed, identity, password };
   }
 
   it("maps a verified Google subject to a Waflo user and consumes state once", async () => {
@@ -155,7 +211,12 @@ describe.sequential("production external identity and lifecycle", () => {
       }),
     );
     const completed = await external.complete(
-      { provider: "google", state: flow.state, code: "one-time-google-code" },
+      {
+        provider: "google",
+        state: flow.state,
+        code: "one-time-google-code",
+        browserBinding: flow.browserBinding,
+      },
       request,
     );
     const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
@@ -171,7 +232,15 @@ describe.sequential("production external identity and lifecycle", () => {
     expect(identity.providerEmail).toBe(email);
     expect(completed.session.rawToken).not.toContain("one-time-google-code");
     await expect(
-      external.complete({ provider: "google", state: flow.state, code: "replayed-code" }, request),
+      external.complete(
+        {
+          provider: "google",
+          state: flow.state,
+          code: "replayed-code",
+          browserBinding: flow.browserBinding,
+        },
+        request,
+      ),
     ).rejects.toMatchObject({ code: "EXTERNAL_AUTH_INVALID" });
   });
 
@@ -189,7 +258,12 @@ describe.sequential("production external identity and lifecycle", () => {
     );
     await expect(
       external.complete(
-        { provider: "google", state: wrongAudience.state, code: "wrong-audience" },
+        {
+          provider: "google",
+          state: wrongAudience.state,
+          code: "wrong-audience",
+          browserBinding: wrongAudience.browserBinding,
+        },
         request,
       ),
     ).rejects.toMatchObject({ code: "EXTERNAL_AUTH_FAILED" });
@@ -207,7 +281,12 @@ describe.sequential("production external identity and lifecycle", () => {
     );
     await expect(
       external.complete(
-        { provider: "google", state: wrongNonce.state, code: "wrong-nonce" },
+        {
+          provider: "google",
+          state: wrongNonce.state,
+          code: "wrong-nonce",
+          browserBinding: wrongNonce.browserBinding,
+        },
         request,
       ),
     ).rejects.toMatchObject({ code: "EXTERNAL_AUTH_FAILED" });
@@ -239,7 +318,15 @@ describe.sequential("production external identity and lifecycle", () => {
       }),
     );
     await expect(
-      external.complete({ provider: "google", state: flow.state, code: "collision" }, request),
+      external.complete(
+        {
+          provider: "google",
+          state: flow.state,
+          code: "collision",
+          browserBinding: flow.browserBinding,
+        },
+        request,
+      ),
     ).rejects.toMatchObject({ code: "EXTERNAL_AUTH_ACTION_REQUIRED" });
     expect(await prisma.client.externalIdentity.count({ where: { userId: user.id } })).toBe(0);
   });
@@ -287,6 +374,7 @@ describe.sequential("production external identity and lifecycle", () => {
         provider: "google",
         state: requiredQueryParameter(flowUrl, "state"),
         code: "link-code",
+        browserBinding: started.browserBinding.value,
       },
       request,
     );
@@ -345,6 +433,7 @@ describe.sequential("production external identity and lifecycle", () => {
           provider: "google",
           state: requiredQueryParameter(flowUrl, "state"),
           code: "revoked-link-code",
+          browserBinding: started.browserBinding.value,
         },
         request,
       ),
@@ -352,13 +441,13 @@ describe.sequential("production external identity and lifecycle", () => {
     expect(await prisma.client.externalIdentity.count({ where: { userId: user.id } })).toBe(0);
   });
 
-  it("keeps Google provider subject permanent while provider email metadata changes", async () => {
+  it("canonicalizes both valid Google issuer aliases to one permanent provider identity", async () => {
     const first = await start("google", true);
     const subject = `permanent-${randomUUID()}`;
     const firstEmail = `${randomUUID()}@first.example`;
     returnToken(
       await idToken({
-        issuer: GOOGLE_ISSUER,
+        issuer: "accounts.google.com",
         audience: GOOGLE_CLIENT_ID,
         subject,
         nonce: first.nonce,
@@ -366,7 +455,15 @@ describe.sequential("production external identity and lifecycle", () => {
         emailVerified: true,
       }),
     );
-    await external.complete({ provider: "google", state: first.state, code: "first" }, request);
+    await external.complete(
+      {
+        provider: "google",
+        state: first.state,
+        code: "first",
+        browserBinding: first.browserBinding,
+      },
+      request,
+    );
     const second = await start("google", false);
     const changedEmail = `${randomUUID()}@changed.example`;
     returnToken(
@@ -379,7 +476,15 @@ describe.sequential("production external identity and lifecycle", () => {
         emailVerified: true,
       }),
     );
-    await external.complete({ provider: "google", state: second.state, code: "second" }, request);
+    await external.complete(
+      {
+        provider: "google",
+        state: second.state,
+        code: "second",
+        browserBinding: second.browserBinding,
+      },
+      request,
+    );
     const identities = await prisma.client.externalIdentity.findMany({
       where: { provider: "GOOGLE", issuer: GOOGLE_ISSUER, providerSubject: subject },
     });
@@ -406,6 +511,7 @@ describe.sequential("production external identity and lifecycle", () => {
         provider: "apple",
         state: first.state,
         code: "apple-first-code",
+        browserBinding: first.browserBinding,
         appleUser: JSON.stringify({
           email: relay,
           name: { firstName: "Relay", lastName: "Merchant" },
@@ -413,6 +519,9 @@ describe.sequential("production external identity and lifecycle", () => {
       },
       request,
     );
+    const firstCredential = await prisma.client.appleAuthorizationCredential.findFirstOrThrow({
+      where: { externalIdentity: { providerSubject: subject } },
+    });
     const second = await start("apple", false);
     returnToken(
       await idToken({
@@ -421,9 +530,15 @@ describe.sequential("production external identity and lifecycle", () => {
         subject,
         nonce: second.nonce,
       }),
+      { omitRefreshToken: true },
     );
     await external.complete(
-      { provider: "apple", state: second.state, code: "apple-later-code" },
+      {
+        provider: "apple",
+        state: second.state,
+        code: "apple-later-code",
+        browserBinding: second.browserBinding,
+      },
       request,
     );
     const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
@@ -436,6 +551,10 @@ describe.sequential("production external identity and lifecycle", () => {
       },
     });
     expect(identity.providerEmail).toBe(relay);
+    const repeatedCredential = await prisma.client.appleAuthorizationCredential.findUniqueOrThrow({
+      where: { externalIdentityId: identity.id },
+    });
+    expect(repeatedCredential.refreshTokenEncrypted).toBe(firstCredential.refreshTokenEncrypted);
   });
 
   it("rejects Apple audience mismatch and cannot unlink the final authentication method", async () => {
@@ -451,7 +570,15 @@ describe.sequential("production external identity and lifecycle", () => {
       }),
     );
     await expect(
-      external.complete({ provider: "apple", state: invalid.state, code: "wrong-aud" }, request),
+      external.complete(
+        {
+          provider: "apple",
+          state: invalid.state,
+          code: "wrong-aud",
+          browserBinding: invalid.browserBinding,
+        },
+        request,
+      ),
     ).rejects.toMatchObject({ code: "EXTERNAL_AUTH_FAILED" });
 
     const valid = await start("apple", true);
@@ -466,7 +593,15 @@ describe.sequential("production external identity and lifecycle", () => {
         emailVerified: true,
       }),
     );
-    await external.complete({ provider: "apple", state: valid.state, code: "valid" }, request);
+    await external.complete(
+      {
+        provider: "apple",
+        state: valid.state,
+        code: "valid",
+        browserBinding: valid.browserBinding,
+      },
+      request,
+    );
     const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
       where: {
         provider_issuer_providerSubject: {
@@ -479,6 +614,123 @@ describe.sequential("production external identity and lifecycle", () => {
     await expect(
       external.unlink("apple", identity.userId, randomUUID(), undefined, request),
     ).rejects.toMatchObject({ code: "FINAL_AUTH_METHOD" });
+  });
+
+  it("encrypts Apple tokens and durably revokes them after explicit unlink", async () => {
+    const merchant = await createApplePasswordMerchant("apple-unlink-revoke");
+    expect(merchant.identity.appleCredential?.refreshTokenEncrypted).toMatch(/^wae1\./);
+    expect(merchant.identity.appleCredential?.refreshTokenEncrypted).not.toContain("refresh-");
+    await external.unlink(
+      "apple",
+      merchant.identity.userId,
+      merchant.completed.session.sessionId,
+      merchant.password,
+      request,
+    );
+    expect(
+      await prisma.client.externalIdentity.count({ where: { id: merchant.identity.id } }),
+    ).toBe(0);
+    const job = await prisma.client.appleTokenRevocationJob.findUniqueOrThrow({
+      where: { idempotencyKey: `unlink:${merchant.identity.id}` },
+    });
+    expect(job.status).toBe("PENDING");
+    expect(job.tokenEncrypted).toMatch(/^wae1\./);
+
+    const worker = new OperationalWorker(prisma.client, environment.values);
+    let revokeBody: URLSearchParams | null = null;
+    worker.providerFetch = vi.fn(async (_url, init) => {
+      revokeBody = new URLSearchParams(String(init?.body ?? ""));
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      expect(await worker.processOneAppleTokenRevocation()).toBe(true);
+    } finally {
+      worker.close();
+    }
+    expect(revokeBody?.get("client_id")).toBe(APPLE_CLIENT_ID);
+    expect(revokeBody?.get("token_type_hint")).toBe("refresh_token");
+    expect(revokeBody?.get("token")).toMatch(/^refresh-/);
+    const completed = await prisma.client.appleTokenRevocationJob.findUniqueOrThrow({
+      where: { id: job.id },
+    });
+    expect(completed.status).toBe("COMPLETED");
+    expect(completed.tokenEncrypted).toBeNull();
+    expect(completed.tokenClearedAt).not.toBeNull();
+  });
+
+  it("retries Apple revocation with a durable lease and erases token material after bounded failure", async () => {
+    const merchant = await createApplePasswordMerchant("apple-revoke-retry");
+    await external.unlink(
+      "apple",
+      merchant.identity.userId,
+      merchant.completed.session.sessionId,
+      merchant.password,
+      request,
+    );
+    const job = await prisma.client.appleTokenRevocationJob.findUniqueOrThrow({
+      where: { idempotencyKey: `unlink:${merchant.identity.id}` },
+    });
+    const worker = new OperationalWorker(prisma.client, environment.values);
+    worker.providerFetch = vi.fn(
+      async () => new Response(null, { status: 503 }),
+    ) as unknown as typeof fetch;
+    try {
+      expect(await worker.processOneAppleTokenRevocation()).toBe(true);
+      const retry = await prisma.client.appleTokenRevocationJob.findUniqueOrThrow({
+        where: { id: job.id },
+      });
+      expect(retry.status).toBe("PENDING");
+      expect(retry.attemptCount).toBe(1);
+      expect(retry.tokenEncrypted).toMatch(/^wae1\./);
+
+      await prisma.client.appleTokenRevocationJob.update({
+        where: { id: job.id },
+        data: { attemptCount: 7, nextAttemptAt: new Date(Date.now() - 1_000) },
+      });
+      expect(await worker.processOneAppleTokenRevocation()).toBe(true);
+    } finally {
+      worker.close();
+    }
+    const exhausted = await prisma.client.appleTokenRevocationJob.findUniqueOrThrow({
+      where: { id: job.id },
+    });
+    expect(exhausted.status).toBe("DEAD_LETTER");
+    expect(exhausted.tokenEncrypted).toBeNull();
+    expect(exhausted.tokenClearedAt).not.toBeNull();
+  });
+
+  it("queues Apple revocation without blocking Waflo account deletion", async () => {
+    const merchant = await createApplePasswordMerchant("apple-account-deletion");
+    const commandId = randomUUID();
+    const result = await auth.requestAccountLifecycle(
+      merchant.identity.userId,
+      "DELETION",
+      {
+        commandId,
+        sessionId: merchant.completed.session.sessionId,
+        confirmation: "REQUEST DELETION",
+        currentPassword: merchant.password,
+      },
+      request,
+    );
+    expect(result.status).toBe("COMPLETED");
+    expect(
+      await prisma.client.appleAuthorizationCredential.count({
+        where: { externalIdentityId: merchant.identity.id },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.client.appleTokenRevocationJob.count({
+        where: { reason: "ACCOUNT_DELETION", encryptionContextId: merchant.identity.id },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.client.externalIdentity.count({ where: { id: merchant.identity.id } }),
+    ).toBe(1);
+    expect(
+      (await prisma.client.user.findUniqueOrThrow({ where: { id: merchant.identity.userId } }))
+        .status,
+    ).toBe("DEACTIVATED");
   });
 
   it("serializes concurrent identity unlinking so one authentication method always remains", async () => {

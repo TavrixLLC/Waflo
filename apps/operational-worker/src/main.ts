@@ -13,6 +13,13 @@ import {
   queueWalletPassStateChange,
 } from "@waflo/database";
 import {
+  createAppleClientSecret,
+  createExternalAuthTokenKeyring,
+  decryptExternalAuthToken,
+  type ExternalAuthTokenKeyring,
+  resolveApplePrivateKey,
+} from "@waflo/external-auth-security";
+import {
   calculateLedgerEntryHash,
   canonicalJson,
   LEDGER_GENESIS_HASH,
@@ -164,8 +171,10 @@ export class OperationalWorker {
   private readonly workerId = `operations-${randomUUID()}`;
   private readonly objectStorage: S3Client;
   private readonly customerKeyring;
+  private readonly externalAuthTokenKeyring: ExternalAuthTokenKeyring | null;
   private readonly stripe: Stripe | null;
   private stopping = false;
+  providerFetch: typeof fetch = fetch;
 
   constructor(
     private readonly prisma: PrismaClient,
@@ -187,6 +196,17 @@ export class OperationalWorker {
         environment.CUSTOMER_DATA_ENCRYPTION_KEY_V1,
       ),
     );
+    this.externalAuthTokenKeyring =
+      environment.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON ||
+      environment.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1
+        ? createExternalAuthTokenKeyring(
+            environment.EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION,
+            parseVersionedSecretEntries(
+              environment.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON,
+              environment.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1 ?? "",
+            ),
+          )
+        : null;
     this.stripe = environment.STRIPE_SECRET_KEY
       ? new Stripe(environment.STRIPE_SECRET_KEY, {
           appInfo: { name: "Waflo Operational Worker", version: "1.0.0" },
@@ -254,10 +274,122 @@ export class OperationalWorker {
       analyticsRows: await this.processIncrementalAnalytics(),
       exportsProcessed: (await this.processOneExport()) ? 1 : 0,
       privacyRequestsProcessed: (await this.processOnePrivacyRequest()) ? 1 : 0,
+      appleRevocationsProcessed: (await this.processOneAppleTokenRevocation()) ? 1 : 0,
       stripeSubscriptionsReconciled: await this.reconcileStripeSubscriptions(),
       integrityFindings: await this.sampleProjectionIntegrity(),
       cleanupItems: await this.cleanupExpiredState(),
     };
+  }
+
+  async processOneAppleTokenRevocation(): Promise<boolean> {
+    const now = new Date();
+    const candidate = await this.prisma.appleTokenRevocationJob.findFirst({
+      where: {
+        tokenEncrypted: { not: null },
+        nextAttemptAt: { lte: now },
+        OR: [{ status: "PENDING" }, { status: "PROCESSING", leaseExpiresAt: { lt: now } }],
+      },
+      orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
+    });
+    if (!candidate) return false;
+    const leaseExpiresAt = new Date(now.getTime() + LEASE_SECONDS * 1_000);
+    const claimed = await this.prisma.appleTokenRevocationJob.updateMany({
+      where: {
+        id: candidate.id,
+        tokenEncrypted: { not: null },
+        nextAttemptAt: { lte: now },
+        OR: [{ status: "PENDING" }, { status: "PROCESSING", leaseExpiresAt: { lt: now } }],
+      },
+      data: {
+        status: "PROCESSING",
+        leaseOwner: this.workerId,
+        leaseExpiresAt,
+        attemptCount: { increment: 1 },
+      },
+    });
+    if (claimed.count !== 1) return false;
+    const job = await this.prisma.appleTokenRevocationJob.findUniqueOrThrow({
+      where: { id: candidate.id },
+    });
+    try {
+      const privateKey = resolveApplePrivateKey(
+        this.environment.APPLE_SIGNIN_PRIVATE_KEY,
+        this.environment.APPLE_SIGNIN_PRIVATE_KEY_BASE64,
+      );
+      if (
+        !this.externalAuthTokenKeyring ||
+        !privateKey ||
+        !this.environment.APPLE_SIGNIN_CLIENT_ID ||
+        !this.environment.APPLE_SIGNIN_TEAM_ID ||
+        !this.environment.APPLE_SIGNIN_KEY_ID ||
+        !job.tokenEncrypted
+      ) {
+        throw new Error("APPLE_REVOCATION_CONFIG_UNAVAILABLE");
+      }
+      if (Number(job.tokenEncrypted.split(".")[1]) !== job.tokenKeyVersion) {
+        throw new Error("APPLE_REVOCATION_KEY_VERSION_MISMATCH");
+      }
+      const token = decryptExternalAuthToken(job.tokenEncrypted, {
+        contextId: job.encryptionContextId,
+        purpose: job.tokenType === "REFRESH_TOKEN" ? "apple-refresh-token" : "apple-access-token",
+        keyring: this.externalAuthTokenKeyring,
+      });
+      const clientSecret = await createAppleClientSecret({
+        privateKey,
+        teamId: this.environment.APPLE_SIGNIN_TEAM_ID,
+        keyId: this.environment.APPLE_SIGNIN_KEY_ID,
+        clientId: this.environment.APPLE_SIGNIN_CLIENT_ID,
+      });
+      const response = await this.providerFetch("https://appleid.apple.com/auth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: this.environment.APPLE_SIGNIN_CLIENT_ID,
+          client_secret: clientSecret,
+          token,
+          token_type_hint: job.tokenType === "REFRESH_TOKEN" ? "refresh_token" : "access_token",
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error("APPLE_REVOCATION_PROVIDER_REJECTED");
+      await this.prisma.appleTokenRevocationJob.updateMany({
+        where: { id: job.id, status: "PROCESSING", leaseOwner: this.workerId },
+        data: {
+          status: "COMPLETED",
+          tokenEncrypted: null,
+          tokenClearedAt: new Date(),
+          completedAt: new Date(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastFailureCode: null,
+        },
+      });
+      return true;
+    } catch {
+      const exhausted = job.attemptCount >= 8;
+      await this.prisma.appleTokenRevocationJob.updateMany({
+        where: { id: job.id, status: "PROCESSING", leaseOwner: this.workerId },
+        data: exhausted
+          ? {
+              status: "DEAD_LETTER",
+              tokenEncrypted: null,
+              tokenClearedAt: new Date(),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              lastFailureCode: "APPLE_REVOCATION_RETRY_EXHAUSTED",
+            }
+          : {
+              status: "PENDING",
+              nextAttemptAt: new Date(
+                Date.now() + Math.min(2 ** job.attemptCount * 30_000, 6 * 60 * 60 * 1_000),
+              ),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              lastFailureCode: "APPLE_REVOCATION_RETRY_SCHEDULED",
+            },
+      });
+      return true;
+    }
   }
 
   async reconcileStripeSubscriptions(): Promise<number> {
@@ -2448,6 +2580,20 @@ export class OperationalWorker {
       select: { id: true },
       take: batch,
     });
+    const appleRevocationJobs = await this.prisma.appleTokenRevocationJob.findMany({
+      where: {
+        status: { in: ["COMPLETED", "DEAD_LETTER"] },
+        tokenEncrypted: null,
+        updatedAt: { lte: retentionCutoff },
+      },
+      select: { id: true },
+      take: batch,
+    });
+    const appleNotifications = await this.prisma.appleServerNotification.findMany({
+      where: { receivedAt: { lte: retentionCutoff } },
+      select: { id: true },
+      take: batch,
+    });
     const exports = await this.prisma.exportCommand.findMany({
       where: { status: "COMPLETED", expiresAt: { lte: now } },
       select: { id: true, objectKey: true },
@@ -2500,6 +2646,12 @@ export class OperationalWorker {
       const oauthResult = await transaction.oAuthAuthorizationRequest.deleteMany({
         where: { id: { in: oauthFlows.map((item) => item.id) } },
       });
+      const appleRevocationResult = await transaction.appleTokenRevocationJob.deleteMany({
+        where: { id: { in: appleRevocationJobs.map((item) => item.id) } },
+      });
+      const appleNotificationResult = await transaction.appleServerNotification.deleteMany({
+        where: { id: { in: appleNotifications.map((item) => item.id) } },
+      });
       return (
         pairingResult.count +
         approvalResult.count +
@@ -2508,7 +2660,9 @@ export class OperationalWorker {
         sessionResult.count +
         verificationResult.count +
         resetResult.count +
-        oauthResult.count
+        oauthResult.count +
+        appleRevocationResult.count +
+        appleNotificationResult.count
       );
     });
     let cleanedObjects = 0;

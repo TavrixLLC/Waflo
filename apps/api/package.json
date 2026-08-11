@@ -28,6 +28,7 @@
     "@waflo/contracts": "workspace:*",
     "@waflo/customer-security": "workspace:*",
     "@waflo/database": "workspace:*",
+    "@waflo/external-auth-security": "workspace:*",
     "@waflo/loyalty-ledger": "workspace:*",
     "@waflo/loyalty-policy": "workspace:*",
     "@waflo/operational-analytics": "workspace:*",

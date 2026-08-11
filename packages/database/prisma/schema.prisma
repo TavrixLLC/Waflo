@@ -500,6 +500,23 @@ enum OAuthAuthorizationIntent {
   LINK
 }
 
+enum AppleTokenRevocationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  DEAD_LETTER
+}
+
+enum AppleTokenRevocationReason {
+  UNLINK
+  ACCOUNT_DELETION
+}
+
+enum AppleTokenType {
+  REFRESH_TOKEN
+  ACCESS_TOKEN
+}
+
 model User {
   id                         String                   @id @default(uuid()) @db.Uuid
   displayName                String                   @db.VarChar(100)
@@ -558,16 +575,18 @@ model MerchantAccountLifecycleRequest {
 }
 
 model ExternalIdentity {
-  id              String                   @id @default(uuid()) @db.Uuid
-  provider        ExternalIdentityProvider
-  issuer          String                   @db.VarChar(255)
-  providerSubject String                   @map("provider_subject") @db.VarChar(255)
-  userId          String                   @map("user_id") @db.Uuid
-  providerEmail   String?                  @map("provider_email") @db.VarChar(254)
-  emailVerified   Boolean                  @default(false) @map("email_verified")
-  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  lastUsedAt      DateTime                 @default(now()) @map("last_used_at") @db.Timestamptz(6)
-  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                     String                        @id @default(uuid()) @db.Uuid
+  provider               ExternalIdentityProvider
+  issuer                 String                        @db.VarChar(255)
+  providerSubject        String                        @map("provider_subject") @db.VarChar(255)
+  userId                 String                        @map("user_id") @db.Uuid
+  providerEmail          String?                       @map("provider_email") @db.VarChar(254)
+  emailVerified          Boolean                       @default(false) @map("email_verified")
+  emailForwardingEnabled Boolean?                      @map("email_forwarding_enabled")
+  createdAt              DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt             DateTime                      @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  user                   User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appleCredential        AppleAuthorizationCredential?
 
   @@unique([provider, issuer, providerSubject])
   @@unique([userId, provider])
@@ -583,6 +602,7 @@ model OAuthAuthorizationRequest {
   userId                   String?                   @map("user_id") @db.Uuid
   reauthenticatedSessionId String?                   @map("reauthenticated_session_id") @db.Uuid
   nonceHash                String                    @map("nonce_hash") @db.Char(64)
+  browserBindingHash       String                    @map("browser_binding_hash") @db.Char(64)
   codeVerifierCiphertext   String                    @map("code_verifier_ciphertext") @db.Text
   allowRegistration       Boolean                   @default(false) @map("allow_registration")
   locale                   Locale                    @default(EN)
@@ -595,6 +615,57 @@ model OAuthAuthorizationRequest {
   @@index([userId, createdAt])
   @@index([reauthenticatedSessionId])
   @@map("oauth_authorization_requests")
+}
+
+model AppleAuthorizationCredential {
+  id                       String           @id @default(uuid()) @db.Uuid
+  externalIdentityId       String           @unique @map("external_identity_id") @db.Uuid
+  refreshTokenEncrypted    String?          @map("refresh_token_encrypted") @db.Text
+  refreshTokenKeyVersion   Int?             @map("refresh_token_key_version")
+  accessTokenEncrypted     String?          @map("access_token_encrypted") @db.Text
+  accessTokenKeyVersion    Int?             @map("access_token_key_version")
+  accessTokenExpiresAt     DateTime?        @map("access_token_expires_at") @db.Timestamptz(6)
+  createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  externalIdentity         ExternalIdentity @relation(fields: [externalIdentityId], references: [id], onDelete: Cascade)
+
+  @@map("apple_authorization_credentials")
+}
+
+model AppleTokenRevocationJob {
+  id                    String                     @id @default(uuid()) @db.Uuid
+  idempotencyKey        String                     @unique @map("idempotency_key") @db.VarChar(255)
+  encryptionContextId   String                     @map("encryption_context_id") @db.Uuid
+  tokenEncrypted        String?                    @map("token_encrypted") @db.Text
+  tokenKeyVersion       Int                        @map("token_key_version")
+  tokenType             AppleTokenType             @map("token_type")
+  reason                AppleTokenRevocationReason
+  status                AppleTokenRevocationStatus @default(PENDING)
+  attemptCount          Int                        @default(0) @map("attempt_count")
+  nextAttemptAt         DateTime                   @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseOwner            String?                    @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt        DateTime?                  @map("lease_expires_at") @db.Timestamptz(6)
+  lastFailureCode       String?                    @map("last_failure_code") @db.VarChar(120)
+  completedAt           DateTime?                  @map("completed_at") @db.Timestamptz(6)
+  tokenClearedAt        DateTime?                  @map("token_cleared_at") @db.Timestamptz(6)
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@map("apple_token_revocation_jobs")
+}
+
+model AppleServerNotification {
+  id              String   @id @default(uuid()) @db.Uuid
+  notificationId  String   @unique @map("notification_id") @db.VarChar(255)
+  eventType       String   @map("event_type") @db.VarChar(40)
+  providerSubject String   @map("provider_subject") @db.VarChar(255)
+  eventTime       DateTime @map("event_time") @db.Timestamptz(6)
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt     DateTime @map("processed_at") @db.Timestamptz(6)
+
+  @@index([providerSubject, eventTime])
+  @@map("apple_server_notifications")
 }
 
 model Session {

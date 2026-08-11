@@ -752,6 +752,43 @@ export class AuthService {
             identityValidatedAt: now,
           },
         });
+        if (requestType === "DELETION") {
+          const appleIdentity = await transaction.externalIdentity.findUnique({
+            where: { userId_provider: { userId, provider: "APPLE" } },
+            include: { appleCredential: true },
+          });
+          const credential = appleIdentity?.appleCredential;
+          if (appleIdentity && credential) {
+            const useRefresh = Boolean(
+              credential.refreshTokenEncrypted && credential.refreshTokenKeyVersion,
+            );
+            const tokenEncrypted = useRefresh
+              ? credential.refreshTokenEncrypted
+              : credential.accessTokenEncrypted;
+            const tokenKeyVersion = useRefresh
+              ? credential.refreshTokenKeyVersion
+              : credential.accessTokenKeyVersion;
+            if (tokenEncrypted && tokenKeyVersion) {
+              await transaction.appleTokenRevocationJob.upsert({
+                where: {
+                  idempotencyKey: `account-deletion:${lifecycle.id}:${appleIdentity.id}`,
+                },
+                create: {
+                  idempotencyKey: `account-deletion:${lifecycle.id}:${appleIdentity.id}`,
+                  encryptionContextId: appleIdentity.id,
+                  tokenEncrypted,
+                  tokenKeyVersion,
+                  tokenType: useRefresh ? "REFRESH_TOKEN" : "ACCESS_TOKEN",
+                  reason: "ACCOUNT_DELETION",
+                },
+                update: {},
+              });
+            }
+            await transaction.appleAuthorizationCredential.delete({
+              where: { id: credential.id },
+            });
+          }
+        }
         await transaction.user.update({
           where: { id: userId },
           data: {
@@ -800,6 +837,7 @@ export class AuthService {
             metadata: {
               sessionsRevoked: true,
               externalIdentitiesRetainedAsRevokedAccountTombstones: true,
+              appleAuthorizationQueuedForRevocation: requestType === "DELETION",
             },
           },
           request,

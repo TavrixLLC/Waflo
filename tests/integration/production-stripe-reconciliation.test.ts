@@ -375,6 +375,7 @@ describe.sequential("production Stripe subscription reconciliation", () => {
         provider: "GOOGLE",
         intent: "SIGN_IN",
         nonceHash: randomUUID().replaceAll("-", "").padEnd(64, "e"),
+        browserBindingHash: randomUUID().replaceAll("-", "").padEnd(64, "f"),
         codeVerifierCiphertext: "expired-and-no-longer-usable",
         expiresAt: old,
       },

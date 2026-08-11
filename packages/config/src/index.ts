@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
+const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
 
 export const environmentSchema = z
@@ -141,6 +142,9 @@ export const environmentSchema = z
     APPLE_SIGNIN_PRIVATE_KEY: z.string().optional(),
     APPLE_SIGNIN_PRIVATE_KEY_BASE64: z.string().optional(),
     APPLE_SIGNIN_REDIRECT_URI: optionalUrl,
+    EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1: optionalSecret,
+    EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION: z.coerce.number().int().min(1).default(1),
+    EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON: z.string().optional(),
     MERCHANT_BASE_DOMAIN: z.string().min(3).default("waflo.app"),
     SCALE_LOCATION_LIMIT: z.coerce.number().int().positive().optional(),
     SCALE_TEAM_LIMIT: z.coerce.number().int().positive().optional(),
@@ -267,6 +271,34 @@ export const environmentSchema = z
         path: ["APPLE_SIGNIN_CLIENT_ID"],
         message: "Apple Sign-In configuration must be complete or absent.",
       });
+    }
+    if (appleSignInParts.every(Boolean)) {
+      try {
+        const tokenKeys = parseVersionedSecretEntries(
+          value.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON,
+          value.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1 ?? "",
+        );
+        if (!tokenKeys[value.EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION]) {
+          throw new Error("active version missing");
+        }
+        for (const secret of Object.values(tokenKeys)) {
+          const trimmed = secret.trim();
+          const decoded = /^[0-9a-f]{64}$/i.test(trimmed)
+            ? Buffer.from(trimmed, "hex")
+            : Buffer.from(
+                trimmed,
+                trimmed.includes("-") || trimmed.includes("_") ? "base64url" : "base64",
+              );
+          if (decoded.length !== 32) throw new Error("invalid key length");
+        }
+      } catch {
+        context.addIssue({
+          code: "custom",
+          path: ["EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION"],
+          message:
+            "Apple Sign-In requires a valid versioned 32-byte external-auth token encryption keyring.",
+        });
+      }
     }
     if (!value.COOKIE_SECURE) {
       context.addIssue({
