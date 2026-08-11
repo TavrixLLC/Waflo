@@ -1,5 +1,5 @@
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -9,7 +9,35 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-const manifest = JSON.parse(await readFile(resolve(directory, "source-manifest.json"), "utf8"));
+async function readDurableFile(name, encoding) {
+  try {
+    return await readFile(resolve(directory, name), encoding);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`Required durable M2 contract file is missing: ${name}`);
+    }
+    throw error;
+  }
+}
+
+function gitObjectExists(specification) {
+  const result = spawnSync("git", ["cat-file", "-e", specification], { stdio: "ignore" });
+  if (result.error)
+    throw new Error(`Unable to inspect historical M2 Git objects: ${result.error.message}`);
+  return result.status === 0;
+}
+
+function readHistoricalFile(commit, path) {
+  const specification = `${commit}:${path}`;
+  if (!gitObjectExists(specification)) {
+    throw new Error(`Required historical M2 source file is missing: ${path} at ${commit}`);
+  }
+  return execFileSync("git", ["cat-file", "blob", specification], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+const manifest = JSON.parse(await readDurableFile("source-manifest.json", "utf8"));
 const expectedCommit = process.env.M2_EXPECTED_BACKEND_COMMIT ?? manifest.backendCommitSha;
 if (manifest.backendCommitSha !== expectedCommit) {
   throw new Error(
@@ -17,12 +45,23 @@ if (manifest.backendCommitSha !== expectedCommit) {
   );
 }
 
+if (!gitObjectExists(`${manifest.backendCommitSha}^{commit}`)) {
+  throw new Error(
+    `Historical M2 backend commit ${manifest.backendCommitSha} is unavailable. Fetch complete Git history before verification.`,
+  );
+}
+if (!gitObjectExists(`${manifest.backendCommitSha}^{tree}`)) {
+  throw new Error(
+    `Historical M2 backend tree ${manifest.backendCommitSha} is unavailable or incomplete. Fetch complete Git history before verification.`,
+  );
+}
+
 for (const [path, expectedHash] of Object.entries(manifest.sourceFiles)) {
-  const content = execFileSync("git", ["show", `${manifest.backendCommitSha}:${path}`]);
+  const content = readHistoricalFile(manifest.backendCommitSha, path);
   if (sha256(content) !== expectedHash) throw new Error(`Source hash mismatch: ${path}`);
 }
 for (const [name, expectedHash] of Object.entries(manifest.generatedFiles)) {
-  const content = await readFile(resolve(directory, name));
+  const content = await readDurableFile(name);
   if (sha256(content) !== expectedHash) throw new Error(`Generated hash mismatch: ${name}`);
 }
 const bundleSha256 = sha256(
@@ -33,7 +72,7 @@ const bundleSha256 = sha256(
 );
 if (bundleSha256 !== manifest.bundleSha256) throw new Error("Bundle checksum mismatch.");
 
-const m2Schema = JSON.parse(await readFile(resolve(directory, "m2.schema.json"), "utf8"));
+const m2Schema = JSON.parse(await readDurableFile("m2.schema.json", "utf8"));
 const currency = m2Schema.$defs?.PurchaseCurrency;
 if (
   currency?.type !== "string" ||
@@ -52,7 +91,7 @@ const forbidden = [
   /wfl1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/u,
 ];
 for (const name of [...Object.keys(manifest.generatedFiles), "source-manifest.json"]) {
-  const content = await readFile(resolve(directory, name), "utf8");
+  const content = await readDurableFile(name, "utf8");
   if (forbidden.some((pattern) => pattern.test(content))) {
     throw new Error(`Secret or credential pattern detected in ${name}.`);
   }
