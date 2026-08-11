@@ -124,6 +124,9 @@ jobs:
           pnpm env:validate:test
           pnpm db:validate
 
+      - name: Build database seed dependency graph
+        run: pnpm --filter "@waflo/database..." build
+
       - name: Apply all migrations and seed
         run: |
           pnpm db:migrate:deploy
