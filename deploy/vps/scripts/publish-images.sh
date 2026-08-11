@@ -39,7 +39,14 @@ image_exists() {
 }
 
 image_digest() {
-  docker buildx imagetools inspect "$1" --format '{{json .Manifest.digest}}' | tr -d '"'
+  local manifest_json
+  local digest
+  manifest_json="$(
+    docker buildx imagetools inspect "$1" --format '{{json .Manifest}}'
+  )" || return 4
+  digest="$(printf '%s' "${manifest_json}" | jq -er '.digest')" || return 4
+  [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 4
+  printf '%s\n' "${digest}"
 }
 
 mirror_invariant_tag() {
@@ -57,10 +64,19 @@ for package in migrate api operational-worker wallet-worker; do
   mirror_invariant_tag "${package}"
   staging_reference="${registry}/waflo-${package}:${release_sha}-staging"
   production_reference="${registry}/waflo-${package}:${release_sha}-production"
-  if image_exists "${staging_reference}" && image_exists "${production_reference}" && \
-    [[ "$(image_digest "${staging_reference}")" != "$(image_digest "${production_reference}")" ]]; then
-    printf 'Invariant image tags resolve to different manifests for %s.\n' "${package}" >&2
-    exit 4
+  if image_exists "${staging_reference}" && image_exists "${production_reference}"; then
+    staging_digest="$(image_digest "${staging_reference}")" || {
+      printf 'Staging image did not resolve to an OCI digest: %s.\n' "${staging_reference}" >&2
+      exit 4
+    }
+    production_digest="$(image_digest "${production_reference}")" || {
+      printf 'Production image did not resolve to an OCI digest: %s.\n' "${production_reference}" >&2
+      exit 4
+    }
+    if [[ "${staging_digest}" != "${production_digest}" ]]; then
+      printf 'Invariant image tags resolve to different manifests for %s.\n' "${package}" >&2
+      exit 4
+    fi
   fi
 done
 
