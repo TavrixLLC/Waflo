@@ -1,10 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 
 const repository = resolve(import.meta.dirname, "../../..");
 const composeFile = join(repository, "deploy", "vps", "compose.yml");
+const runtimeSmokeRequested = process.argv.includes("--runtime-smoke");
 const scratch = mkdtempSync(join(tmpdir(), "waflo-compose-validation-"));
 mkdirSync(join(scratch, "secrets", "staging", "provider-files"), { recursive: true });
 mkdirSync(join(scratch, "secrets", "production", "provider-files"), { recursive: true });
@@ -120,6 +121,35 @@ function render(environment) {
   return JSON.parse(result.stdout);
 }
 
+function assertTmpfsArguments(environment, model) {
+  for (const [serviceName, service] of Object.entries(model.services)) {
+    for (const specification of service.tmpfs ?? []) {
+      if (["noexec", "nosuid", "nodev"].includes(specification)) {
+        throw new Error(
+          `${environment}/${serviceName} has standalone tmpfs token ${specification}.`,
+        );
+      }
+      const [destination, ...options] = specification.split(":");
+      if (!destination.startsWith("/")) {
+        throw new Error(`${environment}/${serviceName} tmpfs target is not absolute.`);
+      }
+      const mountOptions = options.join(":").split(",");
+      for (const required of ["noexec", "nosuid"]) {
+        if (!mountOptions.includes(required)) {
+          throw new Error(`${environment}/${serviceName} tmpfs lost ${required}.`);
+        }
+      }
+    }
+  }
+  const migrationTmpfs = model.services.migrate.tmpfs ?? [];
+  if (migrationTmpfs.length !== 1 || migrationTmpfs[0] !== "/tmp:rw,noexec,nosuid,size=64m") {
+    throw new Error(
+      `${environment} migration tmpfs argv is malformed: ${JSON.stringify(migrationTmpfs)}`,
+    );
+  }
+}
+
+let runtimeSmokeRan = false;
 for (const environment of ["staging", "production"]) {
   const model = render(environment);
   if (model.name !== `waflo-${environment}`) throw new Error("Compose project isolation failed.");
@@ -135,6 +165,7 @@ for (const environment of ["staging", "production"]) {
   if (!model.services.migrate.profiles?.includes("tools")) {
     throw new Error("Migrations are not an explicit one-shot tool service.");
   }
+  assertTmpfsArguments(environment, model);
   if (!model.services.api.image.includes("4357675fad87bc8371e7832b6c0beee22b5caf61")) {
     throw new Error("The release SHA is missing from application image identity.");
   }
@@ -178,6 +209,21 @@ for (const environment of ["staging", "production"]) {
     ) {
       throw new Error(`${serviceName} must not receive provider secret files.`);
     }
+  }
+  if (runtimeSmokeRequested && !runtimeSmokeRan) {
+    const smoke = spawnSync(
+      process.execPath,
+      [
+        join(repository, "tests", "deployment", "migration-tmpfs.test.mjs"),
+        ...model.services.migrate.tmpfs,
+      ],
+      { cwd: repository, encoding: "utf8", shell: false },
+    );
+    if (smoke.status !== 0) {
+      throw new Error(`migration runtime smoke failed:\n${smoke.stdout}${smoke.stderr}`);
+    }
+    process.stdout.write(smoke.stdout);
+    runtimeSmokeRan = true;
   }
   process.stdout.write(`${environment} Compose: valid, private, release-addressed\n`);
 }

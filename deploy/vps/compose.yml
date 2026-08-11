@@ -181,7 +181,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
     networks: [backend]
     environment:
       DATABASE_POOL_MAX: "2"
@@ -204,7 +205,8 @@ services:
         source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
         target: /run/waflo-provider-secrets
         read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=128m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -238,7 +240,9 @@ services:
     environment:
       WAFLO_SERVICE: waflo-merchant
     networks: [edge]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/merchant-dashboard/.next/cache:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/merchant-dashboard/.next/cache:rw,noexec,nosuid,size=64m"
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/en/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 20s
@@ -262,7 +266,9 @@ services:
       API_INTERNAL_URL: http://api:4000
       WAFLO_SERVICE: waflo-customer
     networks: [edge]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/customer-web/.next/cache:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/customer-web/.next/cache:rw,noexec,nosuid,size=64m"
     depends_on:
       api:
         condition: service_healthy
@@ -288,7 +294,9 @@ services:
     environment:
       WAFLO_SERVICE: waflo-marketing
     networks: [edge]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/marketing-web/.next/cache:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/marketing-web/.next/cache:rw,noexec,nosuid,size=64m"
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/en').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 20s
@@ -311,7 +319,8 @@ services:
     environment:
       DATABASE_POOL_MAX: "${OPERATIONAL_WORKER_DATABASE_POOL_MAX:-5}"
       WAFLO_SERVICE: waflo-operational-worker
-    tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=128m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -338,7 +347,8 @@ services:
         source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
         target: /run/waflo-provider-secrets
         read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=192m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=192m"
     depends_on:
       postgres:
         condition: service_healthy

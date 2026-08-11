@@ -9,9 +9,11 @@ fi
 script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(CDPATH= cd -- "${script_directory}/../.." && pwd)"
 scratch="$(mktemp -d)"
+real_mc_config="/tmp/.mc-real-smoke"
 created_secret_directory=false
 cleanup() {
   rm -rf "${scratch}"
+  rm -rf "${real_mc_config}"
   rm -f \
     /run/secrets/minio_root_user \
     /run/secrets/minio_root_password \
@@ -22,6 +24,37 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+cap_eff=''
+no_new_privs=''
+while IFS=: read -r key value; do
+  case "${key}" in
+    CapEff)
+      set -- ${value}
+      cap_eff="${1:-}"
+      ;;
+    NoNewPrivs)
+      set -- ${value}
+      no_new_privs="${1:-}"
+      ;;
+  esac
+done </proc/self/status
+[ "${cap_eff}" = '0000000000000000' ]
+[ "${no_new_privs}" = '1' ]
+case "$(mc --version)" in
+  *'RELEASE.2025-08-13T08-35-41Z'*) ;;
+  *)
+    printf '%s\n' 'The MinIO smoke is not running the pinned mc release.' >&2
+    exit 1
+    ;;
+esac
+[ ! -e /root/.mc ]
+mkdir -p "${real_mc_config}"
+chmod 0700 "${real_mc_config}"
+mc --config-dir "${real_mc_config}" alias list >/dev/null
+[ -f "${real_mc_config}/config.json" ]
+[ ! -e /root/.mc ]
+rm -rf "${real_mc_config}"
 
 if [ ! -d /run/secrets ]; then
   mkdir -p /run/secrets
@@ -40,6 +73,9 @@ cat >"${fake_bin}/mc" <<'EOF'
 #!/bin/sh
 set -eu
 
+[ "$1" = '--config-dir' ]
+[ "$2" = '/tmp/.mc' ]
+shift 2
 [ "${MC_CONFIG_DIR:-}" = '/tmp/.mc' ]
 [ -d "${MC_CONFIG_DIR}" ]
 [ -w "${MC_CONFIG_DIR}" ]
@@ -95,15 +131,26 @@ esac
 EOF
 chmod 0700 "${fake_bin}/mc"
 
-MC_CALL_LOG="${call_log}" \
-MC_CONFIG_DIR=/root/.mc \
-PATH="${fake_bin}:${PATH}" \
-DEPLOYMENT_ENVIRONMENT=staging \
-OBJECT_STORAGE_BUCKET=waflo-smoke-private \
-  /bin/sh "${repository_root}/deploy/vps/scripts/minio-init.sh" >"${output_log}" 2>&1
+run=1
+while [ "${run}" -le 2 ]; do
+  MC_CALL_LOG="${call_log}" \
+  MC_CONFIG_DIR=/root/.mc \
+  PATH="${fake_bin}:${PATH}" \
+  DEPLOYMENT_ENVIRONMENT=staging \
+  OBJECT_STORAGE_BUCKET=waflo-smoke-private \
+    /bin/sh "${repository_root}/deploy/vps/scripts/minio-init.sh" >>"${output_log}" 2>&1
+  run=$((run + 1))
+done
 
 expected_calls="${scratch}/expected-calls.log"
 cat >"${expected_calls}" <<'EOF'
+alias set local http://minio:9000 <redacted> <redacted>
+mb --ignore-existing local/waflo-smoke-private
+anonymous set none local/waflo-smoke-private
+admin policy create local waflo-staging <ephemeral-policy>
+admin user add local <redacted> <redacted>
+admin user enable local <redacted>
+admin policy attach local waflo-staging --user <redacted>
 alias set local http://minio:9000 <redacted> <redacted>
 mb --ignore-existing local/waflo-smoke-private
 anonymous set none local/waflo-smoke-private
@@ -127,9 +174,11 @@ for credential in \
   esac
 done
 
-[ "$(cat "${output_log}")" = 'MinIO bucket and private application policy are ready.' ]
+[ "$(cat "${output_log}")" = "$(printf '%s\n%s' \
+  'MinIO bucket and private application policy are ready.' \
+  'MinIO bucket and private application policy are ready.')" ]
 [ ! -e /root/.mc ]
 [ ! -e /tmp/.mc ]
 [ ! -e /tmp/waflo-staging-policy.json ]
 
-printf '%s\n' 'MinIO writable config, command order, credential redaction, and ephemerality smoke passed.'
+printf '%s\n' 'Pinned mc explicit config, security options, repeated command order, credential redaction, and ephemerality smoke passed.'

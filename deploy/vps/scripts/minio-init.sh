@@ -7,6 +7,10 @@ export MC_CONFIG_DIR
 mkdir -p "${MC_CONFIG_DIR}"
 chmod 0700 "${MC_CONFIG_DIR}"
 
+mc_cmd() {
+  mc --config-dir "${MC_CONFIG_DIR}" "$@"
+}
+
 root_user="$(cat /run/secrets/minio_root_user)"
 root_password="$(cat /run/secrets/minio_root_password)"
 application_user="$(cat /run/secrets/object_storage_access_key)"
@@ -20,9 +24,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mc alias set local http://minio:9000 "${root_user}" "${root_password}" >/dev/null
-mc mb --ignore-existing "local/${OBJECT_STORAGE_BUCKET}" >/dev/null
-mc anonymous set none "local/${OBJECT_STORAGE_BUCKET}" >/dev/null
+mc_cmd alias set local http://minio:9000 "${root_user}" "${root_password}" >/dev/null
+mc_cmd mb --ignore-existing "local/${OBJECT_STORAGE_BUCKET}" >/dev/null
+mc_cmd anonymous set none "local/${OBJECT_STORAGE_BUCKET}" >/dev/null
 
 cat >"${policy_file}" <<EOF
 {
@@ -42,9 +46,9 @@ cat >"${policy_file}" <<EOF
 }
 EOF
 
-mc admin policy create local "${policy_name}" "${policy_file}" >/dev/null
-mc admin user add local "${application_user}" "${application_password}" >/dev/null
-mc admin user enable local "${application_user}" >/dev/null
-mc admin policy attach local "${policy_name}" --user "${application_user}" >/dev/null
+mc_cmd admin policy create local "${policy_name}" "${policy_file}" >/dev/null
+mc_cmd admin user add local "${application_user}" "${application_password}" >/dev/null
+mc_cmd admin user enable local "${application_user}" >/dev/null
+mc_cmd admin policy attach local "${policy_name}" --user "${application_user}" >/dev/null
 
 printf '%s\n' "MinIO bucket and private application policy are ready."

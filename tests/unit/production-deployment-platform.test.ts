@@ -132,10 +132,22 @@ describe("production deployment platform", () => {
     expect(minioInit).toContain("export MC_CONFIG_DIR");
     expect(minioInit).toContain(`mkdir -p "${mcConfigDirectoryVariable}"`);
     expect(minioInit).toContain(`rm -rf "${mcConfigDirectoryVariable}"`);
+    expect(minioInit).toContain("mc_cmd() {");
+    expect(minioInit).toContain(`mc --config-dir "${mcConfigDirectoryVariable}" "$@"`);
+    expect(minioInit.match(/^mc_cmd /gmu)).toHaveLength(7);
+    expect(minioInit.match(/^\s*mc /gmu)).toHaveLength(1);
     expect(compose).not.toContain("target: /root/.mc");
     expect(compose).not.toContain("target: /tmp/.mc");
     expect(compose).not.toContain("privileged: true");
     expect(compose).toContain("security_opt: [no-new-privileges:true]");
+  });
+
+  it("keeps each hardened tmpfs mount in one Compose argument", () => {
+    expect(compose).not.toMatch(/tmpfs:\s*\[/u);
+    expect(compose).not.toMatch(/^\s*-\s*(?:noexec|nosuid|nodev)\s*$/mu);
+    expect(compose.match(/^\s+- "\/[^"]+:rw,noexec,nosuid,size=\d+m"$/gmu)).toHaveLength(10);
+    expect(compose).toContain('      - "/tmp:rw,noexec,nosuid,size=64m"');
+    expect(deploy.match(/compose run --rm migrate/gmu)).toHaveLength(1);
   });
 
   it("uses one authoritative, immutable-action release workflow without duplicated test gates", () => {
