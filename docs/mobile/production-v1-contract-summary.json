@@ -1,0 +1,189 @@
+{
+  "contractName": "Waflo Mobile Production v1 Backend Contract",
+  "documentAuthority": "executable-source-at-backendCommit",
+  "generatedOn": "2026-08-11",
+  "backendBranch": "release/production-v1",
+  "backendCommit": "763f2dfccdb24fb9bfa16457f0e49936840e20a1",
+  "m2BaselineCommit": "0cc39d9ecb39a34fdbd91498e55b6d6ac35c281e",
+  "m2ContractVersion": "waflo-m2-mobile-contract-v1",
+  "migrationCount": 28,
+  "stagingApiOrigin": "https://api.staging.waflo.app",
+  "productionApiOrigin": "https://api.waflo.app",
+  "mobileActionRequired": true,
+  "mobileActionVerdict": "MOBILE_CODE_CHANGES_REQUIRED",
+  "mobileActions": [
+    {
+      "id": "MOB-001",
+      "classification": "STILL_REQUIRED",
+      "severity": "HIGH",
+      "summary": "Omit the historical stamp managerOverride and never use manager approval to authorize stamp.",
+      "mustCompleteBeforeStagingE2E": true
+    },
+    {
+      "id": "MOB-002",
+      "classification": "STILL_REQUIRED",
+      "severity": "HIGH",
+      "summary": "Handle PURCHASE_THRESHOLD_NOT_MET and retire historical PURCHASE_AMOUNT_BELOW_MINIMUM.",
+      "mustCompleteBeforeStagingE2E": true
+    },
+    {
+      "id": "MOB-003",
+      "classification": "STILL_REQUIRED",
+      "severity": "HIGH",
+      "summary": "Handle OPERATION_BILLING_BLOCKED and trust current server-derived effective billing enforcement.",
+      "mustCompleteBeforeStagingE2E": true
+    },
+    {
+      "id": "MOB-004",
+      "classification": "RESOLVED_BY_BACKEND",
+      "mobileImplementationStatus": "STILL_REQUIRED_FOR_NEW_FLOW",
+      "severity": "HIGH",
+      "summary": "Implement the supported server-issued manager-approval retry sequence; remove the old temporarily-unavailable workaround.",
+      "mustCompleteBeforeStagingE2E": true
+    }
+  ],
+  "endpointCounts": {
+    "totalApiRoutesInspected": 178,
+    "directMobileRequired": 9,
+    "directMobileOptional": 4,
+    "mobileSupporting": 12,
+    "notForMobile": 153,
+    "mobileRelevantTotal": 25
+  },
+  "authModel": "Merchant-initiated one-time pairing; Mobile-held Ed25519 key; opaque Device access and refresh credentials; per-request Ed25519 signed envelope",
+  "authorizationModel": "current User, organization Membership, device, Location, StaffLocationAssignment, device Location assignment, effective billing, Loyalty Card, customer Membership, policy, entitlement, and approval state",
+  "staffAuthorizationScheme": "Device",
+  "staffRequestSignatureAlgorithm": "Ed25519",
+  "staffRequestEnvelopeVersion": "waflo-device-request-v1",
+  "staffSessionDefaultTtlDays": 30,
+  "staffIdleExpiryImplemented": false,
+  "sessionRefreshRequiresUnexpiredAccessSession": true,
+  "sessionRefreshRepeatsLifecycleChecks": true,
+  "locationSwitchingSupported": false,
+  "staffSelfAssignmentSupported": false,
+  "staffLocationAssignmentMerchantFlow": {
+    "executable": true,
+    "list": "GET /v1/organizations/:organizationId/members/:memberId/location-assignments",
+    "put": "PUT /v1/organizations/:organizationId/members/:memberId/location-assignments/:locationId",
+    "delete": "DELETE /v1/organizations/:organizationId/members/:memberId/location-assignments/:locationId",
+    "listPermission": "devices.view",
+    "mutationPermission": "devices.pair",
+    "merchantCookieAndCsrfForMutations": true,
+    "mobileMustNeverCall": true
+  },
+  "managerApprovalOperationTypes": [
+    "REDEEM"
+  ],
+  "managerApprovalTtlMinutes": 5,
+  "managerApprovalOneTime": true,
+  "managerApprovalHttpFlowExecutableEndToEnd": true,
+  "managerApprovalIssuedBy": "first signed POST /v1/staff/operations/redeem",
+  "managerApprovalMerchantIssuanceRoutePresent": false,
+  "managerApprovalRetryRequiresSameIdempotencyKey": true,
+  "managerApprovalRetryRequiresOriginatingDevice": true,
+  "managerApprovalFingerprintOwner": "SERVER",
+  "managerApprovalPublicIdIncludedInFingerprint": false,
+  "managerApprovalAtomicTransition": "APPROVED_TO_CONSUMED_IN_REDEMPTION_TRANSACTION",
+  "managerApprovalBindings": [
+    "operationType",
+    "commandIdempotencyKey",
+    "organization",
+    "customerMembership",
+    "hashedCredential",
+    "loyaltyCardProgram",
+    "pinnedVersion",
+    "entitlement",
+    "rewardDefinition",
+    "thresholdCycleRedemptionConstraints",
+    "approvalPolicy",
+    "requestingStaffMembership",
+    "originatingDevice",
+    "location",
+    "normalizedNote"
+  ],
+  "staffLifecycle": {
+    "authoritativeChecksOnEverySignedBoundary": [
+      "userStatus",
+      "organizationMembershipStatus",
+      "deviceStatus",
+      "locationStatus",
+      "staffLocationAssignment",
+      "deviceLocationAssignment"
+    ],
+    "userDeactivationRevokesAffectedSessions": true,
+    "membershipSuspensionOrRemovalRevokesAffectedSessions": true,
+    "staffLocationAssignmentRevocationRevokesAffectedSessions": true,
+    "deviceRevocationRevokesAffectedSessions": true,
+    "invalidLocationDeniedAtBoundary": true,
+    "reactivationClearsPriorSessionRevocation": false
+  },
+  "staffLifecycleMachineCodes": [
+    "STAFF_USER_DEACTIVATED",
+    "STAFF_MEMBERSHIP_INACTIVE",
+    "STAFF_DEVICE_REVOKED",
+    "STAFF_LOCATION_ASSIGNMENT_INVALID"
+  ],
+  "managerApprovalMachineCodes": [
+    "MANAGER_APPROVAL_REQUIRED",
+    "MANAGER_APPROVAL_PENDING",
+    "MANAGER_APPROVAL_REJECTED",
+    "MANAGER_APPROVAL_EXPIRED",
+    "MANAGER_APPROVAL_CONSUMED",
+    "MANAGER_APPROVAL_MISMATCH",
+    "MANAGER_APPROVAL_INVALID",
+    "MANAGER_APPROVAL_NOT_APPLICABLE",
+    "MANAGER_APPROVAL_ALREADY_DECIDED",
+    "MANAGER_APPROVAL_STALE",
+    "MANAGER_APPROVAL_APPROVER_INACTIVE"
+  ],
+  "staffLocationAssignmentMachineCodes": [
+    "STAFF_MEMBER_NOT_FOUND",
+    "STAFF_MEMBER_NOT_ASSIGNABLE",
+    "STAFF_LOCATION_INVALID",
+    "STAFF_LOCATION_ASSIGNMENT_NOT_FOUND",
+    "PERMISSION_DENIED",
+    "VALIDATION_FAILED"
+  ],
+  "stampVisualStates": [
+    "FILLED",
+    "EMPTY"
+  ],
+  "goalState": {
+    "progressEqualsGoal": true,
+    "allStampsFilled": true,
+    "rewardReady": true
+  },
+  "finalRedemptionState": {
+    "progress": 0,
+    "rewardReady": false,
+    "allActiveStamps": "EMPTY",
+    "completedCyclesIncremented": true
+  },
+  "mutationIdempotencyKeyHeader": "x-idempotency-key",
+  "mutationIdempotencyKeyType": "UUID",
+  "offlineMutationsSupported": false,
+  "nfcSupported": false,
+  "smartTapSupported": false,
+  "posIntegrationSupported": false,
+  "stickyServerSessionsRequired": false,
+  "clientSideEntitlementAuthority": false,
+  "clientSideLoyaltyBalanceAuthority": false,
+  "customerMobileAppRequired": false,
+  "staffMobilePushSupported": false,
+  "staffMobileDeepLinksRequired": false,
+  "healthEndpointMobileOptional": true,
+  "readinessEndpointMobileContract": false,
+  "backendGapVerdicts": {
+    "BCK-001": "RESOLVED",
+    "BCK-002": "RESOLVED",
+    "BCK-003": "RESOLVED",
+    "BCK-004": "OPEN_NON_BLOCKING"
+  },
+  "knownBackendGaps": [
+    {
+      "id": "BCK-004",
+      "blocking": false,
+      "summary": "Some schema-valid but cryptographically invalid Ed25519 pairing public-key/signature inputs can surface INTERNAL_ERROR instead of a client-safe pairing error."
+    }
+  ]
+}
