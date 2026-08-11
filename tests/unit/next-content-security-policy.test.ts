@@ -6,7 +6,6 @@ import { createNextContentSecurityPolicy } from "../../packages/security/src/ind
 
 const originalNodeEnvironment = process.env.NODE_ENV;
 const originalPublicApiUrl = process.env.NEXT_PUBLIC_API_URL;
-// biome-ignore lint/suspicious/noUndeclaredEnvVars: P6 exercises an explicit local-only production smoke switch without changing provenance-bound turbo.json.
 const originalLocalProductionSmoke = process.env.WAFLO_LOCAL_PRODUCTION_SMOKE;
 
 const applicationConfigs = [
@@ -29,7 +28,6 @@ afterEach(() => {
   else process.env.NODE_ENV = originalNodeEnvironment;
   if (originalPublicApiUrl === undefined) delete process.env.NEXT_PUBLIC_API_URL;
   else process.env.NEXT_PUBLIC_API_URL = originalPublicApiUrl;
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: restore the local-only smoke switch after each configuration test.
   if (originalLocalProductionSmoke === undefined) delete process.env.WAFLO_LOCAL_PRODUCTION_SMOKE;
   else process.env.WAFLO_LOCAL_PRODUCTION_SMOKE = originalLocalProductionSmoke;
 });

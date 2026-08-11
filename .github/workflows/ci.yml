@@ -193,6 +193,10 @@ jobs:
         run: pnpm test
 
       - name: Production build
+        env:
+          # Browser flows serve the optimized build against the loopback CI API.
+          # Release images are rebuilt in a separate job without this local-only switch.
+          WAFLO_LOCAL_PRODUCTION_SMOKE: "1"
         run: pnpm build
 
       - name: Deployment assertions
