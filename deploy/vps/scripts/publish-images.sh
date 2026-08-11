@@ -119,4 +119,5 @@ else
 fi
 
 "${script_directory}/verify-release-images.sh" staging "${release_sha}"
+"${script_directory}/smoke-node-release-images.sh" staging "${release_sha}"
 "${script_directory}/verify-release-images.sh" production "${release_sha}"

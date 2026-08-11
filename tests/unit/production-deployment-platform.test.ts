@@ -22,6 +22,10 @@ const deploy = readFileSync(resolve(deploymentRoot, "scripts/deploy.sh"), "utf8"
 const prepareHost = readFileSync(resolve(deploymentRoot, "scripts/prepare-host.sh"), "utf8");
 const minioInit = readFileSync(resolve(deploymentRoot, "scripts/minio-init.sh"), "utf8");
 const publishImages = readFileSync(resolve(deploymentRoot, "scripts/publish-images.sh"), "utf8");
+const smokeNodeReleaseImages = readFileSync(
+  resolve(deploymentRoot, "scripts/smoke-node-release-images.sh"),
+  "utf8",
+);
 const rollback = readFileSync(resolve(deploymentRoot, "scripts/rollback.sh"), "utf8");
 const deployFromGitHub = readFileSync(
   resolve(deploymentRoot, "scripts/deploy-from-github.sh"),
@@ -33,10 +37,13 @@ const releaseEntrypoint = readFileSync(
 );
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
+const localReleaseShaVariable = "$" + "{release_sha}";
 const postgresBindVariable = "$" + "{postgres_bind}";
 const pgdataVariable = "$" + "{pgdata}";
 const environmentVariable = "$" + "{environment}";
 const mcConfigDirectoryVariable = "$" + "{MC_CONFIG_DIR}";
+const referenceVariable = "$" + "{reference}";
+const scriptDirectoryVariable = "$" + "{script_directory}";
 
 function deploymentFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -189,6 +196,24 @@ describe("production deployment platform", () => {
     expect(bake).toContain('"type=provenance,mode=max"');
     expect(bake).toContain('"type=sbom"');
     expect(bake).not.toMatch(/SECRET|PASSWORD|PRIVATE_KEY|SERVICE_ACCOUNT/u);
+  });
+
+  it("smoke tests the exact final Node release images before staging deployment", () => {
+    expect(publishImages).toContain(
+      `"${scriptDirectoryVariable}/smoke-node-release-images.sh" staging "${localReleaseShaVariable}"`,
+    );
+    for (const service of ["api", "operational-worker", "wallet-worker"]) {
+      expect(smokeNodeReleaseImages).toContain(service);
+    }
+    expect(smokeNodeReleaseImages).toContain("docker image inspect");
+    expect(smokeNodeReleaseImages).toContain("await import(entry)");
+    expect(smokeNodeReleaseImages).toContain("import.meta.resolve(specifier");
+    expect(smokeNodeReleaseImages).toContain("startup-reachable bare imports");
+    expect(smokeNodeReleaseImages).toContain("parseEnvironment(process.env)");
+    expect(smokeNodeReleaseImages).toContain("ERR_MODULE_NOT_FOUND|Cannot find package");
+    expect(smokeNodeReleaseImages).toContain(`docker run --rm "${referenceVariable}"`);
+    expect(smokeNodeReleaseImages).not.toContain("--privileged");
+    expect(smokeNodeReleaseImages).not.toContain("--user root");
   });
 
   it("keeps legal approval runtime-scoped and fails closed before production mutation", () => {
