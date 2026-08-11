@@ -26,6 +26,8 @@ trap deployment_failed ERR
 compose config --quiet
 pull_release_images
 compose up -d --no-build postgres redis minio
+printf 'Refreshing the release-bound MinIO provisioning container.\n'
+compose rm --force --stop minio-init
 compose up --no-build minio-init
 
 printf 'Executing exactly one forward migration job.\n'

@@ -142,6 +142,19 @@ describe("production deployment platform", () => {
     expect(compose).toContain("security_opt: [no-new-privileges:true]");
   });
 
+  it("recreates only the release-bound MinIO provisioning container", () => {
+    const removeMinioInit = "compose rm --force --stop minio-init";
+    const runMinioInit = "compose up --no-build minio-init";
+    expect(deploy.match(/compose rm --force --stop minio-init/gmu)).toHaveLength(1);
+    expect(deploy).not.toContain("compose down");
+    expect(deploy).not.toContain("compose rm --volumes");
+    expect(deploy.indexOf("compose up -d --no-build postgres redis minio")).toBeLessThan(
+      deploy.indexOf(removeMinioInit),
+    );
+    expect(deploy.indexOf(removeMinioInit)).toBeLessThan(deploy.indexOf(runMinioInit));
+    expect(deploy.indexOf(runMinioInit)).toBeLessThan(deploy.indexOf("compose run --rm migrate"));
+  });
+
   it("keeps each hardened tmpfs mount in one Compose argument", () => {
     expect(compose).not.toMatch(/tmpfs:\s*\[/u);
     expect(compose).not.toMatch(/^\s*-\s*(?:noexec|nosuid|nodev)\s*$/mu);
