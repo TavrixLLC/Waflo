@@ -19,6 +19,7 @@ import {
   type NotificationMessage,
   NotificationService,
 } from "../notifications/notification.service.js";
+import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycle.js";
 
 interface SessionResult {
   rawToken: string;
@@ -801,6 +802,7 @@ export class AuthService {
           where: { userId, revokedAt: null },
           data: { revokedAt: now, revocationReason: "account_deactivated" },
         });
+        const staffAccess = await revokeStaffAccessForUser(transaction, userId, now);
         await transaction.oAuthAuthorizationRequest.updateMany({
           where: { userId, consumedAt: null },
           data: { consumedAt: now },
@@ -836,6 +838,9 @@ export class AuthService {
             targetId: userId,
             metadata: {
               sessionsRevoked: true,
+              staffDeviceSessionsRevoked: staffAccess.sessionsRevoked,
+              staffPairingsCanceled: staffAccess.pairingsCanceled,
+              staffApprovalsExpired: staffAccess.approvalsExpired,
               externalIdentitiesRetainedAsRevokedAccountTombstones: true,
               appleAuthorizationQueuedForRevocation: requestType === "DELETION",
             },

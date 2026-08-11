@@ -17,6 +17,7 @@ import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycle.js";
 import { AuthService } from "./auth.service.js";
 
 type PublicProvider = "google" | "apple";
@@ -407,6 +408,7 @@ export class ExternalAuthService {
               where: { id: identity.userId },
               data: { status: "DEACTIVATED", deactivatedAt: now },
             });
+            await revokeStaffAccessForUser(transaction, identity.userId, now);
           }
           await this.audit.recordInTransaction(
             transaction,

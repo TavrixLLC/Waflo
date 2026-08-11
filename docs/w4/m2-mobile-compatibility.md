@@ -38,3 +38,18 @@ from mobile semantic-version enforcement and remains forbidden in production.
 
 No Prisma schema change or migration is required. The compatibility layer is API, DTO,
 validation, request-context, testing, and deterministic contract-generation code only.
+
+## Production Mobile handoff delta
+
+- MOB-001 remains required: STAMP must omit manager approval/override input. Approval is REDEEM
+  only.
+- MOB-002 remains required: handle `PURCHASE_THRESHOLD_NOT_MET` and retire the historical
+  `PURCHASE_AMOUNT_BELOW_MINIMUM` spelling.
+- MOB-003 remains required: handle `OPERATION_BILLING_BLOCKED` and trust server effective billing
+  state.
+- MOB-004 is resolved by the backend. Mobile can execute the server-issued pending approval flow
+  in `manager-approval.md`; it no longer needs to permanently gate approval-required redemption.
+
+The existing Device authentication, signing, 30-day default session, online-only mutation,
+durable UUID idempotency, command recovery, QR/member resolution, Loyalty Card, and exactly
+`FILLED`/`EMPTY` grid contracts remain unchanged.

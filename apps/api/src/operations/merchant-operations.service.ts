@@ -5,6 +5,7 @@ import { planCatalog } from "@waflo/billing";
 import type { AnalyticsQuery, AnalyticsRebuildInput } from "@waflo/contracts";
 import { canonicalJson } from "@waflo/loyalty-ledger";
 import { cohortMetrics, operationalDateBucket, safeRate } from "@waflo/operational-analytics";
+import { hasPermission } from "@waflo/permissions";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import type { WafloRequest } from "../common/request-context.js";
@@ -454,74 +455,6 @@ export class MerchantOperationsService {
     });
   }
 
-  async createApproval(
-    userId: string,
-    organizationId: string,
-    input: {
-      membershipId: string;
-      rewardEntitlementId: string;
-      staffDeviceId: string;
-      locationId: string;
-      requestFingerprint: string;
-    },
-    request: WafloRequest,
-  ) {
-    const actor = await this.tenant.requireMembership(
-      userId,
-      organizationId,
-      "operations.manager_approve",
-    );
-    if (actor.role === "STAFF") throw new AppError("PERMISSION_DENIED", "Staff denied.", 403);
-    const [entitlement, device] = await Promise.all([
-      this.prisma.client.rewardEntitlement.findFirst({
-        where: {
-          id: input.rewardEntitlementId,
-          membershipId: input.membershipId,
-          organizationId,
-        },
-      }),
-      this.prisma.client.staffDevice.findFirst({
-        where: { id: input.staffDeviceId, organizationId, status: "ACTIVE" },
-      }),
-    ]);
-    if (!entitlement || !device) {
-      throw new AppError("MANAGER_APPROVAL_INVALID", "Approval context is invalid.", 422);
-    }
-    const approval = await this.prisma.client.$transaction(async (transaction) => {
-      const created = await transaction.managerApprovalChallenge.create({
-        data: {
-          organizationId,
-          membershipId: input.membershipId,
-          rewardEntitlementId: entitlement.id,
-          staffDeviceId: device.id,
-          locationId: input.locationId,
-          requestFingerprint: input.requestFingerprint,
-          operationType: "REDEEM",
-          requestedByMemberId: device.organizationMemberId,
-          expiresAt: new Date(Date.now() + 5 * 60_000),
-        },
-      });
-      await this.audit.recordInTransaction(
-        transaction,
-        {
-          organizationId,
-          actorUserId: userId,
-          action: "operation.manager_approval_requested",
-          targetType: "manager_approval",
-          targetId: created.id,
-          locationId: input.locationId,
-        },
-        request,
-      );
-      return created;
-    });
-    return {
-      publicId: approval.publicId,
-      status: approval.status,
-      expiresAt: approval.expiresAt,
-    };
-  }
-
   async listApprovals(
     userId: string,
     organizationId: string,
@@ -538,6 +471,14 @@ export class MerchantOperationsService {
     );
     if (actor.role === "STAFF") throw new AppError("PERMISSION_DENIED", "Staff denied.", 403);
     const limit = Math.min(Math.max(query.limit ?? 30, 1), 100);
+    await this.prisma.client.managerApprovalChallenge.updateMany({
+      where: {
+        organizationId,
+        status: { in: ["PENDING", "APPROVED"] },
+        expiresAt: { lte: new Date() },
+      },
+      data: { status: "EXPIRED" },
+    });
     const approvals = await this.prisma.client.managerApprovalChallenge.findMany({
       where: {
         organizationId,
@@ -630,14 +571,135 @@ export class MerchantOperationsService {
       "operations.manager_approve",
     );
     if (actor.role === "STAFF") throw new AppError("PERMISSION_DENIED", "Staff denied.", 403);
-    const approval = await this.prisma.client.managerApprovalChallenge.findFirst({
-      where: { publicId, organizationId },
-    });
-    if (approval?.status !== "PENDING" || approval.expiresAt <= new Date()) {
-      throw new AppError("MANAGER_APPROVAL_INVALID", "Approval is unavailable.", 409);
-    }
     const now = new Date();
-    const updated = await this.prisma.client.$transaction(async (transaction) => {
+    const outcome = await this.prisma.client.$transaction(async (transaction) => {
+      const [currentActor, approval] = await Promise.all([
+        transaction.organizationMember.findUnique({
+          where: { organizationId_userId: { organizationId, userId } },
+          include: { user: { select: { status: true } } },
+        }),
+        transaction.managerApprovalChallenge.findFirst({
+          where: { publicId, organizationId },
+        }),
+      ]);
+      if (
+        currentActor?.status !== "ACTIVE" ||
+        currentActor.user.status !== "ACTIVE" ||
+        !hasPermission(currentActor.role, "operations.manager_approve")
+      ) {
+        throw new AppError(
+          "PERMISSION_DENIED",
+          "Manager approval permission is no longer active.",
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      if (approval?.operationType !== "REDEEM") {
+        return { kind: "error" as const, code: "MANAGER_APPROVAL_INVALID" };
+      }
+      if (approval.status !== "PENDING") {
+        const code =
+          approval.status === "APPROVED"
+            ? "MANAGER_APPROVAL_ALREADY_DECIDED"
+            : approval.status === "REJECTED"
+              ? "MANAGER_APPROVAL_REJECTED"
+              : approval.status === "EXPIRED"
+                ? "MANAGER_APPROVAL_EXPIRED"
+                : "MANAGER_APPROVAL_CONSUMED";
+        return { kind: "error" as const, code };
+      }
+      if (approval.expiresAt <= now) {
+        await transaction.managerApprovalChallenge.updateMany({
+          where: { id: approval.id, status: "PENDING" },
+          data: { status: "EXPIRED" },
+        });
+        if (approval.pendingOperationId) {
+          await transaction.loyaltyOperationCommand.updateMany({
+            where: { id: approval.pendingOperationId, status: "PROCESSING", leaseOwner: null },
+            data: {
+              status: "FAILED",
+              safeFailureCode: "MANAGER_APPROVAL_EXPIRED",
+              completedAt: now,
+            },
+          });
+        }
+        return { kind: "error" as const, code: "MANAGER_APPROVAL_EXPIRED" };
+      }
+      if (decision === "APPROVED") {
+        const [entitlement, requester, device, location, staffAssignment, deviceAssignment] =
+          await Promise.all([
+            transaction.rewardEntitlement.findFirst({
+              where: {
+                id: approval.rewardEntitlementId,
+                organizationId,
+                membershipId: approval.membershipId,
+              },
+              include: { membership: true, rewardDefinition: true },
+            }),
+            transaction.organizationMember.findFirst({
+              where: { id: approval.requestedByMemberId, organizationId },
+              include: { user: { select: { status: true } } },
+            }),
+            transaction.staffDevice.findFirst({
+              where: { id: approval.staffDeviceId, organizationId },
+            }),
+            transaction.location.findFirst({
+              where: { id: approval.locationId, organizationId, status: "ACTIVE" },
+            }),
+            transaction.staffLocationAssignment.findFirst({
+              where: {
+                organizationId,
+                organizationMemberId: approval.requestedByMemberId,
+                locationId: approval.locationId,
+                active: true,
+                redemptionAllowed: true,
+              },
+            }),
+            transaction.staffDeviceLocation.findFirst({
+              where: {
+                staffDeviceId: approval.staffDeviceId,
+                locationId: approval.locationId,
+                active: true,
+                redemptionAllowed: true,
+              },
+            }),
+          ]);
+        const stale =
+          !approval.pendingOperationId ||
+          !entitlement ||
+          !["AVAILABLE", "PARTIALLY_REDEEMED"].includes(entitlement.status) ||
+          entitlement.redemptionCount >= entitlement.maximumRedemptionCount ||
+          (entitlement.expiresAt !== null && entitlement.expiresAt <= now) ||
+          entitlement.membership.status !== "ACTIVE" ||
+          entitlement.membership.enrollmentProgramVersionId !== entitlement.programVersionId ||
+          !entitlement.rewardDefinition.requiresManagerApproval ||
+          entitlement.rewardDefinition.versionId !== entitlement.programVersionId ||
+          requester?.status !== "ACTIVE" ||
+          requester.user.status !== "ACTIVE" ||
+          device?.status !== "ACTIVE" ||
+          device.organizationMemberId !== approval.requestedByMemberId ||
+          !location ||
+          !staffAssignment ||
+          !deviceAssignment;
+        if (stale) {
+          await transaction.managerApprovalChallenge.updateMany({
+            where: { id: approval.id, status: "PENDING" },
+            data: { status: "EXPIRED" },
+          });
+          await transaction.loyaltyOperationCommand.updateMany({
+            where: {
+              id: approval.pendingOperationId ?? "00000000-0000-0000-0000-000000000000",
+              status: "PROCESSING",
+              leaseOwner: null,
+            },
+            data: {
+              status: "FAILED",
+              safeFailureCode: "MANAGER_APPROVAL_STALE",
+              completedAt: now,
+            },
+          });
+          return { kind: "error" as const, code: "MANAGER_APPROVAL_STALE" };
+        }
+      }
       const decisionResult = await transaction.managerApprovalChallenge.updateMany({
         where: { id: approval.id, status: "PENDING", expiresAt: { gt: now } },
         data:
@@ -646,7 +708,17 @@ export class MerchantOperationsService {
             : { status: "REJECTED", rejectedAt: now },
       });
       if (decisionResult.count !== 1) {
-        throw new AppError("MANAGER_APPROVAL_INVALID", "Approval is unavailable.", 409);
+        return { kind: "error" as const, code: "MANAGER_APPROVAL_ALREADY_DECIDED" };
+      }
+      if (decision === "REJECTED" && approval.pendingOperationId) {
+        await transaction.loyaltyOperationCommand.updateMany({
+          where: { id: approval.pendingOperationId, status: "PROCESSING", leaseOwner: null },
+          data: {
+            status: "FAILED",
+            safeFailureCode: "MANAGER_APPROVAL_REJECTED",
+            completedAt: now,
+          },
+        });
       }
       const value = await transaction.managerApprovalChallenge.findUniqueOrThrow({
         where: { id: approval.id },
@@ -667,9 +739,22 @@ export class MerchantOperationsService {
         },
         request,
       );
-      return value;
+      return { kind: "success" as const, value };
     });
-    return { publicId: updated.publicId, status: updated.status, decidedAt: now };
+    if (outcome.kind === "error") {
+      throw new AppError(
+        outcome.code,
+        outcome.code === "MANAGER_APPROVAL_EXPIRED"
+          ? "Manager approval has expired."
+          : outcome.code === "MANAGER_APPROVAL_REJECTED"
+            ? "Manager approval was rejected."
+            : outcome.code === "MANAGER_APPROVAL_STALE"
+              ? "The redeem intent is no longer eligible for approval."
+              : "Manager approval is unavailable.",
+        outcome.code === "MANAGER_APPROVAL_EXPIRED" ? HttpStatus.GONE : HttpStatus.CONFLICT,
+      );
+    }
+    return { publicId: outcome.value.publicId, status: outcome.value.status, decidedAt: now };
   }
 
   async listRisk(

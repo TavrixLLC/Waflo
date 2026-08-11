@@ -15,6 +15,7 @@ import {
   NotificationService,
 } from "../notifications/notification.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { revokeStaffAccessForMembership } from "../staff-devices/staff-device-lifecycle.js";
 
 function toPlanCode(plan: "STARTER" | "GROWTH" | "SCALE"): "starter" | "growth" | "scale" {
   return plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
@@ -680,13 +681,17 @@ export class TeamService {
             );
           }
         }
-        return transaction.organizationMember.update({
+        const member = await transaction.organizationMember.update({
           where: { id: target.id },
           data: {
             ...(input.role ? { role: input.role } : {}),
             ...(input.status ? { status: input.status } : {}),
           },
         });
+        if (input.status === "SUSPENDED" && target.status !== "SUSPENDED") {
+          await revokeStaffAccessForMembership(transaction, target.id, new Date());
+        }
+        return member;
       },
     );
     await this.audit.record(
@@ -742,6 +747,7 @@ export class TeamService {
           where: { id: current.id },
           data: { status: "REMOVED" },
         });
+        await revokeStaffAccessForMembership(transaction, current.id, new Date());
         return current;
       },
     );

@@ -376,7 +376,7 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       },
       include: {
         staffDevice: true,
-        organizationMember: true,
+        organizationMember: { include: { user: { select: { status: true } } } },
       },
     });
     if (!session) {
@@ -385,6 +385,64 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         "Staff device session is not active.",
         HttpStatus.UNAUTHORIZED,
       );
+    }
+    const [location, staffAssignment, deviceAssignment] = await Promise.all([
+      this.prisma.client.location.findFirst({
+        where: {
+          id: session.locationId,
+          organizationId: session.organizationId,
+          status: "ACTIVE",
+        },
+        select: { id: true },
+      }),
+      this.prisma.client.staffLocationAssignment.findFirst({
+        where: {
+          organizationId: session.organizationId,
+          organizationMemberId: session.organizationMemberId,
+          locationId: session.locationId,
+          active: true,
+        },
+        select: { locationId: true },
+      }),
+      this.prisma.client.staffDeviceLocation.findFirst({
+        where: {
+          staffDeviceId: session.staffDeviceId,
+          locationId: session.locationId,
+          active: true,
+        },
+        select: { locationId: true },
+      }),
+    ]);
+    const principalFailure =
+      session.organizationMember.user.status !== "ACTIVE"
+        ? {
+            code: "STAFF_USER_DEACTIVATED",
+            message: "The Staff identity is deactivated.",
+          }
+        : session.organizationMember.status !== "ACTIVE"
+          ? {
+              code: "STAFF_MEMBERSHIP_INACTIVE",
+              message: "The Staff organization membership is inactive.",
+            }
+          : session.staffDevice.status !== "ACTIVE"
+            ? { code: "STAFF_DEVICE_REVOKED", message: "The Staff device has been revoked." }
+            : !location || !staffAssignment || !deviceAssignment
+              ? {
+                  code: "STAFF_LOCATION_ASSIGNMENT_INVALID",
+                  message: "The Staff Location assignment is no longer active.",
+                }
+              : null;
+    if (principalFailure) {
+      await this.audit.security(
+        {
+          organizationId: session.organizationId,
+          eventType: `staff_device.${principalFailure.code.toLocaleLowerCase("en-US")}`,
+          severity: "HIGH",
+          metadata: { devicePublicId, requestId },
+        },
+        request,
+      );
+      throw new AppError(principalFailure.code, principalFailure.message, HttpStatus.UNAUTHORIZED);
     }
     try {
       assertDeviceOperational({

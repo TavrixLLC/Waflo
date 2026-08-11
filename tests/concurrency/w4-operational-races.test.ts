@@ -640,7 +640,13 @@ describe.sequential("W4 Repair Round 1 operational races", () => {
         organizationId: ORGANIZATION_ID,
         intendedStaffMemberId: staffMemberId,
         pairingTokenHash: pairing.tokenHash,
-        requestedLocationAssignments: [],
+        requestedLocationAssignments: [
+          {
+            locationId: LOCATION_ID,
+            earningAllowed: true,
+            redemptionAllowed: true,
+          },
+        ],
         createdByUserId: OWNER_ID,
         expiresAt: new Date(Date.now() + 10 * 60_000),
       },
@@ -712,16 +718,33 @@ describe.sequential("W4 Repair Round 1 operational races", () => {
 
   it("allows exactly one manager approval decision and one decision audit", async () => {
     const entitlement = await prisma.client.rewardEntitlement.findFirstOrThrow({
-      where: { organizationId: ORGANIZATION_ID },
+      where: {
+        organizationId: ORGANIZATION_ID,
+        rewardDefinition: { requiresManagerApproval: true },
+      },
+    });
+    const requestFingerprint = createHash("sha256").update(randomUUID()).digest("hex");
+    const command = await prisma.client.loyaltyOperationCommand.create({
+      data: {
+        organizationId: ORGANIZATION_ID,
+        membershipId: entitlement.membershipId,
+        operationType: "REDEEM_REWARD",
+        idempotencyKey: randomUUID(),
+        requestFingerprint,
+        actorMemberId: staffMemberId,
+        actorDeviceId: DEVICE_ID,
+        locationId: LOCATION_ID,
+      },
     });
     const approval = await prisma.client.managerApprovalChallenge.create({
       data: {
         organizationId: ORGANIZATION_ID,
         membershipId: entitlement.membershipId,
         rewardEntitlementId: entitlement.id,
+        pendingOperationId: command.id,
         staffDeviceId: DEVICE_ID,
         locationId: LOCATION_ID,
-        requestFingerprint: createHash("sha256").update(randomUUID()).digest("hex"),
+        requestFingerprint,
         requestedByMemberId: staffMemberId,
         expiresAt: new Date(Date.now() + 5 * 60_000),
       },

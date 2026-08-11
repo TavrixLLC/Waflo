@@ -17,6 +17,16 @@ export const staffPairingLocationSchema = z
   })
   .strict();
 
+export const staffLocationAssignmentUpsertSchema = z
+  .object({
+    earningAllowed: z.boolean(),
+    redemptionAllowed: z.boolean(),
+  })
+  .strict()
+  .refine((value) => value.earningAllowed || value.redemptionAllowed, {
+    message: "At least one Staff operation permission must be enabled.",
+  });
+
 export const createDevicePairingSessionSchema = z
   .object({
     staffMemberId: z.uuid(),
@@ -134,16 +144,6 @@ export const projectionCommandSchema = z
   .object({
     commandId: operationCommandIdSchema,
     expectedProjectionVersion: z.number().int().min(0),
-  })
-  .strict();
-
-export const managerApprovalRequestSchema = z
-  .object({
-    membershipId: z.uuid(),
-    rewardEntitlementId: z.uuid(),
-    staffDeviceId: z.uuid(),
-    locationId: z.uuid(),
-    requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
 
@@ -279,6 +279,9 @@ export const cohortAnalyticsItemSchema = z.object({
 export type CreateDevicePairingSessionInput = z.infer<typeof createDevicePairingSessionSchema>;
 export type DevicePairingClaimInput = z.infer<typeof devicePairingClaimSchema>;
 export type DevicePairingCompleteInput = z.infer<typeof devicePairingCompleteSchema>;
+export type StaffLocationAssignmentUpsertInput = z.infer<
+  typeof staffLocationAssignmentUpsertSchema
+>;
 export type IssueStampInput = z.infer<typeof issueStampSchema>;
 export type RedeemRewardInput = z.infer<typeof redeemRewardSchema>;
 export type ReverseOperationInput = z.infer<typeof reverseOperationSchema>;
