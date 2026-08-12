@@ -2,7 +2,54 @@
 
 Research date: 2026-08-12
 
-Scope: research and design only. This document does not authorize implementation, provider traffic, schema changes, customer tracking, or changes to the existing Apple Wallet and Google Wallet signing contracts.
+Original scope: research and design. The provider research and decision history below are retained. The implementation status recorded on 2026-08-12 supersedes the original “do not implement” recommendation while preserving every provider limitation and external verification requirement. No production provider traffic was used during implementation.
+
+## Implementation status — 2026-08-12
+
+### IMPLEMENTED
+
+- Merchant Web now exposes `Loyalty Card -> Wallet Engagement`, not a separate top-level product.
+- Apple nearby relevance is represented in signed passes with up to 10 selected active merchant locations, `latitude`, `longitude`, localized `relevantText`, and a requested `maxDistance` of 2,000 metres. Product copy states that Apple determines actual relevance distance.
+- Google nearby relevance patches the existing version-bound Loyalty Class with up to 10 `merchantLocations`. Waflo sends latitude/longitude only; no radius or merchant-authored nearby notification text is sent.
+- Google manual promotion uses object-level Add Message with `TEXT_AND_NOTIFY`, localized header/body, a stable delivery-derived message ID, and an optional validated merchant/Waflo HTTPS destination.
+- Google delivery reads the object before Add Message: a retry returns success when the stable message ID is already present. Near the ten-message object limit, Waflo deterministically removes only lexicographically earliest `wfl_` issuer-owned messages, leaving up to two safe send slots when ownership permits; it never removes another integration's message.
+- Apple manual promotion is disabled and reports `PROVIDER_CONFIRMATION_REQUIRED`. No private API was invented and `changeMessage` is not used for marketing.
+- Wallet promotion consent is an explicit, append-only, revocable Customer Web choice scoped to the organization, customer, and membership. Absence defaults to off. Loyalty participation and Wallet use remain available while consent is off.
+- Campaign creation is tenant-authoritative and limited to active, consented Google Wallet holders of the selected Loyalty Card. PostgreSQL resolves the latest consent record before applying the 5,000-pass audience ceiling. The HTTP request creates only durable campaign state; the existing wallet worker resolves targets and creates idempotent delivery commands.
+- Server caps are two promotional sends per pass/provider in 24 hours and five in seven days, plus ten merchant campaigns per 24 hours and a six-hour duplicate-content cooldown. Per-pass slots include in-flight reservations under an advisory transaction lock, preventing concurrent campaigns from racing the caps. Provider quota and transient failures retain safe retry state.
+- Known organization timezones enforce promotional quiet hours from 21:00 until 08:00 local time. This does not reclassify or delay operational loyalty-state updates.
+- Merchant content is normalized plain text with Unicode length limits, control/bidi/HTML/template rejection, first-party-only nearby variables, credential-pattern rejection, related-domain HTTPS validation, and deterministic nearby-claim safeguards.
+- Merchant location coordinates are nullable, range-checked, editable business data. Waflo does not collect customer latitude, longitude, location history, or geofence events.
+- The single category authority is `LoyaltyProgramVersion.baseTemplateCode`; existing `Organization.businessCategory` is the fallback, followed by `GENERAL`. Static versioned English/Arabic copy is resolved deterministically without AI or customer PII.
+- Nearby changes, selected-location coordinate/archive changes, and relevant organization name/category changes queue the existing pass-refresh pipeline. Archiving the last selected nearby branch turns nearby relevance off rather than leaving an enabled configuration with no locations.
+- Migration `20260812170000_wallet_engagement` adds the campaign, delivery, nearby configuration/selection, consent scope, command type, and merchant-coordinate storage. Existing consent, wallet command/outbox, audit, membership, provider identity, and program sync infrastructure are reused.
+
+### PROVIDER-VERIFICATION-PENDING
+
+- Apple must confirm a public, approved promotional/program-notification mechanism for ordinary barcode/store-card loyalty passes that does not require NFC/VAS. Until then, Apple manual promotion remains unselectable.
+- Google publishing access, production issuer policy standing, Add Message quota responses, message-link behavior, and final lock-screen presentation must be verified with controlled staging credentials.
+- Provider acceptance is not proof of device delivery, presentation, timing, or customer view.
+
+### EXTERNAL-PHYSICAL-TEST-PENDING
+
+- Apple nearby relevance requires a physical iPhone with the pass saved and relevant Wallet/location settings enabled.
+- Google manual and nearby behavior requires a physical Android device with Google Wallet notifications and required location permissions enabled.
+- Cloudflare public TLS remains `EXTERNAL_DEFERRED`; physical staging verification starts only after the public staging origin is trustworthy.
+
+### LEGAL_REVIEW_REQUIRED
+
+- Final bilingual consent notice, promotional content policy, retention, complaint/suppression operations, merchant terms, and controlled-pilot wording require legal approval.
+- The Customer Web control deliberately labels the current notice version `LEGAL_REVIEW_REQUIRED`; it is separate from required loyalty terms and is never prechecked.
+
+### Loyalty Card category authority
+
+Nearby copy resolves in this order:
+
+1. explicit built-in Loyalty Card template vertical from `baseTemplateCode`;
+2. existing organization `businessCategory` when no mapped template vertical exists;
+3. `GENERAL`.
+
+Merchant names are never used for category inference. Supported copy families are coffee, restaurant, barber, salon, bakery, gym, retail, and general, but they are resolver outputs rather than a second stored merchant taxonomy.
 
 ## Executive decision
 
@@ -15,9 +62,11 @@ Wallet-native nearby behavior is feasible on both providers without Waflo receiv
 
 Neither provider lets Waflo guarantee a 2,000-metre trigger. Do not market the feature as “within 2 km.” The accurate product wording is “Surface my Loyalty Card when Wallet considers the customer nearby,” with provider-specific permission disclosures.
 
-Recommendation: do not add promotional campaigns or nearby configuration to production v1. Preserve the current loyalty-state update path. For post-v1, validate provider behavior on physical devices, obtain legal review, add explicit Wallet-marketing consent and safety controls, and pilot Google messages before considering an Apple promotional channel.
+Historical recommendation at research time: do not add promotional campaigns or nearby configuration until explicit consent, safety controls, durable delivery, and truthful provider-specific UX exist. Those software prerequisites are now implemented; physical-provider verification and legal review remain pending.
 
-### Decision table
+### Historical research decision table
+
+The phase labels in this table capture the original assessment before implementation. The implementation-status sections above are authoritative for the current repository.
 
 | Capability | Apple Wallet | Google Wallet | Waflo feasibility | Provider-controlled limitations | Recommended phase |
 | --- | --- | --- | --- | --- | --- |
@@ -354,17 +403,17 @@ These are reusable patterns, not evidence that campaign, consent, coordinates, o
 
 A provisioned Google object does not prove that a user has saved it. Google's provider-side `hasUsers` field could inform a future reconciliation design, but Waflo does not currently own a reliable local “saved in Google Wallet” fact.
 
-### Not currently authoritative
+### Not authoritative at the original research checkpoint
 
 - membership assigned to one branch (only ledger events may carry a location);
 - materialized “last visit” with agreed event/reversal semantics;
 - customer birthday;
-- Wallet promotional consent/preference;
-- branch latitude/longitude or Google Place ID;
+- Wallet promotional consent/preference (now implemented as audited `WALLET_PROMOTIONS` consent);
+- branch latitude/longitude or Google Place ID (latitude/longitude are now implemented; Google Place ID remains unnecessary);
 - customer live location, entry, dwell, or exit;
 - notification display, open, or read receipt.
 
-## New components that would be required
+## Implemented components (original requirements retained)
 
 - campaign definition, status machine, approval/audit record, schedule, locale content, and cancellation;
 - immutable audience snapshot/cursor and per-provider/per-target delivery state;
@@ -375,9 +424,9 @@ A provisioned Google object does not prove that a user has saved it. Google's pr
 - quiet-hours/frequency-cap service, emergency disable switch, abuse controls, and aggregate metrics;
 - physical-device/provider conformance test harness and operating runbooks.
 
-## Database changes likely required later
+## Database implementation
 
-Likely future migrations—not part of this task—would add:
+Migration `20260812170000_wallet_engagement` adds:
 
 - `WalletEngagementCampaign` and localized content/schedule/audience definition;
 - audience snapshot or resumable target rows;
@@ -388,7 +437,7 @@ Likely future migrations—not part of this task—would add:
 
 Do not place message bodies in general operational logs. Do not add customer location storage.
 
-Database schema changed by this study: **NO**.
+Database schema changed by implementation: **YES**, additively and without changing existing-customer consent from its off-by-absence default.
 
 ## Provider approval/external requirements
 
@@ -405,7 +454,7 @@ Database schema changed by this study: **NO**.
 - The issuer must remain compliant with Google Wallet API terms and Acceptable Use Policy; unrelated links, deceptive/spam content, and restricted categories are not acceptable.
 - Current production publishing status and quotas must be verified before a pilot.
 
-## Physical-device test plan
+## Operator staging and physical-device test plan — EXTERNAL-PHYSICAL-TEST-PENDING
 
 Provider behavior is meaningful only on physical devices; simulator/API success cannot prove delivery or geofence behavior.
 
@@ -428,6 +477,32 @@ Provider behavior is meaningful only on physical devices; simulator/API success 
 6. Test >10 rejection, coordinate updates, class/object overlap, multiple saved passes, and partial provider failures.
 
 No real customers or production mass send should be used for validation.
+
+### Required staging sequence after public TLS repair
+
+#### Google manual message
+
+1. Use a controlled test customer and explicitly opt in to `WALLET_PROMOTIONS` in Customer Web.
+2. Save the Google Loyalty Card and verify the expected object identity before sending.
+3. Create one Merchant Web campaign and verify the durable campaign/delivery/command records before the worker calls Google.
+4. Verify message content in Google Wallet, the Google-controlled system notification, and the destination opening the intended merchant/Waflo page.
+5. Exercise quota behavior with provider-approved test procedures; never intentionally spam a pass or real customer.
+
+#### Apple manual message
+
+Do not test or expose this path unless Apple confirms a documented compliant mechanism and the adapter is independently reviewed. If approved later, physical-iPhone verification is mandatory. `changeMessage` must remain excluded from promotional delivery.
+
+#### Apple nearby relevance
+
+1. Save the Loyalty Card on a physical iPhone and enable the relevant Wallet/location settings.
+2. Approach a configured merchant location and verify that the signed pass contains the selected coordinates and vertical-specific localized `relevantText`.
+3. Record observed relevance behavior, pass-refresh behavior, and localization. Never report an exact two-kilometre trigger.
+
+#### Google nearby relevance
+
+1. Save the Loyalty Card on a physical Android device; enable Wallet notifications and the precise/always-on location permissions required by Google.
+2. Approach a configured merchant location and verify the provider-generated nearby notification and documented disappearance after leaving.
+3. Confirm that no radius or merchant-authored nearby notification text was sent. Never report an exact radius.
 
 ## Business measurement plan
 
@@ -454,7 +529,7 @@ Attribution is limited: provider acceptance is not delivery; delivery is not vie
 - Sensitive campaign content, identifiers, or consent evidence leaking through logs/analytics.
 - Weak attribution leading to unsupported sales claims.
 
-## Recommendation for production v1
+## Historical recommendation for production v1 — superseded by implementation status
 
 - Do not implement merchant promotional Wallet campaigns.
 - Do not implement nearby configuration or claim exact 2 km.
@@ -464,7 +539,7 @@ Attribution is limited: provider acceptance is not delivery; delivery is not vie
 
 Classification: promotional engagement `NOT_RECOMMENDED` for production v1; exact 2 km `NOT_SUPPORTED`.
 
-## Recommendation for post-v1
+## Historical recommendation for post-v1 — retained for decision history
 
 1. Obtain legal review and provider confirmation, particularly for Apple promotional communication.
 2. Add channel-specific consent, audit, caps, quiet hours, tenant isolation, emergency shutoff, and coordinates through reviewed migrations.
@@ -474,7 +549,9 @@ Classification: promotional engagement `NOT_RECOMMENDED` for production v1; exac
 6. Consider Apple promotion only after Apple confirms the compliant API/content mechanism; otherwise limit Apple to state changes, passive pass offer content, and relevance.
 7. Keep app-based configurable geofencing and iBeacon operations optional future products.
 
-## Explicit product decision proposal
+## Historical product decision proposal — superseded
+
+The following proposal is retained as decision history. The software safeguards it required are now implemented; the current decision is Google manual promotion plus Apple/Google provider-native nearby relevance, with Apple manual promotion still disabled pending provider confirmation.
 
 Adopt these decisions:
 
@@ -536,8 +613,8 @@ Only provider-owned primary sources were used for provider claims. “Guaranteed
 - Mobile-facing API contract changed: **NO**.
 - Staff Mobile action required now: **NO**.
 - Customer Waflo app required: **NO**.
-- Wallet notification feature implemented: **NO**.
+- Wallet notification feature implemented: **YES for Google object-level manual messages and provider-native nearby relevance; Apple manual promotion remains `PROVIDER_CONFIRMATION_REQUIRED`**.
 - Customer tracking implemented: **NO**.
-- Location collection added to Waflo: **NO**.
-- Database schema changed: **NO**.
-- Migration files changed: **NO**.
+- Customer live-location collection added to Waflo: **NO**; merchant business coordinates added: **YES**.
+- Database schema changed: **YES**, additive only.
+- Migration files changed: **YES**, exactly `20260812170000_wallet_engagement`.
