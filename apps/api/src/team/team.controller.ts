@@ -1,5 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from "@nestjs/common";
-import { invitationSchema, memberUpdateSchema, tokenSchema } from "@waflo/contracts";
+import {
+  invitationSchema,
+  localStaffMemberSchema,
+  memberUpdateSchema,
+  tokenSchema,
+} from "@waflo/contracts";
 import { CurrentUser, Public, RateLimit } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { parseInput, parseUuid } from "../common/validation.js";
@@ -12,6 +17,22 @@ export class TeamController {
   @Get("members")
   list(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
     return this.team.list(user.id, parseUuid(organizationId));
+  }
+
+  @Post("members")
+  @RateLimit(20, 300)
+  createLocalStaff(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.team.createLocalStaff(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(localStaffMemberSchema, body),
+      request,
+    );
   }
 
   @Patch("members/:memberId")

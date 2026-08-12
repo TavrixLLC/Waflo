@@ -26,7 +26,10 @@ import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
-import { revokeStaffAccessForLocation } from "./staff-device-lifecycle.js";
+import {
+  revokeStaffAccessForLocation,
+  revokeStaffAccessForMembership,
+} from "./staff-device-lifecycle.js";
 
 const PAIRING_CHALLENGE_VERSION = "waflo-pair-challenge-v1";
 
@@ -557,27 +560,15 @@ export class StaffDeviceService {
             HttpStatus.FORBIDDEN,
           );
         }
-        const active = await transaction.devicePairingSession.findFirst({
-          where: {
-            intendedStaffMemberId: intended.id,
-            status: { in: ["PENDING", "CLAIMED"] },
-            expiresAt: { gt: new Date() },
+        const now = new Date();
+        const revokedAccess = await revokeStaffAccessForMembership(transaction, intended.id, now);
+        const revokedDevices = await transaction.staffDevice.updateMany({
+          where: { organizationMemberId: intended.id, status: { in: ["PENDING", "ACTIVE"] } },
+          data: {
+            status: "REVOKED",
+            revokedAt: now,
+            revocationReason: "A new Staff sign-in QR was generated.",
           },
-        });
-        if (active) {
-          throw new AppError(
-            "DEVICE_PAIRING_ALREADY_ACTIVE",
-            "This Staff member already has an active pairing session.",
-            HttpStatus.CONFLICT,
-          );
-        }
-        await transaction.devicePairingSession.updateMany({
-          where: {
-            intendedStaffMemberId: intended.id,
-            status: { in: ["PENDING", "CLAIMED"] },
-            expiresAt: { lte: new Date() },
-          },
-          data: { status: "EXPIRED" },
         });
         const session = await transaction.devicePairingSession.create({
           data: {
@@ -604,6 +595,9 @@ export class StaffDeviceService {
               intendedStaffMemberId: intended.id,
               locationCount: input.locations.length,
               expiresInMinutes,
+              priorPairingsCanceled: revokedAccess.pairingsCanceled,
+              priorSessionsRevoked: revokedAccess.sessionsRevoked,
+              priorDevicesRevoked: revokedDevices.count,
             },
           },
           request,
@@ -903,11 +897,22 @@ export class StaffDeviceService {
   }
 
   async complete(input: DevicePairingCompleteInput) {
+    const preflight = await this.prisma.client.devicePairingSession.findUnique({
+      where: { publicId: input.pairingPublicId },
+      select: { intendedStaffMemberId: true },
+    });
+    if (!preflight) {
+      throw new AppError(
+        "DEVICE_PAIRING_EXPIRED",
+        "Pairing challenge has expired.",
+        HttpStatus.GONE,
+      );
+    }
     const token = createOpaqueDeviceSessionToken(this.environment.values.DEVICE_SESSION_SECRET);
     const refreshToken = randomBytes(48).toString("base64url");
     return withOrderedInvariantLocks(
       this.prisma.client,
-      [`pairing:${input.pairingPublicId}`],
+      [`pairing-member:${preflight.intendedStaffMemberId}`, `pairing:${input.pairingPublicId}`],
       async (transaction) => {
         const session = await transaction.devicePairingSession.findUnique({
           where: { publicId: input.pairingPublicId },
@@ -1012,27 +1017,54 @@ export class StaffDeviceService {
             HttpStatus.FORBIDDEN,
           );
         }
-        const device = await transaction.staffDevice.create({
-          data: {
-            organizationId: session.organizationId,
-            organizationMemberId: session.intendedStaffMemberId,
-            displayName: input.displayName ?? session.deviceLabelSuggestion ?? "Waflo Staff device",
-            platform:
-              metadata.platform === "IOS" ||
-              metadata.platform === "ANDROID" ||
-              metadata.platform === "TEST_CLIENT"
-                ? metadata.platform
-                : "ANDROID",
-            installationId: session.claimedInstallationId,
-            publicKey: session.claimedPublicKey,
-            status: "ACTIVE",
-            appVersion: typeof metadata.appVersion === "string" ? metadata.appVersion : "unknown",
-            osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
-            model: typeof metadata.model === "string" ? metadata.model : null,
-            pairedAt: new Date(),
-            lastSeenAt: new Date(),
-          },
+        const existingDevice = await transaction.staffDevice.findUnique({
+          where: { installationId: session.claimedInstallationId },
         });
+        if (
+          existingDevice &&
+          (existingDevice.organizationId !== session.organizationId ||
+            existingDevice.organizationMemberId !== session.intendedStaffMemberId)
+        ) {
+          throw new AppError(
+            "DEVICE_PAIRING_INVALID",
+            "This installation is already bound to another Staff identity.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const deviceData = {
+          organizationId: session.organizationId,
+          organizationMemberId: session.intendedStaffMemberId,
+          displayName: input.displayName ?? session.deviceLabelSuggestion ?? "Waflo Staff device",
+          platform:
+            metadata.platform === "IOS" ||
+            metadata.platform === "ANDROID" ||
+            metadata.platform === "TEST_CLIENT"
+              ? metadata.platform
+              : ("ANDROID" as const),
+          publicKey: session.claimedPublicKey,
+          status: "ACTIVE" as const,
+          appVersion: typeof metadata.appVersion === "string" ? metadata.appVersion : "unknown",
+          osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
+          model: typeof metadata.model === "string" ? metadata.model : null,
+          pairedAt: new Date(),
+          lastSeenAt: new Date(),
+          revokedAt: null,
+          revocationReason: null,
+        } satisfies Prisma.StaffDeviceUncheckedUpdateInput;
+        const device = existingDevice
+          ? await transaction.staffDevice.update({
+              where: { id: existingDevice.id },
+              data: deviceData,
+            })
+          : await transaction.staffDevice.create({
+              data: {
+                ...deviceData,
+                installationId: session.claimedInstallationId,
+              },
+            });
+        if (existingDevice) {
+          await transaction.staffDeviceLocation.deleteMany({ where: { staffDeviceId: device.id } });
+        }
         await transaction.staffDeviceLocation.createMany({
           data: locations.map((location) => ({
             staffDeviceId: device.id,

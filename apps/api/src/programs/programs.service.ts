@@ -305,6 +305,7 @@ export class ProgramsService {
     return this.tenant.requireMembership(userId, organizationId, "programs.view").then(() =>
       templates.map((template) => ({
         ...template,
+        availableOnPlans: ["STARTER", "GROWTH", "SCALE"] as const,
         galleryThumbnail: renderTemplateGalleryThumbnail(template, locale),
         ...(template.code === "GENERAL_VISITS"
           ? { blankGalleryThumbnail: renderTemplateGalleryThumbnail(template, locale, "BLANK") }

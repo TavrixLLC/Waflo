@@ -60,6 +60,46 @@ enum BillingStatus {
   CANCELED
 }
 
+enum BillingCadence {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum BillingEmailStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DEAD_LETTER
+  CANCELED
+}
+
+enum BillingRecoveryStatus {
+  NONE
+  GRACE
+  ACTION_REQUIRED
+  RECOVERED
+  EXPIRED
+}
+
+enum RefundRequestStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  SUCCEEDED
+  REJECTED
+  FAILED
+}
+
+enum RefundReason {
+  DUPLICATE_CHARGE
+  INCORRECT_CHARGE
+  SERVICE_FAILURE
+  UNAUTHORIZED_PAYMENT
+  OTHER
+}
+
 enum MemberRole {
   OWNER
   MANAGER
@@ -552,6 +592,7 @@ model User {
   normalizedEmail            String                   @unique @map("normalized_email") @db.VarChar(254)
   emailVerifiedAt            DateTime?                @map("email_verified_at") @db.Timestamptz(6)
   passwordHash               String?                  @map("password_hash") @db.Text
+  interactiveLoginAllowed    Boolean                  @default(true) @map("interactive_login_allowed")
   preferredLocale            Locale                   @default(EN) @map("preferred_locale")
   status                     UserStatus               @default(ACTIVE)
   termsVersion               String                   @map("terms_version") @db.VarChar(60)
@@ -582,6 +623,8 @@ model User {
   createdWalletCampaigns     WalletEngagementCampaign[] @relation("WalletCampaignCreator")
   updatedWalletNearbyConfigurations WalletNearbyConfiguration[] @relation("WalletNearbyUpdater")
   updatedWalletNearbyProgramCopies  WalletNearbyProgramCopy[]  @relation("WalletNearbyProgramCopyUpdater")
+  requestedBillingRefunds    BillingRefundRequest[] @relation("BillingRefundRequester")
+  reviewedBillingRefunds     BillingRefundRequest[] @relation("BillingRefundReviewer")
 
   @@map("users")
 }
@@ -768,6 +811,9 @@ model Organization {
   billingProfile        OrganizationBillingProfile?
   subscriptions         Subscription[]
   webhookEvents         ProcessedWebhookEvent[]
+  billingInvoices       BillingInvoice[]
+  billingEmailOutbox    BillingEmailOutbox[]
+  billingRefundRequests BillingRefundRequest[]
   auditLogs             AuditLog[]
   securityEvents        SecurityEvent[]
   checkoutIdempotencyKeys CheckoutIdempotencyKey[]
@@ -907,12 +953,22 @@ model OrganizationBillingProfile {
   organizationId           String        @unique @map("organization_id") @db.Uuid
   stripeCustomerId         String?       @unique @map("stripe_customer_id") @db.VarChar(255)
   selectedPlan             PlanCode      @default(STARTER) @map("selected_plan")
+  selectedCadence          BillingCadence @default(MONTHLY) @map("selected_cadence")
   subscriptionStatus       BillingStatus @default(PENDING_ACTIVATION) @map("subscription_status")
   trialStart               DateTime?     @map("trial_start") @db.Timestamptz(6)
   trialEnd                 DateTime?     @map("trial_end") @db.Timestamptz(6)
   trialTriggeringProgramId String?       @map("trial_triggering_program_id") @db.Uuid
   trialTriggeringUserId    String?       @map("trial_triggering_user_id") @db.Uuid
   gracePeriodEnd           DateTime?     @map("grace_period_end") @db.Timestamptz(6)
+  billingName              String?       @map("billing_name") @db.VarChar(160)
+  billingEmail             String?       @map("billing_email") @db.VarChar(254)
+  billingCountryCode       String?       @map("billing_country_code") @db.Char(2)
+  billingAddressLine1      String?       @map("billing_address_line_1") @db.VarChar(200)
+  billingAddressLine2      String?       @map("billing_address_line_2") @db.VarChar(200)
+  billingCity              String?       @map("billing_city") @db.VarChar(120)
+  billingRegion            String?       @map("billing_region") @db.VarChar(120)
+  billingPostalCode        String?       @map("billing_postal_code") @db.VarChar(40)
+  stripeIdentitySyncedAt   DateTime?     @map("stripe_identity_synced_at") @db.Timestamptz(6)
   createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -922,12 +978,133 @@ model OrganizationBillingProfile {
   @@map("organization_billing_profiles")
 }
 
+model BillingInvoice {
+  id                       String                @id @default(uuid()) @db.Uuid
+  organizationId           String                @map("organization_id") @db.Uuid
+  stripeInvoiceId          String                @unique @map("stripe_invoice_id") @db.VarChar(255)
+  stripeSubscriptionId     String?               @map("stripe_subscription_id") @db.VarChar(255)
+  stripePaymentMethodId    String?               @map("stripe_payment_method_id") @db.VarChar(255)
+  invoiceNumber            String?               @map("invoice_number") @db.VarChar(120)
+  status                   String                @db.VarChar(40)
+  billingReason            String?               @map("billing_reason") @db.VarChar(80)
+  amountDue                Int                   @map("amount_due")
+  amountPaid               Int                   @map("amount_paid")
+  amountRemaining          Int                   @map("amount_remaining")
+  currency                 String                @db.Char(3)
+  invoiceDate              DateTime              @map("invoice_date") @db.Timestamptz(6)
+  periodStart              DateTime?             @map("period_start") @db.Timestamptz(6)
+  periodEnd                DateTime?             @map("period_end") @db.Timestamptz(6)
+  nextPaymentAttemptAt     DateTime?             @map("next_payment_attempt_at") @db.Timestamptz(6)
+  hostedInvoiceUrl         String?               @map("hosted_invoice_url") @db.Text
+  invoicePdfUrl            String?               @map("invoice_pdf_url") @db.Text
+  customerName             String?               @map("customer_name") @db.VarChar(160)
+  customerEmail            String?               @map("customer_email") @db.VarChar(254)
+  paymentMethodBrand       String?               @map("payment_method_brand") @db.VarChar(40)
+  paymentMethodLast4       String?               @map("payment_method_last4") @db.Char(4)
+  paymentMethodExpMonth    Int?                  @map("payment_method_exp_month")
+  paymentMethodExpYear     Int?                  @map("payment_method_exp_year")
+  firstFailedAt            DateTime?             @map("first_failed_at") @db.Timestamptz(6)
+  graceEndsAt              DateTime?             @map("grace_ends_at") @db.Timestamptz(6)
+  failureCategory          String?               @map("failure_category") @db.VarChar(80)
+  recoveryStatus           BillingRecoveryStatus @default(NONE) @map("recovery_status")
+  automaticRetryEligible   Boolean               @default(false) @map("automatic_retry_eligible")
+  nextRecoveryAttemptAt    DateTime?             @map("next_recovery_attempt_at") @db.Timestamptz(6)
+  recoveryAttemptCount     Int                   @default(0) @map("recovery_attempt_count")
+  recoveryAttemptToken     String?               @map("recovery_attempt_token") @db.VarChar(255)
+  recoveryLeaseOwner       String?               @map("recovery_lease_owner") @db.VarChar(120)
+  recoveryLeaseExpiresAt   DateTime?             @map("recovery_lease_expires_at") @db.Timestamptz(6)
+  recoveryFailureCode      String?               @map("recovery_failure_code") @db.VarChar(120)
+  paidAt                   DateTime?             @map("paid_at") @db.Timestamptz(6)
+  lastStripeEventAt        DateTime?             @map("last_stripe_event_at") @db.Timestamptz(6)
+  lastStripeEventId        String?               @map("last_stripe_event_id") @db.VarChar(255)
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  emailMessages            BillingEmailOutbox[]
+  refundRequests           BillingRefundRequest[]
+
+  @@index([organizationId, invoiceDate(sort: Desc)])
+  @@index([recoveryStatus, nextRecoveryAttemptAt, recoveryLeaseExpiresAt], map: "billing_invoice_recovery_due_idx")
+  @@map("billing_invoices")
+}
+
+model BillingEmailOutbox {
+  id                 String             @id @default(uuid()) @db.Uuid
+  organizationId     String             @map("organization_id") @db.Uuid
+  billingInvoiceId   String?            @map("billing_invoice_id") @db.Uuid
+  kind               String             @db.VarChar(80)
+  dedupeKey          String             @unique @map("dedupe_key") @db.VarChar(255)
+  recipientEmail     String             @map("recipient_email") @db.VarChar(254)
+  locale             Locale             @default(EN)
+  payload            Json               @db.JsonB
+  status             BillingEmailStatus @default(PENDING)
+  availableAt        DateTime           @default(now()) @map("available_at") @db.Timestamptz(6)
+  attemptCount       Int                @default(0) @map("attempt_count")
+  leaseOwner         String?            @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt     DateTime?          @map("lease_expires_at") @db.Timestamptz(6)
+  sentAt             DateTime?          @map("sent_at") @db.Timestamptz(6)
+  lastFailureCode    String?            @map("last_failure_code") @db.VarChar(120)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  billingInvoice     BillingInvoice?    @relation(fields: [billingInvoiceId], references: [id], onDelete: SetNull)
+
+  @@index([status, availableAt, leaseExpiresAt], map: "billing_email_delivery_due_idx")
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("billing_email_outbox")
+}
+
+model BillingRefundRequest {
+  id                         String              @id @default(uuid()) @db.Uuid
+  publicId                   String              @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId            String              @map("organization_id") @db.Uuid
+  billingInvoiceId           String              @map("billing_invoice_id") @db.Uuid
+  requestedByUserId          String              @map("requested_by_user_id") @db.Uuid
+  reviewedByUserId           String?             @map("reviewed_by_user_id") @db.Uuid
+  status                     RefundRequestStatus @default(REQUESTED)
+  reason                     RefundReason
+  explanation                String?             @db.VarChar(2000)
+  reviewNote                 String?             @map("review_note") @db.VarChar(2000)
+  requestedAmount            Int                 @map("requested_amount")
+  approvedAmount             Int?                @map("approved_amount")
+  currency                   String              @db.Char(3)
+  idempotencyKey             String              @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint         String              @map("request_fingerprint") @db.Char(64)
+  stripeRefundId             String?             @unique @map("stripe_refund_id") @db.VarChar(255)
+  stripePaymentIntentId      String?             @map("stripe_payment_intent_id") @db.VarChar(255)
+  providerStatus             String?             @map("provider_status") @db.VarChar(40)
+  executionIdempotencyKey    String              @unique @map("execution_idempotency_key") @db.VarChar(255)
+  executionLeaseOwner        String?             @map("execution_lease_owner") @db.VarChar(120)
+  executionLeaseExpiresAt    DateTime?           @map("execution_lease_expires_at") @db.Timestamptz(6)
+  executionAttemptCount      Int                 @default(0) @map("execution_attempt_count")
+  failureCode                String?             @map("failure_code") @db.VarChar(120)
+  requestedAt                DateTime            @default(now()) @map("requested_at") @db.Timestamptz(6)
+  reviewedAt                 DateTime?           @map("reviewed_at") @db.Timestamptz(6)
+  processingAt               DateTime?           @map("processing_at") @db.Timestamptz(6)
+  completedAt                DateTime?           @map("completed_at") @db.Timestamptz(6)
+  lastStripeEventAt          DateTime?           @map("last_stripe_event_at") @db.Timestamptz(6)
+  lastStripeEventId          String?              @map("last_stripe_event_id") @db.VarChar(255)
+  createdAt                  DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization               Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  billingInvoice             BillingInvoice       @relation(fields: [billingInvoiceId], references: [id], onDelete: Restrict)
+  requestedBy                User                 @relation("BillingRefundRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy                 User?                @relation("BillingRefundReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([billingInvoiceId, status])
+  @@index([status, executionLeaseExpiresAt])
+  @@map("billing_refund_requests")
+}
+
 model Subscription {
   id                       String        @id @default(uuid()) @db.Uuid
   organizationId           String        @map("organization_id") @db.Uuid
   stripeSubscriptionId     String        @unique @map("stripe_subscription_id") @db.VarChar(255)
   stripePriceId            String        @map("stripe_price_id") @db.VarChar(255)
   planCode                 PlanCode      @map("plan_code")
+  cadence                  BillingCadence @default(MONTHLY)
   status                   BillingStatus
   currentPeriodStart       DateTime?     @map("current_period_start") @db.Timestamptz(6)
   currentPeriodEnd         DateTime?     @map("current_period_end") @db.Timestamptz(6)

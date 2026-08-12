@@ -60,6 +60,24 @@ export function parseCheckoutIdempotencyKey(value: unknown): string {
   return value;
 }
 
+export function parseRefundIdempotencyKey(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new AppError(
+      "REFUND_IDEMPOTENCY_KEY_REQUIRED",
+      "A refund request command ID is required.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  if (value !== value.trim() || value.length > 255 || !uuidSchema.safeParse(value).success) {
+    throw new AppError(
+      "REFUND_IDEMPOTENCY_KEY_INVALID",
+      "The refund request command ID must be a UUID without whitespace.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  return value;
+}
+
 export function parseOperationCommandId(value: unknown): string {
   if (
     typeof value !== "string" ||

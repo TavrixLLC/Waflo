@@ -649,7 +649,12 @@ export class ExternalAuthService {
       include: { user: true },
     });
     if (existingIdentity) {
-      if (existingIdentity.user.status !== "ACTIVE") this.deniedIdentity();
+      if (
+        existingIdentity.user.status !== "ACTIVE" ||
+        !existingIdentity.user.interactiveLoginAllowed
+      ) {
+        this.deniedIdentity();
+      }
       return this.prisma.client.$transaction(async (transaction) => {
         if (identity.appleTokens) {
           await this.upsertAppleCredential(transaction, existingIdentity.id, identity.appleTokens);
@@ -739,7 +744,7 @@ export class ExternalAuthService {
       `user-auth-lifecycle:${userId}`,
       async (transaction) => {
         const user = await transaction.user.findUniqueOrThrow({ where: { id: userId } });
-        if (user.status !== "ACTIVE") this.deniedIdentity();
+        if (user.status !== "ACTIVE" || !user.interactiveLoginAllowed) this.deniedIdentity();
         const attached = await transaction.externalIdentity.findUnique({
           where: {
             provider_issuer_providerSubject: {

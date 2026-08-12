@@ -193,6 +193,9 @@ export class NotificationService {
   }
 
   async send(message: NotificationMessage): Promise<void> {
+    if (message.to.trim().toLocaleLowerCase("en-US").endsWith("@staff.waflo.invalid")) {
+      throw new Error("Synthetic Staff identities cannot receive email.");
+    }
     const rendered = {
       to: message.to,
       subject: subjects[message.locale][message.kind],

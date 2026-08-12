@@ -154,6 +154,12 @@ export const environmentSchema = z
     STRIPE_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
     STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
     STRIPE_SCALE_MONTHLY_PRICE_ID: z.string().optional(),
+    STRIPE_STARTER_QUARTERLY_PRICE_ID: z.string().optional(),
+    STRIPE_GROWTH_QUARTERLY_PRICE_ID: z.string().optional(),
+    STRIPE_SCALE_QUARTERLY_PRICE_ID: z.string().optional(),
+    STRIPE_STARTER_YEARLY_PRICE_ID: z.string().optional(),
+    STRIPE_GROWTH_YEARLY_PRICE_ID: z.string().optional(),
+    STRIPE_SCALE_YEARLY_PRICE_ID: z.string().optional(),
     STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID: z.string().optional(),
     STRIPE_RECONCILIATION_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
     STRIPE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
@@ -199,6 +205,49 @@ export const environmentSchema = z
         path: ["NODE_ENV"],
         message: "Staging and production must run optimized production builds.",
       });
+    }
+    const quarterlyPrices = [
+      value.STRIPE_STARTER_QUARTERLY_PRICE_ID,
+      value.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
+      value.STRIPE_SCALE_QUARTERLY_PRICE_ID,
+    ];
+    const yearlyPrices = [
+      value.STRIPE_STARTER_YEARLY_PRICE_ID,
+      value.STRIPE_GROWTH_YEARLY_PRICE_ID,
+      value.STRIPE_SCALE_YEARLY_PRICE_ID,
+    ];
+    if (quarterlyPrices.some(Boolean) && !quarterlyPrices.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_STARTER_QUARTERLY_PRICE_ID"],
+        message: "All three quarterly Stripe Price IDs must be complete or absent.",
+      });
+    }
+    if (yearlyPrices.some(Boolean) && !yearlyPrices.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_STARTER_YEARLY_PRICE_ID"],
+        message: "All three yearly Stripe Price IDs must be complete or absent.",
+      });
+    }
+    for (const key of [
+      "STRIPE_STARTER_MONTHLY_PRICE_ID",
+      "STRIPE_GROWTH_MONTHLY_PRICE_ID",
+      "STRIPE_SCALE_MONTHLY_PRICE_ID",
+      "STRIPE_STARTER_QUARTERLY_PRICE_ID",
+      "STRIPE_GROWTH_QUARTERLY_PRICE_ID",
+      "STRIPE_SCALE_QUARTERLY_PRICE_ID",
+      "STRIPE_STARTER_YEARLY_PRICE_ID",
+      "STRIPE_GROWTH_YEARLY_PRICE_ID",
+      "STRIPE_SCALE_YEARLY_PRICE_ID",
+    ] as const) {
+      if (value[key] && !/^price_[A-Za-z0-9][A-Za-z0-9_]*$/.test(value[key])) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Stripe billing plans require Price IDs in price_ format.",
+        });
+      }
     }
     if (!deployed) return;
     if (value.COOKIE_SAME_SITE === "NONE" && !value.COOKIE_SECURE) {
@@ -663,19 +712,6 @@ export const environmentSchema = z
         path: ["STRIPE_WEBHOOK_SECRET"],
         message: "Stripe webhook secrets must use the whsec_ endpoint-secret format.",
       });
-    }
-    for (const key of [
-      "STRIPE_STARTER_MONTHLY_PRICE_ID",
-      "STRIPE_GROWTH_MONTHLY_PRICE_ID",
-      "STRIPE_SCALE_MONTHLY_PRICE_ID",
-    ] as const) {
-      if (value[key] && !value[key].startsWith("price_")) {
-        context.addIssue({
-          code: "custom",
-          path: [key],
-          message: "Stripe billing plans require Price IDs in price_ format.",
-        });
-      }
     }
     if (
       value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID &&

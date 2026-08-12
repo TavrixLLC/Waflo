@@ -76,7 +76,11 @@ export class AuthService {
     if (existing) {
       // Deliberately match the successful public registration response so this
       // endpoint cannot be used as an account-existence oracle.
-      if (!existing.emailVerifiedAt && existing.status === "ACTIVE") {
+      if (
+        existing.interactiveLoginAllowed &&
+        !existing.emailVerifiedAt &&
+        existing.status === "ACTIVE"
+      ) {
         await this.issueVerification(
           existing.id,
           existing.email,
@@ -132,6 +136,11 @@ export class AuthService {
       this.prisma.client,
       `verification-token:${userId}`,
       async (transaction) => {
+        const user = await transaction.user.findUnique({
+          where: { id: userId },
+          select: { interactiveLoginAllowed: true },
+        });
+        if (!user?.interactiveLoginAllowed) return;
         const now = new Date();
         await transaction.emailVerificationToken.updateMany({
           where: { userId, consumedAt: null },
@@ -171,7 +180,9 @@ export class AuthService {
         where: { tokenHash: hashOpaqueToken(rawToken) },
         include: { user: true },
       });
-      if (!token) return { claimed: false as const, token: null };
+      if (!token?.user.interactiveLoginAllowed) {
+        return { claimed: false as const, token: token ?? null };
+      }
       const claim = await transaction.emailVerificationToken.updateMany({
         where: { id: token.id, consumedAt: null, expiresAt: { gt: now } },
         data: { consumedAt: now },
@@ -215,7 +226,7 @@ export class AuthService {
   async resendVerification(emailInput: string, request: WafloRequest) {
     const normalizedEmail = normalizeEmail(emailInput);
     const user = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
-    if (user && !user.emailVerifiedAt) {
+    if (user?.interactiveLoginAllowed && !user.emailVerifiedAt) {
       await this.issueVerification(
         user.id,
         user.email,
@@ -233,7 +244,7 @@ export class AuthService {
     const normalizedEmail = normalizeEmail(emailInput);
     const user = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
     const passwordValid = await verifyPassword(user?.passwordHash ?? DUMMY_PASSWORD_HASH, password);
-    if (!user || !passwordValid) {
+    if (!user?.interactiveLoginAllowed || !passwordValid) {
       if (user) {
         await this.audit.security(
           {
@@ -311,9 +322,9 @@ export class AuthService {
       async (transaction) => {
         const user = await transaction.user.findUnique({
           where: { id: userId },
-          select: { status: true },
+          select: { status: true, interactiveLoginAllowed: true },
         });
-        if (user?.status !== "ACTIVE") {
+        if (user?.status !== "ACTIVE" || !user.interactiveLoginAllowed) {
           throw new AppError(
             "AUTHENTICATION_FAILED",
             "Sign-in could not be completed.",
@@ -356,7 +367,7 @@ export class AuthService {
     const user = await this.prisma.client.user.findUnique({
       where: { normalizedEmail: normalizeEmail(emailInput) },
     });
-    if (user) {
+    if (user?.interactiveLoginAllowed) {
       const rawToken = createOpaqueToken();
       const expiresAt = new Date(
         Date.now() + this.environment.values.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
@@ -409,7 +420,9 @@ export class AuthService {
         where: { tokenHash: hashOpaqueToken(rawToken) },
         include: { user: true },
       });
-      if (!token) return { claimed: false as const, token: null };
+      if (!token?.user.interactiveLoginAllowed) {
+        return { claimed: false as const, token: token ?? null };
+      }
       const claim = await transaction.passwordResetToken.updateMany({
         where: { id: token.id, consumedAt: null, expiresAt: { gt: changedAt } },
         data: { consumedAt: changedAt },
@@ -483,7 +496,11 @@ export class AuthService {
     request: WafloRequest,
   ): Promise<SessionResult> {
     const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!user.passwordHash || !(await verifyPassword(user.passwordHash, currentPassword))) {
+    if (
+      !user.interactiveLoginAllowed ||
+      !user.passwordHash ||
+      !(await verifyPassword(user.passwordHash, currentPassword))
+    ) {
       throw new AppError(
         "CURRENT_PASSWORD_INVALID",
         "The current password is incorrect.",

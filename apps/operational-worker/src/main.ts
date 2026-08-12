@@ -2,8 +2,16 @@ import { createCipheriv, createHash, randomBytes, randomUUID } from "node:crypto
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  billingFailurePolicy,
+  billingRecoverySchedule,
+  isExactlyTwoLocalCalendarDaysBefore,
+  type BillingEmailKind,
+  type BillingEmailPayload,
+  renderBillingEmail,
+} from "@waflo/billing";
 import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
-import { type BillingStatus, type PlanCode } from "@waflo/contracts";
+import { type BillingCadence, type BillingStatus, type PlanCode } from "@waflo/contracts";
 import { createCustomerDataKeyring, decryptCustomerValue } from "@waflo/customer-security";
 import {
   createPrismaClient,
@@ -34,6 +42,7 @@ import {
   operationalDateBucket,
 } from "@waflo/operational-analytics";
 import Stripe from "stripe";
+import nodemailer from "nodemailer";
 
 const LEASE_SECONDS = 90;
 
@@ -58,6 +67,10 @@ function dbBillingStatus(status: BillingStatus) {
 
 function dbPlanCode(plan: PlanCode) {
   return plan.toUpperCase() as "STARTER" | "GROWTH" | "SCALE";
+}
+
+function dbBillingCadence(cadence: BillingCadence) {
+  return cadence.toUpperCase() as "MONTHLY" | "QUARTERLY" | "YEARLY";
 }
 
 function log(event: string, metadata: Record<string, unknown> = {}) {
@@ -172,6 +185,7 @@ export class OperationalWorker {
   private readonly customerKeyring;
   private readonly externalAuthTokenKeyring: ExternalAuthTokenKeyring | null;
   private readonly stripe: Stripe | null;
+  private readonly mailer;
   private stopping = false;
   providerFetch: typeof fetch = fetch;
 
@@ -211,6 +225,17 @@ export class OperationalWorker {
           appInfo: { name: "Waflo Operational Worker", version: "1.0.0" },
         })
       : null;
+    this.mailer = nodemailer.createTransport({
+      host: environment.SMTP_HOST,
+      port: environment.SMTP_PORT,
+      secure: environment.SMTP_SECURE,
+      connectionTimeout: 5_000,
+      greetingTimeout: 5_000,
+      socketTimeout: 10_000,
+      ...(environment.SMTP_USER && environment.SMTP_PASSWORD
+        ? { auth: { user: environment.SMTP_USER, pass: environment.SMTP_PASSWORD } }
+        : {}),
+    });
   }
 
   async readiness() {
@@ -275,6 +300,11 @@ export class OperationalWorker {
       privacyRequestsProcessed: (await this.processOnePrivacyRequest()) ? 1 : 0,
       appleRevocationsProcessed: (await this.processOneAppleTokenRevocation()) ? 1 : 0,
       stripeSubscriptionsReconciled: await this.reconcileStripeSubscriptions(),
+      stripeCustomersReconciled: await this.reconcileStripeCustomerIdentities(),
+      renewalRemindersQueued: await this.queueRenewalReminders(),
+      billingRecoveriesProcessed: await this.processBillingRecoveries(),
+      billingGracePeriodsExpired: await this.expireBillingGracePeriods(),
+      billingEmailsSent: await this.processBillingEmails(),
       integrityFindings: await this.sampleProjectionIntegrity(),
       cleanupItems: await this.cleanupExpiredState(),
     };
@@ -490,7 +520,7 @@ export class OperationalWorker {
     leaseExpiresAt: Date,
   ) {
     const price = canonical.items.data[0]?.price;
-    const plan = this.planForStripePrice(price?.id);
+    const { plan, cadence } = this.planForStripePrice(price?.id);
     const customerId =
       typeof canonical.customer === "string" ? canonical.customer : canonical.customer.id;
     await this.prisma.$transaction(async (transaction) => {
@@ -516,12 +546,20 @@ export class OperationalWorker {
       ) {
         throw new Error("STRIPE_RECONCILIATION_OWNERSHIP_MISMATCH");
       }
-      const status = dbBillingStatus(stripeStatus(canonical.status));
+      const providerStatus = stripeStatus(canonical.status);
+      const status =
+        providerStatus === "past_due" &&
+        profile.subscriptionStatus === "GRACE_PERIOD" &&
+        profile.gracePeriodEnd !== null &&
+        profile.gracePeriodEnd > new Date()
+          ? "GRACE_PERIOD"
+          : dbBillingStatus(providerStatus);
       await transaction.subscription.update({
         where: { id: local.id },
         data: {
           stripePriceId: price?.id ?? local.stripePriceId,
           planCode: dbPlanCode(plan),
+          cadence: dbBillingCadence(cadence),
           status,
           currentPeriodStart: canonical.items.data[0]?.current_period_start
             ? new Date(canonical.items.data[0].current_period_start * 1000)
@@ -539,7 +577,11 @@ export class OperationalWorker {
       });
       await transaction.organizationBillingProfile.update({
         where: { organizationId: local.organizationId },
-        data: { subscriptionStatus: status, selectedPlan: dbPlanCode(plan) },
+        data: {
+          subscriptionStatus: status,
+          selectedPlan: dbPlanCode(plan),
+          selectedCadence: dbBillingCadence(cadence),
+        },
       });
       await transaction.organization.update({
         where: { id: local.organizationId },
@@ -594,10 +636,547 @@ export class OperationalWorker {
     });
   }
 
-  private planForStripePrice(priceId: string | undefined): PlanCode {
-    if (priceId === this.environment.STRIPE_STARTER_MONTHLY_PRICE_ID) return "starter";
-    if (priceId === this.environment.STRIPE_GROWTH_MONTHLY_PRICE_ID) return "growth";
-    if (priceId === this.environment.STRIPE_SCALE_MONTHLY_PRICE_ID) return "scale";
+  async reconcileStripeCustomerIdentities(): Promise<number> {
+    if (!this.stripe) return 0;
+    const staleBefore = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const profiles = await this.prisma.organizationBillingProfile.findMany({
+      where: {
+        stripeCustomerId: { not: null },
+        OR: [{ stripeIdentitySyncedAt: null }, { stripeIdentitySyncedAt: { lte: staleBefore } }],
+      },
+      include: {
+        organization: {
+          include: {
+            members: {
+              where: { role: "OWNER", status: "ACTIVE" },
+              include: { user: true },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+            },
+          },
+        },
+      },
+      take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
+    });
+    let count = 0;
+    for (const profile of profiles) {
+      if (!profile.stripeCustomerId) continue;
+      const owner = profile.organization.members[0]?.user;
+      const email = profile.billingEmail ?? owner?.email;
+      if (!email) continue;
+      try {
+        await this.stripe.customers.update(profile.stripeCustomerId, {
+          name: profile.billingName ?? profile.organization.name,
+          email,
+          address: {
+            line1: profile.billingAddressLine1 ?? "",
+            line2: profile.billingAddressLine2 ?? "",
+            city: profile.billingCity ?? "",
+            state: profile.billingRegion ?? "",
+            postal_code: profile.billingPostalCode ?? "",
+            country: profile.billingCountryCode ?? "",
+          },
+          preferred_locales: [profile.organization.defaultLocale === "AR" ? "ar" : "en"],
+          metadata: {
+            organizationId: profile.organizationId,
+            wafloOrganizationId: profile.organizationId,
+          },
+        });
+        await this.prisma.organizationBillingProfile.update({
+          where: { id: profile.id },
+          data: { stripeIdentitySyncedAt: new Date() },
+        });
+        count += 1;
+      } catch {
+        log("stripe_customer_identity_sync_failed", {
+          organizationId: profile.organizationId,
+          safeFailureCode: "STRIPE_CUSTOMER_SYNC_FAILED",
+        });
+      }
+    }
+    return count;
+  }
+
+  async queueRenewalReminders(): Promise<number> {
+    if (!this.stripe) return 0;
+    const now = new Date();
+    const subscriptions = await this.prisma.subscription.findMany({
+      where: {
+        status: { in: ["ACTIVE", "TRIALING"] },
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: {
+          gt: now,
+          lte: new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000),
+        },
+        organization: { status: "ACTIVE" },
+      },
+      include: {
+        organization: {
+          include: {
+            billingProfile: true,
+            members: {
+              where: { role: "OWNER", status: "ACTIVE" },
+              include: { user: true },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+            },
+          },
+        },
+      },
+      take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
+    });
+    let queued = 0;
+    for (const subscription of subscriptions) {
+      const renewalAt = subscription.currentPeriodEnd;
+      const profile = subscription.organization.billingProfile;
+      const customerId = profile?.stripeCustomerId;
+      const recipient = profile?.billingEmail ?? subscription.organization.members[0]?.user.email;
+      if (
+        !renewalAt ||
+        !customerId ||
+        !recipient ||
+        !isExactlyTwoLocalCalendarDaysBefore(now, renewalAt, subscription.organization.timezone)
+      ) {
+        continue;
+      }
+      try {
+        const [preview, customer] = await Promise.all([
+          this.stripe.invoices.createPreview({
+            customer: customerId,
+            subscription: subscription.stripeSubscriptionId,
+          }),
+          this.stripe.customers.retrieve(customerId, {
+            expand: ["invoice_settings.default_payment_method"],
+          }),
+        ]);
+        if (customer.deleted) continue;
+        const rawMethod = customer.invoice_settings.default_payment_method;
+        const paymentMethod = rawMethod && typeof rawMethod !== "string" ? rawMethod : null;
+        const card = paymentMethod?.card;
+        const payload: BillingEmailPayload = {
+          organizationName: profile?.billingName ?? subscription.organization.name,
+          plan: subscription.planCode.toLocaleLowerCase("en-US"),
+          cadence: subscription.cadence.toLocaleLowerCase("en-US"),
+          amount: preview.amount_due,
+          currency: preview.currency.toUpperCase(),
+          expectedChargeAt: renewalAt.toISOString(),
+          paymentMethod: card
+            ? {
+                brand: card.brand,
+                last4: card.last4,
+                expMonth: card.exp_month,
+                expYear: card.exp_year,
+              }
+            : null,
+          billingUrl: `${this.environment.MERCHANT_DASHBOARD_URL}/${subscription.organization.defaultLocale === "AR" ? "ar" : "en"}/dashboard/billing`,
+          timezone: subscription.organization.timezone,
+        };
+        const result = await this.prisma.billingEmailOutbox.createMany({
+          data: [
+            {
+              organizationId: subscription.organizationId,
+              kind: "RENEWAL_REMINDER",
+              dedupeKey: `renewal:${subscription.stripeSubscriptionId}:${renewalAt.toISOString()}`,
+              recipientEmail: recipient,
+              locale: subscription.organization.defaultLocale,
+              payload: payload as unknown as Prisma.InputJsonValue,
+            },
+          ],
+          skipDuplicates: true,
+        });
+        queued += result.count;
+      } catch {
+        log("billing_renewal_reminder_queue_failed", {
+          organizationId: subscription.organizationId,
+          safeFailureCode: "RENEWAL_PREVIEW_FAILED",
+        });
+      }
+    }
+    return queued;
+  }
+
+  async processBillingRecoveries(): Promise<number> {
+    if (!this.stripe) return 0;
+    const now = new Date();
+    const candidates = await this.prisma.billingInvoice.findMany({
+      where: {
+        recoveryStatus: "GRACE",
+        automaticRetryEligible: true,
+        amountRemaining: { gt: 0 },
+        graceEndsAt: { gt: now },
+        nextRecoveryAttemptAt: { lte: now },
+        OR: [{ recoveryLeaseExpiresAt: null }, { recoveryLeaseExpiresAt: { lte: now } }],
+      },
+      orderBy: [{ nextRecoveryAttemptAt: "asc" }, { createdAt: "asc" }],
+      take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
+    });
+    let processed = 0;
+    for (const candidate of candidates) {
+      const leaseExpiresAt = new Date(Date.now() + LEASE_SECONDS * 1000);
+      const attemptToken =
+        candidate.recoveryAttemptToken ??
+        `waflo:invoice:${candidate.stripeInvoiceId}:recovery:${candidate.recoveryAttemptCount + 1}`;
+      const claimed = await this.prisma.billingInvoice.updateMany({
+        where: {
+          id: candidate.id,
+          recoveryStatus: "GRACE",
+          automaticRetryEligible: true,
+          nextRecoveryAttemptAt: { lte: new Date() },
+          OR: [{ recoveryLeaseExpiresAt: null }, { recoveryLeaseExpiresAt: { lte: new Date() } }],
+        },
+        data: {
+          recoveryLeaseOwner: this.workerId,
+          recoveryLeaseExpiresAt: leaseExpiresAt,
+          recoveryAttemptToken: attemptToken,
+          recoveryAttemptCount: { increment: 1 },
+        },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        const invoice = await this.stripe.invoices.retrieve(candidate.stripeInvoiceId, {
+          expand: ["customer", "parent.subscription_details.subscription"],
+        });
+        if (invoice.status === "paid" || invoice.amount_remaining === 0) {
+          await this.markRecoveredInvoice(candidate.id, leaseExpiresAt, invoice);
+          processed += 1;
+          continue;
+        }
+        const customer = invoice.customer;
+        const customerId = typeof customer === "string" ? customer : customer?.id;
+        if (!customerId) throw new Error("STRIPE_CUSTOMER_MISSING");
+        const canonicalCustomer = await this.stripe.customers.retrieve(customerId, {
+          expand: ["invoice_settings.default_payment_method"],
+        });
+        if (canonicalCustomer.deleted) throw new Error("STRIPE_CUSTOMER_MISSING");
+        const method = canonicalCustomer.invoice_settings.default_payment_method;
+        const paymentMethodId = typeof method === "string" ? method : method?.id;
+        if (!paymentMethodId) throw new Error("STRIPE_PAYMENT_METHOD_MISSING");
+        const parentSubscription = invoice.parent?.subscription_details?.subscription;
+        const subscriptionId =
+          typeof parentSubscription === "string" ? parentSubscription : parentSubscription?.id;
+        if (subscriptionId) {
+          await this.stripe.subscriptions.update(subscriptionId, {
+            default_payment_method: paymentMethodId,
+          });
+        }
+        await this.stripe.invoices.update(invoice.id, {
+          default_payment_method: paymentMethodId,
+        });
+        const paid = await this.stripe.invoices.pay(
+          invoice.id,
+          { payment_method: paymentMethodId },
+          { idempotencyKey: attemptToken },
+        );
+        if (paid.status === "paid" || paid.amount_remaining === 0) {
+          await this.markRecoveredInvoice(candidate.id, leaseExpiresAt, paid);
+        } else {
+          await this.scheduleNextBillingRecovery(candidate.id, leaseExpiresAt, paid);
+        }
+        processed += 1;
+      } catch (error) {
+        const code =
+          error instanceof Stripe.errors.StripeError
+            ? (error.decline_code ?? error.code ?? null)
+            : null;
+        const policy = billingFailurePolicy(code);
+        const nextScheduledAttempt = candidate.firstFailedAt
+          ? billingRecoverySchedule(candidate.firstFailedAt).find((date) => date > new Date())
+          : null;
+        await this.prisma.billingInvoice.updateMany({
+          where: {
+            id: candidate.id,
+            recoveryLeaseOwner: this.workerId,
+            recoveryLeaseExpiresAt: leaseExpiresAt,
+          },
+          data: {
+            recoveryStatus: policy.automaticRetryEligible ? "GRACE" : "ACTION_REQUIRED",
+            automaticRetryEligible: policy.automaticRetryEligible,
+            failureCategory: policy.category,
+            nextRecoveryAttemptAt: policy.automaticRetryEligible
+              ? (nextScheduledAttempt ?? candidate.graceEndsAt)
+              : null,
+            recoveryAttemptToken: null,
+            recoveryLeaseOwner: null,
+            recoveryLeaseExpiresAt: null,
+            recoveryFailureCode: "PAYMENT_ATTEMPT_FAILED",
+          },
+        });
+      }
+    }
+    return processed;
+  }
+
+  private async markRecoveredInvoice(
+    id: string,
+    leaseExpiresAt: Date,
+    invoice: Stripe.Invoice,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.billingInvoice.findFirstOrThrow({
+        where: { id, recoveryLeaseOwner: this.workerId, recoveryLeaseExpiresAt: leaseExpiresAt },
+        include: { organization: { include: { billingProfile: true } } },
+      });
+      await transaction.billingInvoice.update({
+        where: { id },
+        data: {
+          status: invoice.status ?? "paid",
+          amountPaid: invoice.amount_paid,
+          amountRemaining: invoice.amount_remaining,
+          recoveryStatus: "RECOVERED",
+          automaticRetryEligible: false,
+          nextRecoveryAttemptAt: null,
+          recoveryAttemptToken: null,
+          recoveryLeaseOwner: null,
+          recoveryLeaseExpiresAt: null,
+          recoveryFailureCode: null,
+          paidAt: new Date(
+            (invoice.status_transitions.paid_at ?? Math.floor(Date.now() / 1000)) * 1000,
+          ),
+          hostedInvoiceUrl: invoice.hosted_invoice_url ?? row.hostedInvoiceUrl,
+          invoicePdfUrl: invoice.invoice_pdf ?? row.invoicePdfUrl,
+        },
+      });
+      await transaction.organizationBillingProfile.update({
+        where: { organizationId: row.organizationId },
+        data: { subscriptionStatus: "ACTIVE", gracePeriodEnd: null },
+      });
+      await transaction.billingEmailOutbox.updateMany({
+        where: {
+          billingInvoiceId: row.id,
+          status: { in: ["PENDING", "PROCESSING"] },
+          kind: { in: ["PAYMENT_FAILED", "BILLING_GRACE_EXPIRED"] },
+        },
+        data: { status: "CANCELED", leaseOwner: null, leaseExpiresAt: null },
+      });
+      const recipient = row.customerEmail ?? row.organization.billingProfile?.billingEmail;
+      if (recipient) {
+        await transaction.billingEmailOutbox.upsert({
+          where: { dedupeKey: `invoice-paid:${invoice.id}` },
+          update: {},
+          create: {
+            organizationId: row.organizationId,
+            billingInvoiceId: row.id,
+            kind: "INVOICE_PAID",
+            dedupeKey: `invoice-paid:${invoice.id}`,
+            recipientEmail: recipient,
+            locale: row.organization.defaultLocale,
+            payload: {
+              organizationName: row.customerName,
+              invoiceNumber: invoice.number,
+              invoiceDate: new Date((invoice.effective_at ?? invoice.created) * 1000).toISOString(),
+              amount: invoice.amount_paid,
+              currency: invoice.currency.toUpperCase(),
+              status: "paid",
+              plan: invoice.parent?.subscription_details?.metadata?.plan ?? null,
+              cadence: invoice.parent?.subscription_details?.metadata?.cadence ?? null,
+              paymentMethod:
+                row.paymentMethodBrand && row.paymentMethodLast4
+                  ? { brand: row.paymentMethodBrand, last4: row.paymentMethodLast4 }
+                  : null,
+              hostedInvoiceUrl: invoice.hosted_invoice_url ?? row.hostedInvoiceUrl,
+              invoicePdfUrl: invoice.invoice_pdf ?? row.invoicePdfUrl,
+              timezone: row.organization.timezone,
+            },
+          },
+        });
+      }
+    });
+  }
+
+  private async scheduleNextBillingRecovery(
+    id: string,
+    leaseExpiresAt: Date,
+    invoice: Stripe.Invoice,
+  ): Promise<void> {
+    const row = await this.prisma.billingInvoice.findUniqueOrThrow({ where: { id } });
+    const schedule = row.firstFailedAt ? billingRecoverySchedule(row.firstFailedAt) : [];
+    const next = schedule.find(
+      (date) => date > new Date() && (!row.graceEndsAt || date <= row.graceEndsAt),
+    );
+    await this.prisma.billingInvoice.updateMany({
+      where: { id, recoveryLeaseOwner: this.workerId, recoveryLeaseExpiresAt: leaseExpiresAt },
+      data: {
+        status: invoice.status ?? row.status,
+        amountRemaining: invoice.amount_remaining,
+        nextRecoveryAttemptAt: next ?? row.graceEndsAt,
+        recoveryAttemptToken: null,
+        recoveryLeaseOwner: null,
+        recoveryLeaseExpiresAt: null,
+        recoveryFailureCode: "INVOICE_REMAINS_OPEN",
+      },
+    });
+  }
+
+  async expireBillingGracePeriods(): Promise<number> {
+    const now = new Date();
+    const due = await this.prisma.billingInvoice.findMany({
+      where: {
+        recoveryStatus: { in: ["GRACE", "ACTION_REQUIRED"] },
+        amountRemaining: { gt: 0 },
+        graceEndsAt: { lte: now },
+      },
+      include: {
+        organization: { include: { billingProfile: true } },
+      },
+      take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
+    });
+    let count = 0;
+    for (const row of due) {
+      await this.prisma.$transaction(async (transaction) => {
+        const claimed = await transaction.billingInvoice.updateMany({
+          where: {
+            id: row.id,
+            recoveryStatus: { in: ["GRACE", "ACTION_REQUIRED"] },
+            amountRemaining: { gt: 0 },
+            graceEndsAt: { lte: now },
+          },
+          data: {
+            recoveryStatus: "EXPIRED",
+            automaticRetryEligible: false,
+            nextRecoveryAttemptAt: null,
+            recoveryAttemptToken: null,
+            recoveryLeaseOwner: null,
+            recoveryLeaseExpiresAt: null,
+          },
+        });
+        if (claimed.count !== 1) return;
+        await transaction.organizationBillingProfile.update({
+          where: { organizationId: row.organizationId },
+          data: { subscriptionStatus: "PAST_DUE", gracePeriodEnd: row.graceEndsAt },
+        });
+        const recipient = row.customerEmail ?? row.organization.billingProfile?.billingEmail;
+        if (recipient && row.graceEndsAt) {
+          await transaction.billingEmailOutbox.upsert({
+            where: { dedupeKey: `grace-expired:${row.stripeInvoiceId}` },
+            update: {},
+            create: {
+              organizationId: row.organizationId,
+              billingInvoiceId: row.id,
+              kind: "BILLING_GRACE_EXPIRED",
+              dedupeKey: `grace-expired:${row.stripeInvoiceId}`,
+              recipientEmail: recipient,
+              locale: row.organization.defaultLocale,
+              payload: {
+                organizationName: row.customerName,
+                invoiceNumber: row.invoiceNumber,
+                amount: row.amountRemaining,
+                currency: row.currency,
+                graceEndsAt: row.graceEndsAt.toISOString(),
+                billingUrl: `${this.environment.MERCHANT_DASHBOARD_URL}/${row.organization.defaultLocale === "AR" ? "ar" : "en"}/dashboard/billing`,
+                timezone: row.organization.timezone,
+              },
+            },
+          });
+        }
+        await transaction.auditLog.create({
+          data: {
+            organizationId: row.organizationId,
+            action: "billing.grace_expired",
+            targetType: "billing_invoice",
+            targetId: row.stripeInvoiceId,
+            requestId: `billing-grace:${row.id}`,
+            metadata: {
+              policy: "PAST_DUE_RESTRICT_NEW_OPERATIONS_KEEP_EXISTING_CARDS_VIEWABLE",
+            },
+          },
+        });
+        count += 1;
+      });
+    }
+    return count;
+  }
+
+  async processBillingEmails(): Promise<number> {
+    const now = new Date();
+    const candidates = await this.prisma.billingEmailOutbox.findMany({
+      where: {
+        availableAt: { lte: now },
+        OR: [{ status: "PENDING" }, { status: "PROCESSING", leaseExpiresAt: { lte: now } }],
+      },
+      orderBy: [{ availableAt: "asc" }, { createdAt: "asc" }],
+      take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
+    });
+    let sent = 0;
+    for (const candidate of candidates) {
+      const leaseExpiresAt = new Date(Date.now() + LEASE_SECONDS * 1000);
+      const claimed = await this.prisma.billingEmailOutbox.updateMany({
+        where: {
+          id: candidate.id,
+          OR: [
+            { status: "PENDING" },
+            { status: "PROCESSING", leaseExpiresAt: { lte: new Date() } },
+          ],
+        },
+        data: {
+          status: "PROCESSING",
+          leaseOwner: this.workerId,
+          leaseExpiresAt,
+          attemptCount: { increment: 1 },
+        },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        const kind = candidate.kind as BillingEmailKind;
+        const rendered = renderBillingEmail(
+          kind,
+          candidate.payload as unknown as BillingEmailPayload,
+          candidate.locale === "AR" ? "ar" : "en",
+        );
+        await this.mailer.sendMail({
+          from: this.environment.SMTP_FROM || this.environment.EMAIL_FROM,
+          to: candidate.recipientEmail,
+          subject: rendered.subject,
+          html: rendered.html,
+        });
+        const completed = await this.prisma.billingEmailOutbox.updateMany({
+          where: {
+            id: candidate.id,
+            status: "PROCESSING",
+            leaseOwner: this.workerId,
+            leaseExpiresAt,
+          },
+          data: {
+            status: "SENT",
+            sentAt: new Date(),
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastFailureCode: null,
+          },
+        });
+        sent += completed.count;
+      } catch {
+        const attempt = candidate.attemptCount + 1;
+        await this.prisma.billingEmailOutbox.updateMany({
+          where: {
+            id: candidate.id,
+            status: "PROCESSING",
+            leaseOwner: this.workerId,
+            leaseExpiresAt,
+          },
+          data: {
+            status: attempt >= 8 ? "DEAD_LETTER" : "PENDING",
+            availableAt: new Date(Date.now() + Math.min(360, 2 ** attempt) * 60 * 1000),
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastFailureCode: "PROVIDER_DELIVERY_FAILED",
+          },
+        });
+      }
+    }
+    return sent;
+  }
+
+  private planForStripePrice(priceId: string | undefined): {
+    plan: PlanCode;
+    cadence: BillingCadence;
+  } {
+    for (const cadence of ["monthly", "quarterly", "yearly"] as const) {
+      for (const plan of ["starter", "growth", "scale"] as const) {
+        const key =
+          `STRIPE_${plan.toUpperCase()}_${cadence.toUpperCase()}_PRICE_ID` as keyof Environment;
+        if (priceId && priceId === this.environment[key]) return { plan, cadence };
+      }
+    }
     throw new Error("STRIPE_PRICE_UNKNOWN");
   }
 

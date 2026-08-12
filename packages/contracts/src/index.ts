@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { canonicalTimeZoneSchema, countryCodeSchema } from "./geography.js";
 import { programOperationalStatuses } from "./program-publication-state.js";
 
+export * from "./geography.js";
 export * from "./m2.js";
 export * from "./platform-capabilities.js";
 export * from "./program-publication-state.js";
@@ -17,6 +19,10 @@ export const localeSchema = z.enum(locales);
 export const planCodes = ["starter", "growth", "scale"] as const;
 export type PlanCode = (typeof planCodes)[number];
 export const planCodeSchema = z.enum(planCodes);
+
+export const billingCadences = ["monthly", "quarterly", "yearly"] as const;
+export type BillingCadence = (typeof billingCadences)[number];
+export const billingCadenceSchema = z.enum(billingCadences);
 
 export const memberRoles = ["OWNER", "MANAGER", "STAFF"] as const;
 export type MemberRole = (typeof memberRoles)[number];
@@ -101,17 +107,7 @@ export const updateUserSchema = z
   })
   .strict();
 
-export const timezoneSchema = z.string().refine(
-  (value) => {
-    try {
-      Intl.DateTimeFormat("en-US", { timeZone: value }).format();
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  { message: "Invalid IANA timezone." },
-);
+export const timezoneSchema = canonicalTimeZoneSchema;
 
 export const organizationSchema = z
   .object({
@@ -140,7 +136,7 @@ const locationObjectSchema = z.object({
   city: z.string().trim().max(100).optional(),
   region: z.string().trim().max(100).optional(),
   postalCode: z.string().trim().max(30).optional(),
-  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  countryCode: countryCodeSchema.optional(),
   phone: z.string().trim().min(5).max(30).optional(),
   timezone: timezoneSchema.optional(),
   latitude: z.number().min(-90).max(90).nullable().optional(),
@@ -175,6 +171,13 @@ export const invitationSchema = z
   .object({ email: emailSchema, role: z.enum(["MANAGER", "STAFF"]) })
   .strict();
 
+export const localStaffMemberSchema = z
+  .object({
+    name: z.string().trim().min(2).max(100),
+    role: z.enum(["MANAGER", "STAFF"]),
+  })
+  .strict();
+
 export const memberUpdateSchema = z
   .object({
     role: memberRoleSchema.optional(),
@@ -182,7 +185,59 @@ export const memberUpdateSchema = z
   })
   .strict();
 
-export const selectedPlanSchema = z.object({ plan: planCodeSchema }).strict();
+export const selectedPlanSchema = z
+  .object({ plan: planCodeSchema, cadence: billingCadenceSchema.optional() })
+  .strict();
+
+export const billingCheckoutSchema = z
+  .object({ cadence: billingCadenceSchema.default("monthly") })
+  .strict();
+
+const optionalBillingText = (maximum: number) =>
+  z.string().trim().max(maximum).nullable().optional();
+
+export const billingIdentitySchema = z
+  .object({
+    name: z.string().trim().min(2).max(160),
+    email: emailSchema,
+    countryCode: countryCodeSchema.nullable().optional(),
+    addressLine1: optionalBillingText(200),
+    addressLine2: optionalBillingText(200),
+    city: optionalBillingText(120),
+    region: optionalBillingText(120),
+    postalCode: optionalBillingText(40),
+  })
+  .strict();
+
+export type BillingIdentityInput = z.infer<typeof billingIdentitySchema>;
+
+export const refundReasons = [
+  "duplicate_charge",
+  "incorrect_charge",
+  "service_failure",
+  "unauthorized_payment",
+  "other",
+] as const;
+export type RefundReason = (typeof refundReasons)[number];
+export const refundReasonSchema = z.enum(refundReasons);
+
+export const refundRequestSchema = z
+  .object({
+    reason: refundReasonSchema,
+    amount: z.number().int().positive().optional(),
+    explanation: z.string().trim().max(2000).nullable().optional(),
+  })
+  .strict();
+export type RefundRequestInput = z.infer<typeof refundRequestSchema>;
+
+export const refundReviewSchema = z
+  .object({
+    action: z.enum(["start_review", "approve", "reject"]),
+    approvedAmount: z.number().int().positive().optional(),
+    note: z.string().trim().max(2000).nullable().optional(),
+  })
+  .strict();
+export type RefundReviewInput = z.infer<typeof refundReviewSchema>;
 
 export const slugChangeSchema = z
   .object({ slug: z.string().min(3).max(40), password: z.string().min(1).max(128) })

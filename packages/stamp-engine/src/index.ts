@@ -226,8 +226,8 @@ export function renderStampSvg(input: StampRenderInput): {
     input.rewardLabelVisible && input.rewardLabel ? input.rewardLabel : null,
   ].filter((value): value is string => Boolean(value));
   const labelHeight = labelLines.length ? labelLines.length * 24 + 16 : 0;
-  const maxX = Math.max(...positions.map((position) => position.x + size / 2)) + size / 2;
-  const maxY = Math.max(...positions.map((position) => position.y + size / 2)) + size / 2;
+  const maxX = Math.max(...positions.map((position) => position.x + size / 2));
+  const maxY = Math.max(...positions.map((position) => position.y + size / 2));
   const width = Math.ceil(maxX);
   const height = Math.ceil(maxY + labelHeight);
   const filledHref = artworkHref(

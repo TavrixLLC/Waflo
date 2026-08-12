@@ -56,17 +56,53 @@ export class HostResolutionService {
   }
 
   async resolveOrganization(host: string, developmentOverride?: string) {
-    if (developmentOverride && this.environment.values.DEPLOYMENT_ENVIRONMENT === "production") {
-      throw new AppError(
-        "TENANT_OVERRIDE_FORBIDDEN",
-        "Tenant overrides are disabled in production.",
-        HttpStatus.BAD_REQUEST,
-      );
+    const deployment = this.environment.values.DEPLOYMENT_ENVIRONMENT;
+    let effectiveHost = host;
+    if (developmentOverride) {
+      if (deployment === "production") {
+        throw new AppError(
+          "TENANT_OVERRIDE_FORBIDDEN",
+          "Tenant overrides are disabled in production.",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (
+        !/^[a-z0-9](?:[a-z0-9-]{0,47}[a-z0-9])?$/.test(developmentOverride) ||
+        reservedSlugs.has(developmentOverride)
+      ) {
+        throw new AppError(
+          "TENANT_OVERRIDE_INVALID",
+          "The tenant override is invalid.",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const normalizedRequestHost = host.trim().toLocaleLowerCase("en-US").split(":")[0] ?? "";
+      if (deployment === "staging") {
+        const sharedCustomerHost = new URL(this.environment.values.CUSTOMER_WEB_URL).hostname;
+        if (normalizedRequestHost !== sharedCustomerHost) {
+          throw new AppError(
+            "TENANT_OVERRIDE_HOST_FORBIDDEN",
+            "Tenant overrides are accepted only on the shared staging customer host.",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        effectiveHost = `${developmentOverride}.${this.environment.values.MERCHANT_BASE_DOMAIN}`;
+      } else {
+        const localHost =
+          normalizedRequestHost === "localhost" ||
+          normalizedRequestHost === "127.0.0.1" ||
+          normalizedRequestHost.endsWith(".localhost") ||
+          normalizedRequestHost.endsWith(".lvh.me");
+        if (!localHost) {
+          throw new AppError(
+            "TENANT_OVERRIDE_HOST_FORBIDDEN",
+            "Tenant overrides are accepted only on local development hosts.",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        effectiveHost = `${developmentOverride}.localhost`;
+      }
     }
-    const effectiveHost =
-      developmentOverride && this.environment.values.DEPLOYMENT_ENVIRONMENT !== "production"
-        ? `${developmentOverride}.localhost`
-        : host;
     const parsed = parseMerchantHostname(
       effectiveHost,
       this.environment.values.MERCHANT_BASE_DOMAIN,

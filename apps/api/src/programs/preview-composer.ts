@@ -61,6 +61,19 @@ function escapeXml(value: string): string {
   );
 }
 
+function localizeSvgRoot(svg: string, locale: "EN" | "AR"): string {
+  const language = locale === "AR" ? "ar" : "en";
+  const localized = svg.replace("<svg ", `<svg lang="${language}" xml:lang="${language}" `);
+  if (locale !== "AR") return localized;
+  // Left-side Wallet fields use the physical left edge as their origin. Under
+  // an RTL root, `start` points into the margin; `end` makes content flow back
+  // into the card while right-side fields retain their logical `start` anchor.
+  return localized.replace(
+    /x="48" y="(188|210|440|464)" text-anchor="start"/g,
+    'x="48" y="$1" text-anchor="end"',
+  );
+}
+
 function truncate(value: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, Math.max(1, limit - 1))}…` : value;
 }
@@ -336,7 +349,7 @@ function composeApple(
   const anchor = "start";
   const contentX = rtl ? 412 : 48;
   const headerX = rtl ? 48 : 412;
-  const headerAnchor = rtl ? "start" : "end";
+  const headerAnchor = "end";
   const previewBadgeX = rtl ? 24 : 316;
   const previewBadgeCenter = previewBadgeX + 60;
   const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
@@ -457,8 +470,10 @@ export function composeProgramPreview(
       : input.profile === "GOOGLE_WALLET"
         ? composeGoogle(input)
         : composeCustomer(input);
+  const svg = localizeSvgRoot(result.svg, input.locale);
   return {
     ...result,
-    digest: createHash("sha256").update(result.svg).digest("hex"),
+    svg,
+    digest: createHash("sha256").update(svg).digest("hex"),
   };
 }
