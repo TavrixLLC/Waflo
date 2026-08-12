@@ -77,11 +77,12 @@ describe("merchant Loyalty Studio information architecture", () => {
     );
   });
 
-  it("exposes six task-oriented areas in the intended order", () => {
+  it("exposes seven task-oriented areas in the intended order", () => {
     expect(studioAreas).toEqual([
       "overview",
       "how-it-works",
       "customers-locations",
+      "engagement",
       "test",
       "launch",
       "settings",
