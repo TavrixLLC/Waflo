@@ -6,6 +6,7 @@ const root = resolve(import.meta.dirname, "../..");
 const deploymentRoot = resolve(root, "deploy/vps");
 const compose = readFileSync(resolve(deploymentRoot, "compose.yml"), "utf8");
 const dockerfile = readFileSync(resolve(deploymentRoot, "Dockerfile"), "utf8");
+const minioInit = readFileSync(resolve(deploymentRoot, "scripts/minio-init.sh"), "utf8");
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
 
@@ -57,5 +58,11 @@ describe("production deployment platform", () => {
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/redis`);
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/object-storage`);
     expect(compose).toContain(`secrets/${deploymentEnvironmentVariable}`);
+  });
+
+  it("keeps MinIO provisioning credentials aligned with runtime application credentials", () => {
+    expect(compose).toContain("minio-init:\n    <<: *application-environment");
+    expect(minioInit).toContain("OBJECT_STORAGE_ACCESS_KEY_ID");
+    expect(minioInit).toContain("OBJECT_STORAGE_SECRET_ACCESS_KEY");
   });
 });

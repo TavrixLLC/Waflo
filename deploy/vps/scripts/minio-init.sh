@@ -3,8 +3,15 @@ set -eu
 
 root_user="$(cat /run/secrets/minio_root_user)"
 root_password="$(cat /run/secrets/minio_root_password)"
-application_user="$(cat /run/secrets/object_storage_access_key)"
-application_password="$(cat /run/secrets/object_storage_secret_key)"
+application_user="${OBJECT_STORAGE_ACCESS_KEY_ID:-}"
+application_password="${OBJECT_STORAGE_SECRET_ACCESS_KEY:-}"
+
+if [ -z "${application_user}" ]; then
+  application_user="$(cat /run/secrets/object_storage_access_key)"
+fi
+if [ -z "${application_password}" ]; then
+  application_password="$(cat /run/secrets/object_storage_secret_key)"
+fi
 policy_name="waflo-${DEPLOYMENT_ENVIRONMENT}"
 policy_file="/tmp/${policy_name}-policy.json"
 
