@@ -24,6 +24,7 @@ const studioAreaSegments = new Map<string, StudioArea>([
   ["overview", "overview"],
   ["how-it-works", "how-it-works"],
   ["customers-locations", "customers-locations"],
+  ["engagement", "engagement"],
   ["test", "test"],
   ["launch", "launch"],
   ["settings", "settings"],

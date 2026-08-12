@@ -7,8 +7,8 @@ import {
   Badge,
   Button,
   Card,
-  EmptyState,
   EmailInput,
+  EmptyState,
   FormField,
   Modal,
   PageHeader,
@@ -23,7 +23,7 @@ import {
 } from "@waflo/ui";
 import { CalendarClock, Copy, Gift, MapPin, Plus } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, ApiClientError, resetCsrf } from "../lib/api-client";
+import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import type { DashboardSection, MembershipView } from "./dashboard";
 
 function message(error: unknown, fallback: string): string {
@@ -230,6 +230,8 @@ interface LocationItem {
   city: string | null;
   phone: string | null;
   timezone: string;
+  latitude: number | null;
+  longitude: number | null;
   status: "ACTIVE" | "ARCHIVED";
   createdAt: string;
 }
@@ -252,6 +254,7 @@ export function LocationsScreen({
   const ar = locale === "ar";
   const [data, setData] = useState<{ items: LocationItem[]; usage: UsageDecision } | null>(null);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<LocationItem | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const canManage = membership.role !== "STAFF";
@@ -278,12 +281,40 @@ export function LocationsScreen({
           city: String(form.get("city") ?? "") || undefined,
           phone: String(form.get("phone") ?? "") || undefined,
           timezone: String(form.get("timezone") ?? membership.organization.defaultLocale),
+          latitude: form.get("latitude") ? Number(form.get("latitude")) : undefined,
+          longitude: form.get("longitude") ? Number(form.get("longitude")) : undefined,
         }),
       });
       setOpen(false);
       await load();
     } catch (caught) {
       setError(message(caught, ar ? "تعذر إنشاء الموقع." : "Unable to create location."));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function updateCoordinates(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    setSaving(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const latitude = String(form.get("latitude") ?? "").trim();
+    const longitude = String(form.get("longitude") ?? "").trim();
+    try {
+      await apiFetch(`/v1/organizations/${membership.organization.id}/locations/${editing.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          latitude: latitude ? Number(latitude) : null,
+          longitude: longitude ? Number(longitude) : null,
+        }),
+      });
+      setEditing(null);
+      await load();
+    } catch (caught) {
+      setError(
+        message(caught, ar ? "تعذر حفظ إحداثيات الموقع." : "Unable to save location coordinates."),
+      );
     } finally {
       setSaving(false);
     }
@@ -349,12 +380,19 @@ export function LocationsScreen({
               caption={ar ? "مواقع المؤسسة" : "Organization locations"}
               headers={
                 ar
-                  ? ["الموقع", "المدينة", "المنطقة الزمنية", "الحالة", "الإجراء"]
-                  : ["Location", "City", "Timezone", "Status", "Action"]
+                  ? ["الموقع", "المدينة", "الإحداثيات", "المنطقة الزمنية", "الحالة", "الإجراء"]
+                  : ["Location", "City", "Coordinates", "Timezone", "Status", "Action"]
               }
               rows={data.items.map((location) => [
                 <strong key="name">{location.name}</strong>,
                 location.city ?? "—",
+                location.latitude !== null && location.longitude !== null ? (
+                  <span dir="ltr" key="coordinates">
+                    {location.latitude}, {location.longitude}
+                  </span>
+                ) : (
+                  <span key="coordinates">{ar ? "غير مهيأة" : "Not configured"}</span>
+                ),
                 <span dir="ltr" key="timezone">
                   {location.timezone}
                 </span>,
@@ -364,23 +402,28 @@ export function LocationsScreen({
                   label={location.status}
                 />,
                 canManage ? (
-                  <Button
-                    key="action"
-                    variant="ghost"
-                    onClick={() =>
-                      void (location.status === "ACTIVE"
-                        ? archive(location.id)
-                        : restore(location.id))
-                    }
-                  >
-                    {location.status === "ACTIVE"
-                      ? ar
-                        ? "أرشفة"
-                        : "Archive"
-                      : ar
-                        ? "استعادة"
-                        : "Restore"}
-                  </Button>
+                  <div className="dashboard-actions" key="action">
+                    <Button type="button" variant="ghost" onClick={() => setEditing(location)}>
+                      {ar ? "الإحداثيات" : "Coordinates"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        void (location.status === "ACTIVE"
+                          ? archive(location.id)
+                          : restore(location.id))
+                      }
+                    >
+                      {location.status === "ACTIVE"
+                        ? ar
+                          ? "أرشفة"
+                          : "Archive"
+                        : ar
+                          ? "استعادة"
+                          : "Restore"}
+                    </Button>
+                  </div>
                 ) : (
                   "—"
                 ),
@@ -419,6 +462,28 @@ export function LocationsScreen({
               <option value="Asia/Dubai">Asia/Dubai</option>
             </Select>
           </FormField>
+          <div className="dashboard-grid-two">
+            <FormField label={ar ? "خط العرض" : "Latitude"} hint="−90 … 90">
+              <TextInput
+                name="latitude"
+                type="number"
+                inputMode="decimal"
+                min={-90}
+                max={90}
+                step="any"
+              />
+            </FormField>
+            <FormField label={ar ? "خط الطول" : "Longitude"} hint="−180 … 180">
+              <TextInput
+                name="longitude"
+                type="number"
+                inputMode="decimal"
+                min={-180}
+                max={180}
+                step="any"
+              />
+            </FormField>
+          </div>
           <div className="dashboard-actions">
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               {ar ? "إلغاء" : "Cancel"}
@@ -428,6 +493,64 @@ export function LocationsScreen({
             </Button>
           </div>
         </form>
+      </Modal>
+      <Modal
+        open={Boolean(editing)}
+        title={ar ? "إحداثيات الموقع التجاري" : "Business location coordinates"}
+        description={
+          ar
+            ? "أدخل إحداثيات الموقع التجاري الموثقة. لا تستخدم إحداثيات جهاز العميل."
+            : "Enter verified business coordinates. Customer device coordinates are never used."
+        }
+        descriptionVisible
+        onClose={() => setEditing(null)}
+      >
+        {editing ? (
+          <form className="dashboard-form" onSubmit={updateCoordinates}>
+            <Alert tone="info" title={editing.name}>
+              {ar
+                ? "تستخدم Apple وGoogle هذه الإحداثيات لتحديد صلة بطاقة Wallet بالقرب من النشاط."
+                : "Apple and Google use these coordinates for provider-native Wallet relevance near the business."}
+            </Alert>
+            <div className="dashboard-grid-two">
+              <FormField label={ar ? "خط العرض" : "Latitude"} hint="−90 … 90">
+                <TextInput
+                  name="latitude"
+                  type="number"
+                  inputMode="decimal"
+                  min={-90}
+                  max={90}
+                  step="any"
+                  defaultValue={editing.latitude ?? ""}
+                />
+              </FormField>
+              <FormField label={ar ? "خط الطول" : "Longitude"} hint="−180 … 180">
+                <TextInput
+                  name="longitude"
+                  type="number"
+                  inputMode="decimal"
+                  min={-180}
+                  max={180}
+                  step="any"
+                  defaultValue={editing.longitude ?? ""}
+                />
+              </FormField>
+            </div>
+            <p className="dashboard-form__hint">
+              {ar
+                ? "اترك الحقلين فارغين لإزالة الإحداثيات."
+                : "Leave both fields empty to remove coordinates."}
+            </p>
+            <div className="dashboard-actions">
+              <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
+                {ar ? "إلغاء" : "Cancel"}
+              </Button>
+              <Button type="submit" loading={saving}>
+                {ar ? "حفظ الإحداثيات" : "Save coordinates"}
+              </Button>
+            </div>
+          </form>
+        ) : null}
       </Modal>
     </>
   );

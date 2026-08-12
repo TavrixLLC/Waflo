@@ -22,6 +22,7 @@ import {
 import {
   Archive,
   ArrowLeft,
+  BellRing,
   Check,
   ChevronDown,
   ChevronRight,
@@ -82,6 +83,11 @@ import {
   selectCustomerPreviewSource,
 } from "./program-publication-presentation";
 import {
+  selectStudioLocalizedProgramContent,
+  selectStudioLocalizedRewardContent,
+  selectStudioLocalizedServerRewardName,
+} from "./program-studio-localization";
+import {
   deriveStudioLifecyclePresentation,
   type StudioArea,
   type StudioLifecyclePresentation,
@@ -92,11 +98,6 @@ import {
   studioOperationError,
   studioTestActionError,
 } from "./program-studio-presentation";
-import {
-  selectStudioLocalizedProgramContent,
-  selectStudioLocalizedRewardContent,
-  selectStudioLocalizedServerRewardName,
-} from "./program-studio-localization";
 import {
   type AssetItem,
   apiDraft,
@@ -112,6 +113,7 @@ import {
   type ValidationResult,
   versionToDraft,
 } from "./program-studio-types";
+import { WalletEngagementPanel } from "./wallet-engagement-panel";
 
 type SaveState = "saved" | "unsaved" | "saving" | "failed" | "conflict";
 type PreviewLoadState = "idle" | "loading" | "available" | "unavailable";
@@ -254,6 +256,7 @@ export function ProgramStudioEditor({
   assets,
   onAssetUploaded,
   ar,
+  canManageEngagement,
   initialArea = "overview",
   onAreaChange,
   onClose,
@@ -269,6 +272,7 @@ export function ProgramStudioEditor({
   assets: AssetItem[];
   onAssetUploaded: (asset: AssetItem) => void;
   ar: boolean;
+  canManageEngagement: boolean;
   builderHandoff?: boolean;
   initialArea?: StudioArea;
   onAreaChange?: (area: StudioArea, options?: { restoreFocus?: boolean }) => void;
@@ -984,6 +988,7 @@ export function ProgramStudioEditor({
             onAssetUploaded={onAssetUploaded}
             plan={plan}
             ar={ar}
+            canManageEngagement={canManageEngagement}
             lifecycleState={lifecycleState}
             validation={validation}
             validating={working}
@@ -1079,6 +1084,7 @@ function StudioAreaIcon({ area }: { area: StudioArea }) {
   if (area === "overview") return <LayoutDashboard size={19} aria-hidden="true" />;
   if (area === "how-it-works") return <Workflow size={19} aria-hidden="true" />;
   if (area === "customers-locations") return <MapPinned size={19} aria-hidden="true" />;
+  if (area === "engagement") return <BellRing size={19} aria-hidden="true" />;
   if (area === "test") return <FlaskConical size={19} aria-hidden="true" />;
   if (area === "launch") return <Rocket size={19} aria-hidden="true" />;
   return <Settings2 size={19} aria-hidden="true" />;
@@ -1263,6 +1269,7 @@ function StudioAreaContent({
   onAssetUploaded,
   plan,
   ar,
+  canManageEngagement,
   lifecycleState,
   validation,
   validating,
@@ -1310,6 +1317,7 @@ function StudioAreaContent({
   onAssetUploaded: (asset: AssetItem) => void;
   plan: "STARTER" | "GROWTH" | "SCALE";
   ar: boolean;
+  canManageEngagement: boolean;
   lifecycleState: StudioLifecyclePresentation;
   validation: ValidationResult | null;
   validating: boolean;
@@ -1422,6 +1430,16 @@ function StudioAreaContent({
         ar={ar}
         locationEditor={nestedSection("locations")}
         onCreateDraft={onCreateDraft}
+      />
+    );
+
+  if (area === "engagement")
+    return (
+      <WalletEngagementPanel
+        organizationId={organizationId}
+        programId={programId}
+        ar={ar}
+        canManage={canManageEngagement}
       />
     );
 

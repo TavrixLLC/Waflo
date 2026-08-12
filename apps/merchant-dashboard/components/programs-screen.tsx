@@ -448,6 +448,7 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         ar={ar}
+        canManageEngagement={membership.role !== "STAFF"}
         initialArea={studioArea}
         onAreaChange={(area, options) => {
           const targetPath = `/${locale}/dashboard/programs/${studioProgramId}${
