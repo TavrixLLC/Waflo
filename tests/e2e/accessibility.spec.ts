@@ -176,6 +176,7 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
 
   await studioNavigation.getByRole("button", { name: /^Customers & locations/u }).click();
   await expect(page).toHaveURL(/\/customers-locations$/u);
+  await expect(page).toHaveTitle(/Customers & locations/u);
   await expectNoCriticalViolations(page);
 
   await studioNavigation.getByRole("button", { name: /^Test/u }).click();

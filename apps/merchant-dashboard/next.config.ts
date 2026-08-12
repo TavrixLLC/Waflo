@@ -1,10 +1,12 @@
-import { createNextContentSecurityPolicy } from "@waflo/security";
 import { join } from "node:path";
+import { createNextContentSecurityPolicy } from "@waflo/security";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: join(import.meta.dirname, "../.."),
+  // A routed Merchant document must not render before its title metadata is available.
+  htmlLimitedBots: /.*/,
   transpilePackages: [
     "@waflo/ui",
     "@waflo/brand",

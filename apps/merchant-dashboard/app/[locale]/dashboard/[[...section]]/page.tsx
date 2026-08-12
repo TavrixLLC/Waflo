@@ -1,4 +1,5 @@
 import type { Locale } from "@waflo/contracts";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { DashboardApplication, type DashboardSection } from "../../../../components/dashboard";
 import type { StudioArea } from "../../../../components/program-studio-presentation";
@@ -29,6 +30,51 @@ const studioAreaSegments = new Map<string, StudioArea>([
   ["launch", "launch"],
   ["settings", "settings"],
 ]);
+
+const dashboardSectionTitles = new Map<DashboardSection, string>([
+  ["overview", "Overview"],
+  ["programs", "Loyalty Cards"],
+  ["customers", "Customers"],
+  ["devices", "Staff devices"],
+  ["approvals", "Manager approvals"],
+  ["risk", "Risk"],
+  ["locations", "Locations"],
+  ["team", "Team"],
+  ["analytics", "Analytics"],
+  ["exports", "Exports"],
+  ["billing", "Billing"],
+  ["audit", "Audit"],
+  ["settings", "Settings"],
+  ["security", "Security"],
+]);
+
+const studioAreaTitles = new Map<string, string>([
+  ["overview", "Loyalty Studio"],
+  ["how-it-works", "How it works"],
+  ["customers-locations", "Customers & locations"],
+  ["engagement", "Wallet Engagement"],
+  ["test", "Test loyalty card"],
+  ["launch", "Launch loyalty card"],
+  ["settings", "Loyalty card settings"],
+]);
+
+function titleForDashboardRoute(section?: string[]): string {
+  const selected = (section?.[0] ?? "overview") as DashboardSection;
+  if (selected !== "programs") return dashboardSectionTitles.get(selected) ?? "Merchant dashboard";
+  if (!section?.[1]) return dashboardSectionTitles.get("programs") ?? "Loyalty Cards";
+  if (section[1] === "new") return "Choose a loyalty card design";
+  if (section[2] === "edit") return "Customize loyalty card";
+  return studioAreaTitles.get(section[2] ?? "overview") ?? "Loyalty Studio";
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: Locale; section?: string[] }>;
+}): Promise<Metadata> {
+  const { section } = await params;
+  return { title: titleForDashboardRoute(section) };
+}
 
 export default async function DashboardPage({
   params,
