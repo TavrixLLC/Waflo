@@ -54,7 +54,7 @@ Before selecting the example subnets, inspect `docker network ls` and `docker ne
 
 ## Configuration and secrets
 
-Copy the matching tracked templates to the paths above. `compose.env` and `application.env` are non-sensitive and mode `0640` is suitable. The entire environment secret directory and every file within it must be restricted; deployment enforces mode `0600` for files.
+Copy the matching tracked templates to the paths above. `compose.env` and `application.env` are non-sensitive and mode `0640` is suitable. The entire environment secret directory must remain mode `0700`. Deployment enforces mode `0600` for top-level secret files except `cloudflare_tunnel_token`, whose narrow contract is `root:65532` mode `0440` so the explicitly non-root cloudflared process can read it. Deployment repairs only that token's metadata and rejects symlinks or non-regular files.
 
 `secrets/<environment>/application.env` holds secret application values. Individual Docker and
 provider secret files are described in [templates/secrets/README.md](templates/secrets/README.md).

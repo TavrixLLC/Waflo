@@ -31,6 +31,10 @@ for environment in staging production; do
     "${PLATFORM_ROOT}/backups/${environment}/postgres" \
     "${PLATFORM_ROOT}/backups/${environment}/restore-drills"
   install -d -m 0700 "${PLATFORM_ROOT}/deploy-logs/${environment}"
+  cloudflare_token="$(cloudflare_tunnel_token_path "${environment}")"
+  if [[ -e "${cloudflare_token}" || -L "${cloudflare_token}" ]]; then
+    prepare_cloudflare_tunnel_token "${environment}"
+  fi
 done
 
 printf 'Prepared %s without changing Docker, host ports, or unrelated services.\n' "${PLATFORM_ROOT}"

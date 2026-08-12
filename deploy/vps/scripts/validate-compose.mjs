@@ -177,6 +177,15 @@ for (const environment of ["staging", "production"]) {
   if (model.services.cloudflared.environment?.TUNNEL_TOKEN) {
     throw new Error("Cloudflare token must not be an environment value.");
   }
+  if (model.services.cloudflared.user !== "65532:65532") {
+    throw new Error("cloudflared must run as the pinned non-root identity 65532:65532.");
+  }
+  const cloudflareSecret = model.services.cloudflared.secrets?.find(
+    (secret) => secret.source === "cloudflare_tunnel_token",
+  );
+  if (cloudflareSecret?.mode !== "0440") {
+    throw new Error("cloudflared token mount must remain group-readable and non-world-readable.");
+  }
   for (const serviceName of ["api", "wallet-worker"]) {
     const providerMount = model.services[serviceName].volumes?.find(
       (volume) => volume.target === "/run/waflo-provider-secrets",

@@ -1,6 +1,6 @@
 # Cloudflare edge runbook
 
-Waflo uses a dedicated remotely managed tunnel container per environment. It does not read, edit, restart, or share the host's historical system cloudflared configuration. The token is a mode-`0600` file mounted at `/run/secrets/cloudflare_tunnel_token`; cloudflared 2026.7.2 reads it through `--token-file`. The token is absent from the image, Compose command line, container environment, and normal logs.
+Waflo uses a dedicated remotely managed tunnel container per environment. It does not read, edit, restart, or share the host's historical system cloudflared configuration. The token is a regular, non-symlink host file owned by `root:65532` with mode `0440`, mounted at `/run/secrets/cloudflare_tunnel_token`. cloudflared 2026.7.2 runs explicitly as the non-root identity `65532:65532` and reads it through `--token-file`. Host preparation and every deploy or rollback idempotently repair only this file's ownership and mode without rewriting its bytes. The token is absent from the image, Compose command line, container environment, and normal logs.
 
 Configure ingress in the Cloudflare dashboard for the environment's tunnel. Origins are private Compose service DNS names:
 

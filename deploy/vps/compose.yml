@@ -365,6 +365,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+    user: "65532:65532"
     restart: unless-stopped
     command:
       - tunnel
@@ -378,7 +379,7 @@ services:
       - /run/secrets/cloudflare_tunnel_token
     secrets:
       - source: cloudflare_tunnel_token
-        mode: 0400
+        mode: 0440
     networks: [edge]
     depends_on:
       api:

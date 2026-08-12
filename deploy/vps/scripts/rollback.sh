@@ -8,6 +8,7 @@ environment="${1:-}"
 target_release_sha="${2:-}"
 configure_release "${environment}" "${target_release_sha}"
 assert_legal_release_state
+prepare_cloudflare_tunnel_token "${environment}"
 assert_secret_permissions
 
 exec 9>"${PLATFORM_ROOT}/deploy-${environment}.lock"

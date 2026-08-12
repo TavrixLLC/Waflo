@@ -27,6 +27,10 @@ const smokeNodeReleaseImages = readFileSync(
   "utf8",
 );
 const rollback = readFileSync(resolve(deploymentRoot, "scripts/rollback.sh"), "utf8");
+const cloudflareTokenPermissionTest = readFileSync(
+  resolve(root, "tests/deployment/cloudflare-token-permissions.test.sh"),
+  "utf8",
+);
 const deployFromGitHub = readFileSync(
   resolve(deploymentRoot, "scripts/deploy-from-github.sh"),
   "utf8",
@@ -42,6 +46,8 @@ const postgresBindVariable = "$" + "{postgres_bind}";
 const pgdataVariable = "$" + "{pgdata}";
 const environmentVariable = "$" + "{environment}";
 const mcConfigDirectoryVariable = "$" + "{MC_CONFIG_DIR}";
+const cloudflaredContainerGidVariable = "$" + "{CLOUDFLARED_CONTAINER_GID}";
+const tokenFileVariable = "$" + "{token_file}";
 const referenceVariable = "$" + "{reference}";
 const scriptDirectoryVariable = "$" + "{script_directory}";
 
@@ -132,6 +138,33 @@ describe("production deployment platform", () => {
     expect(deploy.indexOf(preparationCall)).toBeLessThan(
       deploy.indexOf("compose up -d --no-build postgres redis minio"),
     );
+  });
+
+  it("repairs only the Cloudflare token for its pinned non-root container identity", () => {
+    const preparationCall = `prepare_cloudflare_tunnel_token "${environmentVariable}"`;
+    expect(compose).toContain('user: "65532:65532"');
+    expect(compose).toMatch(/cloudflare_tunnel_token\n\s+mode: 0440/u);
+    expect(common).toContain("readonly CLOUDFLARED_CONTAINER_UID=65532");
+    expect(common).toContain("readonly CLOUDFLARED_CONTAINER_GID=65532");
+    expect(common).toContain(`chown --no-dereference "0:${cloudflaredContainerGidVariable}"`);
+    expect(common).toContain(`chmod 0440 -- "${tokenFileVariable}"`);
+    expect(common).toContain("may not grant permissions to other users");
+    expect(common).toContain("! -name cloudflare_tunnel_token ! -perm 0600");
+    expect(common).not.toContain("chmod 0644");
+    expect(deploy).toContain(preparationCall);
+    expect(rollback).toContain(preparationCall);
+    expect(prepareHost).toContain(preparationCall);
+    expect(common).toContain(
+      `export CLOUDFLARE_TUNNEL_TOKEN_FILE="$(cloudflare_tunnel_token_path "${environmentVariable}")"`,
+    );
+    expect(deploy.indexOf(preparationCall)).toBeLessThan(
+      deploy.indexOf("assert_secret_permissions"),
+    );
+    expect(cloudflareTokenPermissionTest).toContain("cmp --silent");
+    expect(cloudflareTokenPermissionTest).toContain("World-readable Cloudflare token was accepted");
+    expect(cloudflareTokenPermissionTest).toContain("symlink substitution was accepted");
+    expect(cloudflareTokenPermissionTest).toContain("600:0:0");
+    expect(workflow).toContain("sudo bash tests/deployment/cloudflare-token-permissions.test.sh");
   });
 
   it("uses only ephemeral writable MinIO client configuration", () => {

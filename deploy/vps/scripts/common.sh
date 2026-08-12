@@ -4,6 +4,8 @@ set -Eeuo pipefail
 readonly PLATFORM_ROOT="${PLATFORM_ROOT:-/opt/waflo-platform}"
 readonly POSTGRES_CONTAINER_UID=70
 readonly POSTGRES_CONTAINER_GID=70
+readonly CLOUDFLARED_CONTAINER_UID=65532
+readonly CLOUDFLARED_CONTAINER_GID=65532
 readonly -a INFRASTRUCTURE_SERVICES=(postgres redis minio minio-init)
 readonly -a APPLICATION_SERVICES=(
   api
@@ -68,6 +70,81 @@ prepare_postgres_bind() {
     "${POSTGRES_CONTAINER_UID}" "${POSTGRES_CONTAINER_GID}" "${postgres_bind}"
 }
 
+cloudflare_tunnel_token_path() {
+  local environment="${1:-}"
+  require_environment "${environment}"
+  printf '%s' "${PLATFORM_ROOT}/secrets/${environment}/cloudflare_tunnel_token"
+}
+
+assert_cloudflare_tunnel_token_permissions() {
+  local environment="${1:-}"
+  local secret_root="${PLATFORM_ROOT}/secrets"
+  local secret_directory
+  local token_file
+
+  require_environment "${environment}"
+  secret_directory="${secret_root}/${environment}"
+  token_file="$(cloudflare_tunnel_token_path "${environment}")"
+
+  for directory in "${PLATFORM_ROOT}" "${secret_root}" "${secret_directory}"; do
+    if [[ -L "${directory}" || ! -d "${directory}" ]]; then
+      printf 'Cloudflare token parent must be a real directory: %s\n' "${directory}" >&2
+      return 2
+    fi
+  done
+  if [[ -L "${token_file}" || ! -f "${token_file}" ]]; then
+    printf 'Cloudflare tunnel token must be a regular, non-symlink file: %s\n' \
+      "${token_file}" >&2
+    return 2
+  fi
+  if [[ "$(stat -c '%a:%u:%g' "${token_file}")" != \
+    "440:0:${CLOUDFLARED_CONTAINER_GID}" ]]; then
+    printf 'Cloudflare tunnel token must be mode 0440 and owned by root:%s.\n' \
+      "${CLOUDFLARED_CONTAINER_GID}" >&2
+    return 2
+  fi
+}
+
+prepare_cloudflare_tunnel_token() {
+  local environment="${1:-}"
+  local token_file
+
+  require_environment "${environment}"
+  if [[ "${EUID}" -ne 0 ]]; then
+    printf 'Cloudflare tunnel token preparation must run as root.\n' >&2
+    return 2
+  fi
+  token_file="$(cloudflare_tunnel_token_path "${environment}")"
+
+  # Validate every expected path before changing metadata. In particular, never
+  # follow a substituted token symlink or operate outside this environment.
+  if [[ -L "${PLATFORM_ROOT}" || ! -d "${PLATFORM_ROOT}" || \
+    -L "${PLATFORM_ROOT}/secrets" || ! -d "${PLATFORM_ROOT}/secrets" || \
+    -L "${PLATFORM_ROOT}/secrets/${environment}" || \
+    ! -d "${PLATFORM_ROOT}/secrets/${environment}" || \
+    -L "${token_file}" || ! -f "${token_file}" ]]; then
+    printf 'Cloudflare tunnel token path must contain only real directories and a regular file: %s\n' \
+      "${token_file}" >&2
+    return 2
+  fi
+  if [[ "$(stat -c '%a' "${token_file}")" == *[1-7] ]]; then
+    printf 'Cloudflare tunnel token may not grant permissions to other users: %s\n' \
+      "${token_file}" >&2
+    return 2
+  fi
+
+  chown --no-dereference "0:${CLOUDFLARED_CONTAINER_GID}" -- "${token_file}"
+  if [[ -L "${token_file}" || ! -f "${token_file}" ]]; then
+    printf 'Cloudflare tunnel token changed file type during preparation: %s\n' \
+      "${token_file}" >&2
+    return 2
+  fi
+  chmod 0440 -- "${token_file}"
+  assert_cloudflare_tunnel_token_permissions "${environment}"
+  printf 'Cloudflare tunnel token metadata is prepared for container identity %s:%s.\n' \
+    "${CLOUDFLARED_CONTAINER_UID}" "${CLOUDFLARED_CONTAINER_GID}"
+}
+
 configure_release() {
   local environment="$1"
   local release_sha="$2"
@@ -82,6 +159,7 @@ configure_release() {
   export COMPOSE_ENV_FILE="${PLATFORM_ROOT}/env/${environment}/compose.env"
   export WAFLO_ENV_FILE="${PLATFORM_ROOT}/env/${environment}/application.env"
   export WAFLO_SECRET_ENV_FILE="${PLATFORM_ROOT}/secrets/${environment}/application.env"
+  export CLOUDFLARE_TUNNEL_TOKEN_FILE="$(cloudflare_tunnel_token_path "${environment}")"
 
   [[ -f "${COMPOSE_FILE}" ]] || { printf 'Missing release compose file: %s\n' "${COMPOSE_FILE}" >&2; return 2; }
   [[ -f "${COMPOSE_ENV_FILE}" ]] || { printf 'Missing Compose environment: %s\n' "${COMPOSE_ENV_FILE}" >&2; return 2; }
@@ -192,7 +270,9 @@ assert_secret_permissions() {
   local secret_directory="${PLATFORM_ROOT}/secrets/${DEPLOYMENT_ENVIRONMENT}"
   local provider_directory="${secret_directory}/provider-files"
   local insecure
-  insecure="$(find "${secret_directory}" -maxdepth 1 -type f ! -perm 0600 -print)"
+  assert_cloudflare_tunnel_token_permissions "${DEPLOYMENT_ENVIRONMENT}" || return 2
+  insecure="$(find "${secret_directory}" -maxdepth 1 -type f \
+    ! -name cloudflare_tunnel_token ! -perm 0600 -print)"
   if [[ -n "${insecure}" ]]; then
     printf 'Secret files must be mode 0600:\n%s\n' "${insecure}" >&2
     return 2
