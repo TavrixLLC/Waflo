@@ -15,6 +15,7 @@ import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { CustomerCardService } from "../customer/customer-card.service.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { EnvironmentService } from "../config/environment.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 import { WalletProviderRegistry } from "../wallet/wallet-provider.registry.js";
 
@@ -52,6 +53,46 @@ function nextPromotionalWindow(timezone: string, now = new Date()): Date {
   return new Date(now.getTime() + (hoursUntilEight * 60 - minute) * 60_000);
 }
 
+export function normalizeWalletCampaignDestination(input: {
+  destinationUrl: string;
+  configuredWafloUrls: readonly string[];
+  merchantHostnames: readonly string[];
+  allowLocal: boolean;
+}): string {
+  let url: URL;
+  try {
+    url = new URL(input.destinationUrl);
+  } catch {
+    throw new AppError(
+      "WALLET_CAMPAIGN_URL_INVALID",
+      "Use a valid merchant or Waflo destination URL.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  const hostname = url.hostname.toLocaleLowerCase("en-US");
+  const local = ["localhost", "127.0.0.1"].includes(hostname);
+  const configuredWafloHosts = new Set(
+    input.configuredWafloUrls.map((value) => new URL(value).hostname.toLocaleLowerCase("en-US")),
+  );
+  const allowed =
+    configuredWafloHosts.has(hostname) ||
+    input.merchantHostnames.some(
+      (merchantHostname) => merchantHostname.toLocaleLowerCase("en-US") === hostname,
+    ) ||
+    (input.allowLocal && local);
+  const allowedProtocol =
+    url.protocol === "https:" || (input.allowLocal && local && url.protocol === "http:");
+  if (!allowedProtocol || url.username || url.password || !allowed) {
+    throw new AppError(
+      "WALLET_CAMPAIGN_URL_NOT_ALLOWED",
+      "The destination must use HTTPS and belong to this merchant or Waflo.",
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+  url.hash = "";
+  return url.toString();
+}
+
 @Injectable()
 export class WalletEngagementService {
   constructor(
@@ -60,6 +101,7 @@ export class WalletEngagementService {
     private readonly audit: AuditService,
     private readonly providers: WalletProviderRegistry,
     private readonly customerCards: CustomerCardService,
+    private readonly environment: EnvironmentService,
   ) {}
 
   private async program(userId: string, organizationId: string, programId: string, manage = false) {
@@ -71,16 +113,23 @@ export class WalletEngagementService {
     const program = await this.prisma.client.loyaltyProgram.findFirst({
       where: { id: programId, organizationId },
       include: {
-        organization: true,
+        organization: {
+          include: {
+            walletNearbyConfiguration: {
+              include: {
+                locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
+              },
+            },
+            locations: { where: { status: "ACTIVE" }, orderBy: { createdAt: "asc" } },
+          },
+        },
         currentPublishedVersion: {
           include: {
             translations: true,
             locations: { include: { location: true }, orderBy: { createdAt: "asc" } },
           },
         },
-        walletNearbyConfiguration: {
-          include: { locations: { include: { location: true }, orderBy: { sortOrder: "asc" } } },
-        },
+        walletNearbyProgramCopy: true,
       },
     });
     if (!program) {
@@ -119,7 +168,8 @@ export class WalletEngagementService {
 
   async getMerchantView(userId: string, organizationId: string, programId: string) {
     const program = await this.program(userId, organizationId, programId);
-    const configuration = program.walletNearbyConfiguration;
+    const configuration = program.organization.walletNearbyConfiguration;
+    const programCopy = program.walletNearbyProgramCopy;
     const published = program.currentPublishedVersion;
     const templateCode = published?.baseTemplateCode ?? null;
     const previewEn = resolveWalletNearbyText({
@@ -127,25 +177,27 @@ export class WalletEngagementService {
       businessCategory: program.organization.businessCategory,
       merchantName: program.organization.name,
       locale: "en",
-      customText: configuration?.appleCustomTextEn,
+      customText: programCopy?.appleCustomTextEn,
     });
     const previewAr = resolveWalletNearbyText({
       templateCode,
       businessCategory: program.organization.businessCategory,
       merchantName: program.organization.name,
       locale: "ar",
-      customText: configuration?.appleCustomTextAr,
+      customText: programCopy?.appleCustomTextAr,
     });
-    const eligibleLocations = (published?.locations ?? [])
-      .filter(({ location }) => location.status === "ACTIVE")
-      .map(({ location }) => ({
-        id: location.id,
-        name: location.name,
-        city: location.city,
-        latitude: location.latitude === null ? null : Number(location.latitude),
-        longitude: location.longitude === null ? null : Number(location.longitude),
-        coordinatesConfigured: location.latitude !== null && location.longitude !== null,
-      }));
+    const publishedLocationIds = new Set(
+      (published?.locations ?? []).map(({ locationId }) => locationId),
+    );
+    const eligibleLocations = program.organization.locations.map((location) => ({
+      id: location.id,
+      name: location.name,
+      city: location.city,
+      latitude: location.latitude === null ? null : Number(location.latitude),
+      longitude: location.longitude === null ? null : Number(location.longitude),
+      coordinatesConfigured: location.latitude !== null && location.longitude !== null,
+      participatesInThisCard: publishedLocationIds.has(location.id),
+    }));
     return {
       program: {
         id: program.id,
@@ -158,12 +210,13 @@ export class WalletEngagementService {
         google: this.capability("GOOGLE"),
       },
       nearby: {
+        scope: "ORGANIZATION" as const,
         enabled: configuration?.enabled ?? false,
         revision: configuration?.revision ?? 1,
         locationIds: configuration?.locations.map((item) => item.locationId) ?? [],
         desiredAppleMaxDistanceMeters: APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
-        appleCustomTextEn: configuration?.appleCustomTextEn ?? null,
-        appleCustomTextAr: configuration?.appleCustomTextAr ?? null,
+        appleCustomTextEn: programCopy?.appleCustomTextEn ?? null,
+        appleCustomTextAr: programCopy?.appleCustomTextAr ?? null,
         preview: {
           en: {
             ...previewEn,
@@ -177,6 +230,10 @@ export class WalletEngagementService {
       },
       eligibleLocations,
       disclosures: {
+        policy:
+          "Nearby is a business-wide Wallet policy. Participating locations apply to each published Loyalty Card where that location participates.",
+        delivery:
+          "Apple, Google, and the customer's device settings control whether and when a card is surfaced.",
         apple:
           "Apple determines when the pass becomes relevant and uses the smaller of Waflo’s requested maximum and Apple’s default distance.",
         google: "Google Wallet determines nearby distance, dwell time, and the system reminder.",
@@ -199,14 +256,13 @@ export class WalletEngagementService {
         HttpStatus.CONFLICT,
       );
     }
-    const publishedVersionId = program.currentPublishedVersion.id;
-    const locations = program.currentPublishedVersion.locations
-      .filter(({ location }) => input.locationIds.includes(location.id))
-      .map(({ location }) => location);
+    const locations = program.organization.locations.filter((location) =>
+      input.locationIds.includes(location.id),
+    );
     if (locations.length !== input.locationIds.length) {
       throw new AppError(
         "WALLET_NEARBY_LOCATION_INVALID",
-        "Choose active locations that participate in this Loyalty Card.",
+        "Choose active business locations owned by this organization.",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -225,9 +281,13 @@ export class WalletEngagementService {
     }
     const updated = await withInvariantLock(
       this.prisma.client,
-      `wallet-nearby:${programId}`,
+      `wallet-nearby:${organizationId}`,
       async (transaction) => {
         const current = await transaction.walletNearbyConfiguration.findUnique({
+          where: { organizationId },
+          include: { locations: { orderBy: { sortOrder: "asc" } } },
+        });
+        const currentProgramCopy = await transaction.walletNearbyProgramCopy.findUnique({
           where: { programId },
         });
         const currentRevision = current?.revision ?? 1;
@@ -245,8 +305,6 @@ export class WalletEngagementService {
               where: { id: current.id },
               data: {
                 enabled: input.enabled,
-                appleCustomTextEn: input.appleCustomTextEn ?? null,
-                appleCustomTextAr: input.appleCustomTextAr ?? null,
                 updatedByUserId: userId,
                 revision,
                 locations: { deleteMany: {} },
@@ -255,10 +313,7 @@ export class WalletEngagementService {
           : await transaction.walletNearbyConfiguration.create({
               data: {
                 organizationId,
-                programId,
                 enabled: input.enabled,
-                appleCustomTextEn: input.appleCustomTextEn ?? null,
-                appleCustomTextAr: input.appleCustomTextAr ?? null,
                 updatedByUserId: userId,
                 revision,
               },
@@ -272,44 +327,53 @@ export class WalletEngagementService {
             })),
           });
         }
-        const firstMembership = await transaction.membership.findFirst({
-          where: { organizationId, programId },
-          select: { id: true },
-          orderBy: { createdAt: "asc" },
-        });
-        const googleBinding = await transaction.walletProgramBinding.findFirst({
-          where: {
+        const programCopy = await transaction.walletNearbyProgramCopy.upsert({
+          where: { programId },
+          create: {
             organizationId,
             programId,
-            provider: "GOOGLE",
-            programVersionId: publishedVersionId,
+            appleCustomTextEn: input.appleCustomTextEn ?? null,
+            appleCustomTextAr: input.appleCustomTextAr ?? null,
+            updatedByUserId: userId,
+          },
+          update: {
+            appleCustomTextEn: input.appleCustomTextEn ?? null,
+            appleCustomTextAr: input.appleCustomTextAr ?? null,
+            updatedByUserId: userId,
           },
         });
-        if (firstMembership && googleBinding) {
-          const key = `wallet:google:nearby-template:${programId}:r${revision}`;
-          await transaction.walletCommand.create({
+        const previousLocationIds = current?.locations.map((item) => item.locationId) ?? [];
+        const policyChanged =
+          (current?.enabled ?? false) !== input.enabled ||
+          JSON.stringify(previousLocationIds) !== JSON.stringify(input.locationIds);
+        const copyChanged =
+          (currentProgramCopy?.appleCustomTextEn ?? null) !== (input.appleCustomTextEn ?? null) ||
+          (currentProgramCopy?.appleCustomTextAr ?? null) !== (input.appleCustomTextAr ?? null);
+        const affectedPrograms = policyChanged
+          ? await transaction.loyaltyProgram.findMany({
+              where: {
+                organizationId,
+                OR: [
+                  { walletBindings: { some: {} } },
+                  { memberships: { some: { walletPassInstances: { some: {} } } } },
+                ],
+              },
+              select: { id: true },
+            })
+          : [{ id: programId }];
+        for (const affectedProgram of affectedPrograms) {
+          await transaction.programWalletSyncJob.create({
             data: {
               organizationId,
-              membershipId: firstMembership.id,
-              provider: "GOOGLE",
-              commandType: "ENSURE_TEMPLATE",
-              idempotencyKey: key,
-              payloadFingerprint: fingerprint({ programId, revision, input }),
-              safePayload: { bindingId: googleBinding.id, reason: "NEARBY_RELEVANCE_CHANGED" },
+              programId: affectedProgram.id,
+              action: "update",
+              reason: "NEARBY_RELEVANCE_CHANGED",
+              commandType: "UPDATE",
+              idempotencyKey: `program-wallet-nearby-sync:${affectedProgram.id}:r${revision}:source:${programId}`,
+              batchSize: 500,
             },
           });
         }
-        await transaction.programWalletSyncJob.create({
-          data: {
-            organizationId,
-            programId,
-            action: "update",
-            reason: "NEARBY_RELEVANCE_CHANGED",
-            commandType: "UPDATE",
-            idempotencyKey: `program-wallet-nearby-sync:${programId}:r${revision}`,
-            batchSize: 500,
-          },
-        });
         await this.audit.recordInTransaction(
           transaction,
           {
@@ -320,17 +384,15 @@ export class WalletEngagementService {
             targetId: configuration.id,
             metadata: {
               programId,
+              scope: "ORGANIZATION",
               locationIds: input.locationIds,
-              appleCustomTextChanged:
-                (current?.appleCustomTextEn ?? null) !== (input.appleCustomTextEn ?? null) ||
-                (current?.appleCustomTextAr ?? null) !== (input.appleCustomTextAr ?? null),
+              appleCustomTextChanged: copyChanged,
+              affectedProgramIds: affectedPrograms.map((item) => item.id),
               revision,
             },
           },
           request,
         );
-        const previousLocationIds =
-          program.walletNearbyConfiguration?.locations.map((item) => item.locationId) ?? [];
         if (JSON.stringify(previousLocationIds) !== JSON.stringify(input.locationIds)) {
           await this.audit.recordInTransaction(
             transaction,
@@ -345,25 +407,24 @@ export class WalletEngagementService {
             request,
           );
         }
-        if (
-          (current?.appleCustomTextEn ?? null) !== (input.appleCustomTextEn ?? null) ||
-          (current?.appleCustomTextAr ?? null) !== (input.appleCustomTextAr ?? null)
-        ) {
+        if (copyChanged) {
           await this.audit.recordInTransaction(
             transaction,
             {
               organizationId,
               actorUserId: userId,
               action: "wallet.apple_nearby_text_changed",
-              targetType: "wallet_nearby_configuration",
-              targetId: configuration.id,
+              targetType: "wallet_nearby_program_copy",
+              targetId: programCopy.id,
               metadata: {
                 programId,
                 localizedValuesChanged: [
-                  ...((current?.appleCustomTextEn ?? null) !== (input.appleCustomTextEn ?? null)
+                  ...((currentProgramCopy?.appleCustomTextEn ?? null) !==
+                  (input.appleCustomTextEn ?? null)
                     ? ["EN"]
                     : []),
-                  ...((current?.appleCustomTextAr ?? null) !== (input.appleCustomTextAr ?? null)
+                  ...((currentProgramCopy?.appleCustomTextAr ?? null) !==
+                  (input.appleCustomTextAr ?? null)
                     ? ["AR"]
                     : []),
                 ],
@@ -436,36 +497,21 @@ export class WalletEngagementService {
     destinationUrl: string | null | undefined,
   ): Promise<string | null> {
     if (!destinationUrl) return null;
-    let url: URL;
-    try {
-      url = new URL(destinationUrl);
-    } catch {
-      throw new AppError(
-        "WALLET_CAMPAIGN_URL_INVALID",
-        "Use a valid merchant or Waflo destination URL.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
     const allowedDomains = await this.prisma.client.organizationDomain.findMany({
       where: { organizationId, status: "ACTIVE" },
       select: { hostname: true },
     });
-    const hostname = url.hostname.toLocaleLowerCase("en-US");
-    const local = ["localhost", "127.0.0.1"].includes(hostname);
-    const allowed =
-      hostname === "waflo.app" ||
-      hostname.endsWith(".waflo.app") ||
-      allowedDomains.some((domain) => domain.hostname.toLocaleLowerCase("en-US") === hostname) ||
-      (process.env.NODE_ENV !== "production" && local);
-    if ((!local && url.protocol !== "https:") || url.username || url.password || !allowed) {
-      throw new AppError(
-        "WALLET_CAMPAIGN_URL_NOT_ALLOWED",
-        "The destination must use HTTPS and belong to this merchant or Waflo.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    url.hash = "";
-    return url.toString();
+    return normalizeWalletCampaignDestination({
+      destinationUrl,
+      configuredWafloUrls: [
+        this.environment.values.MARKETING_WEB_URL,
+        this.environment.values.MERCHANT_DASHBOARD_URL,
+        this.environment.values.CUSTOMER_WEB_URL,
+        this.environment.values.API_PUBLIC_URL,
+      ],
+      merchantHostnames: allowedDomains.map((domain) => domain.hostname),
+      allowLocal: process.env.NODE_ENV !== "production",
+    });
   }
 
   async createCampaign(

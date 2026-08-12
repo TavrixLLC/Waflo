@@ -98,15 +98,17 @@ export class OrganizationsService {
             trialEnd: null,
           },
         });
-        await transaction.organizationDomain.create({
-          data: {
-            organizationId: created.id,
-            hostname: `${merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
-            type: "SUBDOMAIN",
-            status: "ACTIVE",
-            isPrimary: true,
-          },
-        });
+        if (this.environment.values.DEPLOYMENT_ENVIRONMENT !== "staging") {
+          await transaction.organizationDomain.create({
+            data: {
+              organizationId: created.id,
+              hostname: `${merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
+              type: "SUBDOMAIN",
+              status: "ACTIVE",
+              isPrimary: true,
+            },
+          });
+        }
         await transaction.user.update({
           where: { id: userId },
           data: { lastSelectedOrganizationId: created.id },
@@ -195,13 +197,25 @@ export class OrganizationsService {
       request,
     );
     if (input.name !== undefined || input.businessCategory !== undefined) {
-      const nearbyConfigurations = await this.prisma.client.walletNearbyConfiguration.findMany({
-        where: { organizationId, enabled: true },
-        select: { programId: true },
+      const nearbyConfiguration = await this.prisma.client.walletNearbyConfiguration.findUnique({
+        where: { organizationId },
+        select: { enabled: true },
       });
-      if (nearbyConfigurations.length) {
+      const affectedPrograms = nearbyConfiguration?.enabled
+        ? await this.prisma.client.loyaltyProgram.findMany({
+            where: {
+              organizationId,
+              OR: [
+                { walletBindings: { some: {} } },
+                { memberships: { some: { walletPassInstances: { some: {} } } } },
+              ],
+            },
+            select: { id: true },
+          })
+        : [];
+      if (affectedPrograms.length) {
         await this.prisma.client.programWalletSyncJob.createMany({
-          data: nearbyConfigurations.map(({ programId }) => ({
+          data: affectedPrograms.map(({ id: programId }) => ({
             organizationId,
             programId,
             action: "update" as const,

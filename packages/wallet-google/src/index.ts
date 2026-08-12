@@ -549,7 +549,22 @@ export class GoogleWalletProvider implements WalletProvider {
     };
     if (this.mode !== "REAL" || !this.client) return { state: "STORED_AND_NOTIFIED" };
     const objectPath = `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`;
-    const current = await this.client.request<{ messages?: unknown[] }>(objectPath);
+    const current = await this.client.request<{ hasUsers?: boolean; messages?: unknown[] }>(
+      objectPath,
+    );
+    if (current.value.hasUsers === false) {
+      return {
+        state: "NO_ACTIVE_WALLET_HOLDER",
+        ...(current.requestId ? { providerRequestId: current.requestId } : {}),
+      };
+    }
+    if (current.value.hasUsers !== true) {
+      throw new WalletProviderError(
+        "TEMPORARY_FAILURE",
+        "Google Wallet did not return authoritative saved-pass state.",
+        { retryable: true, ...(current.requestId ? { providerRequestId: current.requestId } : {}) },
+      );
+    }
     const storedMessages = Array.isArray(current.value.messages) ? current.value.messages : [];
     const messageId = (value: unknown) => {
       if (!value || typeof value !== "object" || !("id" in value)) return null;
@@ -561,27 +576,30 @@ export class GoogleWalletProvider implements WalletProvider {
         ...(current.requestId ? { providerRequestId: current.requestId } : {}),
       };
     }
-    if (storedMessages.length > 8) {
-      const issuerOwnedIds = storedMessages
+    if (storedMessages.length >= 10) {
+      const explicitlyObsolete = new Set(
+        (message.obsoleteMessageIds ?? []).filter((id) => id.startsWith("wfl_")),
+      );
+      const removableIds = storedMessages
         .map(messageId)
-        .filter((id): id is string => Boolean(id?.startsWith("wfl_")))
+        .filter((id): id is string => Boolean(id && explicitlyObsolete.has(id)))
         .sort((left, right) => left.localeCompare(right, "en"));
-      const minimumRemovalCount = Math.max(0, storedMessages.length - 9);
-      const preferredRemovalCount = storedMessages.length - 8;
-      const removalCount = Math.min(preferredRemovalCount, issuerOwnedIds.length);
-      if (removalCount < minimumRemovalCount) {
+      const removalCount = storedMessages.length - 9;
+      if (removableIds.length < removalCount) {
         throw new WalletProviderError(
-          "PERMANENT_FAILURE",
-          "The Google Wallet pass message limit is occupied by non-Waflo messages.",
+          "MESSAGE_CAPACITY_REACHED",
+          "The Google Wallet pass has no safely removable message capacity.",
           { retryable: false },
         );
       }
       if (removalCount > 0) {
-        const removableIds = new Set(issuerOwnedIds.slice(0, removalCount));
+        const selectedRemovalIds = new Set(removableIds.slice(0, removalCount));
         await this.client.request(objectPath, {
           method: "PATCH",
           body: {
-            messages: storedMessages.filter((stored) => !removableIds.has(messageId(stored) ?? "")),
+            messages: storedMessages.filter(
+              (stored) => !selectedRemovalIds.has(messageId(stored) ?? ""),
+            ),
           },
         });
       }

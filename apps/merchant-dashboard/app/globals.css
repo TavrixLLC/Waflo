@@ -678,6 +678,64 @@ body {
   background: repeating-linear-gradient(90deg, var(--waflo-brick) 0 6px, transparent 6px 11px);
 }
 
+.wallet-policy-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3rem minmax(0, 1fr);
+  align-items: stretch;
+  margin: 1rem 0 1.4rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--waflo-ink) 12%, transparent);
+  border-radius: var(--waflo-radius-lg);
+  background: var(--waflo-white);
+  box-shadow: 0 9px 24px rgba(36, 25, 22, 0.06);
+}
+
+.wallet-policy-rail > div {
+  display: grid;
+  align-content: center;
+  gap: 0.35rem;
+  min-height: 7.5rem;
+  padding: 1.15rem 1.35rem;
+}
+
+.wallet-policy-rail > div:first-child {
+  border-inline-start: 0.35rem solid var(--waflo-brick);
+  background: color-mix(in srgb, var(--waflo-soft) 58%, white);
+}
+
+.wallet-policy-rail span {
+  color: var(--waflo-brick);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.wallet-policy-rail strong {
+  font-size: 1rem;
+}
+
+.wallet-policy-rail small {
+  color: var(--waflo-muted);
+  line-height: 1.55;
+}
+
+.wallet-policy-rail i {
+  position: relative;
+  display: grid;
+  place-items: center;
+  background: var(--waflo-ink);
+}
+
+.wallet-policy-rail i::before {
+  color: white;
+  font-style: normal;
+  content: "→";
+}
+
+[dir="rtl"] .wallet-policy-rail i::before {
+  content: "←";
+}
+
 .wallet-engagement-layout {
   display: grid;
   grid-template-columns: minmax(12.5rem, 0.32fr) minmax(0, 1fr);
@@ -2679,6 +2737,18 @@ body {
 }
 
 @media (max-width: 760px) {
+  .wallet-policy-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-policy-rail i {
+    min-height: 2rem;
+  }
+
+  .wallet-policy-rail i::before {
+    content: "↓";
+  }
+
   .template-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

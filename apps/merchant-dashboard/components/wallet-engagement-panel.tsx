@@ -47,6 +47,7 @@ interface WalletEngagementView {
     };
   };
   nearby: {
+    scope: "ORGANIZATION";
     enabled: boolean;
     revision: number;
     locationIds: string[];
@@ -65,8 +66,9 @@ interface WalletEngagementView {
     latitude: number | null;
     longitude: number | null;
     coordinatesConfigured: boolean;
+    participatesInThisCard: boolean;
   }>;
-  disclosures: { apple: string; google: string };
+  disclosures: { policy: string; delivery: string; apple: string; google: string };
 }
 
 interface AudienceEstimate {
@@ -305,6 +307,35 @@ export function WalletEngagementPanel({
         </span>
       </section>
 
+      <section
+        className="wallet-policy-rail"
+        aria-label={ar ? "سياسة العمل والتسليم" : "Business policy and delivery"}
+      >
+        <div>
+          <span>{ar ? "سياسة العمل" : "BUSINESS POLICY"}</span>
+          <strong>
+            {nearbyEnabled
+              ? ar
+                ? "التذكيرات القريبة مفعّلة"
+                : "Nearby reminders enabled"
+              : ar
+                ? "التذكيرات القريبة متوقفة"
+                : "Nearby reminders off"}
+          </strong>
+          <small>
+            {ar ? "يعمل هذا الخيار على مستوى النشاط التجاري." : view.disclosures.policy}
+          </small>
+        </div>
+        <i aria-hidden="true" />
+        <div>
+          <span>{ar ? "التسليم على الجهاز" : "DEVICE DELIVERY"}</span>
+          <strong>{ar ? "تحكم Apple وGoogle" : "Apple & Google controlled"}</strong>
+          <small>
+            {ar ? "إعدادات Wallet والموقع على جهاز العميل هي الحاسمة." : view.disclosures.delivery}
+          </small>
+        </div>
+      </section>
+
       <div className="wallet-engagement-layout">
         <aside
           className="wallet-provider-rail"
@@ -357,12 +388,12 @@ export function WalletEngagementPanel({
                 <MapPin />
               </div>
               <div>
-                <Badge tone="brand">01 · {ar ? "قريب" : "NEARBY"}</Badge>
-                <h3>{ar ? "تذكير Wallet القريب" : "Nearby Wallet reminder"}</h3>
+                <Badge tone="brand">{ar ? "سياسة النشاط" : "BUSINESS POLICY"}</Badge>
+                <h3>{ar ? "تذكيرات Wallet القريبة" : "Nearby Wallet reminders"}</h3>
                 <p>
                   {ar
-                    ? "اختر حتى 10 مواقع تجارية موثقة. يحدد مزود Wallet وقت وكيفية ظهور البطاقة."
-                    : "Choose up to 10 verified business locations. Each Wallet provider decides when and how the card appears."}
+                    ? "عند التفعيل، قد تعرض Apple Wallet وGoogle Wallet بطاقة الولاء للعملاء بالقرب من المواقع المشاركة. يحدد المزود وإعدادات الجهاز المسافة والتوقيت."
+                    : "When enabled, Apple Wallet and Google Wallet may surface your Loyalty Card when customers are near participating locations. Distance and timing are controlled by the Wallet provider and the customer’s device settings."}
                 </p>
               </div>
               <label className="wallet-switch">
@@ -404,11 +435,15 @@ export function WalletEngagementPanel({
                     <span>
                       <strong>{location.name}</strong>
                       <small>
-                        {location.coordinatesConfigured
-                          ? `${location.city ?? (ar ? "موقع تجاري" : "Business location")} · ${location.latitude}, ${location.longitude}`
-                          : ar
-                            ? "أضف الإحداثيات من إعدادات المواقع"
-                            : "Add coordinates in Location settings"}
+                        {!location.participatesInThisCard
+                          ? ar
+                            ? "هذا الموقع غير مشارك في بطاقة الولاء هذه"
+                            : "This location does not participate in this Loyalty Card"
+                          : location.coordinatesConfigured
+                            ? `${location.city ?? (ar ? "موقع تجاري" : "Business location")} · ${location.latitude}, ${location.longitude}`
+                            : ar
+                              ? "أضف الإحداثيات من إعدادات المواقع"
+                              : "Add coordinates in Location settings"}
                       </small>
                     </span>
                   </label>
@@ -513,8 +548,8 @@ export function WalletEngagementPanel({
                 <BellRing />
               </div>
               <div>
-                <Badge tone="brand">02 · {ar ? "إرسال" : "SEND"}</Badge>
-                <h3>{ar ? "إرسال رسالة إلى Wallet" : "Send a Wallet message"}</h3>
+                <Badge tone="brand">{ar ? "رسالة ترويجية" : "PROMOTIONAL SEND"}</Badge>
+                <h3>{ar ? "إرسال إشعار" : "Send notification"}</h3>
                 <p>
                   {ar
                     ? "تُرسل فقط إلى حاملي Google Wallet النشطين الذين منحوا موافقة ترويجية حالية."
@@ -665,7 +700,7 @@ export function WalletEngagementPanel({
           >
             <div className="wallet-engagement-heading">
               <div>
-                <Badge>03 · {ar ? "السجل" : "HISTORY"}</Badge>
+                <Badge>{ar ? "السجل" : "HISTORY"}</Badge>
                 <h3>{ar ? "سجل الحملات" : "Campaign history"}</h3>
               </div>
             </div>

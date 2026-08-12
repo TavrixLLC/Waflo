@@ -17,6 +17,7 @@ export const walletErrorCategories = [
   "PERMANENT_FAILURE",
   "SIGNING_FAILED",
   "PROVIDER_UNAVAILABLE",
+  "MESSAGE_CAPACITY_REACHED",
 ] as const;
 export type WalletErrorCategory = (typeof walletErrorCategories)[number];
 
@@ -279,10 +280,11 @@ export interface WalletPromotionalMessageInput {
   readonly title: string;
   readonly body: string;
   readonly destinationUrl?: string;
+  readonly obsoleteMessageIds?: readonly string[];
 }
 
 export interface WalletPromotionalMessageResult {
-  readonly state: "STORED_AND_NOTIFIED";
+  readonly state: "STORED_AND_NOTIFIED" | "NO_ACTIVE_WALLET_HOLDER";
   readonly providerRequestId?: string;
 }
 

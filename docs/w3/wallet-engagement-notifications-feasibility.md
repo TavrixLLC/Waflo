@@ -1,5 +1,20 @@
 # Wallet engagement and nearby-notification feasibility
 
+## Final product policy (2026-08-12)
+
+Provider-native Nearby relevance is an organization-level business policy and is not gated by an
+individual customerâ€™s `WALLET_PROMOTIONS` consent. When an owner or authorized manager enables it,
+the selected active business locations feed every eligible published Loyalty Card; each Program
+Version intersects that selection with its participating locations. Loyalty-Card-specific Apple
+copy still resolves from `LoyaltyProgramVersion.baseTemplateCode`, then
+`Organization.businessCategory`, then `GENERAL`.
+
+`WALLET_PROMOTIONS` remains mandatory for manual promotional messages such as Google
+`TEXT_AND_NOTIFY`. Apple manual promotion remains `PROVIDER_CONFIRMATION_REQUIRED`, and
+`changeMessage` is not a marketing channel. Apple, Google, Wallet notification/location settings,
+and pass removal remain authoritative for actual Nearby presentation; no exact 2 km trigger or
+delivery is guaranteed.
+
 Research date: 2026-08-12
 
 Original scope: research and design. The provider research and decision history below are retained. The implementation status recorded on 2026-08-12 supersedes the original “do not implement” recommendation while preserving every provider limitation and external verification requirement. No production provider traffic was used during implementation.
@@ -21,7 +36,7 @@ Original scope: research and design. The provider research and decision history 
 - Merchant content is normalized plain text with Unicode length limits, control/bidi/HTML/template rejection, first-party-only nearby variables, credential-pattern rejection, related-domain HTTPS validation, and deterministic nearby-claim safeguards.
 - Merchant location coordinates are nullable, range-checked, editable business data. Waflo does not collect customer latitude, longitude, location history, or geofence events.
 - The single category authority is `LoyaltyProgramVersion.baseTemplateCode`; existing `Organization.businessCategory` is the fallback, followed by `GENERAL`. Static versioned English/Arabic copy is resolved deterministically without AI or customer PII.
-- Nearby changes, selected-location coordinate/archive changes, and relevant organization name/category changes queue the existing pass-refresh pipeline. Archiving the last selected nearby branch turns nearby relevance off rather than leaving an enabled configuration with no locations.
+- Organization-level Nearby changes, selected-location coordinate/archive changes, and relevant organization name/category changes queue the existing pass-refresh pipeline for every affected Program and all usable Google version bindings. Archiving the last selected nearby branch turns Nearby off rather than leaving an enabled configuration with no locations.
 - Migration `20260812170000_wallet_engagement` adds the campaign, delivery, nearby configuration/selection, consent scope, command type, and merchant-coordinate storage. Existing consent, wallet command/outbox, audit, membership, provider identity, and program sync infrastructure are reused.
 
 ### PROVIDER-VERIFICATION-PENDING
@@ -350,7 +365,7 @@ The UI must display provider differences. Google can support a post-v1 `TEXT_AND
 
 ### Nearby relevance
 
-Offer a per-location setting: **“Surface this Loyalty Card when Wallet considers the customer nearby.”** Show supported providers, permission requirements, the 10-location limits, and “Distance and timing are controlled by Apple/Google.” Do not expose a 2 km slider.
+Offer one business-level **Nearby Wallet reminders** switch plus deterministic participating-location selection. The organization switch overrides all cards; each Program Version can only receive selected locations that already participate in that card. Show the 10-location limits and “Distance and timing are controlled by Apple/Google and the customer’s device settings.” Do not expose a 2 km slider or mention promotional consent in this control.
 
 ## Proposed Backend architecture
 
@@ -401,7 +416,11 @@ These are reusable patterns, not evidence that campaign, consent, coordinates, o
 - active Apple Wallet registrations (`unregisteredAt` is null);
 - provisioned/synced Google Wallet objects via pass-instance provider identity/status.
 
-A provisioned Google object does not prove that a user has saved it. Google's provider-side `hasUsers` field could inform a future reconciliation design, but Waflo does not currently own a reliable local “saved in Google Wallet” fact.
+A provisioned Google object does not prove that a user has saved it. Immediately before a manual
+`TEXT_AND_NOTIFY` send, Waflo now retrieves the Google object and requires authoritative
+`hasUsers=true`. `false` is stored as a non-delivered `NO_ACTIVE_WALLET_HOLDER` skip; unavailable or
+missing state receives only the existing bounded retry policy and is never guessed true. Nearby
+class synchronization does not perform per-customer `hasUsers` lookups.
 
 ### Not authoritative at the original research checkpoint
 

@@ -326,12 +326,22 @@ export class LocationsService {
     locationId: string,
     changedAt: Date,
   ) {
-    const selections = await this.prisma.client.walletNearbyLocation.findMany({
+    const selection = await this.prisma.client.walletNearbyLocation.findFirst({
       where: { locationId, configuration: { organizationId, enabled: true } },
-      include: { configuration: true },
     });
-    for (const selection of selections) {
-      const programId = selection.configuration.programId;
+    if (!selection) return;
+    const programs = await this.prisma.client.loyaltyProgram.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { walletBindings: { some: {} } },
+          { memberships: { some: { walletPassInstances: { some: {} } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    for (const program of programs) {
+      const programId = program.id;
       const fingerprint = `${locationId}:${changedAt.toISOString()}`;
       await this.prisma.client.programWalletSyncJob.upsert({
         where: { idempotencyKey: `program-wallet-nearby-location:${programId}:${fingerprint}` },
@@ -356,11 +366,11 @@ export class LocationsService {
     changedAt: Date,
     request: WafloRequest,
   ) {
-    const configurations = await this.prisma.client.walletNearbyConfiguration.findMany({
+    const configuration = await this.prisma.client.walletNearbyConfiguration.findFirst({
       where: { organizationId, locations: { some: { locationId } } },
-      select: { id: true, programId: true, revision: true },
+      select: { id: true, revision: true },
     });
-    for (const configuration of configurations) {
+    if (configuration) {
       await this.prisma.client.$transaction(async (transaction) => {
         await transaction.walletNearbyLocation.deleteMany({
           where: { configurationId: configuration.id, locationId },
@@ -375,20 +385,27 @@ export class LocationsService {
             ...(remainingLocations === 0 ? { enabled: false } : {}),
           },
         });
-        await transaction.programWalletSyncJob.upsert({
+        const programs = await transaction.loyaltyProgram.findMany({
           where: {
-            idempotencyKey: `program-wallet-nearby-archive:${configuration.programId}:${changedAt.toISOString()}`,
-          },
-          create: {
             organizationId,
-            programId: configuration.programId,
+            OR: [
+              { walletBindings: { some: {} } },
+              { memberships: { some: { walletPassInstances: { some: {} } } } },
+            ],
+          },
+          select: { id: true },
+        });
+        await transaction.programWalletSyncJob.createMany({
+          data: programs.map(({ id: programId }) => ({
+            organizationId,
+            programId,
             action: "update",
             reason: "NEARBY_RELEVANCE_CHANGED",
             commandType: "UPDATE",
-            idempotencyKey: `program-wallet-nearby-archive:${configuration.programId}:${changedAt.toISOString()}`,
+            idempotencyKey: `program-wallet-nearby-archive:${programId}:${changedAt.toISOString()}`,
             batchSize: 500,
-          },
-          update: {},
+          })),
+          skipDuplicates: true,
         });
         await this.audit.recordInTransaction(
           transaction,
@@ -399,7 +416,8 @@ export class LocationsService {
             targetType: "wallet_nearby_configuration",
             targetId: configuration.id,
             metadata: {
-              programId: configuration.programId,
+              scope: "ORGANIZATION",
+              affectedProgramIds: programs.map((program) => program.id),
               removedLocationId: locationId,
               nearbyDisabled: remainingLocations === 0,
               revision: configuration.revision + 1,

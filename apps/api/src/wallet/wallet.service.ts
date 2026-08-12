@@ -30,9 +30,7 @@ const walletPassInclude = {
   membershipCredential: true,
   membership: {
     include: {
-      organization: true,
-      customer: true,
-      program: {
+      organization: {
         include: {
           walletNearbyConfiguration: {
             include: {
@@ -41,11 +39,14 @@ const walletPassInclude = {
           },
         },
       },
+      customer: true,
+      program: { include: { walletNearbyProgramCopy: true } },
       progress: true,
       enrollmentProgramVersion: {
         include: {
           translations: true,
           stampRule: true,
+          locations: { select: { locationId: true } },
           visualTheme: publishedVisualThemeInclude,
         },
       },
@@ -356,16 +357,17 @@ export class WalletService {
         createHash("sha256").update(version.id).digest("hex"),
       locale,
       nearbyRelevance: walletNearbyRelevance({
-        enabled: membership.program.walletNearbyConfiguration?.enabled ?? false,
-        locations: membership.program.walletNearbyConfiguration?.locations ?? [],
+        enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
+        locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
+        allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
         templateCode: version.baseTemplateCode,
         businessCategory: membership.organization.businessCategory,
         merchantName: membership.organization.name,
         locale,
         customText:
           locale === "ar"
-            ? membership.program.walletNearbyConfiguration?.appleCustomTextAr
-            : membership.program.walletNearbyConfiguration?.appleCustomTextEn,
+            ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
+            : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
       }),
     };
     return {
@@ -388,6 +390,7 @@ export class WalletService {
 
 function walletNearbyRelevance(input: {
   enabled: boolean;
+  allowedLocationIds: ReadonlySet<string>;
   locations: ReadonlyArray<{
     location: {
       id: string;
@@ -406,7 +409,10 @@ function walletNearbyRelevance(input: {
   const locations = input.locations
     .filter(
       ({ location }) =>
-        location.status === "ACTIVE" && location.latitude !== null && location.longitude !== null,
+        input.allowedLocationIds.has(location.id) &&
+        location.status === "ACTIVE" &&
+        location.latitude !== null &&
+        location.longitude !== null,
     )
     .slice(0, 10)
     .map(({ location }) => ({

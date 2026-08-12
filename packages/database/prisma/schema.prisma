@@ -581,6 +581,7 @@ model User {
   accountLifecycleRequests   MerchantAccountLifecycleRequest[]
   createdWalletCampaigns     WalletEngagementCampaign[] @relation("WalletCampaignCreator")
   updatedWalletNearbyConfigurations WalletNearbyConfiguration[] @relation("WalletNearbyUpdater")
+  updatedWalletNearbyProgramCopies  WalletNearbyProgramCopy[]  @relation("WalletNearbyProgramCopyUpdater")
 
   @@map("users")
 }
@@ -793,7 +794,8 @@ model Organization {
   transferEvents         MembershipTransferEvent[]
   publicWalletAssets      PublicWalletAsset[]
   programWalletSyncJobs   ProgramWalletSyncJob[]
-  walletNearbyConfigurations WalletNearbyConfiguration[]
+  walletNearbyConfiguration  WalletNearbyConfiguration?
+  walletNearbyProgramCopies  WalletNearbyProgramCopy[]
   walletEngagementCampaigns WalletEngagementCampaign[]
   walletCampaignDeliveries WalletCampaignDelivery[]
 
@@ -1059,7 +1061,7 @@ model LoyaltyProgram {
   enrollmentCommands    EnrollmentCommand[]
   walletBindings        WalletProgramBinding[]
   walletSyncJobs        ProgramWalletSyncJob[]
-  walletNearbyConfiguration WalletNearbyConfiguration?
+  walletNearbyProgramCopy   WalletNearbyProgramCopy?
   walletEngagementCampaigns WalletEngagementCampaign[]
 
   @@index([organizationId, status, updatedAt(sort: Desc)])
@@ -1764,23 +1766,36 @@ model WalletCommand {
 
 model WalletNearbyConfiguration {
   id                       String         @id @default(uuid()) @db.Uuid
-  organizationId           String         @map("organization_id") @db.Uuid
-  programId                String         @unique @map("program_id") @db.Uuid
+  organizationId           String         @unique @map("organization_id") @db.Uuid
   enabled                  Boolean        @default(false)
-  appleCustomTextEn        String?        @map("apple_custom_text_en") @db.VarChar(120)
-  appleCustomTextAr        String?        @map("apple_custom_text_ar") @db.VarChar(120)
   desiredAppleMaxDistance  Int            @default(2000) @map("desired_apple_max_distance")
   revision                 Int            @default(1)
   updatedByUserId          String         @map("updated_by_user_id") @db.Uuid
   createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization             Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  program                  LoyaltyProgram @relation(fields: [programId], references: [id], onDelete: Restrict)
   updatedBy                User           @relation("WalletNearbyUpdater", fields: [updatedByUserId], references: [id], onDelete: Restrict)
   locations                WalletNearbyLocation[]
 
-  @@index([organizationId, enabled])
+  @@index([enabled])
   @@map("wallet_nearby_configurations")
+}
+
+model WalletNearbyProgramCopy {
+  id                       String         @id @default(uuid()) @db.Uuid
+  organizationId           String         @map("organization_id") @db.Uuid
+  programId                String         @unique @map("program_id") @db.Uuid
+  appleCustomTextEn        String?        @map("apple_custom_text_en") @db.VarChar(120)
+  appleCustomTextAr        String?        @map("apple_custom_text_ar") @db.VarChar(120)
+  updatedByUserId          String         @map("updated_by_user_id") @db.Uuid
+  createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program                  LoyaltyProgram @relation(fields: [programId], references: [id], onDelete: Restrict)
+  updatedBy                User           @relation("WalletNearbyProgramCopyUpdater", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@map("wallet_nearby_program_copies")
 }
 
 model WalletNearbyLocation {

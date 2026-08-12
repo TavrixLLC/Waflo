@@ -20,10 +20,7 @@ ALTER TABLE "locations"
 CREATE TABLE "wallet_nearby_configurations" (
   "id" UUID NOT NULL,
   "organization_id" UUID NOT NULL,
-  "program_id" UUID NOT NULL,
   "enabled" BOOLEAN NOT NULL DEFAULT false,
-  "apple_custom_text_en" VARCHAR(120),
-  "apple_custom_text_ar" VARCHAR(120),
   "desired_apple_max_distance" INTEGER NOT NULL DEFAULT 2000,
   "revision" INTEGER NOT NULL DEFAULT 1,
   "updated_by_user_id" UUID NOT NULL,
@@ -31,13 +28,30 @@ CREATE TABLE "wallet_nearby_configurations" (
   "updated_at" TIMESTAMPTZ(6) NOT NULL,
   CONSTRAINT "wallet_nearby_configurations_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "wallet_nearby_configurations_distance_check" CHECK ("desired_apple_max_distance" = 2000),
-  CONSTRAINT "wallet_nearby_configurations_program_id_key" UNIQUE ("program_id"),
+  CONSTRAINT "wallet_nearby_configurations_organization_id_key" UNIQUE ("organization_id"),
   CONSTRAINT "wallet_nearby_configurations_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT "wallet_nearby_configurations_program_id_fkey" FOREIGN KEY ("program_id") REFERENCES "loyalty_programs"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "wallet_nearby_configurations_updated_by_user_id_fkey" FOREIGN KEY ("updated_by_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE INDEX "wallet_nearby_configurations_organization_id_enabled_idx" ON "wallet_nearby_configurations"("organization_id", "enabled");
+CREATE INDEX "wallet_nearby_configurations_enabled_idx" ON "wallet_nearby_configurations"("enabled");
+
+CREATE TABLE "wallet_nearby_program_copies" (
+  "id" UUID NOT NULL,
+  "organization_id" UUID NOT NULL,
+  "program_id" UUID NOT NULL,
+  "apple_custom_text_en" VARCHAR(120),
+  "apple_custom_text_ar" VARCHAR(120),
+  "updated_by_user_id" UUID NOT NULL,
+  "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMPTZ(6) NOT NULL,
+  CONSTRAINT "wallet_nearby_program_copies_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "wallet_nearby_program_copies_program_id_key" UNIQUE ("program_id"),
+  CONSTRAINT "wallet_nearby_program_copies_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "wallet_nearby_program_copies_program_id_fkey" FOREIGN KEY ("program_id") REFERENCES "loyalty_programs"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "wallet_nearby_program_copies_updated_by_user_id_fkey" FOREIGN KEY ("updated_by_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX "wallet_nearby_program_copies_organization_id_idx" ON "wallet_nearby_program_copies"("organization_id");
 
 CREATE TABLE "wallet_nearby_locations" (
   "configuration_id" UUID NOT NULL,
@@ -52,6 +66,44 @@ CREATE TABLE "wallet_nearby_locations" (
 );
 
 CREATE INDEX "wallet_nearby_locations_location_id_idx" ON "wallet_nearby_locations"("location_id");
+
+CREATE OR REPLACE FUNCTION enforce_wallet_nearby_program_copy_tenant()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM "loyalty_programs" AS program
+    WHERE program."id" = NEW."program_id"
+      AND program."organization_id" = NEW."organization_id"
+  ) THEN
+    RAISE EXCEPTION 'wallet nearby program copy tenant mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION enforce_wallet_nearby_location_tenant()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM "wallet_nearby_configurations" AS configuration
+    INNER JOIN "locations" AS location ON location."id" = NEW."location_id"
+    WHERE configuration."id" = NEW."configuration_id"
+      AND configuration."organization_id" = location."organization_id"
+  ) THEN
+    RAISE EXCEPTION 'wallet nearby location tenant mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER wallet_nearby_program_copies_tenant_guard
+BEFORE INSERT OR UPDATE ON "wallet_nearby_program_copies"
+FOR EACH ROW EXECUTE FUNCTION enforce_wallet_nearby_program_copy_tenant();
+
+CREATE TRIGGER wallet_nearby_locations_tenant_guard
+BEFORE INSERT OR UPDATE ON "wallet_nearby_locations"
+FOR EACH ROW EXECUTE FUNCTION enforce_wallet_nearby_location_tenant();
 
 CREATE TABLE "wallet_engagement_campaigns" (
   "id" UUID NOT NULL,

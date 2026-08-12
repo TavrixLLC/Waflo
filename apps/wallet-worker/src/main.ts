@@ -54,7 +54,8 @@ import { Redis } from "ioredis";
 import sharp from "sharp";
 import { classifyApplePushResponse } from "./apple-push.js";
 
-const QUEUE_KEY = "waflo:wallet:commands";
+const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
+const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
 const SIGNAL_TTL_SECONDS = 180;
 const LEASE_SECONDS = 90;
 
@@ -89,9 +90,7 @@ const passInclude = {
   membershipCredential: true,
   membership: {
     include: {
-      organization: true,
-      customer: true,
-      program: {
+      organization: {
         include: {
           walletNearbyConfiguration: {
             include: {
@@ -100,11 +99,14 @@ const passInclude = {
           },
         },
       },
+      customer: true,
+      program: { include: { walletNearbyProgramCopy: true } },
       progress: true,
       enrollmentProgramVersion: {
         include: {
           translations: true,
           stampRule: true,
+          locations: { select: { locationId: true } },
           visualTheme: {
             include: {
               filledStampAsset: { include: { variants: true } },
@@ -285,16 +287,17 @@ function mapPass(
       createHash("sha256").update(version.id).digest("hex"),
     locale,
     nearbyRelevance: nearbyRelevance({
-      enabled: membership.program.walletNearbyConfiguration?.enabled ?? false,
-      locations: membership.program.walletNearbyConfiguration?.locations ?? [],
+      enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
+      locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
+      allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
       templateCode: version.baseTemplateCode,
       businessCategory: membership.organization.businessCategory,
       merchantName: membership.organization.name,
       locale,
       customText:
         locale === "ar"
-          ? membership.program.walletNearbyConfiguration?.appleCustomTextAr
-          : membership.program.walletNearbyConfiguration?.appleCustomTextEn,
+          ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
+          : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
     }),
     ...(progressAssetUrl ? { publicAssetBaseUrl: progressAssetUrl } : {}),
     walletPassInstanceId: pass.id,
@@ -315,8 +318,7 @@ function mapPass(
 function mapProgram(
   binding: Prisma.WalletProgramBindingGetPayload<{
     include: {
-      organization: true;
-      program: {
+      organization: {
         include: {
           walletNearbyConfiguration: {
             include: {
@@ -325,7 +327,14 @@ function mapProgram(
           };
         };
       };
-      programVersion: { include: { translations: true; visualTheme: true } };
+      program: { include: { walletNearbyProgramCopy: true } };
+      programVersion: {
+        include: {
+          translations: true;
+          visualTheme: true;
+          locations: { select: { locationId: true } };
+        };
+      };
     };
   }>,
   programLogoUrl?: string,
@@ -350,16 +359,17 @@ function mapProgram(
     configurationFingerprint: binding.configurationFingerprint,
     locale,
     nearbyRelevance: nearbyRelevance({
-      enabled: binding.program.walletNearbyConfiguration?.enabled ?? false,
-      locations: binding.program.walletNearbyConfiguration?.locations ?? [],
+      enabled: binding.organization.walletNearbyConfiguration?.enabled ?? false,
+      locations: binding.organization.walletNearbyConfiguration?.locations ?? [],
+      allowedLocationIds: new Set(binding.programVersion.locations.map((item) => item.locationId)),
       templateCode: binding.programVersion.baseTemplateCode,
       businessCategory: binding.organization.businessCategory,
       merchantName: binding.organization.name,
       locale,
       customText:
         locale === "ar"
-          ? binding.program.walletNearbyConfiguration?.appleCustomTextAr
-          : binding.program.walletNearbyConfiguration?.appleCustomTextEn,
+          ? binding.program.walletNearbyProgramCopy?.appleCustomTextAr
+          : binding.program.walletNearbyProgramCopy?.appleCustomTextEn,
     }),
     ...(programLogoUrl ? { programLogoUrl } : {}),
   };
@@ -367,6 +377,7 @@ function mapProgram(
 
 function nearbyRelevance(input: {
   enabled: boolean;
+  allowedLocationIds: ReadonlySet<string>;
   locations: ReadonlyArray<{
     location: {
       id: string;
@@ -385,7 +396,10 @@ function nearbyRelevance(input: {
   const locations = input.locations
     .filter(
       ({ location }) =>
-        location.status === "ACTIVE" && location.latitude !== null && location.longitude !== null,
+        input.allowedLocationIds.has(location.id) &&
+        location.status === "ACTIVE" &&
+        location.latitude !== null &&
+        location.longitude !== null,
     )
     .slice(0, 10)
     .map(({ location }) => ({
@@ -475,23 +489,40 @@ export class WalletWorker {
   }
 
   async dispatch(limit = 100) {
-    const commands = await this.prisma.walletCommand.findMany({
+    const eligible: Prisma.WalletCommandWhereInput = {
+      OR: [
+        { status: { in: ["PENDING", "FAILED"] }, nextAttemptAt: { lte: new Date() } },
+        { status: "PROCESSING", leaseExpiresAt: { lt: new Date() } },
+      ],
+    };
+    const operational = await this.prisma.walletCommand.findMany({
       where: {
-        OR: [
-          { status: { in: ["PENDING", "FAILED"] }, nextAttemptAt: { lte: new Date() } },
-          { status: "PROCESSING", leaseExpiresAt: { lt: new Date() } },
-        ],
+        ...eligible,
+        commandType: { not: "SEND_PROMOTION" },
       },
-      select: { id: true },
-      orderBy: { nextAttemptAt: "asc" },
+      select: { id: true, commandType: true },
+      orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
       take: limit,
     });
+    const promotional =
+      operational.length < limit
+        ? await this.prisma.walletCommand.findMany({
+            where: { ...eligible, commandType: "SEND_PROMOTION" },
+            select: { id: true, commandType: true },
+            orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
+            take: limit - operational.length,
+          })
+        : [];
+    const commands = [...operational, ...promotional];
     let queued = 0;
     for (const command of commands) {
       const signal = `waflo:wallet:queued:${command.id}`;
       const reserved = await this.redis.set(signal, "1", "EX", SIGNAL_TTL_SECONDS, "NX");
       if (reserved !== "OK") continue;
-      await this.redis.lpush(QUEUE_KEY, command.id);
+      await this.redis.lpush(
+        command.commandType === "SEND_PROMOTION" ? PROMOTIONAL_QUEUE_KEY : OPERATIONAL_QUEUE_KEY,
+        command.id,
+      );
       queued += 1;
     }
     return queued;
@@ -610,34 +641,37 @@ export class WalletWorker {
     });
     try {
       if (job.reason === "NEARBY_RELEVANCE_CHANGED") {
-        const binding = await this.prisma.walletProgramBinding.findFirst({
+        const bindings = await this.prisma.walletProgramBinding.findMany({
           where: {
             organizationId: job.organizationId,
             programId: job.programId,
             provider: "GOOGLE",
+            status: { not: "DISABLED" },
           },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         });
         const membership = await this.prisma.membership.findFirst({
           where: { organizationId: job.organizationId, programId: job.programId },
           select: { id: true },
           orderBy: { createdAt: "asc" },
         });
-        if (binding && membership) {
-          const idempotencyKey = `wallet:google:nearby-template:${job.id}`;
-          await this.prisma.walletCommand.upsert({
-            where: { idempotencyKey },
-            create: {
-              organizationId: job.organizationId,
-              membershipId: membership.id,
-              provider: "GOOGLE",
-              commandType: "ENSURE_TEMPLATE",
-              idempotencyKey,
-              payloadFingerprint: createHash("sha256").update(idempotencyKey).digest("hex"),
-              safePayload: { bindingId: binding.id, reason: "NEARBY_RELEVANCE_CHANGED" },
-            },
-            update: {},
-          });
+        if (membership) {
+          for (const binding of bindings) {
+            const idempotencyKey = `wallet:google:nearby-template:${job.id}:${binding.id}`;
+            await this.prisma.walletCommand.upsert({
+              where: { idempotencyKey },
+              create: {
+                organizationId: job.organizationId,
+                membershipId: membership.id,
+                provider: "GOOGLE",
+                commandType: "ENSURE_TEMPLATE",
+                idempotencyKey,
+                payloadFingerprint: createHash("sha256").update(idempotencyKey).digest("hex"),
+                safePayload: { bindingId: binding.id, reason: "NEARBY_RELEVANCE_CHANGED" },
+              },
+              update: {},
+            });
+          }
         }
       }
       const passes = await this.prisma.walletPassInstance.findMany({
@@ -992,12 +1026,19 @@ export class WalletWorker {
     }
   }
 
+  async popNextQueuedCommand(): Promise<string | null> {
+    return (
+      (await this.redis.rpop(OPERATIONAL_QUEUE_KEY)) ??
+      (await this.redis.rpop(PROMOTIONAL_QUEUE_KEY))
+    );
+  }
+
   private async consume(slot: number) {
     while (!this.stopping) {
       // A blocking BRPOP monopolizes a Redis connection. Consumers share the
       // worker connection with the dispatcher, so use a short non-blocking
       // poll to keep queue publication and health checks responsive.
-      const commandId = await this.redis.rpop(QUEUE_KEY);
+      const commandId = await this.popNextQueuedCommand();
       if (!commandId) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         continue;
@@ -1044,8 +1085,7 @@ export class WalletWorker {
           ? await this.prisma.walletProgramBinding.findUnique({
               where: { id: payload.bindingId },
               include: {
-                organization: true,
-                program: {
+                organization: {
                   include: {
                     walletNearbyConfiguration: {
                       include: {
@@ -1057,7 +1097,14 @@ export class WalletWorker {
                     },
                   },
                 },
-                programVersion: { include: { translations: true, visualTheme: true } },
+                program: { include: { walletNearbyProgramCopy: true } },
+                programVersion: {
+                  include: {
+                    translations: true,
+                    visualTheme: true,
+                    locations: { select: { locationId: true } },
+                  },
+                },
               },
             })
           : null;
@@ -1394,6 +1441,15 @@ export class WalletWorker {
     if (!provider.sendPromotionalMessage) {
       throw new Error("This Wallet provider has no approved promotional message adapter.");
     }
+    const obsoleteDeliveries = await this.prisma.walletCampaignDelivery.findMany({
+      where: {
+        walletPassInstanceId: delivery.walletPassInstanceId,
+        status: "SUCCEEDED",
+        campaign: { status: "CANCELED" },
+      },
+      select: { providerMessageId: true },
+      orderBy: { createdAt: "asc" },
+    });
     const result = await provider.sendPromotionalMessage(
       { providerIdentity: delivery.walletPassInstance.providerIdentity },
       {
@@ -1404,8 +1460,21 @@ export class WalletWorker {
         ...(delivery.campaign.destinationUrl
           ? { destinationUrl: delivery.campaign.destinationUrl }
           : {}),
+        obsoleteMessageIds: obsoleteDeliveries.map((item) => item.providerMessageId),
       },
     );
+    if (result.state === "NO_ACTIVE_WALLET_HOLDER") {
+      await this.prisma.walletCampaignDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "SKIPPED",
+          safeSkipCode: "NO_ACTIVE_WALLET_HOLDER",
+          completedAt: now,
+          ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
+        },
+      });
+      return result.providerRequestId;
+    }
     await this.prisma.walletCampaignDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -1670,8 +1739,7 @@ export class WalletWorker {
   private async ensureGoogleProgramLogo(
     binding: Prisma.WalletProgramBindingGetPayload<{
       include: {
-        organization: true;
-        program: {
+        organization: {
           include: {
             walletNearbyConfiguration: {
               include: {
@@ -1680,7 +1748,14 @@ export class WalletWorker {
             };
           };
         };
-        programVersion: { include: { translations: true; visualTheme: true } };
+        program: { include: { walletNearbyProgramCopy: true } };
+        programVersion: {
+          include: {
+            translations: true;
+            visualTheme: true;
+            locations: { select: { locationId: true } };
+          };
+        };
       };
     }>,
   ): Promise<string> {
