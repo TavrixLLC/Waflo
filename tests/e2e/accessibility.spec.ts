@@ -243,7 +243,10 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await programCard.getByRole("button", { name: /فتح البطاقة/ }).click();
   await expect(page.locator(".studio-shell")).toHaveAttribute("dir", "rtl");
   await expect(page.locator(".studio-workspace")).toBeVisible();
-  await page.locator(".studio-section-nav button").nth(4).click();
+  await page
+    .getByRole("navigation", { name: "أقسام الاستوديو" })
+    .getByRole("button", { name: /^الإطلاق/u })
+    .click();
   await expect(page.getByRole("heading", { name: "الإطلاق غير متاح" })).toBeVisible();
   const suspendedStatusAction = page.getByRole("button", { name: "عرض حالة البطاقة" });
   await suspendedStatusAction.focus();

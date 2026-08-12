@@ -242,7 +242,7 @@ async function createComparisonNotes(): Promise<void> {
         <line x1="92" y1="498" x2="1508" y2="498" stroke="#e7ded9"/>
         <text x="116" y="552" font-weight="700">Visible complexity</text>
         <text x="562" y="552">The public message emphasizes</text><text x="562" y="578">a short guided path.</text>
-        <text x="998" y="552">Operational depth is staged across six</text><text x="998" y="578">Studio tasks; redundant outer panels removed.</text>
+        <text x="998" y="552">Operational depth is staged across seven</text><text x="998" y="578">Studio areas; redundant outer panels removed.</text>
 
         <line x1="92" y1="618" x2="1508" y2="618" stroke="#e7ded9"/>
         <text x="116" y="672" font-weight="700">Wallet truthfulness</text>

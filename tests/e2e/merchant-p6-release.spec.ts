@@ -92,7 +92,14 @@ async function openSeededStudio(
   options: {
     locale?: "en" | "ar";
     state?: "DRAFT" | "READY" | "LIVE";
-    area?: "overview" | "how-it-works" | "customers-locations" | "test" | "launch" | "settings";
+    area?:
+      | "overview"
+      | "how-it-works"
+      | "customers-locations"
+      | "engagement"
+      | "test"
+      | "launch"
+      | "settings";
     viewport?: { width: number; height: number };
   } = {},
 ): Promise<void> {
@@ -246,6 +253,7 @@ test("loads Studio deep links, refreshes, and fails safely for inaccessible card
     ["", "Overview"],
     ["/how-it-works", "How it works"],
     ["/customers-locations", "Customers & locations"],
+    ["/engagement", "Wallet Engagement"],
     ["/test", "Test"],
     ["/launch", "Launch"],
     ["/settings", "Settings"],

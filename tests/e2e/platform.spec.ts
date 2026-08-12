@@ -275,7 +275,9 @@ test.describe
       await expect(
         page.getByRole("heading", { level: 1, name: "Browser Studio Rewards Updated" }),
       ).toBeVisible();
-      await expect(page.locator(".studio-section-nav button")).toHaveCount(6);
+      await expect(
+        page.getByRole("navigation", { name: "Studio sections" }).getByRole("button"),
+      ).toHaveCount(7);
       await expect(page.locator(".studio-device-frame img")).toBeVisible();
       await screenshot(page, "23-loyalty-studio-customer-preview");
       const previewProgress = page.locator(".studio-preview-panel input[type=range]");
