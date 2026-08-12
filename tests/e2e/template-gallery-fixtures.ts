@@ -5,8 +5,8 @@ import {
   renderTemplateGalleryPreviews,
   renderTemplateGalleryThumbnail,
 } from "../../apps/api/src/programs/template-gallery-preview.js";
-import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { createBuilderDraft } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
+import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { apiDraft } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { findProgramTemplate, latestProgramTemplates } from "../../packages/contracts/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
@@ -102,6 +102,7 @@ export async function mockTemplateGalleryApi(
     fixtureLocations = [{ id: "gallery-location", name: "Gallery Main Branch", status: "ACTIVE" }],
     seededProgram = false,
     arabicEarningCopy = "present",
+    memberRole = "OWNER",
   }: {
     businessCategory?: string | null;
     onCreate?: (body: Record<string, unknown>) => void;
@@ -147,6 +148,7 @@ export async function mockTemplateGalleryApi(
     fixtureLocations?: Array<{ id: string; name: string; status: string }>;
     seededProgram?: boolean;
     arabicEarningCopy?: "present" | "missing";
+    memberRole?: "OWNER" | "MANAGER" | "STAFF";
   } = {},
 ): Promise<void> {
   await page.route("https://fonts.googleapis.com/**", async (route) => {
@@ -183,6 +185,12 @@ export async function mockTemplateGalleryApi(
   let remainingPublicationFailures = publicationFailures;
   let publicationRequestCount = 0;
   let currentStudioState = studioState;
+  let walletNearbyEnabled = false;
+  let walletNearbyRevision = 1;
+  let walletNearbyLocationIds: string[] = [];
+  let walletNearbyCustomEn: string | null = null;
+  let walletNearbyCustomAr: string | null = null;
+  const walletCampaigns: Array<Record<string, unknown>> = [];
 
   function currentArtwork() {
     if (!storedDraft) return null;
@@ -512,7 +520,7 @@ export async function mockTemplateGalleryApi(
         memberships: [
           {
             id: "merchant-template-gallery-membership",
-            role: "OWNER",
+            role: memberRole,
             organization: {
               id: templateGalleryOrganizationId,
               name: "Gallery Coffee",
@@ -582,6 +590,137 @@ export async function mockTemplateGalleryApi(
           editingMode: body.editingMode === "pro" ? "PRO" : "QUICK",
         },
         currentPublishedVersion: null,
+      });
+      return;
+    }
+    const walletEngagementBase = `/v1/organizations/${templateGalleryOrganizationId}/programs/created-program-id/wallet-engagement`;
+    if (path === walletEngagementBase && request.method() === "GET") {
+      await fulfill(route, {
+        program: {
+          id: "created-program-id",
+          name: String(storedDraft?.internalName ?? "Gallery Coffee Rewards"),
+          status: "PUBLISHED",
+          templateCode: String(storedDraft?.templateCode ?? "COFFEE_WARM_LATTE"),
+        },
+        capabilities: {
+          apple: {
+            configured: true,
+            manualPromotion: "PROVIDER_CONFIRMATION_REQUIRED",
+            nearbyRelevance: "AVAILABLE",
+            customNearbyText: true,
+            providerControlsNearbyText: false,
+            selectableForManualPromotion: false,
+          },
+          google: {
+            configured: true,
+            manualPromotion: "AVAILABLE",
+            nearbyRelevance: "AVAILABLE",
+            customNearbyText: false,
+            providerControlsNearbyText: true,
+            selectableForManualPromotion: true,
+          },
+        },
+        nearby: {
+          enabled: walletNearbyEnabled,
+          revision: walletNearbyRevision,
+          locationIds: walletNearbyLocationIds,
+          desiredAppleMaxDistanceMeters: 2000,
+          appleCustomTextEn: walletNearbyCustomEn,
+          appleCustomTextAr: walletNearbyCustomAr,
+          preview: {
+            en: {
+              text:
+                walletNearbyCustomEn ??
+                "You’re near Gallery Coffee. Your loyalty card is ready for your next coffee visit.",
+              vertical: "COFFEE",
+              usedCustomText: Boolean(walletNearbyCustomEn),
+            },
+            ar: {
+              text:
+                walletNearbyCustomAr ??
+                "أنت بالقرب من جاليري كوفي. بطاقة الولاء جاهزة لزيارتك القادمة.",
+              vertical: "COFFEE",
+              usedCustomText: Boolean(walletNearbyCustomAr),
+            },
+          },
+        },
+        eligibleLocations: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "Gallery Main Branch",
+            city: "Baghdad",
+            latitude: 33.3024,
+            longitude: 44.3882,
+            coordinatesConfigured: true,
+          },
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            name: "Gallery Riverside",
+            city: "Baghdad",
+            latitude: null,
+            longitude: null,
+            coordinatesConfigured: false,
+          },
+        ],
+        disclosures: {
+          apple:
+            "Apple determines when the pass becomes relevant and uses the smaller of Waflo’s requested maximum and Apple’s default distance.",
+          google: "Google Wallet determines nearby distance, dwell time, and the system reminder.",
+        },
+      });
+      return;
+    }
+    if (path === `${walletEngagementBase}/nearby` && request.method() === "PATCH") {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      walletNearbyEnabled = body.enabled === true;
+      walletNearbyLocationIds = Array.isArray(body.locationIds) ? body.locationIds.map(String) : [];
+      walletNearbyCustomEn =
+        typeof body.appleCustomTextEn === "string" ? body.appleCustomTextEn : null;
+      walletNearbyCustomAr =
+        typeof body.appleCustomTextAr === "string" ? body.appleCustomTextAr : null;
+      walletNearbyRevision += 1;
+      await fulfill(route, {
+        enabled: walletNearbyEnabled,
+        revision: walletNearbyRevision,
+        updateQueued: true,
+      });
+      return;
+    }
+    if (path === `${walletEngagementBase}/audience-estimate` && request.method() === "GET") {
+      await fulfill(route, {
+        audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+        total: 12,
+        providers: { apple: 0, google: 12 },
+        capped: false,
+        exclusions: ["NO_CURRENT_CONSENT", "NO_ELIGIBLE_WALLET_PASS"],
+      });
+      return;
+    }
+    if (path === `${walletEngagementBase}/campaigns` && request.method() === "GET") {
+      await fulfill(route, { items: walletCampaigns });
+      return;
+    }
+    if (path === `${walletEngagementBase}/campaigns` && request.method() === "POST") {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      const id = `campaign-${walletCampaigns.length + 1}`;
+      walletCampaigns.unshift({
+        id,
+        createdAt: "2026-08-12T09:00:00.000Z",
+        scheduledAt: "2026-08-12T09:00:00.000Z",
+        title: body.title,
+        body: body.body,
+        locale: body.locale,
+        providers: ["GOOGLE"],
+        audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+        status: "PENDING",
+        counts: { eligible: 12, queued: 0, succeeded: 0, skipped: 0, failed: 0 },
+        creator: "Gallery Merchant",
+      });
+      await fulfill(route, {
+        id,
+        status: "PENDING",
+        scheduledAt: "2026-08-12T09:00:00.000Z",
+        replayed: false,
       });
       return;
     }

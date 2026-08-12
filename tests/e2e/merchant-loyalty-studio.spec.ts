@@ -51,7 +51,7 @@ async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {
   await continueToStudio.click();
 }
 
-test("continues from Builder into a six-area merchant Studio without duplicate design editors", async ({
+test("continues from Builder into a seven-area merchant Studio without duplicate design editors", async ({
   page,
 }) => {
   await mockTemplateGalleryApi(page);
@@ -59,11 +59,12 @@ test("continues from Builder into a six-area merchant Studio without duplicate d
   await enterStudio(page, "en");
 
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
-  await expect(navigation.getByRole("button")).toHaveCount(6);
+  await expect(navigation.getByRole("button")).toHaveCount(7);
   for (const label of [
     "Overview",
     "How it works",
     "Customers & locations",
+    "Wallet Engagement",
     "Test",
     "Launch",
     "Settings",
@@ -125,11 +126,12 @@ test("uses a discoverable mobile menu and complete Arabic RTL navigation", async
 
   const navigation = page.getByRole("navigation", { name: "أقسام الاستوديو" });
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole("button")).toHaveCount(6);
+  await expect(navigation.getByRole("button")).toHaveCount(7);
   for (const label of [
     "نظرة عامة",
     "طريقة العمل",
     "العملاء والمواقع",
+    "تفاعل Wallet",
     "الاختبار",
     "الإطلاق",
     "الإعدادات",
