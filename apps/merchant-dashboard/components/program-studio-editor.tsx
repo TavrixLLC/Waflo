@@ -5,6 +5,7 @@ import {
   type ProgramOperationalStatus,
   type ProgramPreviewPlatform,
   programPlatformCapabilities,
+  timeZoneOptions,
 } from "@waflo/contracts";
 import {
   Alert,
@@ -13,8 +14,10 @@ import {
   Button,
   Card,
   Checkbox,
+  ColorInput,
   FormField,
   Modal,
+  SearchableSelect,
   Select,
   TextArea,
   TextInput,
@@ -54,7 +57,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import {
   type MerchantProgramLifecycleAction,
@@ -1217,23 +1220,39 @@ function StudioNavigation({
     >
       {studioAreas.map((area) => {
         const copy = studioAreaCopy[locale][area];
+        const group =
+          area === "overview"
+            ? ar
+              ? "البناء"
+              : "Build"
+            : area === "test"
+              ? ar
+                ? "الإطلاق"
+                : "Go live"
+              : area === "engagement"
+                ? ar
+                  ? "الإدارة"
+                  : "Manage"
+                : null;
         return (
-          <button
-            type="button"
-            key={area}
-            className={activeArea === area ? "studio-section-nav__active" : ""}
-            onClick={() => onArea(area)}
-            aria-current={activeArea === area ? "page" : undefined}
-          >
-            <span className="studio-section-nav__icon">
-              <StudioAreaIcon area={area} />
-            </span>
-            <span>
-              <strong>{copy.label}</strong>
-              <small>{copy.description}</small>
-            </span>
-            <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
-          </button>
+          <Fragment key={area}>
+            {group ? <span className="studio-section-nav__group">{group}</span> : null}
+            <button
+              type="button"
+              className={activeArea === area ? "studio-section-nav__active" : ""}
+              onClick={() => onArea(area)}
+              aria-current={activeArea === area ? "page" : undefined}
+            >
+              <span className="studio-section-nav__icon">
+                <StudioAreaIcon area={area} />
+              </span>
+              <span>
+                <strong>{copy.label}</strong>
+                <small>{copy.description}</small>
+              </span>
+              <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
+            </button>
+          </Fragment>
         );
       })}
     </nav>
@@ -1895,6 +1914,8 @@ function StudioPreview({
         </div>
       ) : null}
       <div
+        dir={ar ? "rtl" : "ltr"}
+        lang={ar ? "ar" : "en"}
         className={`studio-device-frame studio-device-frame--${publishedPreviewContext ? "published" : selectedProfile.toLowerCase()}`}
       >
         {source === "published" ? (
@@ -2630,8 +2651,8 @@ function StudioSectionContent({
           ).map(([key, label]) => (
             <FormField key={key} label={label}>
               <div className="studio-color-input">
-                <input
-                  type="color"
+                <ColorInput
+                  aria-label={label}
                   value={draft.visualTheme[key]}
                   onChange={(event) =>
                     update((current) => ({
@@ -3115,6 +3136,15 @@ function OperationsPolicyEditor({
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
   ar: boolean;
 }) {
+  const timezoneChoices = useMemo(
+    () =>
+      timeZoneOptions(ar ? "ar" : "en").map((option) => ({
+        value: option.id,
+        label: option.label,
+        group: option.group,
+      })),
+    [ar],
+  );
   return (
     <div className="studio-section-content">
       <Alert tone="info" title={ar ? "قواعد التحديث" : "How rule changes take effect"}>
@@ -3123,12 +3153,15 @@ function OperationsPolicyEditor({
           : "New rules apply to customers who join after this update is published. Existing customers keep their current terms."}
       </Alert>
       <FormField label={ar ? "المنطقة الزمنية للنشاط" : "Business timezone"} required>
-        <TextInput
+        <SearchableSelect
+          name="operationalTimezone"
+          options={timezoneChoices}
           value={draft.operationalTimezone}
-          onChange={(event) =>
-            update((current) => ({ ...current, operationalTimezone: event.target.value }))
+          onValueChange={(value) =>
+            value && update((current) => ({ ...current, operationalTimezone: value }))
           }
-          placeholder="Asia/Baghdad"
+          placeholder={ar ? "ابحث عن منطقة زمنية" : "Search timezones"}
+          required
         />
         <span className="field-help">
           {ar

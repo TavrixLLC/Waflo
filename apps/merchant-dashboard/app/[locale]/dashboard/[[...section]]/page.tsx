@@ -1,6 +1,6 @@
 import type { Locale } from "@waflo/contracts";
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { DashboardApplication, type DashboardSection } from "../../../../components/dashboard";
 import type { StudioArea } from "../../../../components/program-studio-presentation";
 
@@ -8,7 +8,6 @@ const dashboardSections = new Set<DashboardSection>([
   "overview",
   "programs",
   "customers",
-  "devices",
   "approvals",
   "risk",
   "locations",
@@ -35,7 +34,6 @@ const dashboardSectionTitles = new Map<DashboardSection, string>([
   ["overview", "Overview"],
   ["programs", "Loyalty Cards"],
   ["customers", "Customers"],
-  ["devices", "Staff devices"],
   ["approvals", "Manager approvals"],
   ["risk", "Risk"],
   ["locations", "Locations"],
@@ -84,6 +82,7 @@ export default async function DashboardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale, section } = await params;
+  if (section?.[0] === "devices") redirect(`/${locale}/dashboard/team`);
   const query = await searchParams;
   const programsGallery = section?.[0] === "programs" && section?.[1] === "new";
   const programsBuilder =

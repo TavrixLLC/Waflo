@@ -4,9 +4,9 @@ export const studioAreas = [
   "overview",
   "how-it-works",
   "customers-locations",
-  "engagement",
   "test",
   "launch",
+  "engagement",
   "settings",
 ] as const;
 
@@ -89,7 +89,7 @@ export const studioAreaCopy = {
       description: "Nearby relevance and consented messages",
     },
     test: { label: "Test", description: "Try a complete reward cycle" },
-    launch: { label: "Launch", description: "Readiness checks and publishing" },
+    launch: { label: "Review & launch", description: "Resolve checks, then publish safely" },
     settings: { label: "Settings", description: "Advanced controls and history" },
   },
   ar: {
@@ -302,7 +302,7 @@ const stateCopy = {
 const journeyCopy = {
   en: {
     design: "Design",
-    checks: "Checks",
+    checks: "Review",
     test: "Test",
     live: "Live",
     complete: "Complete",

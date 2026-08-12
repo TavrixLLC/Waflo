@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  ColorInput,
   FormField,
   Modal,
   RadioGroup,
@@ -410,8 +411,8 @@ export function ProgramQuickWizard({
               ] as const
             ).map(([key, label]) => (
               <FormField key={key} label={label}>
-                <input
-                  type="color"
+                <ColorInput
+                  aria-label={label}
                   value={draft.visualTheme[key]}
                   onChange={(event) =>
                     editDraft((current) => ({

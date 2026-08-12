@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   Checkbox,
+  ColorInput,
   FormField,
   Modal,
   Select,
@@ -1514,8 +1515,7 @@ function AppearanceSection({
         {colors.map(([key, label]) => (
           <FormField key={key} label={label}>
             <div className="builder-color-control">
-              <input
-                type="color"
+              <ColorInput
                 aria-label={label}
                 value={draft.visualTheme[key]}
                 onChange={(event) =>
@@ -2232,6 +2232,8 @@ function PreviewPanel({
       <p className="builder-preview-provider-note">{text.walletPreviewNote}</p>
       <div
         id={`${idPrefix}-panel`}
+        dir={previewLocale === "AR" ? "rtl" : "ltr"}
+        lang={previewLocale === "AR" ? "ar" : "en"}
         role="tabpanel"
         aria-labelledby={`${idPrefix}-${profile}`}
         aria-busy={previewLoading}

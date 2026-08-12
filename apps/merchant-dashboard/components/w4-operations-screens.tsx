@@ -1454,14 +1454,30 @@ export function OperationalAnalyticsScreen({
         <Skeleton height="18rem" />
       ) : (
         <>
-          <div className="dashboard-grid">
+          <div className="dashboard-status-band dashboard-status-band--analytics">
+            <div>
+              <span>{ar ? "مصدر البيانات" : "Data source"}</span>
+              <strong>{ar ? "أحداث تشغيلية فعلية" : "Verified operational events"}</strong>
+            </div>
+            <Badge tone={data.advancedAnalyticsAvailable ? "success" : "neutral"}>
+              {data.plan} ·{" "}
+              {data.advancedAnalyticsAvailable
+                ? ar
+                  ? "مقارنات متقدمة"
+                  : "Advanced comparisons"
+                : ar
+                  ? "مقاييس أساسية"
+                  : "Core metrics"}
+            </Badge>
+          </div>
+          <div className="dashboard-metric-grid dashboard-metric-grid--analytics">
             {metrics.map(([label, value]) => (
-              <Card className="dashboard-card" key={String(label)}>
+              <Card className="dashboard-card dashboard-card--metric" key={String(label)}>
                 <span className="dashboard-card__label">{label}</span>
                 <span className="dashboard-card__value">{value}</span>
               </Card>
             ))}
-            <Card className="dashboard-card">
+            <Card className="dashboard-card dashboard-card--metric dashboard-card--accent">
               <span className="dashboard-card__label">
                 {ar ? "معدل الاسترداد" : "REDEMPTION RATE"}
               </span>
@@ -1578,20 +1594,37 @@ export function OperationalAnalyticsScreen({
               />
             </Card>
           ) : null}
-          <h2>{ar ? "أحدث الأحداث" : "Recent operations"}</h2>
-          {data.recentOperations.length ? (
-            <Table
-              caption={ar ? "أحدث عمليات الولاء" : "Recent loyalty operations"}
-              headers={ar ? ["الحدث", "تغير الأختام", "الوقت"] : ["Event", "Stamp delta", "Time"]}
-              rows={data.recentOperations.map((operation) => [
-                operation.eventType,
-                String(operation.stampDelta),
-                formattedDate(operation.occurredAt, ar),
-              ])}
-            />
-          ) : (
-            <Alert title={ar ? "لا توجد عمليات بعد." : "No operations yet."} />
-          )}
+          <Card className="dashboard-form-card dashboard-card--full">
+            <div className="dashboard-section-heading">
+              <div>
+                <span className="dashboard-card__label">
+                  {ar ? "سجل النشاط" : "ACTIVITY STREAM"}
+                </span>
+                <h2>{ar ? "أحدث الأحداث" : "Recent operations"}</h2>
+              </div>
+            </div>
+            {data.recentOperations.length ? (
+              <Table
+                caption={ar ? "أحدث عمليات الولاء" : "Recent loyalty operations"}
+                headers={ar ? ["الحدث", "تغير الأختام", "الوقت"] : ["Event", "Stamp delta", "Time"]}
+                rows={data.recentOperations.map((operation) => [
+                  operation.eventType,
+                  String(operation.stampDelta),
+                  formattedDate(operation.occurredAt, ar),
+                ])}
+              />
+            ) : (
+              <EmptyState
+                icon={<Activity />}
+                title={ar ? "لا توجد عمليات بعد" : "No operations yet"}
+                description={
+                  ar
+                    ? "ستظهر عمليات الختم والمكافآت هنا."
+                    : "Stamp and reward activity will appear here."
+                }
+              />
+            )}
+          </Card>
         </>
       )}
     </>
@@ -1630,6 +1663,15 @@ export function ExportsOperationsScreen({
   const [jobs, setJobs] = useState<ExportJob[]>([]);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const exportLabels: Record<ExportType, string> = {
+    MEMBERSHIP_SUMMARY: ar ? "ملخص العضويات" : "Membership summary",
+    LEDGER_OPERATIONS: ar ? "عمليات السجل" : "Ledger operations",
+    REWARD_REDEMPTIONS: ar ? "استرداد المكافآت" : "Reward redemptions",
+    LOCATION_PERFORMANCE: ar ? "أداء المواقع" : "Location performance",
+    STAFF_PERFORMANCE: ar ? "أداء الموظفين" : "Staff performance",
+    RISK_SIGNALS: ar ? "إشارات المخاطر" : "Risk signals",
+    AGGREGATE_ANALYTICS: ar ? "التحليلات المجمعة" : "Aggregate analytics",
+  };
 
   useEffect(() => {
     void apiFetch<{ items: ExportJob[] }>(`/v1/organizations/${organizationId}/exports?limit=50`)
@@ -1684,50 +1726,75 @@ export function ExportsOperationsScreen({
         }
       />
       {error ? <Alert tone="danger" title={error} /> : null}
-      <Card className="dashboard-form-card">
-        <FormField label={ar ? "نوع التصدير" : "Export type"}>
-          <Select
-            value={exportType}
-            onChange={(event) => setExportType(event.target.value as ExportType)}
-          >
-            <option value="MEMBERSHIP_SUMMARY">MEMBERSHIP_SUMMARY</option>
-            <option value="LEDGER_OPERATIONS">LEDGER_OPERATIONS</option>
-            <option value="REWARD_REDEMPTIONS">REWARD_REDEMPTIONS</option>
-            <option value="LOCATION_PERFORMANCE">LOCATION_PERFORMANCE</option>
-            <option value="STAFF_PERFORMANCE">STAFF_PERFORMANCE</option>
-            <option value="RISK_SIGNALS">RISK_SIGNALS</option>
-            <option value="AGGREGATE_ANALYTICS">AGGREGATE_ANALYTICS</option>
-          </Select>
-        </FormField>
-        <Button onClick={() => void createExport()} loading={working}>
-          <Download size={17} /> {ar ? "إنشاء ملف" : "Create export"}
-        </Button>
+      <div className="dashboard-status-band dashboard-status-band--exports">
+        <div>
+          <span>{ar ? "الحماية" : "File handling"}</span>
+          <strong>{ar ? "خاص · مؤقت · قابل للتدقيق" : "Private · expiring · audited"}</strong>
+        </div>
+        <Badge tone="brand">{membership.organization.selectedPlan}</Badge>
+      </div>
+      <Card className="dashboard-form-card export-composer">
+        <div>
+          <span className="dashboard-card__label">{ar ? "تصدير جديد" : "NEW EXPORT"}</span>
+          <h2>{exportLabels[exportType]}</h2>
+          <p>
+            {ar
+              ? "ينشئ Waflo لقطة CSV من البيانات المصرح بها حالياً. ينتهي رابط التنزيل تلقائياً."
+              : "Waflo creates a CSV snapshot from data you can currently access. Its download expires automatically."}
+          </p>
+        </div>
+        <div className="export-composer__controls">
+          <FormField label={ar ? "نوع التصدير" : "Export type"}>
+            <Select
+              value={exportType}
+              onChange={(event) => setExportType(event.target.value as ExportType)}
+            >
+              {(Object.keys(exportLabels) as ExportType[]).map((value) => (
+                <option key={value} value={value}>
+                  {exportLabels[value]}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <Button onClick={() => void createExport()} loading={working}>
+            <Download size={17} /> {ar ? "إنشاء ملف" : "Create export"}
+          </Button>
+        </div>
       </Card>
       {jobs.length ? (
-        <Table
-          caption={ar ? "مهام التصدير الحالية" : "Current export jobs"}
-          headers={
-            ar ? ["النوع", "الحالة", "الصفوف", "الإجراء"] : ["Type", "Status", "Rows", "Action"]
-          }
-          rows={jobs.map((job) => [
-            job.exportType ?? "—",
-            job.status,
-            job.rowCount === null || job.rowCount === undefined ? "—" : String(job.rowCount),
-            <div className="dashboard-actions" key="actions">
-              <Button variant="ghost" onClick={() => void refresh(job)}>
-                <Activity size={16} /> {ar ? "تحديث" : "Refresh"}
-              </Button>
-              {job.status === "COMPLETED" ? (
-                <a
-                  className="wf-button wf-button--secondary"
-                  href={`/api/waflo/v1/organizations/${organizationId}/exports/${job.publicId}/download`}
-                >
-                  {ar ? "تنزيل مصرح" : "Authorized download"}
-                </a>
-              ) : null}
-            </div>,
-          ])}
-        />
+        <Card className="dashboard-form-card dashboard-card--full export-jobs-card">
+          <div className="dashboard-section-heading">
+            <div>
+              <span className="dashboard-card__label">{ar ? "سجل الملفات" : "FILE HISTORY"}</span>
+              <h2>{ar ? "مهام التصدير" : "Export jobs"}</h2>
+            </div>
+            <Badge>{jobs.length}</Badge>
+          </div>
+          <Table
+            caption={ar ? "مهام التصدير الحالية" : "Current export jobs"}
+            headers={
+              ar ? ["النوع", "الحالة", "الصفوف", "الإجراء"] : ["Type", "Status", "Rows", "Action"]
+            }
+            rows={jobs.map((job) => [
+              job.exportType ? exportLabels[job.exportType] : "—",
+              job.status,
+              job.rowCount === null || job.rowCount === undefined ? "—" : String(job.rowCount),
+              <div className="dashboard-actions" key="actions">
+                <Button variant="ghost" onClick={() => void refresh(job)}>
+                  <Activity size={16} /> {ar ? "تحديث" : "Refresh"}
+                </Button>
+                {job.status === "COMPLETED" ? (
+                  <a
+                    className="wf-button wf-button--secondary"
+                    href={`/api/waflo/v1/organizations/${organizationId}/exports/${job.publicId}/download`}
+                  >
+                    {ar ? "تنزيل مصرح" : "Authorized download"}
+                  </a>
+                ) : null}
+              </div>,
+            ])}
+          />
+        </Card>
       ) : (
         <Card>
           <EmptyState

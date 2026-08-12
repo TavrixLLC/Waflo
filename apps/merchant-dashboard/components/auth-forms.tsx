@@ -234,6 +234,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
                 أوافق على{" "}
                 <a
                   href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/ar/terms`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   شروط الاستخدام
                 </a>
@@ -244,6 +246,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
                 I agree to the{" "}
                 <a
                   href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/en/terms`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   Terms of Service
                 </a>
@@ -263,6 +267,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
                 قرأت{" "}
                 <a
                   href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/ar/privacy`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   سياسة الخصوصية
                 </a>
@@ -273,6 +279,8 @@ export function SignupForm({ locale }: { locale: Locale }) {
                 I have read the{" "}
                 <a
                   href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/en/privacy`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   Privacy Policy
                 </a>
@@ -281,6 +289,19 @@ export function SignupForm({ locale }: { locale: Locale }) {
             )
           }
         />
+        <p className="auth-form__legal-support">
+          {ar ? "توضح " : "The "}
+          <a
+            href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/${locale}/refunds`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {ar ? "سياسة الفوترة والاسترداد" : "Billing & Refund Policy"}
+          </a>{" "}
+          {ar
+            ? "الفرق بين الإلغاء والتخفيض والاسترداد."
+            : "explains cancellation, downgrades, and refund review."}
+        </p>
         <Button
           type="submit"
           loading={loading}

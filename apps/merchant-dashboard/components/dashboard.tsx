@@ -19,7 +19,6 @@ import {
   LockKeyhole,
   LogOut,
   MapPin,
-  MonitorSmartphone,
   Settings,
   ShieldAlert,
   ShieldCheck,
@@ -44,7 +43,6 @@ import { ProgramsScreen } from "./programs-screen";
 import type { StudioArea } from "./program-studio-presentation";
 import {
   CustomersOperationsScreen,
-  DevicesOperationsScreen,
   ExportsOperationsScreen,
   ManagerApprovalsScreen,
   OperationalAnalyticsScreen,
@@ -77,7 +75,6 @@ const sectionIcons = {
   overview: Gauge,
   programs: WalletCards,
   customers: Users,
-  devices: MonitorSmartphone,
   approvals: ShieldCheck,
   risk: ShieldAlert,
   locations: MapPin,
@@ -95,7 +92,6 @@ const labels = {
     overview: "Overview",
     programs: "Loyalty Cards",
     customers: "Customers",
-    devices: "Staff devices",
     approvals: "Manager approvals",
     risk: "Risk",
     locations: "Locations",
@@ -109,7 +105,6 @@ const labels = {
     logout: "Log out",
   },
   ar: {
-    devices: "أجهزة الموظفين",
     approvals: "موافقات المدير",
     risk: "المخاطر",
     exports: "التصدير",
@@ -381,12 +376,6 @@ function DashboardScreen({
       <MerchantOperationsDenied locale={locale} />
     ) : (
       <CustomersOperationsScreen locale={locale} membership={membership} />
-    );
-  if (section === "devices")
-    return membership.role === "STAFF" ? (
-      <MerchantOperationsDenied locale={locale} />
-    ) : (
-      <DevicesOperationsScreen locale={locale} membership={membership} />
     );
   if (section === "approvals")
     return membership.role === "STAFF" ? (

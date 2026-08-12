@@ -1,6 +1,6 @@
 "use client";
 
-import type { Locale, PlanCode } from "@waflo/contracts";
+import { countryOptions, type Locale, type PlanCode, timeZoneOptions } from "@waflo/contracts";
 import Image from "next/image";
 import {
   Alert,
@@ -9,12 +9,13 @@ import {
   FormField,
   LanguageSwitcher,
   PlanCard,
+  SearchableSelect,
   Select,
   TextInput,
 } from "@waflo/ui";
 import { Check, Link2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiFetch, ApiClientError } from "../lib/api-client";
 
 function OnboardingShell({
@@ -74,6 +75,15 @@ export function BusinessOnboarding({ locale }: { locale: Locale }) {
   const [availability, setAvailability] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const timezones = useMemo(
+    () =>
+      timeZoneOptions(locale).map((option) => ({
+        value: option.id,
+        label: option.label,
+        group: option.group,
+      })),
+    [locale],
+  );
 
   useEffect(() => {
     if (slug.length < 3) {
@@ -185,13 +195,13 @@ export function BusinessOnboarding({ locale }: { locale: Locale }) {
           </FormField>
         </div>
         <FormField label={ar ? "المنطقة الزمنية" : "Business timezone"} required>
-          <Select name="timezone" defaultValue="Asia/Baghdad">
-            <option value="Asia/Baghdad">Asia/Baghdad</option>
-            <option value="Asia/Riyadh">Asia/Riyadh</option>
-            <option value="Asia/Dubai">Asia/Dubai</option>
-            <option value="Europe/London">Europe/London</option>
-            <option value="America/New_York">America/New_York</option>
-          </Select>
+          <SearchableSelect
+            name="timezone"
+            options={timezones}
+            defaultValue="Asia/Baghdad"
+            placeholder={ar ? "ابحث عن منطقة زمنية" : "Search timezones"}
+            required
+          />
         </FormField>
         <div>
           <strong>{ar ? "الخطة المختارة للإعداد" : "Setup plan"}</strong>
@@ -231,6 +241,19 @@ export function LocationOnboarding({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const countries = useMemo(
+    () => countryOptions(locale).map((option) => ({ value: option.code, label: option.name })),
+    [locale],
+  );
+  const timezones = useMemo(
+    () =>
+      timeZoneOptions(locale).map((option) => ({
+        value: option.id,
+        label: option.label,
+        group: option.group,
+      })),
+    [locale],
+  );
   const effectiveOrganizationId =
     organizationId ??
     (typeof window === "undefined"
@@ -257,6 +280,7 @@ export function LocationOnboarding({
           addressLine1: String(form.get("address") ?? "") || undefined,
           city: String(form.get("city") ?? "") || undefined,
           phone: String(form.get("phone") ?? "") || undefined,
+          countryCode: String(form.get("countryCode") ?? "") || undefined,
           timezone: String(form.get("timezone") ?? "Asia/Baghdad"),
         }),
       });
@@ -307,13 +331,26 @@ export function LocationOnboarding({
             <TextInput name="phone" type="tel" autoComplete="tel" />
           </FormField>
         </div>
-        <FormField label={ar ? "المنطقة الزمنية" : "Timezone"} required>
-          <Select name="timezone" defaultValue="Asia/Baghdad">
-            <option value="Asia/Baghdad">Asia/Baghdad</option>
-            <option value="Asia/Riyadh">Asia/Riyadh</option>
-            <option value="Asia/Dubai">Asia/Dubai</option>
-          </Select>
-        </FormField>
+        <div className="dashboard-form__row">
+          <FormField label={ar ? "البلد" : "Country"} required>
+            <SearchableSelect
+              name="countryCode"
+              options={countries}
+              defaultValue="IQ"
+              placeholder={ar ? "ابحث عن بلد" : "Search countries"}
+              required
+            />
+          </FormField>
+          <FormField label={ar ? "المنطقة الزمنية" : "Timezone"} required>
+            <SearchableSelect
+              name="timezone"
+              options={timezones}
+              defaultValue="Asia/Baghdad"
+              placeholder={ar ? "ابحث عن منطقة زمنية" : "Search timezones"}
+              required
+            />
+          </FormField>
+        </div>
         <Button type="submit" loading={loading}>
           {ar ? "إنشاء الموقع وإكمال الإعداد" : "Create location and finish setup"}
         </Button>

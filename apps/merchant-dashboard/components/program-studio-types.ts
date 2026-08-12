@@ -254,6 +254,7 @@ export interface TemplateGalleryPreview {
 }
 
 export interface TemplateItem extends Omit<ProgramTemplateDefinition, "artwork"> {
+  availableOnPlans: readonly ["STARTER", "GROWTH", "SCALE"];
   galleryThumbnail: TemplateGalleryPreview;
   blankGalleryThumbnail?: TemplateGalleryPreview;
   artwork: {
