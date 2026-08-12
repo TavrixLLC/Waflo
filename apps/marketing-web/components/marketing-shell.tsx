@@ -76,6 +76,9 @@ export function MarketingShell({
             <a href={`/${locale}/contact`}>{copy.navigation.contact}</a>
             <a href={`/${locale}/privacy`}>{locale === "ar" ? "الخصوصية" : "Privacy"}</a>
             <a href={`/${locale}/terms`}>{locale === "ar" ? "الشروط" : "Terms"}</a>
+            <a href={`/${locale}/refunds`}>
+              {locale === "ar" ? "الفوترة والاسترداد" : "Billing & refunds"}
+            </a>
           </div>
         </div>
         <div className="marketing-footer__legal">

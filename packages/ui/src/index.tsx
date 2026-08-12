@@ -1,17 +1,19 @@
 "use client";
 
-import { planCatalog } from "@waflo/billing";
-import type { Locale, PlanCode } from "@waflo/contracts";
+import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
+import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
 import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
 import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
   type InputHTMLAttributes,
+  type KeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -118,6 +120,195 @@ export function Select({ className = "", error = false, ...props }: SelectProps)
       aria-invalid={error || undefined}
       {...props}
     />
+  );
+}
+
+export interface SearchableSelectOption {
+  value: string;
+  label: string;
+  group?: string;
+}
+
+export function SearchableSelect({
+  name,
+  options,
+  value,
+  defaultValue = "",
+  placeholder,
+  required = false,
+  disabled = false,
+  className = "",
+  onValueChange,
+  ariaLabel,
+}: {
+  name: string;
+  options: readonly SearchableSelectOption[];
+  value?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  required?: boolean;
+  disabled?: boolean;
+  className?: string;
+  onValueChange?: (value: string) => void;
+  ariaLabel?: string;
+}) {
+  const listboxId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const controlled = value !== undefined;
+  const [selectedValue, setSelectedValue] = useState(value ?? defaultValue);
+  const selected = options.find((option) => option.value === selectedValue) ?? null;
+  const [query, setQuery] = useState(selected?.label ?? "");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!controlled) return;
+    setSelectedValue(value ?? "");
+    setQuery(options.find((option) => option.value === value)?.label ?? "");
+  }, [controlled, options, value]);
+
+  const filtered = useMemo(() => {
+    const normalized = query.normalize("NFKC").trim().toLocaleLowerCase();
+    if (!normalized || selected?.label === query) return options;
+    return options.filter((option) =>
+      `${option.label} ${option.value} ${option.group ?? ""}`
+        .normalize("NFKC")
+        .toLocaleLowerCase()
+        .includes(normalized),
+    );
+  }, [options, query, selected?.label]);
+
+  function choose(option: SearchableSelectOption) {
+    setSelectedValue(option.value);
+    setQuery(option.label);
+    setOpen(false);
+    setActiveIndex(0);
+    inputRef.current?.setCustomValidity("");
+    onValueChange?.(option.value);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((index) => Math.min(index + 1, Math.max(0, filtered.length - 1)));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((index) => Math.max(0, index - 1));
+    } else if (event.key === "Enter" && open && filtered[activeIndex]) {
+      event.preventDefault();
+      choose(filtered[activeIndex]);
+    } else if (event.key === "Escape") {
+      setOpen(false);
+      setQuery(selected?.label ?? "");
+    }
+  }
+
+  return (
+    <div className={`wf-search-select ${open ? "wf-search-select--open" : ""} ${className}`}>
+      <input type="hidden" name={name} value={selectedValue} />
+      <input
+        ref={inputRef}
+        type="search"
+        className="wf-input wf-search-select__input"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-activedescendant={
+          open && filtered[activeIndex] ? `${listboxId}-${activeIndex}` : undefined
+        }
+        autoComplete="off"
+        placeholder={placeholder}
+        value={query}
+        required={required}
+        disabled={disabled}
+        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        onBlur={() => {
+          setOpen(false);
+          const exact = options.find(
+            (option) =>
+              option.value.toLocaleLowerCase() === query.trim().toLocaleLowerCase() ||
+              option.label.toLocaleLowerCase() === query.trim().toLocaleLowerCase(),
+          );
+          if (exact) choose(exact);
+          else {
+            setQuery(selected?.label ?? "");
+            inputRef.current?.setCustomValidity(
+              required && !selectedValue ? "Choose an option." : "",
+            );
+          }
+        }}
+        onKeyDown={onKeyDown}
+        onChange={(event) => {
+          setQuery(event.currentTarget.value);
+          setSelectedValue("");
+          event.currentTarget.setCustomValidity(required ? "Choose a listed option." : "");
+          setActiveIndex(0);
+          setOpen(true);
+          onValueChange?.("");
+        }}
+      />
+      {open ? (
+        <div className="wf-search-select__list" id={listboxId} role="listbox">
+          {filtered.length ? (
+            filtered.map((option, index) => {
+              const previousGroup = filtered[index - 1]?.group;
+              return (
+                <div key={option.value}>
+                  {option.group && option.group !== previousGroup ? (
+                    <div className="wf-search-select__group" aria-hidden="true">
+                      {option.group}
+                    </div>
+                  ) : null}
+                  <button
+                    id={`${listboxId}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={option.value === selectedValue}
+                    className="wf-search-select__option"
+                    data-active={index === activeIndex || undefined}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => choose(option)}
+                    onMouseEnter={() => setActiveIndex(index)}
+                  >
+                    <span>{option.label}</span>
+                    <small dir="ltr">{option.value}</small>
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <div className="wf-search-select__empty">No matching option</div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function ColorInput({
+  className = "",
+  value,
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const color = typeof value === "string" ? value : "#000000";
+  return (
+    <div className={`wf-color-input ${className}`}>
+      <input type="color" value={color} {...props} />
+      <span
+        className="wf-color-input__swatch"
+        style={{ backgroundColor: color }}
+        aria-hidden="true"
+      />
+      <code>{color.toLocaleUpperCase("en-US")}</code>
+      <span className="wf-color-input__action" aria-hidden="true">
+        Edit
+      </span>
+    </div>
   );
 }
 
@@ -691,34 +882,100 @@ export function PlanCard({
   plan,
   selected,
   locale,
+  cadence = "monthly",
   onSelect,
 }: {
   plan: PlanCode;
   selected: boolean;
   locale: Locale;
+  cadence?: BillingCadence;
   onSelect?: (plan: PlanCode) => void;
 }) {
   const definition = planCatalog[plan];
+  const pricing = cadencePrice(plan, cadence);
+  const cadenceDefinition = billingCadenceCatalog[cadence];
   const copy = locale === "ar";
+  const count = (value: number | null, singular: string, plural: string, unboundedLabel: string) =>
+    value === null ? unboundedLabel : `${value} ${value === 1 ? singular : plural}`;
+  const benefits = [
+    count(
+      definition.limits.programs,
+      copy ? "بطاقة ولاء نشطة" : "active loyalty card",
+      copy ? "بطاقات ولاء نشطة" : "active loyalty cards",
+      copy ? "بطاقات ولاء نشطة غير محدودة" : "Unlimited active loyalty cards",
+    ),
+    count(
+      definition.limits.locations,
+      copy ? "موقع" : "location",
+      copy ? "مواقع" : "locations",
+      copy ? "حد مواقع Scale قابل للضبط" : "Configurable Scale location limit",
+    ),
+    count(
+      definition.limits.teamSeats,
+      copy ? "مقعد مدير أو موظف" : "Manager or Staff seat",
+      copy ? "مقاعد للمديرين والموظفين" : "Manager and Staff seats",
+      copy ? "حد مقاعد Scale قابل للضبط" : "Configurable Scale Manager and Staff limit",
+    ),
+    copy
+      ? "جميع قوالب وتصاميم البطاقات وApple Wallet وGoogle Wallet"
+      : "All card templates and designs, Apple Wallet, and Google Wallet",
+    copy
+      ? "عمليات المسح والختم والاستبدال والتحليلات الأساسية"
+      : "Resolve, stamp, redeem, and basic analytics",
+    ...(definition.features.advancedCustomization
+      ? [
+          copy
+            ? "الوضع الاحترافي والمكافآت المتعددة ومكافآت المراحل"
+            : "Pro Mode, multiple rewards, and milestone rewards",
+        ]
+      : []),
+    ...(definition.features.advancedAnalytics
+      ? [
+          copy
+            ? "تحليلات متقدمة حسب البرنامج والموقع والموظف"
+            : "Advanced program, location, and Staff analytics",
+        ]
+      : []),
+    ...(definition.features.advancedExports
+      ? [copy ? "تصديرات CSV المتقدمة" : "Advanced CSV exports"]
+      : []),
+  ];
   return (
     <Card className={`wf-plan-card ${selected ? "wf-plan-card--selected" : ""}`}>
+      <span className="wf-plan-card__tier">{copy ? "فئة الخطة" : "Plan tier"}</span>
       <div className="wf-plan-card__heading">
         <h3>{definition.name}</h3>
         {selected ? <Badge tone="brand">{copy ? "الخطة المختارة" : "Selected"}</Badge> : null}
       </div>
       <p className="wf-plan-card__price">
-        ${definition.monthlyPriceUsd}
-        <span>/{copy ? "شهرياً" : "month"}</span>
+        ${pricing.billedAmountUsd.toFixed(2)}
+        <span>
+          /
+          {copy
+            ? cadence === "monthly"
+              ? "شهرياً"
+              : cadence === "quarterly"
+                ? "ربع سنوي"
+                : "سنوياً"
+            : cadenceDefinition.label.toLocaleLowerCase("en-US")}
+        </span>
       </p>
-      <ul>
-        <li>
-          {definition.limits.locations ?? (copy ? "حد مرن" : "Configurable")}{" "}
-          {copy ? "مواقع" : "locations"}
-        </li>
-        <li>
-          {definition.limits.teamSeats ?? (copy ? "حد مرن" : "Configurable")}{" "}
-          {copy ? "مقاعد فريق" : "team seats"}
-        </li>
+      <small className="wf-plan-card__cadence">
+        {copy ? "وتيرة الفوترة:" : "Billing cadence:"} {cadenceDefinition.label}
+      </small>
+      {cadenceDefinition.discountRate ? (
+        <small className="wf-plan-card__equivalent">
+          ${pricing.monthlyEquivalentUsd.toFixed(2)}/{copy ? "شهر" : "month"} ·{" "}
+          {Math.round(cadenceDefinition.discountRate * 100)}% {copy ? "خصم" : "off"}
+        </small>
+      ) : null}
+      <ul className="wf-plan-card__benefits">
+        {benefits.map((benefit) => (
+          <li key={benefit}>
+            <Check size={16} aria-hidden="true" />
+            <span>{benefit}</span>
+          </li>
+        ))}
       </ul>
       {onSelect ? (
         <Button

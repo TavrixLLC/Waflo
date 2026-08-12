@@ -521,3 +521,93 @@ body {
     flex-direction: column;
   }
 }
+.marketing-plan-choice {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.marketing-cadence-comparison {
+  margin-top: 4rem;
+}
+
+.marketing-cadence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.marketing-cadence-grid article {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-lg);
+  background: var(--waflo-surface);
+}
+
+.marketing-cadence-grid article > strong {
+  font-size: 1.2rem;
+}
+
+.marketing-cadence-grid article > span {
+  width: fit-content;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: #f7e8e3;
+  color: var(--waflo-brick);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.marketing-cadence-grid dl,
+.marketing-content .marketing-policy-definitions {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.marketing-cadence-grid dl > div,
+.marketing-content .marketing-policy-definitions > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-block-start: 1px solid var(--waflo-border);
+}
+
+.marketing-cadence-grid dt,
+.marketing-cadence-grid dd,
+.marketing-content .marketing-policy-definitions dt,
+.marketing-content .marketing-policy-definitions dd {
+  margin: 0;
+}
+
+.marketing-cadence-grid dd,
+.marketing-content .marketing-policy-definitions dt {
+  font-weight: 800;
+}
+
+.marketing-content .marketing-policy-definitions > div {
+  align-items: start;
+}
+
+.marketing-content .marketing-policy-definitions dt {
+  min-width: 9rem;
+}
+
+.marketing-content .marketing-policy-definitions dd {
+  max-width: 48rem;
+  color: var(--waflo-muted);
+}
+
+@media (max-width: 760px) {
+  .marketing-cadence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .marketing-content .marketing-policy-definitions > div {
+    flex-direction: column;
+  }
+}

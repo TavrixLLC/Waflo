@@ -3,9 +3,16 @@ import type { Metadata } from "next";
 
 export const marketingOrigin = "https://waflo.app";
 export const marketingSocialImage = "/brand/waflo-open-graph-1200x630.png";
-export const publicMarketingPaths = ["", "/pricing", "/contact", "/privacy", "/terms"] as const;
+export const publicMarketingPaths = [
+  "",
+  "/pricing",
+  "/contact",
+  "/privacy",
+  "/terms",
+  "/refunds",
+] as const;
 
-export type MarketingPage = "home" | "pricing" | "contact" | "privacy" | "terms";
+export type MarketingPage = "home" | "pricing" | "contact" | "privacy" | "terms" | "refunds";
 
 const pageCopy: Record<
   MarketingPage,
@@ -77,6 +84,20 @@ const pageCopy: Record<
       title: "شروط الخدمة",
       description: "اطّلع على الشروط الحالية التي تنظّم استخدام التجار لمنصة Waflo.",
       path: "/terms",
+    },
+  },
+  refunds: {
+    en: {
+      title: "Billing & Refund Policy",
+      description:
+        "Understand Waflo cancellation, downgrade, refund-review, account-credit, and payment-dispute handling.",
+      path: "/refunds",
+    },
+    ar: {
+      title: "سياسة الفوترة والاسترداد",
+      description:
+        "تعرّف على آلية Waflo للإلغاء والتخفيض ومراجعة الاسترداد ورصيد الحساب والنزاعات المالية.",
+      path: "/refunds",
     },
   },
 };

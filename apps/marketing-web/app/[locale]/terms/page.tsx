@@ -58,6 +58,10 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
           </p>
           <p>
             <a href={`/${locale}/contact`}>{ar ? "تواصل مع Waflo" : "Contact Waflo"}</a>
+            {" · "}
+            <a href={`/${locale}/refunds`}>
+              {ar ? "سياسة الفوترة والاسترداد" : "Billing & Refund Policy"}
+            </a>
           </p>
         </div>
       </article>

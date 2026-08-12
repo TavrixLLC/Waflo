@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { planCatalog } from "@waflo/billing";
+import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
 import { isLocale } from "@waflo/i18n";
-import { Card } from "@waflo/ui";
+import { PlanCard } from "@waflo/ui";
 import { Check } from "lucide-react";
 import { MarketingShell } from "../../../components/marketing-shell";
 import { createMarketingMetadata } from "../../../lib/seo";
@@ -21,71 +21,57 @@ export default async function PricingPage({ params }: { params: Promise<{ locale
   if (!isLocale(locale)) notFound();
   const ar = locale === "ar";
   const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? "http://localhost:3001";
-  const details = {
-    starter: ar
-      ? ["موقع واحد", "برنامج ولاء واحد", "3 مقاعد فريق", "تخصيص وتحليلات أساسية"]
-      : ["1 location", "1 loyalty program", "3 team seats", "Basic customization and analytics"],
-    growth: ar
-      ? ["حتى 3 مواقع", "برامج ولاء متعددة", "10 مقاعد فريق", "تخصيص وتحليلات متقدمة"]
-      : [
-          "Up to 3 locations",
-          "Multiple loyalty programs",
-          "10 team seats",
-          "Advanced customization and analytics",
-        ],
-    scale: ar
-      ? ["حدود مرنة للمواقع والفريق", "برامج ولاء متعددة", "تخصيص وتحليلات متقدمة", "تصدير متقدم"]
-      : [
-          "Configurable location and team limits",
-          "Multiple loyalty programs",
-          "Advanced customization and analytics",
-          "Advanced exports",
-        ],
-  } as const;
   return (
     <MarketingShell locale={locale} path="/pricing">
       <section className="marketing-container marketing-content">
         <span className="marketing-kicker">
-          {ar ? "أسعار شهرية واضحة" : "Simple monthly pricing"}
+          {ar ? "الخطة شيء، ووتيرة الفوترة شيء آخر" : "Plan tier and billing cadence, made clear"}
         </span>
         <h1>{ar ? "اختر المساحة التي تناسب نموك." : "Choose the space your business needs."}</h1>
         <p className="marketing-content__lead">
           {ar
-            ? "كل الأسعار بالدولار الأمريكي والفوترة شهرية في المرحلة الحالية. اختيار الخطة أثناء الإعداد لا يعني بدء الدفع أو التجربة."
-            : "All prices are in USD and billed monthly. Selecting a plan during setup does not start payment or your trial."}
+            ? "كل الأسعار بالدولار الأمريكي. اختر Starter أو Growth أو Scale، ثم اختر الدفع الشهري أو كل ثلاثة أشهر بخصم 7% أو السنوي بخصم 17%. اختيار الخطة أثناء الإعداد لا يبدأ الدفع أو التجربة."
+            : "All prices are in USD. Choose Starter, Growth, or Scale, then choose monthly billing, quarterly billing at 7% off, or yearly billing at 17% off. Selecting a plan during setup does not start payment or your trial."}
         </p>
         <div className="marketing-plans" style={{ marginTop: "3rem" }}>
           {Object.values(planCatalog).map((plan) => (
-            <Card className="wf-plan-card" key={plan.code}>
-              <div className="wf-plan-card__heading">
-                <h2>{plan.name}</h2>
-                {plan.code === "growth" ? (
-                  <span className="wf-badge wf-badge--brand">
-                    {ar ? "الأكثر مرونة" : "Most flexible"}
-                  </span>
-                ) : null}
-              </div>
-              <p className="wf-plan-card__price">
-                ${plan.monthlyPriceUsd}
-                <span>/{ar ? "شهرياً" : "month"}</span>
-              </p>
-              <ul style={{ listStyle: "none", padding: 0 }}>
-                {details[plan.code].map((item) => (
-                  <li key={item} style={{ display: "flex", gap: ".5rem" }}>
-                    <Check size={17} color="var(--waflo-brick)" aria-hidden="true" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
+            <div className="marketing-plan-choice" key={plan.code}>
+              <PlanCard plan={plan.code} selected={false} locale={locale} cadence="monthly" />
               <a
                 className="wf-button wf-button--primary marketing-button-link marketing-button-link--full"
                 href={`${dashboardUrl}/${locale}/signup`}
               >
                 {ar ? "ابدأ الإعداد" : "Start setup"}
               </a>
-            </Card>
+            </div>
           ))}
         </div>
+        <section className="marketing-cadence-comparison" aria-labelledby="cadence-heading">
+          <span className="marketing-kicker">{ar ? "وتيرة الفوترة" : "Billing cadence"}</span>
+          <h2 id="cadence-heading">{ar ? "اختر موعد الدفعة" : "Choose when the charge happens"}</h2>
+          <div className="marketing-cadence-grid">
+            {(["monthly", "quarterly", "yearly"] as const).map((cadence) => (
+              <article key={cadence}>
+                <strong>{billingCadenceCatalog[cadence].label}</strong>
+                <span>
+                  {billingCadenceCatalog[cadence].discountRate
+                    ? `${Math.round(billingCadenceCatalog[cadence].discountRate * 100)}% ${ar ? "خصم" : "off"}`
+                    : ar
+                      ? "بدون خصم"
+                      : "No discount"}
+                </span>
+                <dl>
+                  {(["starter", "growth", "scale"] as const).map((plan) => (
+                    <div key={plan}>
+                      <dt>{planCatalog[plan].name}</dt>
+                      <dd>${cadencePrice(plan, cadence).billedAmountUsd.toFixed(2)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </article>
+            ))}
+          </div>
+        </section>
         <div style={{ marginTop: "2rem" }}>
           <div className="wf-alert wf-alert--info">
             <Check size={20} aria-hidden="true" />
