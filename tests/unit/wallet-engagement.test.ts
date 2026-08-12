@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { WalletWorker } from "../../apps/wallet-worker/src/main.js";
+import { parseEnvironment } from "../../packages/config/src/index.js";
 import { locationUpdateSchema } from "../../packages/contracts/src/index.js";
 import {
   walletCampaignCreateSchema,
@@ -253,10 +255,10 @@ describe("Google merchant-written Wallet messages", () => {
   it("uses object-level Add Message with TEXT_AND_NOTIFY and makes retry idempotent", async () => {
     const request = vi
       .fn()
-      .mockResolvedValueOnce({ value: {} })
+      .mockResolvedValueOnce({ value: { hasUsers: true } })
       .mockResolvedValueOnce({ value: {}, requestId: "provider-request-1" })
       .mockResolvedValueOnce({
-        value: { messages: [{ id: "wfl_campaign_pass_stable" }] },
+        value: { hasUsers: true, messages: [{ id: "wfl_campaign_pass_stable" }] },
         requestId: "provider-request-2",
       });
     const provider = new GoogleWalletProvider({
@@ -298,14 +300,15 @@ describe("Google merchant-written Wallet messages", () => {
     expect(request.mock.calls[0]?.[0]).not.toContain("loyaltyClass");
   });
 
-  it("deterministically prunes only an issuer-owned message at the object limit", async () => {
+  it("prunes only explicitly canceled Waflo messages at the object limit", async () => {
     const messages = [
       { id: "partner_message" },
       ...Array.from({ length: 9 }, (_, index) => ({ id: `wfl_${9 - index}` })),
     ];
-    const request = vi.fn().mockResolvedValueOnce({ value: { messages } }).mockResolvedValue({
-      value: {},
-    });
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ value: { hasUsers: true, messages } })
+      .mockResolvedValue({ value: {} });
     const provider = new GoogleWalletProvider({
       mode: "REAL",
       issuerId: "issuer",
@@ -319,6 +322,7 @@ describe("Google merchant-written Wallet messages", () => {
       locale: "en",
       title: "A new offer",
       body: "Your loyalty card has a new message.",
+      obsoleteMessageIds: ["wfl_1"],
     });
 
     expect(request).toHaveBeenNthCalledWith(
@@ -326,12 +330,115 @@ describe("Google merchant-written Wallet messages", () => {
       `loyaltyObject/${encodeURIComponent(membershipInput.providerIdentity)}`,
       {
         method: "PATCH",
-        body: { messages: expect.not.arrayContaining([{ id: "wfl_1" }, { id: "wfl_2" }]) },
+        body: { messages: expect.not.arrayContaining([{ id: "wfl_1" }]) },
       },
     );
-    expect(request.mock.calls[1]?.[1]?.body.messages).toHaveLength(8);
+    expect(request.mock.calls[1]?.[1]?.body.messages).toHaveLength(9);
     expect(request.mock.calls[1]?.[1]?.body.messages).toContainEqual({ id: "partner_message" });
+    expect(request.mock.calls[1]?.[1]?.body.messages).toContainEqual({ id: "wfl_2" });
     expect(request.mock.calls[2]?.[0]).toContain("/addMessage");
+  });
+
+  it("fails closed when no message is safely obsolete", async () => {
+    const messages = [
+      { id: "partner_message" },
+      ...Array.from({ length: 9 }, (_, index) => ({ id: `wfl_active_${index}` })),
+    ];
+    const request = vi.fn().mockResolvedValue({ value: { hasUsers: true, messages } });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer",
+      allowedOrigins: ["https://waflo.app"],
+      testActionBaseUrl: "https://waflo.app/google-test",
+      client: { request } as never,
+    });
+
+    await expect(
+      provider.sendPromotionalMessage(membershipInput, {
+        messageId: "wfl_new",
+        locale: "en",
+        title: "A new offer",
+        body: "Your loyalty card has a new message.",
+      }),
+    ).rejects.toMatchObject({
+      category: "MESSAGE_CAPACITY_REACHED",
+      options: { retryable: false },
+    });
+    expect(request.mock.calls.some(([path]) => String(path).endsWith("/addMessage"))).toBe(false);
+  });
+
+  it("uses authoritative hasUsers and skips objects with no active Wallet holder", async () => {
+    const request = vi.fn().mockResolvedValue({
+      value: { hasUsers: false, messages: [] },
+      requestId: "lookup-request",
+    });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer",
+      allowedOrigins: ["https://waflo.app"],
+      testActionBaseUrl: "https://waflo.app/google-test",
+      client: { request } as never,
+    });
+    await expect(
+      provider.sendPromotionalMessage(membershipInput, {
+        messageId: "wfl_new",
+        locale: "en",
+        title: "A new offer",
+        body: "Your loyalty card has a new message.",
+      }),
+    ).resolves.toEqual({ state: "NO_ACTIVE_WALLET_HOLDER", providerRequestId: "lookup-request" });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries boundedly when Google cannot provide authoritative hasUsers state", async () => {
+    const request = vi.fn().mockResolvedValue({
+      value: { messages: [] },
+      requestId: "lookup-unavailable",
+    });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer",
+      allowedOrigins: ["https://waflo.app"],
+      testActionBaseUrl: "https://waflo.app/google-test",
+      client: { request } as never,
+    });
+    await expect(
+      provider.sendPromotionalMessage(membershipInput, {
+        messageId: "wfl_new",
+        locale: "en",
+        title: "A new offer",
+        body: "Your loyalty card has a new message.",
+      }),
+    ).rejects.toMatchObject({
+      category: "TEMPORARY_FAILURE",
+      options: { retryable: true, providerRequestId: "lookup-unavailable" },
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Wallet command priority", () => {
+  it("always checks operational work before promotional sends", async () => {
+    const rpop = vi.fn().mockResolvedValueOnce("operational-command");
+    const worker = new WalletWorker(
+      {} as never,
+      { rpop } as never,
+      parseEnvironment(process.env),
+      new Map(),
+    );
+
+    await expect(worker.popNextQueuedCommand()).resolves.toBe("operational-command");
+    expect(rpop).toHaveBeenCalledTimes(1);
+    expect(rpop).toHaveBeenCalledWith("waflo:wallet:commands:operational");
+
+    rpop.mockReset();
+    rpop.mockResolvedValueOnce(null).mockResolvedValueOnce("promotional-command");
+    await expect(worker.popNextQueuedCommand()).resolves.toBe("promotional-command");
+    expect(rpop.mock.calls).toEqual([
+      ["waflo:wallet:commands:operational"],
+      ["waflo:wallet:commands:promotional"],
+    ]);
+    worker.close();
   });
 });
 

@@ -19,6 +19,7 @@ let prisma: PrismaService;
 let environment: EnvironmentService;
 let engagement: WalletEngagementService;
 let fixture: W3CustomerWalletFixture;
+let tenantFixture: W3CustomerWalletFixture;
 let membershipId = "";
 let customerSessionCookie = "";
 let customerCsrfCookie = "";
@@ -198,9 +199,13 @@ describe.sequential("Wallet Engagement durable integration", () => {
       ),
     ).rejects.toMatchObject({ code: "PERMISSION_DENIED", status: 403 });
 
-    const other = await createW3CustomerWalletFixture(prisma.client, "wallet-engagement-tenant");
+    tenantFixture = await createW3CustomerWalletFixture(prisma.client, "wallet-engagement-tenant");
     await expect(
-      engagement.audienceEstimate(fixture.ownerId, other.organizationId, other.programId),
+      engagement.audienceEstimate(
+        fixture.ownerId,
+        tenantFixture.organizationId,
+        tenantFixture.programId,
+      ),
     ).rejects.toMatchObject({ code: "ORGANIZATION_ACCESS_DENIED", status: 403 });
   });
 
@@ -222,10 +227,23 @@ describe.sequential("Wallet Engagement durable integration", () => {
     ).resolves.toMatchObject({ enabled: true, revision: 1, updateQueued: true });
 
     const configuration = await prisma.client.walletNearbyConfiguration.findUniqueOrThrow({
-      where: { programId: fixture.programId },
+      where: { organizationId: fixture.organizationId },
       include: { locations: true },
     });
+    const programCopy = await prisma.client.walletNearbyProgramCopy.findUniqueOrThrow({
+      where: { programId: fixture.programId },
+    });
     expect(configuration.locations.map((item) => item.locationId)).toEqual([fixture.locationId]);
+    expect(programCopy.appleCustomTextEn).toBe("Your card is ready near Cedar.");
+    await expect(
+      prisma.client.walletNearbyLocation.create({
+        data: {
+          configurationId: configuration.id,
+          locationId: tenantFixture.locationId,
+          sortOrder: 1,
+        },
+      }),
+    ).rejects.toThrow(/tenant mismatch/u);
     expect(
       await prisma.client.programWalletSyncJob.count({
         where: { programId: fixture.programId, reason: "NEARBY_RELEVANCE_CHANGED" },
@@ -245,6 +263,263 @@ describe.sequential("Wallet Engagement durable integration", () => {
         },
       }),
     ).toBe(3);
+  });
+
+  it("applies Nearby to consent-off and consent-on holders while manual promotion targets only consent-on", async () => {
+    expect((await setConsent(false)).statusCode).toBe(201);
+    const secondEnrollment = await app.inject({
+      method: "POST",
+      url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+      headers: {
+        host: fixture.merchantHost,
+        "content-type": "application/json",
+        "x-idempotency-key": `enroll:${randomUUID()}`,
+      },
+      payload: {
+        ...w3EnrollmentBase,
+        displayName: "Nearby Consent On Member",
+        formStartedAt: Date.now() - 2_000,
+      },
+    });
+    expect(secondEnrollment.statusCode).toBe(201);
+    const secondPublicMembershipId = data<{ membership: { publicMembershipId: string } }>(
+      secondEnrollment,
+    ).membership.publicMembershipId;
+    const secondMembership = await prisma.client.membership.findUniqueOrThrow({
+      where: { publicMembershipId: secondPublicMembershipId },
+      include: { walletPassInstances: true },
+    });
+    const secondGooglePass = secondMembership.walletPassInstances.find(
+      (pass) => pass.provider === "GOOGLE",
+    );
+    if (!secondGooglePass) throw new Error("Second Google Wallet fixture pass was not created.");
+    await prisma.client.walletPassInstance.update({
+      where: { id: secondGooglePass.id },
+      data: { status: "ACTIVE", providerState: { testFixture: true } },
+    });
+    await prisma.client.customerConsent.create({
+      data: {
+        organizationId: fixture.organizationId,
+        customerId: secondMembership.customerId,
+        membershipId: secondMembership.id,
+        consentType: "WALLET_PROMOTIONS",
+        granted: true,
+        documentFingerprint: "wallet-promotions-v1-LEGAL_REVIEW_REQUIRED",
+        locale: "EN",
+      },
+    });
+    const secondEligibilityState = await prisma.client.membership.findUniqueOrThrow({
+      where: { id: secondMembership.id },
+      include: {
+        customer: true,
+        credentials: true,
+        walletPassInstances: true,
+        consents: { orderBy: [{ capturedAt: "desc" }, { id: "desc" }] },
+      },
+    });
+    expect(secondEligibilityState).toMatchObject({
+      status: "ACTIVE",
+      customer: { status: "ACTIVE" },
+      credentials: [expect.objectContaining({ status: "ACTIVE" })],
+      walletPassInstances: expect.arrayContaining([
+        expect.objectContaining({ provider: "GOOGLE", status: "ACTIVE" }),
+      ]),
+      consents: expect.arrayContaining([
+        expect.objectContaining({
+          consentType: "WALLET_PROMOTIONS",
+          granted: true,
+          revokedAt: null,
+        }),
+      ]),
+    });
+
+    const nearbyJob = await prisma.client.programWalletSyncJob.findFirstOrThrow({
+      where: {
+        organizationId: fixture.organizationId,
+        programId: fixture.programId,
+        reason: "NEARBY_RELEVANCE_CHANGED",
+        status: "PENDING",
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const worker = new WalletWorker(prisma.client, {} as never, environment.values);
+    await worker.processOneProgramSyncJob(nearbyJob.id);
+    const nearbyUpdates = await prisma.client.walletCommand.findMany({
+      where: {
+        commandType: "UPDATE",
+        safePayload: { path: ["programSyncJobId"], equals: nearbyJob.id },
+      },
+      select: { membershipId: true, provider: true },
+    });
+    expect(new Set(nearbyUpdates.map((command) => command.membershipId))).toEqual(
+      new Set([membershipId, secondMembership.id]),
+    );
+    expect(new Set(nearbyUpdates.map((command) => command.provider))).toEqual(
+      new Set(["APPLE", "GOOGLE"]),
+    );
+    await prisma.client.walletPassInstance.updateMany({
+      where: {
+        membershipId: { in: [membershipId, secondMembership.id] },
+        provider: "GOOGLE",
+        status: "UPDATE_PENDING",
+      },
+      data: { status: "ACTIVE" },
+    });
+
+    await expect(
+      engagement.audienceEstimate(fixture.ownerId, fixture.organizationId, fixture.programId),
+    ).resolves.toMatchObject({ total: 1, providers: { apple: 0, google: 1 } });
+    const manualCampaign = await engagement.createCampaign(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      campaignInput("Nearby consent distinction"),
+      requestContext,
+    );
+    await prisma.client.walletEngagementCampaign.update({
+      where: { id: manualCampaign.id },
+      data: { scheduledAt: new Date(0) },
+    });
+    await worker.processOneWalletCampaign(manualCampaign.id);
+    const deliveries = await prisma.client.walletCampaignDelivery.findMany({
+      where: { campaignId: manualCampaign.id },
+      select: { membershipId: true, status: true, safeSkipCode: true },
+    });
+    expect(deliveries).toContainEqual({
+      membershipId,
+      status: "SKIPPED",
+      safeSkipCode: "CONSENT_REVOKED",
+    });
+    expect(deliveries).toContainEqual({
+      membershipId: secondMembership.id,
+      status: "QUEUED",
+      safeSkipCode: null,
+    });
+
+    await prisma.client.customerConsent.create({
+      data: {
+        organizationId: fixture.organizationId,
+        customerId: secondMembership.customerId,
+        membershipId: secondMembership.id,
+        consentType: "WALLET_PROMOTIONS",
+        granted: false,
+        revokedAt: new Date(),
+        documentFingerprint: "wallet-promotions-v1-LEGAL_REVIEW_REQUIRED",
+        locale: "EN",
+      },
+    });
+    await prisma.client.membership.update({
+      where: { id: secondMembership.id },
+      data: { status: "REVOKED" },
+    });
+    expect((await setConsent(true)).statusCode).toBe(201);
+    worker.close();
+  });
+
+  it("disables Nearby across every current and historical Google class binding", async () => {
+    const historicalVersion = await prisma.client.loyaltyProgramVersion.create({
+      data: {
+        organizationId: fixture.organizationId,
+        programId: fixture.programId,
+        versionNumber: 999,
+        status: "DRAFT",
+        baseTemplateCode: "COFFEE_WARM_LATTE",
+        createdByUserId: fixture.ownerId,
+        locations: {
+          create: { locationId: fixture.locationId },
+        },
+      },
+    });
+    await prisma.client.loyaltyProgramVersion.update({
+      where: { id: historicalVersion.id },
+      data: {
+        status: "SUPERSEDED",
+        publishedAt: new Date(Date.now() - 86_400_000),
+        supersededAt: new Date(),
+      },
+    });
+    const historicalBinding = await prisma.client.walletProgramBinding.create({
+      data: {
+        organizationId: fixture.organizationId,
+        programId: fixture.programId,
+        programVersionId: historicalVersion.id,
+        provider: "GOOGLE",
+        providerTemplateId: `historical-${historicalVersion.id}`,
+        status: "READY",
+        configurationFingerprint: "f".repeat(64),
+      },
+    });
+    const currentBinding = await prisma.client.walletProgramBinding.findFirstOrThrow({
+      where: {
+        organizationId: fixture.organizationId,
+        programId: fixture.programId,
+        provider: "GOOGLE",
+        id: { not: historicalBinding.id },
+      },
+    });
+    const currentConfiguration = await prisma.client.walletNearbyConfiguration.findUniqueOrThrow({
+      where: { organizationId: fixture.organizationId },
+    });
+    await engagement.updateNearby(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      {
+        enabled: false,
+        locationIds: [fixture.locationId],
+        appleCustomTextEn: "Your card is ready near Cedar.",
+        appleCustomTextAr: "بطاقتك جاهزة بالقرب من سيدار.",
+        revision: currentConfiguration.revision,
+      },
+      requestContext,
+    );
+    const disableJob = await prisma.client.programWalletSyncJob.findFirstOrThrow({
+      where: {
+        organizationId: fixture.organizationId,
+        programId: fixture.programId,
+        reason: "NEARBY_RELEVANCE_CHANGED",
+        idempotencyKey: { contains: `r${currentConfiguration.revision + 1}` },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const worker = new WalletWorker(prisma.client, {} as never, environment.values);
+    await worker.processOneProgramSyncJob(disableJob.id);
+    const classRefreshes = await prisma.client.walletCommand.findMany({
+      where: {
+        commandType: "ENSURE_TEMPLATE",
+        safePayload: { path: ["reason"], equals: "NEARBY_RELEVANCE_CHANGED" },
+        idempotencyKey: { contains: disableJob.id },
+      },
+      select: { safePayload: true },
+    });
+    const refreshedBindingIds = classRefreshes.map(
+      (command) => (command.safePayload as { bindingId: string }).bindingId,
+    );
+    expect(new Set(refreshedBindingIds)).toEqual(
+      new Set([currentBinding.id, historicalBinding.id]),
+    );
+    await expect(
+      prisma.client.walletNearbyConfiguration.findUniqueOrThrow({
+        where: { organizationId: fixture.organizationId },
+      }),
+    ).resolves.toMatchObject({ enabled: false });
+    expect(
+      await prisma.client.walletCommand.count({
+        where: {
+          commandType: "UPDATE",
+          safePayload: { path: ["programSyncJobId"], equals: disableJob.id },
+        },
+      }),
+    ).toBeGreaterThanOrEqual(2);
+    await prisma.client.walletPassInstance.updateMany({
+      where: {
+        organizationId: fixture.organizationId,
+        provider: "GOOGLE",
+        status: "UPDATE_PENDING",
+      },
+      data: { status: "ACTIVE" },
+    });
+    worker.close();
   });
 
   it("creates idempotent campaigns without provider calls in HTTP work and dispatches a tenant-authoritative audience", async () => {
@@ -336,6 +611,58 @@ describe.sequential("Wallet Engagement durable integration", () => {
     expect(
       await prisma.client.walletEngagementCampaign.findUniqueOrThrow({ where: { id: created.id } }),
     ).toMatchObject({ status: "COMPLETED", succeededCount: 1, failedCount: 0 });
+    worker.close();
+  });
+
+  it("skips manual Google delivery when the authoritative object has no Wallet holder", async () => {
+    const campaign = await engagement.createCampaign(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      campaignInput("No saved Wallet holder"),
+      requestContext,
+    );
+    await prisma.client.walletEngagementCampaign.update({
+      where: { id: campaign.id },
+      data: { scheduledAt: new Date(0) },
+    });
+    const sendPromotionalMessage = vi.fn().mockResolvedValue({
+      state: "NO_ACTIVE_WALLET_HOLDER",
+      providerRequestId: "google-object-lookup-1",
+    });
+    const worker = new WalletWorker(
+      prisma.client,
+      {} as never,
+      environment.values,
+      new Map([
+        [
+          "GOOGLE",
+          {
+            provider: "GOOGLE",
+            mode: "TEST_ADAPTER",
+            sendPromotionalMessage,
+          } as unknown as WalletProvider,
+        ],
+      ]),
+    );
+    await worker.processOneWalletCampaign(campaign.id);
+    const command = await prisma.client.walletCommand.findFirstOrThrow({
+      where: { campaignDelivery: { campaignId: campaign.id } },
+    });
+    expect(await worker.processCommandById(command.id)).toBe(true);
+    await expect(
+      prisma.client.walletCampaignDelivery.findFirstOrThrow({
+        where: { campaignId: campaign.id },
+      }),
+    ).resolves.toMatchObject({
+      status: "SKIPPED",
+      safeSkipCode: "NO_ACTIVE_WALLET_HOLDER",
+      providerRequestId: "google-object-lookup-1",
+      logicalSentAt: null,
+    });
+    await expect(
+      prisma.client.walletEngagementCampaign.findUniqueOrThrow({ where: { id: campaign.id } }),
+    ).resolves.toMatchObject({ status: "COMPLETED", succeededCount: 0 });
     worker.close();
   });
 

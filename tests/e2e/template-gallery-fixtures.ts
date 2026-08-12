@@ -621,6 +621,7 @@ export async function mockTemplateGalleryApi(
           },
         },
         nearby: {
+          scope: "ORGANIZATION",
           enabled: walletNearbyEnabled,
           revision: walletNearbyRevision,
           locationIds: walletNearbyLocationIds,
@@ -652,6 +653,7 @@ export async function mockTemplateGalleryApi(
             latitude: 33.3024,
             longitude: 44.3882,
             coordinatesConfigured: true,
+            participatesInThisCard: true,
           },
           {
             id: "22222222-2222-4222-8222-222222222222",
@@ -660,9 +662,14 @@ export async function mockTemplateGalleryApi(
             latitude: null,
             longitude: null,
             coordinatesConfigured: false,
+            participatesInThisCard: true,
           },
         ],
         disclosures: {
+          policy:
+            "Nearby is a business-wide Wallet policy. Participating locations apply to each published Loyalty Card where that location participates.",
+          delivery:
+            "Apple, Google, and the customer’s device settings control whether and when a card is surfaced.",
           apple:
             "Apple determines when the pass becomes relevant and uses the smaller of Waflo’s requested maximum and Apple’s default distance.",
           google: "Google Wallet determines nearby distance, dwell time, and the system reminder.",

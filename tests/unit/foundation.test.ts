@@ -273,7 +273,7 @@ describe("merchant hostname parsing and resolution", () => {
     expect(result.status).toBe(expected);
   });
 
-  it("supports tenant query override only outside production", async () => {
+  it("supports the explicit tenant query on the shared staging Customer Web host", async () => {
     const findUnique = vi.fn().mockResolvedValue({
       id: "org-1",
       name: "Today Coffee",
@@ -286,14 +286,38 @@ describe("merchant hostname parsing and resolution", () => {
       {
         values: {
           NODE_ENV: "test",
+          DEPLOYMENT_ENVIRONMENT: "staging",
           MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
         },
       } as never,
     );
-    const result = await service.resolve("localhost:3002", "today");
+    const result = await service.resolve("card-staging.waflo.app", "today");
     expect(result).toMatchObject({
       status: "active",
-      merchant: { slug: "today", defaultLocale: "ar" },
+      merchant: {
+        slug: "today",
+        defaultLocale: "ar",
+        hostname: "card-staging.waflo.app",
+      },
+    });
+  });
+
+  it("rejects tenant query overrides in production", async () => {
+    const service = new HostResolutionService(
+      { client: { organization: { findUnique: vi.fn() } } } as never,
+      {
+        values: {
+          NODE_ENV: "production",
+          DEPLOYMENT_ENVIRONMENT: "production",
+          MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card.waflo.app",
+        },
+      } as never,
+    );
+    await expect(service.resolve("card.waflo.app", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_FORBIDDEN",
+      status: 400,
     });
   });
 });

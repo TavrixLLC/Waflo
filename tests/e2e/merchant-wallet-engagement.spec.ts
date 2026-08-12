@@ -15,7 +15,9 @@ test("configures provider-native nearby relevance and confirms a consented Googl
 
   const engagement = page.getByTestId("wallet-engagement");
   await expect(engagement).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Nearby Wallet reminder" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Nearby Wallet reminders" })).toBeVisible();
+  await expect(page.getByText("BUSINESS POLICY", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("DEVICE DELIVERY", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Apple determines when the pass becomes relevant", { exact: false }),
   ).toBeVisible();
@@ -67,6 +69,10 @@ test("configures provider-native nearby relevance and confirms a consented Googl
   await dialog.getByRole("button", { name: "Send now" }).click();
   await expect(page.getByText("Campaign created safely.", { exact: false })).toBeVisible();
   await expect(page.getByTestId("wallet-campaign-history")).toContainText("A new visit message");
+  await page.screenshot({
+    path: "test-results/wallet-engagement-desktop.png",
+    fullPage: true,
+  });
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(
@@ -86,7 +92,7 @@ test("keeps Wallet Engagement usable in Arabic RTL on mobile", async ({ page }) 
   await page.goto("/ar/dashboard/programs/created-program-id/engagement");
 
   await expect(page.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");
-  await expect(page.getByRole("heading", { name: "تذكير Wallet القريب" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "تذكيرات Wallet القريبة" })).toBeVisible();
   await expect(
     page.getByText("تحدد Google Wallet المسافة ومدة البقاء", { exact: false }),
   ).toBeVisible();
@@ -97,6 +103,10 @@ test("keeps Wallet Engagement usable in Arabic RTL on mobile", async ({ page }) 
     () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
   );
   expect(noOverflow).toBe(true);
+  await page.screenshot({
+    path: "test-results/wallet-engagement-mobile-ar.png",
+    fullPage: true,
+  });
 });
 
 test("denies Wallet Engagement and the surrounding Loyalty Studio to ordinary staff", async ({

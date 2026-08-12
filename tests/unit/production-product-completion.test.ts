@@ -204,7 +204,7 @@ describe("production environment and provider boundaries", () => {
         APPLE_PASS_CERTIFICATE_PATH_OR_BASE64: "/run/waflo-provider-secrets/pass.p12",
         APPLE_PASS_CERTIFICATE_PASSWORD: "password",
         APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64: "/run/waflo-provider-secrets/wwdr.pem",
-        APPLE_PASS_WEB_SERVICE_URL: "https://api.staging.waflo.app/v1/apple-wallet",
+        APPLE_PASS_WEB_SERVICE_URL: "https://api-staging.waflo.app/v1/apple-wallet",
         APPLE_APNS_ENVIRONMENT: "sandbox",
       }),
     ).toThrow("pass updates require the production APNs endpoint");

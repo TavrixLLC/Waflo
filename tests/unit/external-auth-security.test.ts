@@ -143,12 +143,12 @@ describe("external-auth security primitives and configuration", () => {
       parseEnvironment({
         NODE_ENV: "production",
         DEPLOYMENT_ENVIRONMENT: "staging",
-        API_PUBLIC_URL: "https://api.staging.waflo.app",
+        API_PUBLIC_URL: "https://api-staging.waflo.app",
         APPLE_SIGNIN_CLIENT_ID: "app.waflo.staging",
         APPLE_SIGNIN_TEAM_ID: "TEAM123456",
         APPLE_SIGNIN_KEY_ID: "KEY1234567",
         APPLE_SIGNIN_PRIVATE_KEY_BASE64: Buffer.from("private-key-placeholder").toString("base64"),
-        APPLE_SIGNIN_REDIRECT_URI: "https://api.staging.waflo.app/v1/auth/external/apple/callback",
+        APPLE_SIGNIN_REDIRECT_URI: "https://api-staging.waflo.app/v1/auth/external/apple/callback",
         EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON: JSON.stringify({ 1: "too-short" }),
       }),
     ).toThrow("versioned 32-byte external-auth token encryption keyring");

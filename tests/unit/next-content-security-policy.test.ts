@@ -97,7 +97,8 @@ describe("Next.js Content-Security-Policy", () => {
     const policy = await contentSecurityPolicyFor(dashboardConfig, "production");
 
     expect(policy).toContain("connect-src 'self'");
-    expect(policy).toContain(" http://localhost:4000 https://api.waflo.app");
+    expect(policy).toContain(" http://localhost:4000");
+    expect(policy).not.toContain("https://api.waflo.app");
     expect(policy).not.toContain("'unsafe-eval'");
   });
 
