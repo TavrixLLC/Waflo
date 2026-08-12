@@ -222,7 +222,7 @@ test("completes the final English merchant release journey", async ({ page }) =>
   await page.getByRole("button", { name: "Start demo customer" }).click();
   await expect(page.getByRole("button", { name: "Reset demo customer" })).toBeVisible();
 
-  await openStudioArea(page, /^Launch/u);
+  await openStudioArea(page, /^Review & launch/u);
   await expect(page).toHaveURL(`/en/dashboard/programs/${programId}/launch`);
   await page.getByRole("button", { name: "Launch loyalty card" }).click();
   const dialog = page.getByRole("dialog", { name: "You’re about to launch this loyalty card" });

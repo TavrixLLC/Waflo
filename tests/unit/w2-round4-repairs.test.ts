@@ -40,7 +40,7 @@ describe("W2 Round 4 publication and policy decisions", () => {
         requiredStampCount: 8,
         layoutType: "PATH",
       }),
-    ).toEqual(["PRO_MODE", "MULTIPLE_REWARDS", "MILESTONE_REWARDS", "ADVANCED_LAYOUT"]);
+    ).toEqual(["PRO_MODE", "MULTIPLE_REWARDS", "MILESTONE_REWARDS"]);
   });
 
   it("preserves W2 defaults while confirming W4 operational execution is implemented", () => {

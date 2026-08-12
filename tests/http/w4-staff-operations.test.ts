@@ -1205,6 +1205,116 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     expect(responseCode(rePair)).toBe("DEVICE_PAIRING_INVALID");
   });
 
+  it("creates a local Staff identity without an email invitation", async () => {
+    const headers = await merchantMutationHeaders();
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${ORGANIZATION_ID}/members`,
+      headers,
+      payload: { name: `QR Staff ${randomUUID().slice(0, 8)}`, role: "STAFF" },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    expect(responseData<Record<string, unknown>>(created)).toMatchObject({
+      role: "STAFF",
+      status: "ACTIVE",
+      accessType: "QR",
+      user: { email: null },
+    });
+  });
+
+  it("serializes concurrent Staff QR regeneration and immediately revokes prior access", async () => {
+    const headers = await merchantMutationHeaders();
+    const qrStaff = await createStaffIdentity(`qr-regeneration-${randomUUID()}`);
+    await prisma.client.staffLocationAssignment.create({
+      data: {
+        organizationId: ORGANIZATION_ID,
+        organizationMemberId: qrStaff.memberId,
+        locationId: LOCATION_ID,
+        assignedByUserId: OWNER_ID,
+      },
+    });
+    const activeClient = await pairDevice({
+      organizationId: ORGANIZATION_ID,
+      organizationMemberId: qrStaff.memberId,
+      locationId: LOCATION_ID,
+      label: `prior-device-${randomUUID()}`,
+    });
+    const payload = {
+      staffMemberId: qrStaff.memberId,
+      locations: [{ locationId: LOCATION_ID, earningAllowed: true, redemptionAllowed: true }],
+      expiresInMinutes: 10,
+    };
+    const first = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${ORGANIZATION_ID}/device-pairing-sessions`,
+      headers,
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+    const firstPairing = responseData<{ publicId: string }>(first);
+    expect(
+      (
+        await prisma.client.staffDeviceSession.findUniqueOrThrow({
+          where: { id: activeClient.deviceSessionId },
+        })
+      ).revokedAt,
+    ).not.toBeNull();
+    expect(
+      (
+        await prisma.client.staffDevice.findUniqueOrThrow({
+          where: { publicId: activeClient.devicePublicId },
+        })
+      ).status,
+    ).toBe("REVOKED");
+
+    const oldPhoneDenied = await signedStaffInject(app, activeClient, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(oldPhoneDenied.statusCode).toBe(401);
+    expect(responseCode(oldPhoneDenied)).toBe("STAFF_DEVICE_REVOKED");
+
+    const [second, third] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/v1/organizations/${ORGANIZATION_ID}/device-pairing-sessions`,
+        headers,
+        payload,
+      }),
+      app.inject({
+        method: "POST",
+        url: `/v1/organizations/${ORGANIZATION_ID}/device-pairing-sessions`,
+        headers,
+        payload,
+      }),
+    ]);
+    expect(second.statusCode).toBe(201);
+    expect(third.statusCode).toBe(201);
+    const concurrentPairingIds = [
+      responseData<{ publicId: string }>(second).publicId,
+      responseData<{ publicId: string }>(third).publicId,
+    ];
+    expect(new Set(concurrentPairingIds).size).toBe(2);
+    const concurrentPairings = await prisma.client.devicePairingSession.findMany({
+      where: { publicId: { in: concurrentPairingIds } },
+      select: { publicId: true, status: true },
+    });
+    expect(concurrentPairings.filter((pairing) => pairing.status === "PENDING")).toHaveLength(1);
+    expect(concurrentPairings.filter((pairing) => pairing.status === "CANCELED")).toHaveLength(1);
+    expect(
+      (
+        await prisma.client.devicePairingSession.findUniqueOrThrow({
+          where: { publicId: firstPairing.publicId },
+        })
+      ).status,
+    ).toBe("CANCELED");
+    expect(
+      await prisma.client.devicePairingSession.count({
+        where: { intendedStaffMemberId: qrStaff.memberId, status: "PENDING" },
+      }),
+    ).toBe(1);
+  });
+
   it("denies active devices after membership or Location assignment revocation", async () => {
     const headers = await merchantMutationHeaders();
     const suspendedStaff = await createStaffIdentity("suspended-device-principal");

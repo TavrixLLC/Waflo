@@ -16,6 +16,7 @@ import { EnvironmentService } from "../../apps/api/src/config/environment.servic
 import { PrismaService } from "../../apps/api/src/database/prisma.service";
 import type { NotificationService } from "../../apps/api/src/notifications/notification.service";
 import { TenantService } from "../../apps/api/src/tenancy/tenant.service";
+import { OperationalWorker } from "../../apps/operational-worker/src/main";
 import { hashPassword } from "../../packages/auth/src/index";
 
 const runId = randomUUID().slice(0, 8);
@@ -86,6 +87,7 @@ function buildMockSub(input: {
  */
 function makeMockProvider(
   subscriptions: Map<string, Stripe.Subscription>,
+  invoices: Map<string, Stripe.Invoice> = new Map(),
 ): StripeSubscriptionProvider {
   return {
     async retrieveSubscription(subscriptionId: string) {
@@ -93,6 +95,104 @@ function makeMockProvider(
       if (!sub) throw new Error(`Mock provider: subscription ${subscriptionId} not found`);
       return sub;
     },
+    async retrieveInvoice(invoiceId: string) {
+      const invoice = invoices.get(invoiceId);
+      if (!invoice) throw new Error(`Mock provider: invoice ${invoiceId} not found`);
+      return invoice;
+    },
+  };
+}
+
+function buildInvoice(input: {
+  id: string;
+  organizationId: string;
+  customerId: string;
+  status: "open" | "paid";
+  failureCode?: string;
+  created: number;
+}): Stripe.Invoice {
+  const paid = input.status === "paid";
+  return {
+    id: input.id,
+    object: "invoice",
+    customer: input.customerId,
+    customer_name: "Stripe Test Organization",
+    customer_email: `billing-${runId}@example.com`,
+    metadata: { wafloOrganizationId: input.organizationId },
+    parent: {
+      type: "subscription_details",
+      quote_details: null,
+      subscription_details: {
+        subscription: `sub_invoice_${runId}`,
+        metadata: { organizationId: input.organizationId, plan: "growth", cadence: "monthly" },
+      },
+    },
+    status: input.status,
+    billing_reason: "subscription_cycle",
+    amount_due: 6900,
+    amount_paid: paid ? 6900 : 0,
+    amount_remaining: paid ? 0 : 6900,
+    currency: "usd",
+    created: input.created,
+    effective_at: input.created,
+    period_start: input.created,
+    period_end: input.created + 2_592_000,
+    next_payment_attempt: null,
+    number: `WF-${runId}`,
+    hosted_invoice_url: `https://invoice.stripe.com/i/${input.id}`,
+    invoice_pdf: `https://pay.stripe.com/invoice/${input.id}/pdf`,
+    default_payment_method: {
+      id: `pm_${runId}`,
+      object: "payment_method",
+      card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2028 },
+    } as Stripe.PaymentMethod,
+    payments: {
+      object: "list",
+      data: input.failureCode
+        ? [
+            {
+              payment: {
+                type: "payment_intent",
+                payment_intent: {
+                  id: `pi_${input.id}`,
+                  object: "payment_intent",
+                  payment_method: `pm_${runId}`,
+                  last_payment_error: {
+                    code: "card_declined",
+                    decline_code: input.failureCode,
+                  },
+                } as Stripe.PaymentIntent,
+              },
+            } as Stripe.InvoicePayment,
+          ]
+        : [],
+      has_more: false,
+      url: "",
+    },
+    status_transitions: {
+      finalized_at: input.created,
+      marked_uncollectible_at: null,
+      paid_at: paid ? input.created + 60 : null,
+      voided_at: null,
+    },
+  } as unknown as Stripe.Invoice;
+}
+
+function invoiceEvent(
+  eventId: string,
+  type: "invoice.payment_failed" | "invoice.paid",
+  invoice: Stripe.Invoice,
+) {
+  return {
+    id: eventId,
+    object: "event",
+    api_version: "2026-06-24.dahlia",
+    created: invoice.created + (type === "invoice.paid" ? 60 : 0),
+    data: { object: { id: invoice.id, object: "invoice" } },
+    livemode: false,
+    pending_webhooks: 1,
+    request: null,
+    type,
   };
 }
 
@@ -267,6 +367,177 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         where: { action: "stripe.subscription_applied", targetId: subId },
       }),
     ).toBe(1);
+  });
+
+  it("deduplicates failed-invoice mail, preserves grace on card replacement, and recovers the same invoice", async () => {
+    const environment = new EnvironmentService();
+    const audit = new AuditService(prisma);
+    const tenant = new TenantService(prisma, audit);
+    const notifications = { send: vi.fn(async () => undefined) } as unknown as NotificationService;
+    const invoiceId = `in_recovery_${runId}`;
+    const created = Math.floor(Date.now() / 1000) - 10;
+    const failedInvoice = buildInvoice({
+      id: invoiceId,
+      organizationId: organizationAId,
+      customerId: customerA,
+      status: "open",
+      failureCode: "insufficient_funds",
+      created,
+    });
+    const invoices = new Map([[invoiceId, failedInvoice]]);
+    const billing = new BillingService(prisma, environment, tenant, audit, notifications);
+    billing.subscriptionProvider = makeMockProvider(new Map(), invoices);
+    const failedEvent = invoiceEvent(
+      `evt_invoice_failed_${runId}`,
+      "invoice.payment_failed",
+      failedInvoice,
+    );
+    const failedSigned = sign(failedEvent);
+
+    const duplicateResults = await Promise.all([
+      billing.processWebhook(failedSigned.payload, failedSigned.signature, request),
+      billing.processWebhook(failedSigned.payload, failedSigned.signature, request),
+    ]);
+    expect(duplicateResults.map((result) => result.duplicate).sort()).toEqual([false, true]);
+    const failedRow = await prisma.client.billingInvoice.findUniqueOrThrow({
+      where: { stripeInvoiceId: invoiceId },
+    });
+    expect(failedRow.recoveryStatus).toBe("GRACE");
+    expect(failedRow.automaticRetryEligible).toBe(true);
+    expect(failedRow.graceEndsAt?.getTime()).toBe(created * 1000 + 48 * 60 * 60 * 1000);
+    expect(
+      await prisma.client.billingEmailOutbox.count({
+        where: { billingInvoiceId: failedRow.id, kind: "PAYMENT_FAILED" },
+      }),
+    ).toBe(1);
+
+    const originalDeadline = failedRow.graceEndsAt;
+    const cardEvent = {
+      id: `evt_customer_card_${runId}`,
+      object: "event",
+      api_version: "2026-06-24.dahlia",
+      created: created + 20,
+      data: {
+        object: { id: customerA, object: "customer" },
+        previous_attributes: { invoice_settings: { default_payment_method: `pm_old_${runId}` } },
+      },
+      livemode: false,
+      pending_webhooks: 1,
+      request: null,
+      type: "customer.updated",
+    };
+    const cardSigned = sign(cardEvent);
+    await billing.processWebhook(cardSigned.payload, cardSigned.signature, request);
+    const woken = await prisma.client.billingInvoice.findUniqueOrThrow({
+      where: { stripeInvoiceId: invoiceId },
+    });
+    expect(woken.graceEndsAt).toEqual(originalDeadline);
+    expect(woken.nextRecoveryAttemptAt?.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
+    expect(
+      await prisma.client.billingInvoice.count({ where: { stripeInvoiceId: invoiceId } }),
+    ).toBe(1);
+
+    const paidInvoice = buildInvoice({
+      id: invoiceId,
+      organizationId: organizationAId,
+      customerId: customerA,
+      status: "paid",
+      created,
+    });
+    invoices.set(invoiceId, paidInvoice);
+    const paidEvent = invoiceEvent(`evt_invoice_paid_${runId}`, "invoice.paid", paidInvoice);
+    const paidSigned = sign(paidEvent);
+    await billing.processWebhook(paidSigned.payload, paidSigned.signature, request);
+    const paidRow = await prisma.client.billingInvoice.findUniqueOrThrow({
+      where: { stripeInvoiceId: invoiceId },
+    });
+    const profile = await prisma.client.organizationBillingProfile.findUniqueOrThrow({
+      where: { organizationId: organizationAId },
+    });
+    expect(paidRow.status).toBe("paid");
+    expect(paidRow.amountRemaining).toBe(0);
+    expect(paidRow.recoveryStatus).toBe("RECOVERED");
+    expect(profile.subscriptionStatus).toBe("ACTIVE");
+    expect(profile.gracePeriodEnd).toBeNull();
+    expect(
+      await prisma.client.billingEmailOutbox.count({
+        where: { billingInvoiceId: failedRow.id, kind: "INVOICE_PAID" },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.client.billingEmailOutbox.findFirstOrThrow({
+        where: { billingInvoiceId: failedRow.id, kind: "PAYMENT_FAILED" },
+      }),
+    ).toMatchObject({ status: "CANCELED" });
+  });
+
+  it("does not auto-retry a hard decline and deterministically expires then recovers grace", async () => {
+    const environment = new EnvironmentService();
+    const audit = new AuditService(prisma);
+    const tenant = new TenantService(prisma, audit);
+    const notifications = { send: vi.fn(async () => undefined) } as unknown as NotificationService;
+    const invoiceId = `in_hard_decline_${runId}`;
+    const created = Math.floor((Date.now() - 49 * 60 * 60 * 1000) / 1000);
+    const failed = buildInvoice({
+      id: invoiceId,
+      organizationId: organizationAId,
+      customerId: customerA,
+      status: "open",
+      failureCode: "stolen_card",
+      created,
+    });
+    const invoices = new Map([[invoiceId, failed]]);
+    const billing = new BillingService(prisma, environment, tenant, audit, notifications);
+    billing.subscriptionProvider = makeMockProvider(new Map(), invoices);
+    const event = invoiceEvent(`evt_hard_decline_${runId}`, "invoice.payment_failed", failed);
+    const signed = sign(event);
+    await billing.processWebhook(signed.payload, signed.signature, request);
+    const failedRow = await prisma.client.billingInvoice.findUniqueOrThrow({
+      where: { stripeInvoiceId: invoiceId },
+    });
+    expect(failedRow.failureCategory).toBe("HARD_DECLINE");
+    expect(failedRow.recoveryStatus).toBe("ACTION_REQUIRED");
+    expect(failedRow.automaticRetryEligible).toBe(false);
+    expect(failedRow.nextRecoveryAttemptAt).toBeNull();
+
+    const worker = new OperationalWorker(prisma.client, environment.values);
+    try {
+      expect(await worker.expireBillingGracePeriods()).toBeGreaterThanOrEqual(1);
+    } finally {
+      worker.close();
+    }
+    const expired = await prisma.client.billingInvoice.findUniqueOrThrow({
+      where: { stripeInvoiceId: invoiceId },
+    });
+    const pastDue = await prisma.client.organizationBillingProfile.findUniqueOrThrow({
+      where: { organizationId: organizationAId },
+    });
+    expect(expired.recoveryStatus).toBe("EXPIRED");
+    expect(pastDue.subscriptionStatus).toBe("PAST_DUE");
+    expect(
+      await prisma.client.billingEmailOutbox.count({
+        where: { billingInvoiceId: expired.id, kind: "BILLING_GRACE_EXPIRED" },
+      }),
+    ).toBe(1);
+
+    const paid = buildInvoice({
+      id: invoiceId,
+      organizationId: organizationAId,
+      customerId: customerA,
+      status: "paid",
+      created,
+    });
+    invoices.set(invoiceId, paid);
+    const paidEvent = invoiceEvent(`evt_hard_decline_paid_${runId}`, "invoice.paid", paid);
+    const paidSigned = sign(paidEvent);
+    await billing.processWebhook(paidSigned.payload, paidSigned.signature, request);
+    expect(
+      (
+        await prisma.client.organizationBillingProfile.findUniqueOrThrow({
+          where: { organizationId: organizationAId },
+        })
+      ).subscriptionStatus,
+    ).toBe("ACTIVE");
   });
 
   it("retries a FAILED event and applies business state once", async () => {
@@ -512,7 +783,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
     ).rejects.toMatchObject({ code: "STRIPE_PRICE_UNKNOWN" });
   });
 
-  it("preserves over-limit resources on a Stripe downgrade and records the policy", async () => {
+  it("rejects a Stripe downgrade while the organization exceeds the target limits", async () => {
     await prisma.client.location.createMany({
       data: [
         { organizationId: organizationAId, name: "Over limit 1", timezone: "UTC" },
@@ -565,20 +836,32 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
     ]);
     const b = new BillingService(prisma, environment, tenant, audit, notifications);
     b.subscriptionProvider = makeMockProvider(subs);
-    await b.processWebhook(signed.payload, signed.signature, request);
+    await expect(b.processWebhook(signed.payload, signed.signature, request)).rejects.toMatchObject(
+      {
+        code: "PLAN_DOWNGRADE_BLOCKED_FROM_PROVIDER",
+        details: {
+          requestedPlan: "starter",
+          violations: expect.arrayContaining([
+            expect.objectContaining({ code: "LOCATIONS" }),
+            expect.objectContaining({ code: "ACTIVE_PROGRAMS" }),
+          ]),
+        },
+      },
+    );
     expect(
       await prisma.client.location.count({
         where: { organizationId: organizationAId, status: "ACTIVE" },
       }),
     ).toBeGreaterThanOrEqual(2);
-    const auditEntry = await prisma.client.auditLog.findFirstOrThrow({
-      where: { action: "stripe.subscription_applied", targetId: subId },
+    const organization = await prisma.client.organization.findUniqueOrThrow({
+      where: { id: organizationAId },
+      select: { selectedPlan: true },
     });
-    expect(auditEntry.metadata).toMatchObject({
-      overLimit: true,
-      programUsage: 2,
-      programLimit: 1,
-      overLimitPolicy: "preserve_resources_and_block_new_capacity",
-    });
+    expect(organization.selectedPlan).toBe("GROWTH");
+    expect(
+      await prisma.client.auditLog.findFirst({
+        where: { action: "stripe.subscription_applied", targetId: subId },
+      }),
+    ).toBeNull();
   });
 });

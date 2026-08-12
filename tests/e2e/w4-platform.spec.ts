@@ -8,6 +8,7 @@ const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const disposableCustomerId = randomUUID();
 const disposableMembershipId = randomUUID();
 const disposableCustomerName = `W4 Erasure Evidence ${randomUUID().slice(0, 8)}`;
+const qrStaffName = `W4 QR Staff ${randomUUID().slice(0, 8)}`;
 let wrongLocationPairingToken = "";
 let prisma: Awaited<ReturnType<typeof connectPrisma>>;
 
@@ -59,7 +60,7 @@ async function openProgramTestMode(page: Page, programName: string) {
     await createUpdate.click();
     await expect(startDemoCustomer).toBeVisible();
   }
-  await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+  await studioNavigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }).click();
   await expect(page.getByText("Setup, asset, and preview checks passed.")).toBeVisible();
   await studioNavigation.getByRole("button", { name: /^Test/u }).click();
@@ -255,28 +256,24 @@ test.describe
       await capture(page, "30-projection-verification");
     });
 
-    test("Owner manages devices, manager approvals, risk review, analytics, and exports", async ({
+    test("Owner manages Staff QR access, manager approvals, risk review, analytics, and exports", async ({
       page,
     }) => {
       await login(page);
       await page.goto("/en/dashboard/devices");
-      await expect(page.getByRole("table", { name: "Paired staff devices" })).toContainText(
-        "W4 deterministic Test Client",
-      );
-      await expect(page.getByRole("table", { name: "Paired staff devices" })).toContainText(
-        "Revoked counter tablet",
-      );
-      await capture(page, "31-active-and-revoked-devices");
-      await page.getByRole("button", { name: "Pair device" }).click();
-      await page.getByLabel("Device label").fill("W4 browser evidence device");
-      await page.getByRole("button", { name: "Create pairing code" }).click();
-      await expect(page.getByRole("dialog")).toContainText("Sensitive, short-lived pairing code");
-      await expect(page.getByRole("dialog").locator("img")).toHaveAttribute(
-        "alt",
-        /Pair Staff device/i,
-      );
-      await capture(page, "09-device-pairing-code");
-      await page.getByRole("button", { name: "Close" }).click();
+      await expect(page).toHaveURL(/\/en\/dashboard\/team$/);
+      await page.getByRole("button", { name: "Add staff" }).click();
+      await page.locator('input[name="name"]').fill(qrStaffName);
+      await page.getByRole("button", { name: "Create staff" }).click();
+      const staffRow = page.getByRole("row").filter({ hasText: qrStaffName });
+      await expect(staffRow).toContainText("QR sign-in · no email");
+      await capture(page, "31-staff-access-contexts");
+      await staffRow.getByRole("button", { name: "Sign-in QR" }).click();
+      await page.getByRole("button", { name: "Generate QR" }).click();
+      await expect(page.getByRole("dialog")).toContainText("This is the only valid code");
+      await expect(page.getByRole("dialog").locator("img")).toHaveAttribute("alt", /Pair/i);
+      await capture(page, "09-staff-sign-in-qr");
+      await page.getByRole("button", { name: "Done" }).click();
 
       await page.goto("/en/dashboard/approvals");
       const approvalTable = page.getByRole("table", { name: "Manager approval challenges" });
@@ -286,8 +283,17 @@ test.describe
       const pendingRow = approvalTable.getByRole("row").filter({ hasText: "Maha Reward Ready" });
       page.once("dialog", (dialog) => dialog.accept("Verified in the W4 browser evidence flow."));
       await pendingRow.getByRole("button", { name: "Approve" }).click();
-      await expect(pendingRow).toContainText("APPROVED");
-      await capture(page, "33-manager-approval-completed");
+      await expect(
+        page.getByText("The redeem intent is no longer eligible for approval."),
+      ).toBeVisible();
+      await page.reload();
+      await expect(
+        page
+          .getByRole("table", { name: "Manager approval challenges" })
+          .getByRole("row")
+          .filter({ hasText: "Maha Reward Ready" }),
+      ).toContainText("EXPIRED");
+      await capture(page, "33-stale-manager-approval-blocked");
 
       await page.goto("/en/dashboard/risk");
       const riskTable = page.getByRole("table", { name: "Operational risk signals" });
@@ -540,8 +546,8 @@ test.describe
       const blockedBody = (await blockedResponse.json()) as {
         error: { code: string; message: string };
       };
-      expect(blockedResponse.status(), JSON.stringify(blockedBody)).toBe(403);
-      expect(blockedBody.error.code).toBe("LOCATION_NOT_AUTHORIZED");
+      expect(blockedResponse.status(), JSON.stringify(blockedBody)).toBe(401);
+      expect(blockedBody.error.code).toBe("STAFF_LOCATION_ASSIGNMENT_INVALID");
 
       await page.setContent(`
         <!doctype html>
@@ -592,9 +598,10 @@ test.describe
       await page.getByRole("button", { name: "Close" }).click();
 
       await page.goto("/ar/dashboard/devices");
-      await page.getByRole("button", { name: "اقتران جهاز" }).click();
+      await expect(page).toHaveURL(/\/ar\/dashboard\/team$/);
+      await page.getByRole("button", { name: "إضافة موظف" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
-      await capture(page, "24-rtl-device-pairing");
+      await capture(page, "24-rtl-staff-creation");
 
       const staffContext = await browser.newContext();
       const staffPage = await staffContext.newPage();

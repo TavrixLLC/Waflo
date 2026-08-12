@@ -368,12 +368,22 @@ test.describe
       await page.goto("http://localhost:3001/en/dashboard/programs");
       const card = page.locator(".program-list__card").filter({ hasText: programName });
       await card.getByRole("button", { name: "Open card" }).click();
-      await expect(page.getByText("CUSTOMER ENROLLMENT · W3")).toBeVisible();
-      await expect(page.getByText(new RegExp(programSlug))).toBeVisible();
-      await expect(page.getByText(/TEST_ADAPTER · HEALTHY/).first()).toBeVisible();
+      const customerAccess = page.getByRole("region", {
+        name: "Share the card and manage customers",
+      });
+      await expect(customerAccess).toBeVisible();
+      await expect(customerAccess.getByText(new RegExp(programSlug))).toBeVisible();
+      await expect(
+        customerAccess.getByText(
+          "Ready in test-adapter mode; this is not external production certification.",
+          { exact: true },
+        ),
+      ).toHaveCount(2);
       await screenshot(page, "01-merchant-enrollment-settings");
 
-      await page.getByRole("link", { name: /QR PNG/ }).scrollIntoViewIfNeeded();
+      await page
+        .getByRole("link", { name: "Download enrollment QR as PNG" })
+        .scrollIntoViewIfNeeded();
       await screenshot(page, "02-public-url-and-enrollment-qr");
     });
 
@@ -447,7 +457,8 @@ test.describe
       }
     });
 
-    test("enrolls name-only, displays an opaque 0/8 card, and reaches both Test Adapters", async ({
+    test("enrolls name-only and shows only the device-appropriate Wallet action", async ({
+      browser,
       page,
     }) => {
       const cardUrl = await enroll(page, "Name Only Member");
@@ -455,11 +466,40 @@ test.describe
       await expect(page.getByAltText("Membership card QR")).toBeVisible();
       await screenshot(page, "08-customer-card-0-of-8-membership-qr");
 
-      await expect(page.getByRole("link", { name: "Add to Apple Wallet" })).toBeVisible({
-        timeout: 30_000,
+      await expect(
+        page.getByText("Open this card on iPhone or Android to add it to that device's wallet."),
+      ).toBeVisible();
+      await expect(page.getByRole("link", { name: "Add to Apple Wallet" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
+
+      const iosContext = await browser.newContext({
+        userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
       });
-      await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
-      await screenshot(page, "09-apple-google-ready-test-adapter");
+      const androidContext = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
+      });
+      try {
+        await Promise.all([
+          copyCookies(page.context(), iosContext),
+          copyCookies(page.context(), androidContext),
+        ]);
+        const iosPage = await iosContext.newPage();
+        await iosPage.goto(cardUrl);
+        await expect(iosPage.getByRole("link", { name: "Add to Apple Wallet" })).toBeVisible({
+          timeout: 35_000,
+        });
+        await expect(iosPage.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
+
+        const androidPage = await androidContext.newPage();
+        await androidPage.goto(cardUrl);
+        await expect(androidPage.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible(
+          { timeout: 35_000 },
+        );
+        await expect(androidPage.getByRole("link", { name: "Add to Apple Wallet" })).toHaveCount(0);
+        await screenshot(androidPage, "09-device-appropriate-wallet-test-adapter");
+      } finally {
+        await Promise.all([iosContext.close(), androidContext.close()]);
+      }
 
       const pass = await page.request.get(
         "http://localhost:3002/api/waflo/v1/customer/wallet/apple/pass?tenant=today",

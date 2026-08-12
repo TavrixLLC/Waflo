@@ -75,6 +75,8 @@ function buildBillingService(): BillingService {
   // Patch the private stripe field with a typed mock.
   (service as unknown as { stripe: object }).stripe = {
     customers: {
+      search: async () => ({ data: [] }),
+      update: async (id: string) => ({ id, object: "customer" }),
       create: async (
         params: { email?: string; name?: string; metadata?: object },
         options?: { idempotencyKey?: string },

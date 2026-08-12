@@ -27,13 +27,20 @@ async function enterStudio(page: Page, locale: "en" | "ar" = "en"): Promise<void
 }
 
 async function openLaunch(page: Page, locale: "en" | "ar" = "en"): Promise<void> {
-  const name = locale === "ar" ? /^الإطلاق/u : /^Launch/u;
+  const name = locale === "ar" ? /^الإطلاق/u : /^Review & launch/u;
   const mobileTrigger = page.locator(".studio-mobile-navigation > button");
   if (await mobileTrigger.isVisible()) await mobileTrigger.click();
   await page
     .getByRole("navigation", { name: locale === "ar" ? "أقسام الاستوديو" : "Studio sections" })
     .getByRole("button", { name })
     .click();
+  await expect(page).toHaveURL(new RegExp(`/${locale}/dashboard/programs/[^/]+/launch$`, "u"));
+  await expect(
+    page.getByRole("heading", {
+      level: 2,
+      name: locale === "ar" ? "الإطلاق" : "Review & launch",
+    }),
+  ).toBeVisible();
 }
 
 async function openSettings(page: Page, locale: "en" | "ar" = "en"): Promise<void> {

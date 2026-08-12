@@ -5,7 +5,7 @@ import { type APIRequestContext, expect, type Page, test } from "@playwright/tes
 const screenshots = "test-results/evidence/handoff-w2-round-5/screenshots";
 const runId = randomUUID().slice(0, 8);
 const ownerEmail = `browser-owner-${runId}@waflo.local`;
-const staffEmail = `browser-staff-${runId}@waflo.local`;
+const localStaffName = `Browser QR Staff ${runId.slice(0, 8)}`;
 const resetEmail = `browser-reset-${runId}@waflo.local`;
 const initialPassword = "Browser Waflo 2026!";
 const changedPassword = "Browser Waflo Changed 2026!";
@@ -176,10 +176,56 @@ test.describe
       await screenshot(page, "02-marketing-home-ar");
 
       await page.goto("http://localhost:3000/en/pricing");
-      await expect(page.getByText("$29")).toBeVisible();
-      await expect(page.getByText("$69")).toBeVisible();
-      await expect(page.getByText("$129")).toBeVisible();
+      await expect(page.locator(".wf-plan-card__price")).toHaveText([
+        /\$29\.00/u,
+        /\$69\.00/u,
+        /\$129\.00/u,
+      ]);
+      await expect(page.getByText("7% off").first()).toBeVisible();
+      await expect(page.getByText("17% off").first()).toBeVisible();
       await screenshot(page, "03-pricing");
+
+      await page.goto("http://localhost:3000/en/refunds");
+      await expect(
+        page.getByRole("heading", { name: "Waflo Billing & Refund Policy" }),
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          "Stops renewal according to the subscription state; it does not automatically reverse a past payment.",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await page.goto("http://localhost:3000/ar/refunds");
+      await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    });
+
+    test("keeps signup state while Terms and Privacy open safely in new tabs", async ({ page }) => {
+      await page.goto("/en/signup");
+      await page.locator('input[name="displayName"]').fill("Legal State Preserved");
+      await page.locator('input[name="email"]').fill(`legal-state-${runId}@waflo.local`);
+      await expect(page.locator('input[name="terms"]')).not.toBeChecked();
+      await expect(page.locator('input[name="privacy"]')).not.toBeChecked();
+
+      for (const [name, path] of [
+        ["Terms of Service", "/en/terms"],
+        ["Privacy Policy", "/en/privacy"],
+      ] as const) {
+        const link = page.getByRole("link", { name });
+        await expect(link).toHaveAttribute("target", "_blank");
+        await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+        const opened = page.context().waitForEvent("page");
+        await link.click();
+        const legalPage = await opened;
+        await legalPage.waitForLoadState("domcontentloaded");
+        await expect(legalPage).toHaveURL(new RegExp(`${path}$`));
+        await legalPage.close();
+        await expect(page.locator('input[name="displayName"]')).toHaveValue(
+          "Legal State Preserved",
+        );
+        await expect(page.locator('input[name="email"]')).toHaveValue(
+          `legal-state-${runId}@waflo.local`,
+        );
+      }
     });
 
     test("registers, opens the Mailpit verification action, and completes onboarding", async ({
@@ -206,6 +252,12 @@ test.describe
       await page.locator('input[name="name"]').fill(`Browser Coffee ${runId}`);
       await page.locator('input[name="slug"]').fill(initialSlug);
       await expect(page.getByText("URL is available")).toBeVisible();
+      const businessTimezone = page.getByRole("combobox", { name: "Business timezone" });
+      await businessTimezone.fill("Europe/London");
+      await businessTimezone.press("Enter");
+      await expect(page.locator('input[type="hidden"][name="timezone"]')).toHaveValue(
+        "Europe/London",
+      );
       await page.getByRole("button", { name: "Save and continue" }).click();
       await expect(page).toHaveURL(/\/en\/onboarding\/location/);
       await screenshot(page, "09-onboarding-location");
@@ -213,6 +265,13 @@ test.describe
       await page.locator('input[name="name"]').fill("Browser Main Branch");
       await page.locator('input[name="address"]').fill("Main Street");
       await page.locator('input[name="city"]').fill("Baghdad");
+      const country = page.getByRole("combobox", { name: "Country" });
+      await country.fill("GB");
+      await country.press("Enter");
+      await expect(page.locator('input[type="hidden"][name="countryCode"]')).toHaveValue("GB");
+      const locationTimezone = page.getByRole("combobox", { name: "Timezone" });
+      await locationTimezone.fill("Europe/London");
+      await locationTimezone.press("Enter");
       await page.getByRole("button", { name: "Create location and finish setup" }).click();
       await expect(page).toHaveURL(/\/en\/onboarding\/complete/);
       await expect(page.getByText("Not started", { exact: true })).toBeVisible();
@@ -259,12 +318,6 @@ test.describe
       await page.getByRole("button", { name: "Create loyalty card" }).click();
       await chooseGalleryTemplate(page, "Simple Visits");
       await page.getByLabel("Card name in your dashboard").fill("Browser Studio Rewards Updated");
-      await page
-        .getByRole("button", { name: /^Languages/u })
-        .first()
-        .click();
-      await page.getByRole("tab", { name: /العربية/u }).click();
-      await page.getByLabel("اسم البطاقة").fill("مكافآت استوديو المتصفح");
       await expect(page.getByText("Saved", { exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Review card" }).click();
       await expect(
@@ -326,7 +379,7 @@ test.describe
 
       await page
         .locator(".studio-section-nav")
-        .getByRole("button", { name: /^Launch/u })
+        .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
         .click();
       await page.getByRole("button", { name: "Launch loyalty card" }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Launch card" }).click();
@@ -384,7 +437,7 @@ test.describe
       }
       await page.getByRole("button", { name: "Use demo reward" }).click();
 
-      await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+      await studioNavigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
       await page.getByRole("button", { name: "Publish changes" }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Publish changes" }).click();
       await expect(page.getByRole("heading", { name: "Changes published" })).toBeVisible();
@@ -602,59 +655,239 @@ test.describe
       await expect(page).toHaveURL(/checkout=returned/);
     });
 
-    test("invites a Staff user who registers, verifies, and accepts the invitation", async ({
-      browser,
+    test("shows authoritative Billing details and submits a bounded refund review", async ({
+      page,
+    }) => {
+      await login(page, ownerEmail, initialPassword);
+      let refundRequested = false;
+      let refundPosts = 0;
+      const invoiceId = "f1111111-1111-4111-8111-111111111111";
+      await page.route("**/v1/organizations/*/billing", async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const refund = refundRequested
+          ? [
+              {
+                id: "f2222222-2222-4222-8222-222222222222",
+                status: "REQUESTED",
+                reason: "INCORRECT_CHARGE",
+                explanation: "The billed amount needs review.",
+                requestedAmount: 1700,
+                approvedAmount: null,
+                currency: "USD",
+                requestedAt: "2026-08-12T12:00:00.000Z",
+                completedAt: null,
+                failureCode: null,
+              },
+            ]
+          : [];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: {
+              selectedPlan: "GROWTH",
+              canManageBilling: true,
+              selectedCadence: "quarterly",
+              profile: {
+                subscriptionStatus: "ACTIVE",
+                trialStart: "2026-07-01T09:00:00.000Z",
+                trialEnd: "2026-07-15T09:00:00.000Z",
+              },
+              customerPortalAvailable: true,
+              subscriptions: [
+                {
+                  id: "sub_local_browser",
+                  status: "ACTIVE",
+                  planCode: "GROWTH",
+                  cadence: "QUARTERLY",
+                  currentPeriodEnd: "2026-10-01T09:00:00.000Z",
+                  cancelAtPeriodEnd: false,
+                  createdAt: "2026-07-01T09:00:00.000Z",
+                },
+              ],
+              stripeConfigured: true,
+              cadenceAvailability: { monthly: true, quarterly: true, yearly: true },
+              paymentMethod: {
+                status: "saved",
+                brand: "visa",
+                last4: "4242",
+                expMonth: 8,
+                expYear: 2029,
+                isDefault: true,
+              },
+              billingIdentity: {
+                name: "Browser Coffee",
+                email: ownerEmail,
+                countryCode: "IQ",
+                addressLine1: "Main Street",
+                addressLine2: null,
+                city: "Baghdad",
+                region: "Baghdad",
+                postalCode: "10001",
+                locale: "en",
+                timezone: "Asia/Baghdad",
+                syncedAt: "2026-08-12T10:00:00.000Z",
+              },
+              authoritativeState: {
+                subscriptionStatus: "ACTIVE",
+                trialStart: "2026-07-01T09:00:00.000Z",
+                trialEnd: "2026-07-15T09:00:00.000Z",
+                renewalDate: "2026-10-01T09:00:00.000Z",
+                nextExpectedChargeDate: "2026-10-01T09:00:00.000Z",
+                nextExpectedAmount: 19251,
+                currency: "USD",
+                latestPaymentStatus: "paid",
+                gracePeriodEnd: null,
+                outstandingInvoice: null,
+              },
+              invoices: [
+                {
+                  id: invoiceId,
+                  number: "WF-2026-0042",
+                  status: "paid",
+                  paymentStatus: "paid",
+                  amountDue: 19251,
+                  amountPaid: 19251,
+                  amountRemaining: 0,
+                  currency: "USD",
+                  date: "2026-07-01T09:00:00.000Z",
+                  periodStart: "2026-07-01T09:00:00.000Z",
+                  periodEnd: "2026-10-01T09:00:00.000Z",
+                  paidAt: "2026-07-01T09:00:00.000Z",
+                  hostedInvoiceUrl: "https://invoice.stripe.test/hosted",
+                  invoicePdfUrl: "https://invoice.stripe.test/invoice.pdf",
+                  refundable: !refundRequested,
+                  amountRefunded: 0,
+                  remainingRefundableAmount: refundRequested ? 17551 : 19251,
+                  paymentMethod: {
+                    brand: "visa",
+                    last4: "4242",
+                    expMonth: 8,
+                    expYear: 2029,
+                  },
+                  refunds: refund,
+                },
+              ],
+              downgradeOptions: [
+                {
+                  plan: "starter",
+                  violations: [
+                    {
+                      code: "TEAM_SEATS",
+                      actual: 4,
+                      limit: 3,
+                      message:
+                        "Remove or cancel Staff and Manager seats until the team fits the target plan.",
+                    },
+                  ],
+                },
+              ],
+            },
+            requestId: `billing-browser-${runId}`,
+          }),
+        });
+      });
+      await page.route("**/v1/organizations/*/billing/invoices/*/refunds", async (route) => {
+        refundPosts += 1;
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().headers()["x-idempotency-key"]).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
+        expect(route.request().postDataJSON()).toMatchObject({
+          reason: "incorrect_charge",
+          amount: 1700,
+          explanation: "The billed amount needs review.",
+        });
+        refundRequested = true;
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: {
+              id: "f2222222-2222-4222-8222-222222222222",
+              status: "REQUESTED",
+            },
+            requestId: `refund-browser-${runId}`,
+          }),
+        });
+      });
+
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto("/en/dashboard/billing");
+      await expect(page.getByRole("heading", { name: "Billing and plans" })).toBeVisible();
+      await expect(page.getByText("$192.51").first()).toBeVisible();
+      await expect(page.getByText(/VISA .*4242/).first()).toBeVisible();
+      await expect(page.getByText("Expires 08/2029", { exact: false }).first()).toBeVisible();
+      await expect(page.getByText("WF-2026-0042")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Invoice / receipt" })).toHaveAttribute(
+        "target",
+        "_blank",
+      );
+      await expect(
+        page.getByText("All card templates and designs", { exact: false }).first(),
+      ).toBeVisible();
+      await expect(page.getByText("7% off").first()).toBeVisible();
+      await expect(page.getByText("17% off").first()).toBeVisible();
+      await expect(
+        page.getByText("You need to resolve these items before downgrading."),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Remove or cancel Staff and Manager seats", { exact: false }),
+      ).toBeVisible();
+
+      await page.getByRole("button", { name: "Request refund for invoice WF-2026-0042" }).click();
+      const refundDialog = page.getByRole("dialog", { name: "Request a refund review" });
+      await expect(refundDialog.getByText("Originally paid")).toBeVisible();
+      await expect(refundDialog.getByText("Remaining refundable")).toBeVisible();
+      await refundDialog.getByRole("combobox", { name: "Reason" }).selectOption("incorrect_charge");
+      await refundDialog.getByRole("spinbutton", { name: "Amount (USD)" }).fill("17.00");
+      await refundDialog
+        .getByRole("textbox", { name: "Optional explanation" })
+        .fill("The billed amount needs review.");
+      await refundDialog.getByRole("button", { name: "Submit refund request" }).click();
+      await expect(page.getByText("REQUESTED")).toBeVisible();
+      expect(refundPosts).toBe(1);
+
+      for (const width of [768, 390, 360]) {
+        await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+        ).toBe(true);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.evaluate(() => {
+        document.documentElement.style.zoom = "2";
+      });
+      await expect(page.getByRole("heading", { name: "Billing and plans" })).toBeVisible();
+      await screenshot(page, "13b-billing-refund-responsive");
+    });
+
+    test("creates a local Staff identity and generates its only valid sign-in QR", async ({
       page,
     }) => {
       await login(page, ownerEmail, initialPassword);
       await page.goto("/en/dashboard/team");
-      await page.getByRole("button", { name: "Invite member" }).click();
-      await page.locator('input[name="email"]').fill(staffEmail);
-      await screenshot(page, "15-invitation-dialog");
-      await page.getByRole("button", { name: "Send invitation" }).click();
-      await expect(page.getByText(staffEmail)).toBeVisible();
+      await page.getByRole("button", { name: "Add staff" }).click();
+      await page.locator('input[name="name"]').fill(localStaffName);
+      await expect(page.getByText("No email required")).toBeVisible();
+      await screenshot(page, "15-local-staff-dialog");
+      await page.getByRole("button", { name: "Create staff" }).click();
+      const staffRow = page.getByRole("row").filter({ hasText: localStaffName });
+      await expect(staffRow).toContainText("QR sign-in · no email");
       await screenshot(page, "16-team");
 
-      const invitationUrl = await latestMailAction(
-        page.request,
-        staffEmail,
-        "invited to a Waflo team",
-      );
-      const staffContext = await browser.newContext();
-      const staffPage = await staffContext.newPage();
-      await signup(staffPage, staffEmail, initialPassword);
-      await verifyLatestEmail(staffPage, staffEmail);
-      await login(staffPage, staffEmail, initialPassword);
-      await expect(staffPage).toHaveURL(/\/en\/onboarding\/business/);
-      const invitationParsed = new URL(invitationUrl);
-      invitationParsed.searchParams.set("round3", "fragment");
-      await staffPage.goto(invitationParsed.toString());
-      await expect(staffPage.getByRole("heading", { name: /Join Browser Coffee/ })).toBeVisible();
-      await staffPage.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(staffPage.getByText("Invitation accepted")).toBeVisible();
-      await screenshot(staffPage, "17-invitation-accepted");
-      await staffPage.getByRole("button", { name: "Open dashboard" }).click();
-      await expect(staffPage).toHaveURL(/\/en\/dashboard/);
-      await expect(staffPage.locator(".dashboard-nav-link", { hasText: "Locations" })).toHaveCount(
-        0,
-      );
-      await staffPage.goto("/en/dashboard/locations");
-      await expect(staffPage.getByText("Your role does not allow this action.")).toBeVisible();
-      await staffPage.goto("/en/dashboard/programs");
-      await expect(
-        staffPage.getByText("Your role does not allow access to Loyalty Studio."),
-      ).toBeVisible();
-      await page.reload();
-      const roleSelect = page.getByRole("combobox", { name: "Role for Browser Staff" });
-      await expect(roleSelect).toBeVisible();
+      await staffRow.getByRole("button", { name: "Sign-in QR" }).click();
+      await expect(page.getByText("Regeneration signs out prior access")).toBeVisible();
+      await page.getByRole("button", { name: "Generate QR" }).click();
+      const pairingDialog = page.getByRole("dialog", { name: "Pair staff device" });
+      await expect(pairingDialog.getByText("This is the only valid code")).toBeVisible();
+      await expect(pairingDialog.locator("img")).toBeVisible();
+      await screenshot(page, "17-staff-sign-in-qr");
+      await page.getByRole("button", { name: "Done" }).click();
+
+      const roleSelect = staffRow.getByRole("combobox", { name: `Role for ${localStaffName}` });
       await roleSelect.selectOption("MANAGER");
       await expect(roleSelect).toHaveValue("MANAGER");
-      await staffPage.goto("/en/dashboard/programs");
-      await expect(
-        staffPage.getByRole("main").getByRole("heading", { name: "Loyalty cards", exact: true }),
-      ).toBeVisible();
-      await expect(staffPage.getByRole("button", { name: "Create loyalty card" })).toBeVisible();
-      await staffContext.close();
     });
 
     test("shows audit history, manages sessions, changes slug and password, and resolves the new host", async ({
@@ -767,7 +1000,7 @@ test.describe
       await expect(page.locator(".wf-sidebar")).toBeVisible();
       await page.goto("/ar/dashboard/team");
       await expect(page.locator("table").first()).toBeVisible();
-      await page.getByRole("button", { name: "دعوة عضو" }).click();
+      await page.getByRole("button", { name: "إضافة موظف" }).click();
       await expect(page.getByRole("dialog")).toHaveCSS("direction", "rtl");
       await screenshot(page, "22-dashboard-ar-rtl");
     });
@@ -957,6 +1190,23 @@ test.describe
         });
         const cropDialog = page.getByRole("dialog").filter({ hasText: "Crop image safely" });
         await expect(cropDialog).toBeVisible();
+        await expect(cropDialog.getByText("Horizontal position")).toHaveCount(0);
+        await expect(cropDialog.getByText("Vertical position")).toHaveCount(0);
+        const cropSurface = cropDialog.getByRole("button", { name: /Crop area/ });
+        const cropBounds = await cropSurface.boundingBox();
+        if (!cropBounds) throw new Error("Crop surface bounds are unavailable.");
+        await page.mouse.move(
+          cropBounds.x + cropBounds.width / 2,
+          cropBounds.y + cropBounds.height / 2,
+        );
+        await page.mouse.down();
+        await page.mouse.move(
+          cropBounds.x + cropBounds.width * 0.6,
+          cropBounds.y + cropBounds.height * 0.6,
+        );
+        await page.mouse.up();
+        await cropDialog.getByRole("slider").fill("1.5");
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1.5");
         const uploaded = page.waitForResponse(
           (response) =>
             response.request().method() === "POST" &&
@@ -1055,7 +1305,7 @@ test.describe
           .click();
         await page
           .getByRole("navigation", { name: "Studio sections" })
-          .getByRole("button", { name: /^Launch/u })
+          .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
           .click();
         await expect(page.getByText("Launch unavailable", { exact: true })).toBeVisible();
         await expect(
@@ -1075,7 +1325,7 @@ test.describe
           .click();
         await page
           .getByRole("navigation", { name: "Studio sections" })
-          .getByRole("button", { name: /^Launch/u })
+          .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
           .click();
 
         await database.location.update({

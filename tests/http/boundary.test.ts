@@ -317,6 +317,18 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(allowed.headers["access-control-allow-origin"]).toBe(allowedOrigin);
     expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
 
+    const putPreflight = await app.inject({
+      method: "OPTIONS",
+      url: "/v1/organizations/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/members/44444444-4444-4444-8444-444444444444/location-assignments/a1111111-1111-4111-8111-111111111111",
+      headers: {
+        origin: allowedOrigin,
+        "access-control-request-method": "PUT",
+        "access-control-request-headers": "content-type,x-csrf-token",
+      },
+    });
+    expect(putPreflight.statusCode).toBe(204);
+    expect(putPreflight.headers["access-control-allow-methods"]).toContain("PUT");
+
     const denied = await app.inject({
       method: "GET",
       url: "/health",
@@ -386,6 +398,69 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       headers: { cookie: staff.sessionCookie },
     });
     expect(staffTeam.statusCode).toBe(403);
+  });
+
+  it("enforces refund ownership and tenant isolation at the HTTP boundary", async () => {
+    const paidAt = new Date();
+    const invoice = await prisma.client.billingInvoice.create({
+      data: {
+        organizationId,
+        stripeInvoiceId: `in_http_refund_${runId}_${randomUUID().slice(0, 8)}`,
+        invoiceNumber: `WF-HTTP-${runId}`,
+        status: "paid",
+        billingReason: "subscription_cycle",
+        amountDue: 6900,
+        amountPaid: 6900,
+        amountRemaining: 0,
+        currency: "USD",
+        invoiceDate: paidAt,
+        paidAt,
+      },
+    });
+    const csrfState = await csrf();
+    const idempotencyKey = randomUUID();
+    const url = `/v1/organizations/${organizationId}/billing/invoices/${invoice.id}/refunds`;
+    const payload = { reason: "incorrect_charge", amount: 1700 };
+
+    const created = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        ...mutationHeaders(csrfState, owner),
+        "x-idempotency-key": idempotencyKey,
+      },
+      payload,
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().data).toMatchObject({
+      status: "REQUESTED",
+      requestedAmount: 1700,
+      currency: "USD",
+    });
+
+    const staffDenied = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        ...mutationHeaders(csrfState, staff),
+        "x-idempotency-key": randomUUID(),
+      },
+      payload,
+    });
+    expect(staffDenied.statusCode).toBe(403);
+    expect(staffDenied.json().error.code).toBe("PERMISSION_DENIED");
+
+    const crossTenant = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        ...mutationHeaders(csrfState, intruder),
+        "x-idempotency-key": randomUUID(),
+      },
+      payload,
+    });
+    expect(crossTenant.statusCode).toBe(403);
+    expect(crossTenant.json().error.code).toBe("ORGANIZATION_ACCESS_DENIED");
   });
 
   it("blocks cross-tenant organization, location, member, billing, and audit routes", async () => {
@@ -468,6 +543,18 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       headers: mutationHeaders(csrfState, owner),
       payload: { selectedPlan: "starter" },
     });
+    const invalidCountry = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, owner),
+      payload: { name: "Invalid country", countryCode: "ZZ", timezone: "UTC" },
+    });
+    const invalidTimezone = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, owner),
+      payload: { name: "Invalid timezone", countryCode: "IQ", timezone: "UTC+03:00" },
+    });
     for (const response of [
       malformedUuid,
       malformedCursor,
@@ -476,6 +563,8 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       malformedHost,
       malformedToken,
       selectedPlanOutsideBilling,
+      invalidCountry,
+      invalidTimezone,
     ]) {
       expect(response.statusCode).toBe(422);
       expect(response.json().error.code).toBe("VALIDATION_FAILED");
@@ -524,7 +613,11 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     const stripe = (
       billing as unknown as {
         stripe: {
-          customers: { create: (...args: never[]) => Promise<{ id: string }> };
+          customers: {
+            create: (...args: never[]) => Promise<{ id: string }>;
+            search: (...args: never[]) => Promise<{ data: Array<{ id: string }> }>;
+            update: (...args: never[]) => Promise<{ id: string }>;
+          };
           checkout: {
             sessions: {
               create: (...args: never[]) => Promise<{ id: string; url: string }>;
@@ -534,7 +627,9 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
         };
       }
     ).stripe;
+    stripe.customers.search = async () => ({ data: [] });
     stripe.customers.create = async () => ({ id: `cus_http_${runId}` });
+    stripe.customers.update = async () => ({ id: `cus_http_${runId}` });
     stripe.checkout.sessions.create = async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       return {

@@ -140,6 +140,9 @@ describe.sequential("Waflo W1 service and database integration", () => {
     });
     ownerId = user.id;
     expect(user.emailVerifiedAt).toBeNull();
+    expect(user.termsVersion).toBe(environment.values.LEGAL_TERMS_VERSION);
+    expect(user.privacyVersion).toBe(environment.values.LEGAL_PRIVACY_VERSION);
+    expect(user.legalAcceptedAt.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   it("resends verification while invalidating the previous token", async () => {
@@ -751,6 +754,76 @@ describe.sequential("Waflo W1 service and database integration", () => {
       startsOnFirstProgramPublication: true,
       startedInW1: false,
     });
+  });
+
+  it("returns the authoritative saved Stripe card instead of a stale blank state", async () => {
+    const previous = {
+      STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+      STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+      STRIPE_STARTER_MONTHLY_PRICE_ID: process.env.STRIPE_STARTER_MONTHLY_PRICE_ID,
+      STRIPE_GROWTH_MONTHLY_PRICE_ID: process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID,
+      STRIPE_SCALE_MONTHLY_PRICE_ID: process.env.STRIPE_SCALE_MONTHLY_PRICE_ID,
+    };
+    process.env.STRIPE_SECRET_KEY = "sk_test_saved_card";
+    process.env.STRIPE_WEBHOOK_SECRET = `whsec_${randomUUID().replaceAll("-", "")}`;
+    process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
+    process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
+    process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: organizationAId },
+      data: { stripeCustomerId: "cus_authoritative_card" },
+    });
+    try {
+      const stripeBilling = new BillingService(
+        prisma,
+        new EnvironmentService(),
+        tenant,
+        audit,
+        notificationProvider,
+      );
+      const stripe = (
+        stripeBilling as unknown as {
+          stripe: {
+            customers: { retrieve: () => Promise<unknown> };
+            paymentMethods: { list: () => Promise<unknown> };
+          };
+        }
+      ).stripe;
+      stripe.customers.retrieve = async () => ({
+        id: "cus_authoritative_card",
+        deleted: false,
+        invoice_settings: { default_payment_method: { id: "pm_primary" } },
+      });
+      stripe.paymentMethods.list = async () => ({
+        data: [
+          {
+            id: "pm_primary",
+            card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
+          },
+        ],
+      });
+      const billingState = await stripeBilling.get(ownerId, organizationAId);
+      expect(billingState).toMatchObject({
+        paymentMethod: {
+          status: "saved",
+          brand: "visa",
+          last4: "4242",
+          expMonth: 12,
+          expYear: 2030,
+          isDefault: true,
+        },
+      });
+      expect(billingState.paymentMethod).not.toHaveProperty("id");
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: organizationAId },
+        data: { stripeCustomerId: null },
+      });
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it("uses a safe explicit error when Stripe Checkout credentials are absent", async () => {

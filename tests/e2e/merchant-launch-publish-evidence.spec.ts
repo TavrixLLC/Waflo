@@ -42,8 +42,15 @@ async function openLaunch(page: Page, locale: "en" | "ar"): Promise<void> {
     .getByRole("navigation", {
       name: locale === "ar" ? "أقسام الاستوديو" : "Studio sections",
     })
-    .getByRole("button", { name: locale === "ar" ? /^الإطلاق/u : /^Launch/u })
+    .getByRole("button", { name: locale === "ar" ? /^الإطلاق/u : /^Review & launch/u })
     .click();
+  await expect(page).toHaveURL(new RegExp(`/${locale}/dashboard/programs/[^/]+/launch$`, "u"));
+  await expect(
+    page.getByRole("heading", {
+      level: 2,
+      name: locale === "ar" ? "الإطلاق" : "Review & launch",
+    }),
+  ).toBeVisible();
 }
 
 async function openScenario(

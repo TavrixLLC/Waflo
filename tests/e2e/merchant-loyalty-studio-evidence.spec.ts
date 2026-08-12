@@ -114,7 +114,7 @@ test("captures exactly the focused repair evidence set", async ({ context }) => 
 
   const launch = await context.newPage();
   await openStudio(launch, { state: "CHECKED" });
-  await openArea(launch, /^Launch/u);
+  await openArea(launch, /^Review & launch/u);
   await expect(launch.getByRole("heading", { name: "Not ready to launch" })).toBeVisible();
   await capture(launch, "06-launch-status-consistency.png");
   await launch.close();

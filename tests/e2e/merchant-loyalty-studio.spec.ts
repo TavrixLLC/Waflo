@@ -66,7 +66,7 @@ test("continues from Builder into a seven-area merchant Studio without duplicate
     "Customers & locations",
     "Wallet Engagement",
     "Test",
-    "Launch",
+    "Review & launch",
     "Settings",
   ]) {
     await expect(navigation.getByRole("button", { name: new RegExp(label, "u") })).toBeVisible();
@@ -92,7 +92,7 @@ test("continues from Builder into a seven-area merchant Studio without duplicate
   await expect(page.getByText("Test safely with a demo customer", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start demo customer" })).toBeVisible();
 
-  await navigation.getByRole("button", { name: /^Launch/u }).click();
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page.getByRole("heading", { name: "Not ready to launch" })).toBeVisible();
   await expect(
     page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }),
@@ -188,7 +188,7 @@ test("routes launch blockers to the merchant area that can fix them", async ({ p
   });
   await enterStudio(page, "en");
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
-  await navigation.getByRole("button", { name: /^Launch/u }).click();
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }).click();
   await expect(page.getByText("1 launch blockers", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Choose at least one participating location/u }).click();
@@ -344,7 +344,7 @@ for (const [
     ).toBeVisible();
 
     const navigation = page.getByRole("navigation", { name: "Studio sections" });
-    await navigation.getByRole("button", { name: /^Launch/u }).click();
+    await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
     await expect(page.getByRole("heading", { name: launchStatus })).toBeVisible();
     await expect(
       page.locator(".studio-launch-action").getByRole("button", { name: launchAction }),
@@ -378,7 +378,7 @@ test("shows complete customer access controls and truthful optional Wallet avail
   await expect(page.getByLabel("Primary customer language")).toHaveValue("en");
   await expect(page.getByLabel("Show separate marketing consent")).toBeChecked();
 
-  await navigation.getByRole("button", { name: /^Launch/u }).click();
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page.getByText("Apple Wallet", { exact: true })).toBeVisible();
   await expect(page.getByText("Google Wallet", { exact: true })).toBeVisible();
   await expect(page.getByText("Status unavailable", { exact: true })).toHaveCount(2);

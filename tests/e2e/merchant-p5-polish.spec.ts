@@ -197,7 +197,7 @@ async function createPreviewConsistencySheet(context: BrowserContext): Promise<v
 
   const launch = await context.newPage();
   await openStudio(launch, { state: "READY" });
-  await openStudioArea(launch, /^Launch/u);
+  await openStudioArea(launch, /^Review & launch/u);
   panels.push(
     await labeledPanel(
       await launch.getByLabel("Loyalty card summary").screenshot({ animations: "disabled" }),
@@ -468,7 +468,7 @@ test("captures exactly the focused P5 visual QA set", async ({ context }) => {
 
   const launch = await context.newPage();
   await openStudio(launch, { state: "READY" });
-  await openStudioArea(launch, /^Launch/u);
+  await openStudioArea(launch, /^Review & launch/u);
   await expect(launch.getByText("FINAL LAUNCH REVIEW", { exact: true })).toBeVisible();
   await capture(launch, "07-launch-review.png");
   await launch.close();

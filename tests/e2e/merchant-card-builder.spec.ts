@@ -679,6 +679,7 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
   });
 
   await page.getByLabel("Card name in your dashboard").fill("");
+  await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Review card" }).click();
   await expect(page.getByText("Needs attention", { exact: true }).first()).toBeVisible();
@@ -692,6 +693,7 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
     .first()
     .click();
   await page.getByLabel("Card name in your dashboard").fill("P3 evidence card");
+  await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Review card" }).click();
   await expect(page.getByText("Readiness checks passed", { exact: true }).first()).toBeVisible();

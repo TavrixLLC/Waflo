@@ -320,4 +320,21 @@ describe("merchant hostname parsing and resolution", () => {
       status: 400,
     });
   });
+
+  it("rejects staging tenant overrides outside the authoritative Customer host", async () => {
+    const service = new HostResolutionService(
+      { client: { organization: { findUnique: vi.fn() } } } as never,
+      {
+        values: {
+          DEPLOYMENT_ENVIRONMENT: "staging",
+          MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+        },
+      } as never,
+    );
+    await expect(service.resolve("app-staging.waflo.app", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+  });
 });

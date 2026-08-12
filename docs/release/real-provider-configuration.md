@@ -197,14 +197,19 @@ secret as part of the hostname change.
 - Checkout Session: `POST /v1/organizations/:organizationId/billing/checkout`
 - Customer Portal: `POST /v1/organizations/:organizationId/billing/portal`
 - manual canonical reconciliation: `POST /v1/organizations/:organizationId/billing/reconcile`
+- refund request: `POST /v1/organizations/:organizationId/billing/invoices/:invoiceId/refunds`
+- refund review: `PATCH /v1/organizations/:organizationId/billing/refunds/:refundRequestId`
+- approved refund execution: `POST /v1/organizations/:organizationId/billing/refunds/:refundRequestId/execute`
 - webhook: `POST /v1/webhooks/stripe`
 - exact staging webhook URL: `https://api-staging.waflo.app/v1/webhooks/stripe`
 - exact production webhook URL: `https://api.waflo.app/v1/webhooks/stripe`
 
 Checkout is Stripe-hosted subscription Checkout. The API creates/associates one Stripe Customer per
 organization under invariant locks and uses provider and local idempotency keys. It maps the current
-Waflo `STARTER`, `GROWTH`, and `SCALE` plans only to their configured monthly Price IDs. Product IDs
-are not read. The success/cancel URLs are derived, not configurable:
+Waflo `STARTER`, `GROWTH`, and `SCALE` plan plus `MONTHLY`, `QUARTERLY`, or `YEARLY` cadence to the
+corresponding configured recurring Price ID. Monthly stays available without the optional cadence
+groups; quarterly/yearly stay unavailable unless all three IDs in that cadence group are present.
+Product IDs are not read. The success/cancel URLs are derived, not configurable:
 
 - staging success: `https://app-staging.waflo.app/en/dashboard/billing?checkout=returned`
 - staging cancel: `https://app-staging.waflo.app/en/dashboard/billing?checkout=canceled`
@@ -224,6 +229,12 @@ Customer Portal is available only when the existing organization has a Stripe Cu
 | `STRIPE_STARTER_MONTHLY_PRICE_ID` | NON_SECRET_CONFIG | Environment-specific recurring `price_...` for existing STARTER. |
 | `STRIPE_GROWTH_MONTHLY_PRICE_ID` | NON_SECRET_CONFIG | Environment-specific recurring `price_...` for existing GROWTH. |
 | `STRIPE_SCALE_MONTHLY_PRICE_ID` | NON_SECRET_CONFIG | Environment-specific recurring `price_...` for existing SCALE. |
+| `STRIPE_STARTER_QUARTERLY_PRICE_ID` | NON_SECRET_CONFIG | Optional recurring quarterly Starter Price; configure with the other two quarterly IDs. |
+| `STRIPE_GROWTH_QUARTERLY_PRICE_ID` | NON_SECRET_CONFIG | Optional recurring quarterly Growth Price; configure with the other two quarterly IDs. |
+| `STRIPE_SCALE_QUARTERLY_PRICE_ID` | NON_SECRET_CONFIG | Optional recurring quarterly Scale Price; configure with the other two quarterly IDs. |
+| `STRIPE_STARTER_YEARLY_PRICE_ID` | NON_SECRET_CONFIG | Optional recurring yearly Starter Price; configure with the other two yearly IDs. |
+| `STRIPE_GROWTH_YEARLY_PRICE_ID` | NON_SECRET_CONFIG | Optional recurring yearly Growth Price; configure with the other two yearly IDs. |
+| `STRIPE_SCALE_YEARLY_PRICE_ID` | NON_SECRET_CONFIG | Optional recurring yearly Scale Price; configure with the other two yearly IDs. |
 | `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID` | NON_SECRET_CONFIG | Optional environment-specific `bpc_...`; required only to expose current Portal behavior. |
 | `STRIPE_RECONCILIATION_INTERVAL_MINUTES` | NON_SECRET_CONFIG | Integer 5–1440, template `60`. |
 | `STRIPE_RECONCILIATION_BATCH_SIZE` | NON_SECRET_CONFIG | Integer 1–500, template `50`. |
@@ -231,13 +242,18 @@ Customer Portal is available only when the existing organization has a Stripe Cu
 
 There is no separate `STRIPE_MODE`: deployment environment and key prefixes enforce TEST/LIVE
 isolation. The five core settings (secret, webhook secret, three prices) must be all present or all
-absent. TEST and LIVE Price IDs, Customers, subscriptions, endpoint secrets, and Portal
-configuration remain completely separate.
+absent. Each optional quarterly/yearly group is independently all-or-none and partial groups fail
+environment validation. TEST and LIVE Price IDs, Customers, subscriptions, endpoint secrets, and
+Portal configuration remain completely separate.
 
 The repository uses `stripe@22.3.2` without an override; that SDK sends its bundled default API
 version `2026-06-24.dahlia`. Configure each Dashboard webhook endpoint to that version. Handled
-events are exactly `customer.subscription.created`, `customer.subscription.updated`, and
-`customer.subscription.deleted`; other event types are authenticated, recorded, and ignored.
+events are `invoice.upcoming`, `invoice.created`, `invoice.finalized`, `invoice.paid`,
+`invoice.payment_failed`, `invoice.payment_action_required`, `invoice.updated`,
+`customer.updated`, `customer.subscription.created`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `refund.created`, `refund.updated`, and `refund.failed`. The
+three Refund events are the current non-deprecated Stripe refund lifecycle events consumed by the
+application. Waflo authenticates and audits other event types without applying financial state.
 
 Nest retains the raw webhook body. Stripe signature verification occurs before processing. A unique
 provider/event record and conditional lease make duplicate delivery safe. For each handled event,
@@ -249,13 +265,16 @@ recover missing or delayed webhooks with multi-instance-safe leases.
 
 ### Stripe TEST-mode staging procedure
 
-1. In Stripe TEST mode create the three existing monthly recurring Prices and, if Portal is used,
-   a TEST Portal configuration. Do not use LIVE objects.
+1. In Stripe TEST mode create the three existing monthly recurring Prices, the six quarterly/yearly
+   Prices if those cadences are being enabled, and a TEST Portal configuration if Portal is used.
+   Do not use LIVE objects.
 2. Create a TEST webhook endpoint at exactly
    `https://api-staging.waflo.app/v1/webhooks/stripe`, API version `2026-06-24.dahlia`, subscribing
-   to the three handled subscription events. Install its `whsec_...` endpoint secret.
-3. Install `sk_test_...`, all three TEST Price IDs, optional TEST `bpc_...`, and reconciliation
-   settings; validate readiness and deploy staging outside this task.
+   to the handled invoice, customer, and subscription events above. Install its `whsec_...`
+   endpoint secret.
+3. Install `sk_test_...`, all three monthly TEST Price IDs, complete optional quarterly/yearly
+   groups, optional TEST `bpc_...`, and reconciliation settings; validate readiness and deploy
+   staging outside this task.
 4. In Merchant Web billing, choose an existing Waflo plan and initiate checkout. Complete Stripe
    hosted Checkout with a Stripe TEST card and return to the derived Waflo success URL.
 5. Confirm the webhook receives a valid raw-body signature, retrieves the current subscription,
@@ -267,8 +286,11 @@ recover missing or delayed webhooks with multi-instance-safe leases.
    Do not touch production.
 8. Run authenticated `POST /v1/organizations/:organizationId/billing/reconcile` or wait for the
    scheduled interval. Confirm canonical retrieval corrects the local entitlement before/without
-   relying on the delayed webhook. Resend the delayed event and confirm state remains canonical.
-9. Exercise TEST renewal/payment-failure/cancellation states supported by the existing mapping and
+relying on the delayed webhook. Resend the delayed event and confirm state remains canonical.
+9. Request and approve a TEST full and partial refund. Confirm Stripe refunds the original
+   PaymentIntent, duplicate execution reuses the stable idempotency key, and `refund.updated` /
+   `refund.failed` reconcile without duplicate mail.
+10. Exercise TEST renewal/payment-failure/cancellation states supported by the existing mapping and
    confirm no TEST customer or object exists in LIVE mode.
 
 For LIVE mode, repeat object and endpoint creation in Stripe LIVE mode using the production URL,

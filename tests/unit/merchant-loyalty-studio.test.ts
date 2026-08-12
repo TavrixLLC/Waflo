@@ -82,9 +82,9 @@ describe("merchant Loyalty Studio information architecture", () => {
       "overview",
       "how-it-works",
       "customers-locations",
-      "engagement",
       "test",
       "launch",
+      "engagement",
       "settings",
     ]);
   });

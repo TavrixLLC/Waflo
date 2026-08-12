@@ -435,7 +435,7 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   await openStudio(launch, "READY");
   await launch
     .getByRole("navigation", { name: "Studio sections" })
-    .getByRole("button", { name: /^Launch/u })
+    .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
     .click();
   semanticPanels.push(
     await labeledPanel(

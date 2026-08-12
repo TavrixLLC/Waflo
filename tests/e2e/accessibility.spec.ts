@@ -43,7 +43,10 @@ test("public, authentication, and form-error screens have no serious accessibili
     "http://localhost:3000/en/contact",
     "http://localhost:3000/en/privacy",
     "http://localhost:3000/en/terms",
+    "http://localhost:3000/en/refunds",
+    "http://localhost:3000/ar/refunds",
     "http://localhost:3001/en/signup",
+    "http://localhost:3001/ar/signup",
     "http://localhost:3001/en/login",
     "http://localhost:3001/en/forgot-password",
     "http://localhost:3001/en/reset-password",
@@ -91,8 +94,43 @@ test("authenticated English and Arabic dashboard screens and dialogs are accessi
     await expectNoCriticalViolations(page);
   }
 
+  await page.route("**/v1/organizations/*/billing", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const upstream = await route.fetch();
+    const body = (await upstream.json()) as { data: Record<string, unknown> };
+    body.data.canManageBilling = true;
+    body.data.invoices = [
+      {
+        id: "f3333333-3333-4333-8333-333333333333",
+        number: "WF-A11Y-REFUND",
+        status: "paid",
+        paymentStatus: "paid",
+        amountDue: 6900,
+        amountPaid: 6900,
+        amountRemaining: 0,
+        currency: "USD",
+        date: "2026-08-01T09:00:00.000Z",
+        periodStart: "2026-08-01T09:00:00.000Z",
+        periodEnd: "2026-09-01T09:00:00.000Z",
+        paidAt: "2026-08-01T09:00:00.000Z",
+        hostedInvoiceUrl: "https://invoice.stripe.test/a11y",
+        invoicePdfUrl: null,
+        refundable: true,
+        amountRefunded: 0,
+        remainingRefundableAmount: 6900,
+        paymentMethod: { brand: "visa", last4: "4242", expMonth: 8, expYear: 2029 },
+        refunds: [],
+      },
+    ];
+    await route.fulfill({ response: upstream, json: body });
+  });
+  await page.goto("http://localhost:3001/en/dashboard/billing");
+  await page.getByRole("button", { name: "Request refund for invoice WF-A11Y-REFUND" }).click();
+  await expect(page.getByRole("dialog", { name: "Request a refund review" })).toBeVisible();
+  await expectNoCriticalViolations(page);
+
   await page.goto("http://localhost:3001/en/dashboard/team");
-  await page.getByRole("button", { name: "Invite member" }).click();
+  await page.getByRole("button", { name: "Add staff" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectNoCriticalViolations(page);
 
@@ -194,7 +232,7 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   }
   await expectNoCriticalViolations(page);
 
-  await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+  await studioNavigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page).toHaveURL(/\/launch$/u);
   await expectNoCriticalViolations(page);
   await studioNavigation.getByRole("button", { name: /^Settings/u }).click();
@@ -228,7 +266,7 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await expect(restoreAction).toBeFocused();
   await page
     .getByRole("navigation", { name: "Studio sections" })
-    .getByRole("button", { name: /^Launch/u })
+    .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
     .click();
   await expect(page.getByRole("heading", { name: "Card is archived" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Restore card" })).toBeVisible();

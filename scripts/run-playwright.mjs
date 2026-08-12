@@ -1,8 +1,9 @@
 import { createWriteStream, existsSync, readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { parse as parseDotenv } from "dotenv";
@@ -36,8 +37,10 @@ const isW4 = project.startsWith("w4");
 const usesWalletOperations = isW3 || isW4;
 const providerDisabled = project === "w3-provider-disabled";
 
-const logDirectory = path.join(root, "test-results", "waflo-logs");
-await mkdir(logDirectory, { recursive: true });
+// Playwright clears test-results when the runner starts. Stage logs outside that
+// directory, then copy them back after the run so CI can always upload them.
+const runtimeLogDirectory = await mkdtemp(path.join(tmpdir(), "waflo-playwright-"));
+const artifactLogDirectory = path.join(root, "test-results", "waflo-logs");
 
 const commands = [
   {
@@ -114,7 +117,7 @@ let cleanupStarted = false;
 
 function spawnServer(command) {
   const log = createWriteStream(
-    path.join(logDirectory, `playwright-${project}-${runLabel}-${command.name}.log`),
+    path.join(runtimeLogDirectory, `playwright-${project}-${runLabel}-${command.name}.log`),
   );
   const child = spawn(process.execPath, [command.entry, ...command.args], {
     cwd: command.cwd,
@@ -200,7 +203,21 @@ async function stopChild(entry) {
       entry.child.kill("SIGKILL");
     }
   }
-  entry.log.end();
+  if (!entry.log.closed) {
+    await new Promise((resolve, reject) => {
+      entry.log.once("error", reject);
+      entry.log.end(resolve);
+    });
+  }
+}
+
+let logsPreserved = false;
+async function preserveLogs() {
+  if (logsPreserved) return;
+  logsPreserved = true;
+  await mkdir(artifactLogDirectory, { recursive: true });
+  await cp(runtimeLogDirectory, artifactLogDirectory, { recursive: true, force: true });
+  await rm(runtimeLogDirectory, { recursive: true, force: true });
 }
 
 async function cleanup() {
@@ -227,7 +244,9 @@ async function cleanup() {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
-    void cleanup().finally(() => process.exit(130));
+    void cleanup()
+      .then(preserveLogs)
+      .finally(() => process.exit(130));
   });
 }
 
@@ -245,6 +264,9 @@ try {
     await waitForReady(command, child);
   }
   const playwrightCli = path.join(root, "node_modules", "@playwright", "test", "cli.js");
+  const runnerLog = createWriteStream(
+    path.join(runtimeLogDirectory, `playwright-${project}-${runLabel}-results.log`),
+  );
   const runner = spawn(
     process.execPath,
     [playwrightCli, "test", `--project=${project}`, ...playwrightArguments],
@@ -255,9 +277,7 @@ try {
       windowsHide: true,
     },
   );
-  const runnerLog = createWriteStream(
-    path.join(logDirectory, `playwright-${project}-${runLabel}-results.log`),
-  );
+  children.push({ child: runner, log: runnerLog, name: "playwright", port: null });
   runner.stdout.pipe(process.stdout);
   runner.stdout.pipe(runnerLog);
   runner.stderr.pipe(process.stderr);
@@ -266,9 +286,10 @@ try {
     runner.once("error", reject);
     runner.once("exit", (code) => resolve(code ?? 1));
   });
-  runnerLog.end(`\nexit_code=${exitCode}\n`);
+  runnerLog.write(`\nexit_code=${exitCode}\n`);
 } finally {
   await cleanup();
+  await preserveLogs();
 }
 
 process.exitCode = exitCode;
