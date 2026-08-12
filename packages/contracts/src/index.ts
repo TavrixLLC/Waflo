@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { programOperationalStatuses } from "./program-publication-state.js";
 
+export * from "./m2.js";
 export * from "./platform-capabilities.js";
 export * from "./program-publication-state.js";
 export * from "./program-template-catalog.js";
-export * from "./w4-policy-backlog.js";
 export * from "./w3.js";
 export * from "./w4.js";
-export * from "./m2.js";
+export * from "./w4-policy-backlog.js";
+export * from "./wallet-engagement.js";
 
 export const locales = ["en", "ar"] as const;
 export type Locale = (typeof locales)[number];
@@ -132,21 +133,43 @@ export const organizationUpdateSchema = z
   })
   .strict();
 
-export const locationSchema = z
-  .object({
-    name: z.string().trim().min(2).max(120),
-    addressLine1: z.string().trim().max(160).optional(),
-    addressLine2: z.string().trim().max(160).optional(),
-    city: z.string().trim().max(100).optional(),
-    region: z.string().trim().max(100).optional(),
-    postalCode: z.string().trim().max(30).optional(),
-    countryCode: z.string().trim().length(2).toUpperCase().optional(),
-    phone: z.string().trim().min(5).max(30).optional(),
-    timezone: timezoneSchema.optional(),
-  })
-  .strict();
+const locationObjectSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  addressLine1: z.string().trim().max(160).optional(),
+  addressLine2: z.string().trim().max(160).optional(),
+  city: z.string().trim().max(100).optional(),
+  region: z.string().trim().max(100).optional(),
+  postalCode: z.string().trim().max(30).optional(),
+  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  phone: z.string().trim().min(5).max(30).optional(),
+  timezone: timezoneSchema.optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+});
 
-export const locationUpdateSchema = locationSchema.partial().strict();
+function validateCoordinatePair(
+  value: { latitude?: number | null | undefined; longitude?: number | null | undefined },
+  context: z.RefinementCtx,
+) {
+  const latitudeProvided = Object.hasOwn(value, "latitude");
+  const longitudeProvided = Object.hasOwn(value, "longitude");
+  const latitudeSet = value.latitude !== undefined && value.latitude !== null;
+  const longitudeSet = value.longitude !== undefined && value.longitude !== null;
+  if (latitudeProvided !== longitudeProvided || latitudeSet !== longitudeSet) {
+    context.addIssue({
+      code: "custom",
+      path: [latitudeSet ? "longitude" : "latitude"],
+      message: "Latitude and longitude must be configured together.",
+    });
+  }
+}
+
+export const locationSchema = locationObjectSchema.strict().superRefine(validateCoordinatePair);
+
+export const locationUpdateSchema = locationObjectSchema
+  .partial()
+  .strict()
+  .superRefine(validateCoordinatePair);
 
 export const invitationSchema = z
   .object({ email: emailSchema, role: z.enum(["MANAGER", "STAFF"]) })

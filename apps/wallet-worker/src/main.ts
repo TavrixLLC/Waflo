@@ -9,10 +9,10 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { parseEnvironment, parseVersionedSecretEntries, type Environment } from "@waflo/config";
+import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
 import {
-  decodeSecret,
   createCustomerDataKeyring,
+  decodeSecret,
   decryptCustomerValue,
   deriveAppleAuthenticationToken,
   deriveMembershipCredentialSecret,
@@ -20,34 +20,36 @@ import {
 import {
   createPrismaClient,
   lockApplePassUpdateSequence,
-  queueWalletPassStateChange,
   type Prisma,
   type PrismaClient,
   type PublicWalletAsset,
+  queueWalletPassStateChange,
   type WalletCommand,
 } from "@waflo/database";
 import { formatMembershipQrPayload } from "@waflo/qr-core";
 import {
+  type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
-  type PublishedMembershipStampRenderInput,
   type StampArtwork,
 } from "@waflo/stamp-engine";
 import {
+  type ApplePassSigner,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
   TestApplePassSigner,
-  type ApplePassSigner,
 } from "@waflo/wallet-apple";
 import {
+  APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   normalizeWalletProviderError,
+  resolveWalletNearbyText,
   type WalletMembershipInput,
   type WalletProgramInput,
   type WalletProvider,
   type WalletProviderCode,
   type WalletUpdateReason,
 } from "@waflo/wallet-core";
-import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
+import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
 import { classifyApplePushResponse } from "./apple-push.js";
@@ -89,7 +91,15 @@ const passInclude = {
     include: {
       organization: true,
       customer: true,
-      program: true,
+      program: {
+        include: {
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }, orderBy: { sortOrder: "asc" as const } },
+            },
+          },
+        },
+      },
       progress: true,
       enrollmentProgramVersion: {
         include: {
@@ -274,6 +284,18 @@ function mapPass(
       version.renderFingerprint ??
       createHash("sha256").update(version.id).digest("hex"),
     locale,
+    nearbyRelevance: nearbyRelevance({
+      enabled: membership.program.walletNearbyConfiguration?.enabled ?? false,
+      locations: membership.program.walletNearbyConfiguration?.locations ?? [],
+      templateCode: version.baseTemplateCode,
+      businessCategory: membership.organization.businessCategory,
+      merchantName: membership.organization.name,
+      locale,
+      customText:
+        locale === "ar"
+          ? membership.program.walletNearbyConfiguration?.appleCustomTextAr
+          : membership.program.walletNearbyConfiguration?.appleCustomTextEn,
+    }),
     ...(progressAssetUrl ? { publicAssetBaseUrl: progressAssetUrl } : {}),
     walletPassInstanceId: pass.id,
     providerIdentity: pass.providerIdentity,
@@ -294,7 +316,15 @@ function mapProgram(
   binding: Prisma.WalletProgramBindingGetPayload<{
     include: {
       organization: true;
-      program: true;
+      program: {
+        include: {
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }; orderBy: { sortOrder: "asc" } };
+            };
+          };
+        };
+      };
       programVersion: { include: { translations: true; visualTheme: true } };
     };
   }>,
@@ -319,7 +349,63 @@ function mapProgram(
     foregroundColor: binding.programVersion.visualTheme?.foregroundColor ?? "#241916",
     configurationFingerprint: binding.configurationFingerprint,
     locale,
+    nearbyRelevance: nearbyRelevance({
+      enabled: binding.program.walletNearbyConfiguration?.enabled ?? false,
+      locations: binding.program.walletNearbyConfiguration?.locations ?? [],
+      templateCode: binding.programVersion.baseTemplateCode,
+      businessCategory: binding.organization.businessCategory,
+      merchantName: binding.organization.name,
+      locale,
+      customText:
+        locale === "ar"
+          ? binding.program.walletNearbyConfiguration?.appleCustomTextAr
+          : binding.program.walletNearbyConfiguration?.appleCustomTextEn,
+    }),
     ...(programLogoUrl ? { programLogoUrl } : {}),
+  };
+}
+
+function nearbyRelevance(input: {
+  enabled: boolean;
+  locations: ReadonlyArray<{
+    location: {
+      id: string;
+      name: string;
+      status: "ACTIVE" | "ARCHIVED";
+      latitude: unknown;
+      longitude: unknown;
+    };
+  }>;
+  templateCode?: string | null | undefined;
+  businessCategory?: string | null | undefined;
+  merchantName: string;
+  locale: "en" | "ar";
+  customText?: string | null | undefined;
+}) {
+  const locations = input.locations
+    .filter(
+      ({ location }) =>
+        location.status === "ACTIVE" && location.latitude !== null && location.longitude !== null,
+    )
+    .slice(0, 10)
+    .map(({ location }) => ({
+      locationId: location.id,
+      displayName: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      relevantText: resolveWalletNearbyText({
+        templateCode: input.templateCode,
+        businessCategory: input.businessCategory,
+        merchantName: input.merchantName,
+        locationName: location.name,
+        locale: input.locale,
+        customText: input.customText,
+      }).text,
+    }));
+  return {
+    enabled: input.enabled && locations.length > 0,
+    desiredAppleMaxDistanceMeters: APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+    locations,
   };
 }
 
@@ -450,6 +536,8 @@ export class WalletWorker {
   private async dispatchLoop() {
     while (!this.stopping) {
       try {
+        const campaign = await this.processOneWalletCampaign();
+        if (campaign) workerLog("wallet_campaign_batch_processed", campaign);
         const synced = await this.processOneProgramSyncJob();
         if (synced) workerLog("program_wallet_sync_batch_processed", synced);
         const queued = await this.dispatch();
@@ -521,6 +609,37 @@ export class WalletWorker {
       where: { id: candidate.id },
     });
     try {
+      if (job.reason === "NEARBY_RELEVANCE_CHANGED") {
+        const binding = await this.prisma.walletProgramBinding.findFirst({
+          where: {
+            organizationId: job.organizationId,
+            programId: job.programId,
+            provider: "GOOGLE",
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        const membership = await this.prisma.membership.findFirst({
+          where: { organizationId: job.organizationId, programId: job.programId },
+          select: { id: true },
+          orderBy: { createdAt: "asc" },
+        });
+        if (binding && membership) {
+          const idempotencyKey = `wallet:google:nearby-template:${job.id}`;
+          await this.prisma.walletCommand.upsert({
+            where: { idempotencyKey },
+            create: {
+              organizationId: job.organizationId,
+              membershipId: membership.id,
+              provider: "GOOGLE",
+              commandType: "ENSURE_TEMPLATE",
+              idempotencyKey,
+              payloadFingerprint: createHash("sha256").update(idempotencyKey).digest("hex"),
+              safePayload: { bindingId: binding.id, reason: "NEARBY_RELEVANCE_CHANGED" },
+            },
+            update: {},
+          });
+        }
+      }
       const passes = await this.prisma.walletPassInstance.findMany({
         where: {
           organizationId: job.organizationId,
@@ -650,6 +769,229 @@ export class WalletWorker {
     }
   }
 
+  async processOneWalletCampaign(campaignId?: string): Promise<Record<string, unknown> | null> {
+    const now = new Date();
+    const candidate = await this.prisma.walletEngagementCampaign.findFirst({
+      where: {
+        ...(campaignId ? { id: campaignId } : {}),
+        scheduledAt: { lte: now },
+        OR: [
+          { status: "PENDING", nextAttemptAt: { lte: now } },
+          { status: "PROCESSING", leaseExpiresAt: { lt: now } },
+        ],
+      },
+      orderBy: [{ scheduledAt: "asc" }, { id: "asc" }],
+    });
+    if (!candidate) return null;
+    const claimed = await this.prisma.walletEngagementCampaign.updateMany({
+      where: {
+        id: candidate.id,
+        OR: [
+          { status: "PENDING", nextAttemptAt: { lte: now } },
+          { status: "PROCESSING", leaseExpiresAt: { lt: now } },
+        ],
+      },
+      data: {
+        status: "PROCESSING",
+        attemptCount: { increment: 1 },
+        leaseOwner: this.workerId,
+        leaseExpiresAt: new Date(now.getTime() + LEASE_SECONDS * 1_000),
+      },
+    });
+    if (claimed.count !== 1) return null;
+    const campaign = await this.prisma.walletEngagementCampaign.findUniqueOrThrow({
+      where: { id: candidate.id },
+    });
+    try {
+      const providerCodes = Array.isArray(campaign.intendedProviders)
+        ? campaign.intendedProviders.filter(
+            (value): value is "APPLE" | "GOOGLE" => value === "APPLE" || value === "GOOGLE",
+          )
+        : [];
+      const passes = await this.prisma.walletPassInstance.findMany({
+        where: {
+          organizationId: campaign.organizationId,
+          provider: { in: providerCodes },
+          status: { in: ["ISSUED", "ACTIVE"] },
+          membershipCredential: { status: "ACTIVE" },
+          membership: {
+            programId: campaign.programId,
+            status: "ACTIVE",
+            customer: { status: "ACTIVE" },
+            consents: {
+              some: { consentType: "WALLET_PROMOTIONS", granted: true },
+            },
+          },
+          ...(campaign.cursorPassInstanceId ? { id: { gt: campaign.cursorPassInstanceId } } : {}),
+        },
+        select: { id: true, membershipId: true, provider: true },
+        orderBy: { id: "asc" },
+        take: 250,
+      });
+      let queued = 0;
+      let skipped = 0;
+      for (const pass of passes) {
+        const deliveryId = randomUUID();
+        const providerMessageId = `wfl_${campaign.id.replaceAll("-", "")}_${pass.id.replaceAll("-", "")}`;
+        const outcome = await this.prisma.$transaction(async (transaction) => {
+          const lockKey = `wallet-promotion-rate:${pass.membershipId}:${pass.provider}`;
+          await transaction.$queryRaw<Array<{ locked: string }>>`
+            SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS "locked"
+          `;
+          const consent = await transaction.customerConsent.findFirst({
+            where: { membershipId: pass.membershipId, consentType: "WALLET_PROMOTIONS" },
+            orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
+          });
+          const consentActive = consent?.granted === true && consent.revokedAt === null;
+          const [lastDay, lastWeek] = consentActive
+            ? await Promise.all([
+                transaction.walletCampaignDelivery.count({
+                  where: {
+                    membershipId: pass.membershipId,
+                    provider: pass.provider,
+                    OR: [
+                      {
+                        status: "SUCCEEDED",
+                        logicalSentAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+                      },
+                      {
+                        status: "QUEUED",
+                        createdAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+                      },
+                    ],
+                  },
+                }),
+                transaction.walletCampaignDelivery.count({
+                  where: {
+                    membershipId: pass.membershipId,
+                    provider: pass.provider,
+                    OR: [
+                      {
+                        status: "SUCCEEDED",
+                        logicalSentAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
+                      },
+                      {
+                        status: "QUEUED",
+                        createdAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
+                      },
+                    ],
+                  },
+                }),
+              ])
+            : [0, 0];
+          const safeSkipCode = !consentActive
+            ? "CONSENT_REVOKED"
+            : lastDay >= 2
+              ? "WAFLO_PASS_LIMIT_24H"
+              : lastWeek >= 5
+                ? "WAFLO_PASS_LIMIT_7D"
+                : null;
+          const delivery = await transaction.walletCampaignDelivery.upsert({
+            where: {
+              campaignId_walletPassInstanceId: {
+                campaignId: campaign.id,
+                walletPassInstanceId: pass.id,
+              },
+            },
+            create: {
+              id: deliveryId,
+              organizationId: campaign.organizationId,
+              campaignId: campaign.id,
+              membershipId: pass.membershipId,
+              walletPassInstanceId: pass.id,
+              provider: pass.provider,
+              providerMessageId,
+              status: safeSkipCode ? "SKIPPED" : "QUEUED",
+              safeSkipCode,
+              ...(safeSkipCode ? { completedAt: now } : {}),
+            },
+            update: {},
+          });
+          if (!safeSkipCode && delivery.status === "QUEUED") {
+            const idempotencyKey = `wallet:${pass.provider.toLocaleLowerCase("en-US")}:promotion:${delivery.id}`;
+            await transaction.walletCommand.upsert({
+              where: { idempotencyKey },
+              create: {
+                organizationId: campaign.organizationId,
+                membershipId: pass.membershipId,
+                walletPassInstanceId: pass.id,
+                provider: pass.provider,
+                commandType: "SEND_PROMOTION",
+                idempotencyKey,
+                payloadFingerprint: campaign.contentFingerprint,
+                safePayload: { campaignId: campaign.id, campaignDeliveryId: delivery.id },
+                campaignDeliveryId: delivery.id,
+              },
+              update: {},
+            });
+          }
+          return { createdNew: delivery.id === deliveryId, skipped: Boolean(safeSkipCode) };
+        });
+        if (outcome.createdNew) {
+          if (outcome.skipped) skipped += 1;
+          else queued += 1;
+        }
+      }
+      const last = passes.at(-1);
+      const finished = passes.length < 250;
+      await this.prisma.walletEngagementCampaign.update({
+        where: { id: campaign.id },
+        data: {
+          queuedCount: { increment: queued },
+          skippedCount: { increment: skipped },
+          cursorPassInstanceId: last?.id ?? campaign.cursorPassInstanceId,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          ...(finished
+            ? {
+                status: queued + campaign.queuedCount > 0 ? "DISPATCHED" : "COMPLETED",
+                dispatchedAt: now,
+                ...(queued + campaign.queuedCount > 0 ? {} : { completedAt: now }),
+              }
+            : { status: "PENDING", nextAttemptAt: now }),
+        },
+      });
+      if (finished) {
+        await this.prisma.auditLog.create({
+          data: {
+            organizationId: campaign.organizationId,
+            actorUserId: campaign.createdByUserId,
+            action: "wallet.campaign_dispatched",
+            targetType: "wallet_engagement_campaign",
+            targetId: campaign.id,
+            requestId: "wallet-worker",
+            metadata: {
+              queued: queued + campaign.queuedCount,
+              skipped: skipped + campaign.skippedCount,
+            },
+          },
+        });
+      }
+      return { campaignId: campaign.id, queued, skipped, finished };
+    } catch {
+      const dead = campaign.attemptCount >= this.environment.WALLET_COMMAND_MAX_ATTEMPTS;
+      await this.prisma.walletEngagementCampaign.update({
+        where: { id: campaign.id },
+        data: dead
+          ? {
+              status: "FAILED",
+              safeFailureCode: "TARGET_RESOLUTION_FAILED",
+              completedAt: new Date(),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+            }
+          : {
+              status: "PENDING",
+              safeFailureCode: "TARGET_RESOLUTION_FAILED",
+              nextAttemptAt: new Date(Date.now() + 60_000),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+            },
+      });
+      return { campaignId: campaign.id, failed: true, dead };
+    }
+  }
+
   private async consume(slot: number) {
     while (!this.stopping) {
       // A blocking BRPOP monopolizes a Redis connection. Consumers share the
@@ -703,7 +1045,18 @@ export class WalletWorker {
               where: { id: payload.bindingId },
               include: {
                 organization: true,
-                program: true,
+                program: {
+                  include: {
+                    walletNearbyConfiguration: {
+                      include: {
+                        locations: {
+                          include: { location: true },
+                          orderBy: { sortOrder: "asc" },
+                        },
+                      },
+                    },
+                  },
+                },
                 programVersion: { include: { translations: true, visualTheme: true } },
               },
             })
@@ -725,6 +1078,8 @@ export class WalletWorker {
       } else if (command.commandType === "APPLE_PUSH") {
         if (!command.walletPassInstanceId) throw new Error("Apple push has no pass instance.");
         await this.sendApplePush(command.walletPassInstanceId, provider.mode);
+      } else if (command.commandType === "SEND_PROMOTION") {
+        providerRequestId = await this.executePromotionalMessage(command, provider);
       } else {
         if (!command.walletPassInstanceId) throw new Error("Wallet pass command has no instance.");
         const pass = await this.prisma.walletPassInstance.findUnique({
@@ -832,6 +1187,13 @@ export class WalletWorker {
           ...(providerRequestId ? { providerRequestId } : {}),
         },
       });
+      if (command.commandType === "SEND_PROMOTION" && command.campaignDeliveryId) {
+        const delivery = await this.prisma.walletCampaignDelivery.findUnique({
+          where: { id: command.campaignDeliveryId },
+          select: { campaignId: true },
+        });
+        if (delivery) await this.refreshCampaignAggregation(delivery.campaignId);
+      }
       workerLog("command_completed", {
         commandId: command.id,
         provider: command.provider,
@@ -870,7 +1232,10 @@ export class WalletWorker {
       await this.deadLetter(command, error.category, error.options.providerRequestId);
       return;
     }
-    const delaySeconds = Math.min(3_600, 5 * 2 ** Math.max(0, command.attemptCount - 1));
+    const delaySeconds =
+      error.category === "RATE_LIMITED"
+        ? 6 * 60 * 60
+        : Math.min(3_600, 5 * 2 ** Math.max(0, command.attemptCount - 1));
     await this.prisma.$transaction([
       this.prisma.walletCommand.update({
         where: { id: command.id },
@@ -885,11 +1250,24 @@ export class WalletWorker {
             : {}),
         },
       }),
-      ...(command.walletPassInstanceId
+      ...(command.walletPassInstanceId && command.commandType !== "SEND_PROMOTION"
         ? [
             this.prisma.walletPassInstance.update({
               where: { id: command.walletPassInstanceId },
               data: { status: "ERROR", lastProviderErrorCode: error.category },
+            }),
+          ]
+        : []),
+      ...(command.campaignDeliveryId
+        ? [
+            this.prisma.walletCampaignDelivery.update({
+              where: { id: command.campaignDeliveryId },
+              data: {
+                safeFailureCode: error.category,
+                ...(error.options.providerRequestId
+                  ? { providerRequestId: error.options.providerRequestId }
+                  : {}),
+              },
             }),
           ]
         : []),
@@ -931,7 +1309,154 @@ export class WalletWorker {
           },
         },
       }),
+      ...(command.campaignDeliveryId
+        ? [
+            this.prisma.walletCampaignDelivery.update({
+              where: { id: command.campaignDeliveryId },
+              data: {
+                status: "FAILED",
+                safeFailureCode: safeErrorCode,
+                completedAt: new Date(),
+                ...(providerRequestId ? { providerRequestId } : {}),
+              },
+            }),
+          ]
+        : []),
     ]);
+    if (command.campaignDeliveryId) {
+      const delivery = await this.prisma.walletCampaignDelivery.findUnique({
+        where: { id: command.campaignDeliveryId },
+        select: { campaignId: true },
+      });
+      if (delivery) await this.refreshCampaignAggregation(delivery.campaignId);
+    }
+  }
+
+  private async executePromotionalMessage(
+    command: WalletCommand,
+    provider: WalletProvider,
+  ): Promise<string | undefined> {
+    if (!command.campaignDeliveryId || !command.walletPassInstanceId) {
+      throw new Error("Promotional Wallet command is missing its delivery identity.");
+    }
+    const delivery = await this.prisma.walletCampaignDelivery.findUnique({
+      where: { id: command.campaignDeliveryId },
+      include: { campaign: true, walletPassInstance: true },
+    });
+    if (!delivery || delivery.walletPassInstanceId !== command.walletPassInstanceId) {
+      throw new Error("Promotional Wallet delivery is unavailable.");
+    }
+    if (delivery.status !== "QUEUED") return delivery.providerRequestId ?? undefined;
+    const consent = await this.prisma.customerConsent.findFirst({
+      where: { membershipId: delivery.membershipId, consentType: "WALLET_PROMOTIONS" },
+      orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
+    });
+    const consentActive = consent?.granted === true && consent.revokedAt === null;
+    const now = new Date();
+    const [lastDay, lastWeek] = consentActive
+      ? await Promise.all([
+          this.prisma.walletCampaignDelivery.count({
+            where: {
+              id: { not: delivery.id },
+              membershipId: delivery.membershipId,
+              provider: delivery.provider,
+              status: "SUCCEEDED",
+              logicalSentAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+            },
+          }),
+          this.prisma.walletCampaignDelivery.count({
+            where: {
+              id: { not: delivery.id },
+              membershipId: delivery.membershipId,
+              provider: delivery.provider,
+              status: "SUCCEEDED",
+              logicalSentAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
+            },
+          }),
+        ])
+      : [0, 0];
+    const safeSkipCode = !consentActive
+      ? "CONSENT_REVOKED"
+      : lastDay >= 2
+        ? "WAFLO_PASS_LIMIT_24H"
+        : lastWeek >= 5
+          ? "WAFLO_PASS_LIMIT_7D"
+          : delivery.campaign.status === "CANCELED"
+            ? "CAMPAIGN_CANCELED"
+            : null;
+    if (safeSkipCode) {
+      await this.prisma.walletCampaignDelivery.update({
+        where: { id: delivery.id },
+        data: { status: "SKIPPED", safeSkipCode, completedAt: now },
+      });
+      return undefined;
+    }
+    if (!provider.sendPromotionalMessage) {
+      throw new Error("This Wallet provider has no approved promotional message adapter.");
+    }
+    const result = await provider.sendPromotionalMessage(
+      { providerIdentity: delivery.walletPassInstance.providerIdentity },
+      {
+        messageId: delivery.providerMessageId,
+        locale: delivery.campaign.locale === "AR" ? "ar" : "en",
+        title: delivery.campaign.title,
+        body: delivery.campaign.body,
+        ...(delivery.campaign.destinationUrl
+          ? { destinationUrl: delivery.campaign.destinationUrl }
+          : {}),
+      },
+    );
+    await this.prisma.walletCampaignDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "SUCCEEDED",
+        logicalSentAt: now,
+        completedAt: now,
+        safeFailureCode: null,
+        ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
+      },
+    });
+    return result.providerRequestId;
+  }
+
+  private async refreshCampaignAggregation(campaignId: string) {
+    const [campaign, counts] = await Promise.all([
+      this.prisma.walletEngagementCampaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true, dispatchedAt: true },
+      }),
+      Promise.all(
+        (["QUEUED", "SUCCEEDED", "SKIPPED", "FAILED"] as const).map((status) =>
+          this.prisma.walletCampaignDelivery.count({ where: { campaignId, status } }),
+        ),
+      ),
+    ]);
+    if (!campaign) return;
+    const queued = counts[0] ?? 0;
+    const succeeded = counts[1] ?? 0;
+    const skipped = counts[2] ?? 0;
+    const failed = counts[3] ?? 0;
+    const terminal = campaign.dispatchedAt !== null && queued === 0;
+    const status = !campaign.dispatchedAt
+      ? campaign.status
+      : !terminal
+        ? "DISPATCHED"
+        : failed > 0 && succeeded > 0
+          ? "PARTIAL_FAILURE"
+          : failed > 0
+            ? "FAILED"
+            : "COMPLETED";
+    await this.prisma.walletEngagementCampaign.updateMany({
+      where: { id: campaignId, status: { not: "CANCELED" } },
+      data: {
+        queuedCount: queued,
+        succeededCount: succeeded,
+        skippedCount: skipped,
+        failedCount: failed,
+        status,
+        ...(terminal ? { completedAt: new Date() } : {}),
+      },
+    });
   }
 
   private reason(command: WalletCommand, fallback: WalletUpdateReason): WalletUpdateReason {
@@ -1146,7 +1671,15 @@ export class WalletWorker {
     binding: Prisma.WalletProgramBindingGetPayload<{
       include: {
         organization: true;
-        program: true;
+        program: {
+          include: {
+            walletNearbyConfiguration: {
+              include: {
+                locations: { include: { location: true }; orderBy: { sortOrder: "asc" } };
+              };
+            };
+          };
+        };
         programVersion: { include: { translations: true; visualTheme: true } };
       };
     }>,

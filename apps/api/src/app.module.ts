@@ -9,20 +9,38 @@ import { ExternalAuthController } from "./auth/external-auth.controller.js";
 import { ExternalAuthService } from "./auth/external-auth.service.js";
 import { BillingController, WebhooksController } from "./billing/billing.controller.js";
 import { BillingService } from "./billing/billing.service.js";
-import { EnvelopeInterceptor } from "./common/request-context.js";
 import { ErrorEnvelopeFilter } from "./common/error.filter.js";
 import { ERROR_REPORTER } from "./common/error-reporter.js";
+import { EnvelopeInterceptor } from "./common/request-context.js";
 import { EnvironmentService } from "./config/environment.service.js";
+import { CustomerCardController } from "./customer/customer-card.controller.js";
+import { CustomerCardService } from "./customer/customer-card.service.js";
+import { CustomerSecurityService } from "./customer/customer-security.service.js";
+import { TransferController } from "./customer/transfer.controller.js";
+import { TransferService } from "./customer/transfer.service.js";
 import { PrismaService } from "./database/prisma.service.js";
-import { HealthController } from "./health/health.controller.js";
+import { EnrollmentSettingsController } from "./enrollment/enrollment-settings.controller.js";
+import { EnrollmentSettingsService } from "./enrollment/enrollment-settings.service.js";
+import { PublicEnrollmentController } from "./enrollment/public-enrollment.controller.js";
+import { PublicEnrollmentService } from "./enrollment/public-enrollment.service.js";
 import { CapabilitiesController } from "./health/capabilities.controller.js";
+import { HealthController } from "./health/health.controller.js";
 import { LocationsController } from "./locations/locations.controller.js";
 import { LocationsService } from "./locations/locations.service.js";
+import { LoyaltyOperationService } from "./loyalty/loyalty-operation.service.js";
+import { StaffOperationsController } from "./loyalty/staff-operations.controller.js";
 import { NotificationService } from "./notifications/notification.service.js";
+import { MerchantOperationsController } from "./operations/merchant-operations.controller.js";
+import { MerchantOperationsService } from "./operations/merchant-operations.service.js";
 import { OrganizationsController } from "./organizations/organizations.controller.js";
 import { OrganizationsService } from "./organizations/organizations.service.js";
-import { PublicController } from "./public/public.controller.js";
+import { AssetsController } from "./programs/assets.controller.js";
+import { AssetsService } from "./programs/assets.service.js";
+import { OBJECT_STORAGE, S3ObjectStorage } from "./programs/object-storage.js";
+import { ProgramsController } from "./programs/programs.controller.js";
+import { ProgramsService } from "./programs/programs.service.js";
 import { HostResolutionService } from "./public/host-resolution.service.js";
+import { PublicController } from "./public/public.controller.js";
 import {
   ApiRateLimitGuard,
   CsrfGuard,
@@ -31,38 +49,25 @@ import {
   StaffDeviceSignatureGuard,
 } from "./security/guards.js";
 import { RateLimitService } from "./security/rate-limit.service.js";
-import { InvitationsController, TeamController } from "./team/team.controller.js";
-import { TeamService } from "./team/team.service.js";
-import { TenantService } from "./tenancy/tenant.service.js";
-import { ProgramsController } from "./programs/programs.controller.js";
-import { ProgramsService } from "./programs/programs.service.js";
-import { AssetsController } from "./programs/assets.controller.js";
-import { AssetsService } from "./programs/assets.service.js";
-import { OBJECT_STORAGE, S3ObjectStorage } from "./programs/object-storage.js";
-import { EnrollmentSettingsController } from "./enrollment/enrollment-settings.controller.js";
-import { EnrollmentSettingsService } from "./enrollment/enrollment-settings.service.js";
-import { PublicEnrollmentController } from "./enrollment/public-enrollment.controller.js";
-import { PublicEnrollmentService } from "./enrollment/public-enrollment.service.js";
-import { CustomerCardController } from "./customer/customer-card.controller.js";
-import { CustomerCardService } from "./customer/customer-card.service.js";
-import { CustomerSecurityService } from "./customer/customer-security.service.js";
-import { TransferController } from "./customer/transfer.controller.js";
-import { TransferService } from "./customer/transfer.service.js";
-import { WalletController } from "./wallet/wallet.controller.js";
-import { WalletService } from "./wallet/wallet.service.js";
-import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
-import { AppleUpdateController } from "./wallet/apple-update.controller.js";
-import { AppleUpdateService } from "./wallet/apple-update.service.js";
-import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.controller.js";
 import {
   MerchantStaffDeviceController,
   StaffDevicePairingController,
 } from "./staff-devices/staff-device.controller.js";
 import { StaffDeviceService } from "./staff-devices/staff-device.service.js";
-import { StaffOperationsController } from "./loyalty/staff-operations.controller.js";
-import { LoyaltyOperationService } from "./loyalty/loyalty-operation.service.js";
-import { MerchantOperationsController } from "./operations/merchant-operations.controller.js";
-import { MerchantOperationsService } from "./operations/merchant-operations.service.js";
+import { InvitationsController, TeamController } from "./team/team.controller.js";
+import { TeamService } from "./team/team.service.js";
+import { TenantService } from "./tenancy/tenant.service.js";
+import { AppleUpdateController } from "./wallet/apple-update.controller.js";
+import { AppleUpdateService } from "./wallet/apple-update.service.js";
+import { PublicWalletAssetsController } from "./wallet/public-wallet-assets.controller.js";
+import { WalletController } from "./wallet/wallet.controller.js";
+import { WalletService } from "./wallet/wallet.service.js";
+import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
+import {
+  CustomerWalletEngagementController,
+  MerchantWalletEngagementController,
+} from "./wallet-engagement/wallet-engagement.controller.js";
+import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.service.js";
 
 @Module({
   controllers: [
@@ -91,6 +96,8 @@ import { MerchantOperationsService } from "./operations/merchant-operations.serv
     StaffDevicePairingController,
     StaffOperationsController,
     MerchantOperationsController,
+    MerchantWalletEngagementController,
+    CustomerWalletEngagementController,
   ],
   providers: [
     EnvironmentService,
@@ -117,6 +124,7 @@ import { MerchantOperationsService } from "./operations/merchant-operations.serv
     StaffDeviceService,
     LoyaltyOperationService,
     MerchantOperationsService,
+    WalletEngagementService,
     {
       provide: OBJECT_STORAGE,
       inject: [EnvironmentService],

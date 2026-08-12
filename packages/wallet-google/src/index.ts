@@ -1,11 +1,14 @@
 import { createHash, createSign } from "node:crypto";
 import {
+  normalizeWalletProviderError,
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
   type WalletMembershipInput,
   type WalletProgramInput,
   type WalletProgramTemplateResult,
+  type WalletPromotionalMessageInput,
+  type WalletPromotionalMessageResult,
   type WalletProvider,
   WalletProviderError,
   type WalletProviderHealth,
@@ -13,7 +16,6 @@ import {
   type WalletReconcileResult,
   type WalletUpdateReason,
   type WalletUpdateResult,
-  normalizeWalletProviderError,
 } from "@waflo/wallet-core";
 
 export interface GoogleServiceAccount {
@@ -54,6 +56,9 @@ function translated(value: string, locale: "en" | "ar") {
 }
 
 export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string) {
+  if (input.nearbyRelevance?.enabled && input.nearbyRelevance.locations.length > 10) {
+    throw new Error("Google Wallet supports at most 10 MerchantLocations per class.");
+  }
   return {
     id: classId,
     issuerName: input.organizationName.slice(0, 60),
@@ -70,6 +75,12 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
       : {}),
     localizedIssuerName: translated(input.organizationName.slice(0, 60), input.locale),
     localizedProgramName: translated(input.programName.slice(0, 60), input.locale),
+    merchantLocations: input.nearbyRelevance?.enabled
+      ? input.nearbyRelevance.locations.map((location) => ({
+          latitude: location.latitude,
+          longitude: location.longitude,
+        }))
+      : [],
     textModulesData: [
       { id: "reward", header: "Reward", body: input.rewardSummary.slice(0, 500) },
       {
@@ -248,23 +259,29 @@ export class GoogleWalletRestClient {
     );
     const requestId = response.headers.get("x-request-id") ?? undefined;
     if (!response.ok) {
+      const safeErrorPayload = await response.text().catch(() => "");
+      const providerQuotaExceeded = /QuotaExceededException|quota.{0,30}exceed/iu.test(
+        safeErrorPayload.slice(0, 4_000),
+      );
       throw new WalletProviderError(
-        response.status === 401
-          ? "AUTHENTICATION_FAILED"
-          : response.status === 403
-            ? "PERMISSION_DENIED"
-            : response.status === 404
-              ? "NOT_FOUND"
-              : response.status === 409
-                ? "ALREADY_EXISTS"
-                : response.status === 429
-                  ? "RATE_LIMITED"
-                  : response.status >= 500
-                    ? "TEMPORARY_FAILURE"
-                    : "PERMANENT_FAILURE",
+        providerQuotaExceeded
+          ? "RATE_LIMITED"
+          : response.status === 401
+            ? "AUTHENTICATION_FAILED"
+            : response.status === 403
+              ? "PERMISSION_DENIED"
+              : response.status === 404
+                ? "NOT_FOUND"
+                : response.status === 409
+                  ? "ALREADY_EXISTS"
+                  : response.status === 429
+                    ? "RATE_LIMITED"
+                    : response.status >= 500
+                      ? "TEMPORARY_FAILURE"
+                      : "PERMANENT_FAILURE",
         "Google Wallet request failed.",
         {
-          retryable: response.status === 429 || response.status >= 500,
+          retryable: providerQuotaExceeded || response.status === 429 || response.status >= 500,
           ...(requestId ? { providerRequestId: requestId } : {}),
         },
       );
@@ -501,6 +518,82 @@ export class GoogleWalletProvider implements WalletProvider {
   async reconcileMembershipPass(input: WalletMembershipInput): Promise<WalletReconcileResult> {
     await this.issueMembershipPass(input);
     return { state: "ACTIVE", changed: false };
+  }
+
+  async sendPromotionalMessage(
+    input: Pick<WalletMembershipInput, "providerIdentity">,
+    message: WalletPromotionalMessageInput,
+  ): Promise<WalletPromotionalMessageResult> {
+    this.requireIssuer();
+    const htmlEscape = (value: string) =>
+      value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    const body = message.destinationUrl
+      ? `${htmlEscape(message.body)} <a href="${htmlEscape(message.destinationUrl)}">${
+          message.locale === "ar" ? "فتح الرابط" : "Open link"
+        }</a>`
+      : message.body;
+    const payload = {
+      message: {
+        id: message.messageId,
+        header: message.title,
+        body,
+        messageType: "TEXT_AND_NOTIFY",
+        localizedHeader: translated(message.title, message.locale),
+        localizedBody: translated(body, message.locale),
+      },
+    };
+    if (this.mode !== "REAL" || !this.client) return { state: "STORED_AND_NOTIFIED" };
+    const objectPath = `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`;
+    const current = await this.client.request<{ messages?: unknown[] }>(objectPath);
+    const storedMessages = Array.isArray(current.value.messages) ? current.value.messages : [];
+    const messageId = (value: unknown) => {
+      if (!value || typeof value !== "object" || !("id" in value)) return null;
+      return typeof value.id === "string" ? value.id : null;
+    };
+    if (storedMessages.some((stored) => messageId(stored) === message.messageId)) {
+      return {
+        state: "STORED_AND_NOTIFIED",
+        ...(current.requestId ? { providerRequestId: current.requestId } : {}),
+      };
+    }
+    if (storedMessages.length > 8) {
+      const issuerOwnedIds = storedMessages
+        .map(messageId)
+        .filter((id): id is string => Boolean(id?.startsWith("wfl_")))
+        .sort((left, right) => left.localeCompare(right, "en"));
+      const minimumRemovalCount = Math.max(0, storedMessages.length - 9);
+      const preferredRemovalCount = storedMessages.length - 8;
+      const removalCount = Math.min(preferredRemovalCount, issuerOwnedIds.length);
+      if (removalCount < minimumRemovalCount) {
+        throw new WalletProviderError(
+          "PERMANENT_FAILURE",
+          "The Google Wallet pass message limit is occupied by non-Waflo messages.",
+          { retryable: false },
+        );
+      }
+      if (removalCount > 0) {
+        const removableIds = new Set(issuerOwnedIds.slice(0, removalCount));
+        await this.client.request(objectPath, {
+          method: "PATCH",
+          body: {
+            messages: storedMessages.filter((stored) => !removableIds.has(messageId(stored) ?? "")),
+          },
+        });
+      }
+    }
+    const result = await this.client.request(`${objectPath}/addMessage`, {
+      method: "POST",
+      body: payload,
+    });
+    return {
+      state: "STORED_AND_NOTIFIED",
+      ...(result.requestId ? { providerRequestId: result.requestId } : {}),
+    };
   }
 
   private requireIssuer(): string {

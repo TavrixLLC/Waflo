@@ -1,7 +1,4 @@
 import { createHash, createHmac } from "node:crypto";
-import { zipSync } from "fflate";
-import forge from "node-forge";
-import sharp from "sharp";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
   type WalletAddAction,
@@ -17,6 +14,9 @@ import {
   type WalletUpdateReason,
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
+import { zipSync } from "fflate";
+import forge from "node-forge";
+import sharp from "sharp";
 
 export interface ApplePassConfiguration {
   readonly passTypeIdentifier: string;
@@ -46,6 +46,12 @@ export interface AppleStoreCardPass {
   readonly webServiceURL: string;
   readonly authenticationToken: string;
   readonly voided: boolean;
+  readonly locations?: ReadonlyArray<{
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly relevantText: string;
+  }>;
+  readonly maxDistance?: number;
   readonly barcodes: ReadonlyArray<{
     readonly format: "PKBarcodeFormatQR";
     readonly message: string;
@@ -80,6 +86,10 @@ export function mapAppleStoreCard(
     input.membershipStatus !== "ACTIVE" ||
     input.programStatus === "ARCHIVED" ||
     input.programStatus === "SUSPENDED";
+  const nearby = input.nearbyRelevance;
+  if (nearby?.enabled && nearby.locations.length > 10) {
+    throw new Error("Apple Wallet supports at most 10 nearby locations per pass.");
+  }
   return {
     formatVersion: 1,
     passTypeIdentifier: configuration.passTypeIdentifier,
@@ -94,6 +104,16 @@ export function mapAppleStoreCard(
     webServiceURL: configuration.webServiceUrl.replace(/\/+$/, ""),
     authenticationToken,
     voided: inactive,
+    ...(nearby?.enabled && nearby.locations.length
+      ? {
+          locations: nearby.locations.map((location) => ({
+            latitude: location.latitude,
+            longitude: location.longitude,
+            relevantText: location.relevantText,
+          })),
+          maxDistance: nearby.desiredAppleMaxDistanceMeters,
+        }
+      : {}),
     barcodes: [
       {
         format: "PKBarcodeFormatQR",

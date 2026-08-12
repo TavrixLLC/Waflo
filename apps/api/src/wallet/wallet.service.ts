@@ -6,6 +6,10 @@ import type {
   WalletProgramInput,
   WalletProviderCode,
 } from "@waflo/wallet-core";
+import {
+  APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+  resolveWalletNearbyText,
+} from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
@@ -13,13 +17,13 @@ import type { WafloRequest } from "../common/request-context.js";
 import { CustomerCardService } from "../customer/customer-card.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { TenantService } from "../tenancy/tenant.service.js";
-import { WalletProviderRegistry } from "./wallet-provider.registry.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
 import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
+import { TenantService } from "../tenancy/tenant.service.js";
+import { WalletProviderRegistry } from "./wallet-provider.registry.js";
 
 const walletPassInclude = {
   walletProgramBinding: true,
@@ -28,7 +32,15 @@ const walletPassInclude = {
     include: {
       organization: true,
       customer: true,
-      program: true,
+      program: {
+        include: {
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
+            },
+          },
+        },
+      },
       progress: true,
       enrollmentProgramVersion: {
         include: {
@@ -343,6 +355,18 @@ export class WalletService {
         version.renderFingerprint ??
         createHash("sha256").update(version.id).digest("hex"),
       locale,
+      nearbyRelevance: walletNearbyRelevance({
+        enabled: membership.program.walletNearbyConfiguration?.enabled ?? false,
+        locations: membership.program.walletNearbyConfiguration?.locations ?? [],
+        templateCode: version.baseTemplateCode,
+        businessCategory: membership.organization.businessCategory,
+        merchantName: membership.organization.name,
+        locale,
+        customText:
+          locale === "ar"
+            ? membership.program.walletNearbyConfiguration?.appleCustomTextAr
+            : membership.program.walletNearbyConfiguration?.appleCustomTextEn,
+      }),
     };
     return {
       ...programInput,
@@ -360,4 +384,48 @@ export class WalletService {
       stampRenderInput: stampRender.renderInput,
     };
   }
+}
+
+function walletNearbyRelevance(input: {
+  enabled: boolean;
+  locations: ReadonlyArray<{
+    location: {
+      id: string;
+      name: string;
+      status: "ACTIVE" | "ARCHIVED";
+      latitude: unknown;
+      longitude: unknown;
+    };
+  }>;
+  templateCode?: string | null | undefined;
+  businessCategory?: string | null | undefined;
+  merchantName: string;
+  locale: "en" | "ar";
+  customText?: string | null | undefined;
+}) {
+  const locations = input.locations
+    .filter(
+      ({ location }) =>
+        location.status === "ACTIVE" && location.latitude !== null && location.longitude !== null,
+    )
+    .slice(0, 10)
+    .map(({ location }) => ({
+      locationId: location.id,
+      displayName: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      relevantText: resolveWalletNearbyText({
+        templateCode: input.templateCode,
+        businessCategory: input.businessCategory,
+        merchantName: input.merchantName,
+        locationName: location.name,
+        locale: input.locale,
+        customText: input.customText,
+      }).text,
+    }));
+  return {
+    enabled: input.enabled && locations.length > 0,
+    desiredAppleMaxDistanceMeters: APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+    locations,
+  };
 }

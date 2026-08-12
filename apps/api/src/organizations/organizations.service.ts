@@ -2,14 +2,14 @@ import { HttpStatus, Injectable } from "@nestjs/common";
 import { verifyPassword } from "@waflo/auth";
 import type { OrganizationInput } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
+import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { AuditService } from "../audit/audit.service.js";
-import { TenantService } from "../tenancy/tenant.service.js";
 import { oldSlugReservedUntil, validateSlug } from "../tenancy/slug.js";
+import { TenantService } from "../tenancy/tenant.service.js";
 
 const localeToDb = (locale: "en" | "ar"): "EN" | "AR" => (locale === "ar" ? "AR" : "EN");
 const planToDb = (plan: "starter" | "growth" | "scale") =>
@@ -194,6 +194,26 @@ export class OrganizationsService {
       },
       request,
     );
+    if (input.name !== undefined || input.businessCategory !== undefined) {
+      const nearbyConfigurations = await this.prisma.client.walletNearbyConfiguration.findMany({
+        where: { organizationId, enabled: true },
+        select: { programId: true },
+      });
+      if (nearbyConfigurations.length) {
+        await this.prisma.client.programWalletSyncJob.createMany({
+          data: nearbyConfigurations.map(({ programId }) => ({
+            organizationId,
+            programId,
+            action: "update" as const,
+            reason: "NEARBY_RELEVANCE_CHANGED" as const,
+            commandType: "UPDATE" as const,
+            idempotencyKey: `program-wallet-nearby-organization:${programId}:${organization.updatedAt.toISOString()}`,
+            batchSize: 500,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
     return organization;
   }
 

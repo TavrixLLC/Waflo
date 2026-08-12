@@ -121,6 +121,8 @@ export class LocationsService {
             countryCode: input.countryCode ?? null,
             phone: input.phone ?? null,
             timezone: input.timezone ?? organization.timezone,
+            latitude: input.latitude ?? null,
+            longitude: input.longitude ?? null,
           },
         });
       },
@@ -153,6 +155,8 @@ export class LocationsService {
       countryCode?: string | undefined;
       phone?: string | undefined;
       timezone?: string | undefined;
+      latitude?: number | null | undefined;
+      longitude?: number | null | undefined;
     },
     request: WafloRequest,
   ) {
@@ -170,8 +174,13 @@ export class LocationsService {
         ...(input.countryCode !== undefined ? { countryCode: input.countryCode } : {}),
         ...(input.phone !== undefined ? { phone: input.phone } : {}),
         ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
+        ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
       },
     });
+    if (input.latitude !== undefined || input.longitude !== undefined) {
+      await this.queueNearbyLocationRefresh(organizationId, locationId, location.updatedAt);
+    }
     await this.audit.record(
       {
         organizationId,
@@ -235,6 +244,13 @@ export class LocationsService {
         targetId: locationId,
         locationId,
       },
+      request,
+    );
+    await this.removeArchivedNearbyLocation(
+      userId,
+      organizationId,
+      locationId,
+      updated.updatedAt,
       request,
     );
     return updated;
@@ -303,5 +319,95 @@ export class LocationsService {
       request,
     );
     return updated;
+  }
+
+  private async queueNearbyLocationRefresh(
+    organizationId: string,
+    locationId: string,
+    changedAt: Date,
+  ) {
+    const selections = await this.prisma.client.walletNearbyLocation.findMany({
+      where: { locationId, configuration: { organizationId, enabled: true } },
+      include: { configuration: true },
+    });
+    for (const selection of selections) {
+      const programId = selection.configuration.programId;
+      const fingerprint = `${locationId}:${changedAt.toISOString()}`;
+      await this.prisma.client.programWalletSyncJob.upsert({
+        where: { idempotencyKey: `program-wallet-nearby-location:${programId}:${fingerprint}` },
+        create: {
+          organizationId,
+          programId,
+          action: "update",
+          reason: "NEARBY_RELEVANCE_CHANGED",
+          commandType: "UPDATE",
+          idempotencyKey: `program-wallet-nearby-location:${programId}:${fingerprint}`,
+          batchSize: 500,
+        },
+        update: {},
+      });
+    }
+  }
+
+  private async removeArchivedNearbyLocation(
+    userId: string,
+    organizationId: string,
+    locationId: string,
+    changedAt: Date,
+    request: WafloRequest,
+  ) {
+    const configurations = await this.prisma.client.walletNearbyConfiguration.findMany({
+      where: { organizationId, locations: { some: { locationId } } },
+      select: { id: true, programId: true, revision: true },
+    });
+    for (const configuration of configurations) {
+      await this.prisma.client.$transaction(async (transaction) => {
+        await transaction.walletNearbyLocation.deleteMany({
+          where: { configurationId: configuration.id, locationId },
+        });
+        const remainingLocations = await transaction.walletNearbyLocation.count({
+          where: { configurationId: configuration.id },
+        });
+        await transaction.walletNearbyConfiguration.update({
+          where: { id: configuration.id },
+          data: {
+            revision: { increment: 1 },
+            ...(remainingLocations === 0 ? { enabled: false } : {}),
+          },
+        });
+        await transaction.programWalletSyncJob.upsert({
+          where: {
+            idempotencyKey: `program-wallet-nearby-archive:${configuration.programId}:${changedAt.toISOString()}`,
+          },
+          create: {
+            organizationId,
+            programId: configuration.programId,
+            action: "update",
+            reason: "NEARBY_RELEVANCE_CHANGED",
+            commandType: "UPDATE",
+            idempotencyKey: `program-wallet-nearby-archive:${configuration.programId}:${changedAt.toISOString()}`,
+            batchSize: 500,
+          },
+          update: {},
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "wallet.nearby_location_selection_changed",
+            targetType: "wallet_nearby_configuration",
+            targetId: configuration.id,
+            metadata: {
+              programId: configuration.programId,
+              removedLocationId: locationId,
+              nearbyDisabled: remainingLocations === 0,
+              revision: configuration.revision + 1,
+            },
+          },
+          request,
+        );
+      });
+    }
   }
 }
