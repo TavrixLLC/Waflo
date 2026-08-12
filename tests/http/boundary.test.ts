@@ -629,15 +629,20 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
   });
 
   it("rejects production tenant query overrides without exposing organization UUIDs", async () => {
-    const originalNodeEnvironment = environment.values.NODE_ENV;
-    Object.assign(environment.values, { NODE_ENV: "production" });
-    const rejected = await app.inject({
-      method: "GET",
-      url: "/v1/public/merchant-host/resolve?host=unknown.localhost&tenant=boundary",
-    });
-    Object.assign(environment.values, { NODE_ENV: originalNodeEnvironment });
-    expect(rejected.statusCode).toBe(400);
-    expect(rejected.json().error.code).toBe("TENANT_OVERRIDE_FORBIDDEN");
+    const originalDeploymentEnvironment = environment.values.DEPLOYMENT_ENVIRONMENT;
+    try {
+      Object.assign(environment.values, { DEPLOYMENT_ENVIRONMENT: "production" });
+      const rejected = await app.inject({
+        method: "GET",
+        url: "/v1/public/merchant-host/resolve?host=unknown.localhost&tenant=boundary",
+      });
+      expect(rejected.statusCode).toBe(400);
+      expect(rejected.json().error.code).toBe("TENANT_OVERRIDE_FORBIDDEN");
+    } finally {
+      Object.assign(environment.values, {
+        DEPLOYMENT_ENVIRONMENT: originalDeploymentEnvironment,
+      });
+    }
 
     const organization = await prisma.client.organization.findUniqueOrThrow({
       where: { id: organizationId },
