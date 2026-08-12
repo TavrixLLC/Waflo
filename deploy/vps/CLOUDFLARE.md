@@ -8,12 +8,13 @@ Configure ingress in the Cloudflare dashboard for the environment's tunnel. Orig
 
 | Public hostname | Origin service |
 |---|---|
-| `app.staging.waflo.app` | `http://merchant-web:3001` |
-| `card.staging.waflo.app` | `http://customer-web:3002` |
-| `api.staging.waflo.app` | `http://api:4000` |
+| `staging.waflo.app` | `http://marketing-web:3000` |
+| `app-staging.waflo.app` | `http://merchant-web:3001` |
+| `card-staging.waflo.app` | `http://customer-web:3002` |
+| `api-staging.waflo.app` | `http://api:4000` |
 | fallback | HTTP 404 |
 
-The Marketing Web image still runs in staging for architectural parity and health verification, but no staging marketing hostname was specified. Staging dashboard links therefore use the public `https://waflo.app`; add a dedicated hostname and change only configuration if a separately routed staging marketing site is required.
+The staging Marketing Web is authoritative at `https://staging.waflo.app`. Cloudflare routing is configured manually; this repository does not call Cloudflare APIs or require Advanced Certificate Manager or Total TLS.
 
 ## Production tunnel
 

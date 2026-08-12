@@ -50,7 +50,7 @@ No endpoint grants the client authority over organization, location, device, ent
 
 | Environment | API origin | Use |
 |---|---|---|
-| Staging | `https://api.staging.waflo.app` | Physical-device E2E after the staging deployment and readiness checks are green |
+| Staging | `https://api-staging.waflo.app` | Physical-device E2E after the staging deployment and readiness checks are green |
 | Production | `https://api.waflo.app` | Release build only after production entry criteria pass |
 
 HTTPS is mandatory. Mobile may call `GET /health` for optional diagnostics, but must not use it as a session or operation prerequisite. `GET /ready` is deployment infrastructure only.
@@ -437,7 +437,7 @@ Backward compatibility is guaranteed only by deployed executable routes/schemas 
 
 | M2 durable item/file | Classification | Production-v1 finding | Mobile consequence |
 |---|---|---|---|
-| `source-manifest.json` | `BACKEND_INTERNAL_ONLY` | Pins M2 baseline `0cc39d9ecb39a34fdbd91498e55b6d6ac35c281e`, 24 migrations, source hashes/evidence. Current release has 28 migrations. | Use this release identity instead; no runtime call. |
+| `source-manifest.json` | `BACKEND_INTERNAL_ONLY` | Pins M2 baseline `0cc39d9ecb39a34fdbd91498e55b6d6ac35c281e`, 24 migrations, source hashes/evidence. Current release has 29 migrations. | Use this release identity instead; no runtime call. |
 | `openapi.m2.json` — six durable paths | `UNCHANGED` | Context, resolve, stamp, redeem, public operation status, and command status methods/paths remain executable. | Keep exact `/v1` paths and signed-device domain. |
 | `openapi.m2.json` — stamp `managerOverride` | `CHANGED_MOBILE_ACTION_REQUIRED` | Shape still validates, but execution deliberately grants no override and approvals are `REDEEM` only. | MOB-001 before E2E. |
 | `m2.schema.json` | `UNCHANGED` | Current `packages/contracts/src/m2.ts` still validates the durable response union. | Continue strict field/type handling; use current error additions. |
@@ -456,7 +456,7 @@ Backward compatibility is guaranteed only by deployed executable routes/schemas 
 | Optional reverse endpoint absent from M2 durable path list | `EXTENDED_COMPATIBLY` | Reverse exists with compensating-ledger semantics. | Integrate only if Mobile exposes reversal. |
 | Manager approval narrative outside the six-path bundle | `CHANGED_MOBILE_ACTION_REQUIRED` | Signed redeem now reserves the exact command and creates the server-fingerprinted approval; Merchant Web only lists/decides; same-key Mobile retry consumes atomically. | Implement MOB-004's supported retry flow; backend blocker is resolved. |
 
-Migration 28 remains the external Merchant Google/Apple OAuth security repair; the migration count stays 28. Commit `763f2dfccdb24fb9bfa16457f0e49936840e20a1` adds the production backend repairs without adding a migration: Merchant Location-assignment APIs, server-issued approval requests with atomic consumption, and current-state Staff lifecycle enforcement. The six durable M2 Staff operation paths remain executable; their current behavior is extended by this contract.
+Migration 28 remains the external Merchant Google/Apple OAuth security repair. Migration 29 adds Web/Backend Wallet Engagement storage and has no Staff Mobile API or operation-contract effect. Commit `763f2dfccdb24fb9bfa16457f0e49936840e20a1` adds the production backend repairs: Merchant Location-assignment APIs, server-issued approval requests with atomic consumption, and current-state Staff lifecycle enforcement. The six durable M2 Staff operation paths remain executable; their current behavior is extended by this contract.
 
 ### Production-hardening impact audit
 
@@ -498,7 +498,7 @@ NFC, Smart Tap, POS integration, offline mutations/queues, sticky server session
 
 ## Physical staging E2E entry criteria
 
-1. Exact audited commit is deployed to `https://api.staging.waflo.app` and deployment readiness is green.
+1. Exact audited commit is deployed to `https://api-staging.waflo.app` and deployment readiness is green.
 2. No production credentials/customer data are used.
 3. Staff organization/member, active Loyalty Card, membership credential, earning/redemption location, and effective billing are provisioned.
 4. Staff Location assignments are provisioned through the supported Merchant API before pairing.

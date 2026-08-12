@@ -2,7 +2,7 @@
 
 ## Authority and result policy
 
-Run this checklist against `https://api.staging.waflo.app` only after commit `763f2dfccdb24fb9bfa16457f0e49936840e20a1` is deployed and deployment readiness is green. This checklist does not authorize a push/deploy. The exact wire contract is [production-v1-endpoint-catalog.md](production-v1-endpoint-catalog.md).
+Run this checklist against `https://api-staging.waflo.app` only after commit `763f2dfccdb24fb9bfa16457f0e49936840e20a1` is deployed and deployment readiness is green. This checklist does not authorize a push/deploy. The exact wire contract is [production-v1-endpoint-catalog.md](production-v1-endpoint-catalog.md).
 
 Result values are `PASS`, `FAIL`, `BLOCKED`, or `NOT_APPLICABLE`. A `BLOCKED` critical case prevents production release; it is not a pass. BCK-001, BCK-002, and BCK-003 are resolved at the audited SHA; approval cases are executable and must not be pre-marked blocked.
 
@@ -28,7 +28,7 @@ Never put a pairing QR, member QR, access/refresh token, private key, signature,
 | Mobile build/version | |
 | Physical device/model | |
 | OS/version | |
-| API origin | Must equal `https://api.staging.waflo.app` |
+| API origin | Must equal `https://api-staging.waflo.app` |
 | Deployed backend SHA | Must equal audited SHA |
 | Organization test alias | Non-sensitive alias only |
 | Staff test alias | Non-sensitive alias only |
@@ -40,7 +40,7 @@ Never put a pairing QR, member QR, access/refresh token, private key, signature,
 | # / case | Setup | Mobile action | Expected API call and response | Expected UI state | Backend authoritative check | Pass/fail criterion |
 |---|---|---|---|---|---|---|
 | 1. Clean install | Remove prior app and confirm its secure-store behavior for uninstall on that OS; revoke any old staging device separately. | Install and launch the candidate build. | No authenticated operation call; optionally `GET /health` → 200. No Merchant/customer auth call. | Unpaired/start-pairing screen; no prior customer/progress/session state. | No new device/session/loyalty row. | PASS only if no old credential is used and no loyalty mutation occurs. |
-| 2. Staging origin | Candidate is built with staging environment. | Open diagnostics/about screen; inspect redacted network host. | Requests target only `https://api.staging.waflo.app`; optional `/health` returns staging metadata. | Clearly identifies staging; never silently falls back to production. | Deployment observer confirms staging release SHA. | PASS only for exact HTTPS staging origin and no HTTP/production traffic. |
+| 2. Staging origin | Candidate is built with staging environment. | Open diagnostics/about screen; inspect redacted network host. | Requests target only `https://api-staging.waflo.app`; optional `/health` returns staging metadata. | Clearly identifies staging; never silently falls back to production. | Deployment observer confirms staging release SHA. | PASS only for exact HTTPS staging origin and no HTTP/production traffic. |
 | 3. Authenticate/pair | Owner/Manager first provisions the active Staff assignment through the supported Merchant PUT and confirms it through GET, then creates pairing for the authorized primary Location; display the live QR privately. | Generate key, scan QR, claim, sign challenge, complete. | Merchant assignment PUT → 200; `POST .../pairing/claim` → 200, then `POST .../pairing/complete` → 200 with `ACTIVE` device, secret session bundle, org/role/Location. | Paired home/scan state with expected organization/Location; no Merchant login screen and no Mobile self-assignment call. | Assignment/audit exist; pairing is `COMPLETED`; one active device/session; first requested Location is session Location. | PASS if supported provisioning and exact pairing order work, secrets never appear in logs, and context matches server. |
 | 4. Relaunch persistence | Case 3 succeeded. | Force-stop/terminate and relaunch without rescanning. | Signed `GET /v1/staff/device-context` → 200 using securely restored bundle. | Returns directly to Staff operational state; correct role/location. | Same session/device; `lastActiveAt/lastSeenAt` advances; no duplicate device. | PASS if session persists securely and context is revalidated before mutation. |
 | 5. Valid customer resolve | Same-org active test credential at earning-enabled primary location. | Scan the complete QR. | Signed `POST /v1/staff/memberships/resolve {qrPayload}` → 200 with matching public membership, goal/progress/rewards/visuals. | Customer display name and Loyalty Card state; grid computed only from progress/goal; sensitive QR not shown/logged. | Credential resolves to intended membership and projection version. | PASS if displayed fields equal response and no local parsing/provider assumption occurs. |

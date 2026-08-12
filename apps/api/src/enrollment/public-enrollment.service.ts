@@ -7,6 +7,7 @@ import {
 } from "@waflo/billing";
 import type { BillingStatus, EnrollmentInput } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
+import { canonicalCustomerUrl } from "@waflo/qr-core";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
 import { walletCommandIdempotencyKey, type WalletProviderCode } from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
@@ -32,15 +33,6 @@ function sha256(value: unknown): string {
 
 function billingStatus(value: string): BillingStatus {
   return value.toLocaleLowerCase("en-US") as BillingStatus;
-}
-
-function merchantCustomerUrl(baseUrl: string, merchantSlug: string, path: string): string {
-  const url = new URL(baseUrl);
-  url.hostname = `${merchantSlug}.${url.hostname}`;
-  url.pathname = path;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
 }
 
 const publicVersionInclude = {
@@ -511,11 +503,11 @@ export class PublicEnrollmentService {
     return {
       membership: {
         publicMembershipId: membership.publicMembershipId,
-        cardUrl: merchantCustomerUrl(
-          this.environment.values.CUSTOMER_WEB_URL,
+        cardUrl: canonicalCustomerUrl({
+          customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
           merchantSlug,
-          `/card/${membership.publicMembershipId}`,
-        ),
+          pathname: `/card/${membership.publicMembershipId}`,
+        }),
       },
       providerStates,
       replayed,

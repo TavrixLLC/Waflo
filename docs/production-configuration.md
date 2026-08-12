@@ -37,6 +37,11 @@ prints credentials.
   `CUSTOMER_COOKIE_NAME=__Host-waflo_customer`, `SESSION_TTL_DAYS`, and
   `SESSION_IDLE_TTL_MINUTES`.
 
+The authoritative staging public origins are `https://staging.waflo.app`,
+`https://app-staging.waflo.app`, `https://card-staging.waflo.app`, and
+`https://api-staging.waflo.app`. They are first-level subdomains covered by the existing Cloudflare
+Universal SSL model. Production origins remain unchanged.
+
 Only the configured trusted proxy may supply forwarded network context. OAuth
 callbacks are fixed API paths; the Customer BFF verifies that its resolved
 upstream origin is the configured API origin.
@@ -48,14 +53,17 @@ upstream origin is the configured API origin.
 Create separate Google OAuth web clients for staging and production. Register
 exactly:
 
-- staging: `https://<staging-api>/v1/auth/external/google/callback`
-- production: `https://<production-api>/v1/auth/external/google/callback`
+- staging: `https://api-staging.waflo.app/v1/auth/external/google/callback`
+- production: `https://api.waflo.app/v1/auth/external/google/callback`
 
 Set `GOOGLE_SIGNIN_CLIENT_ID`, `GOOGLE_SIGNIN_CLIENT_SECRET`, and
 `GOOGLE_SIGNIN_REDIRECT_URI`. Also set a dedicated `OAUTH_FLOW_SECRET` and
 `OAUTH_FLOW_TTL_MINUTES`. Verify with the operator readiness command and a real
 provider login. Never commit the client secret, flow secret, authorization
 code, ID token, or access token.
+
+The operator must add the exact staging callback above to the staging Google OAuth web client in
+Google Cloud Console before cutover. Repository validation cannot make that external-console change.
 
 ### Sign in with Apple — REQUIRED_ONLY_IF_FEATURE_ENABLED
 
@@ -75,7 +83,7 @@ cleared.
 
 Register the server-to-server notification URL for the environment:
 
-- staging: `https://api.staging.waflo.app/v1/auth/external/apple/notifications`
+- staging: `https://api-staging.waflo.app/v1/auth/external/apple/notifications`
 - production: `https://api.waflo.app/v1/auth/external/apple/notifications`
 
 The API verifies Apple's signed JWS and handles `email-enabled`,
@@ -101,7 +109,8 @@ notification fails; delivery failure is retried and audited.
 ## Stripe — REQUIRED_ONLY_IF_BILLING_IS_ENABLED
 
 Create separate Stripe TEST and LIVE Prices, portal configuration, server key,
-and webhook endpoint `https://<api-origin>/v1/webhooks/stripe`. Set
+and webhook endpoint `https://<api-origin>/v1/webhooks/stripe`. The current staging endpoint is
+`https://api-staging.waflo.app/v1/webhooks/stripe`. Set
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, the three
 `STRIPE_*_MONTHLY_PRICE_ID` values,
 `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID`,

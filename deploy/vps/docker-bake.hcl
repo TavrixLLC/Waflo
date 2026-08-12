@@ -73,9 +73,9 @@ target "_staging-build" {
   cache-to = ["type=gha,mode=max,scope=waflo-release-staging"]
   args = {
     DEPLOYMENT_ENVIRONMENT          = "staging"
-    NEXT_PUBLIC_API_URL             = "https://api.staging.waflo.app"
-    NEXT_PUBLIC_DASHBOARD_URL       = "https://app.staging.waflo.app"
-    NEXT_PUBLIC_MARKETING_URL       = "https://waflo.app"
+    NEXT_PUBLIC_API_URL             = "https://api-staging.waflo.app"
+    NEXT_PUBLIC_DASHBOARD_URL       = "https://app-staging.waflo.app"
+    NEXT_PUBLIC_MARKETING_URL       = "https://staging.waflo.app"
   }
 }
 

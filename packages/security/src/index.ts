@@ -251,12 +251,9 @@ export function createNextContentSecurityPolicy(
     options.apiUrl,
     options.allowLoopbackApi === true,
   );
-  const configuredApiSource =
-    configuredApiOrigin && configuredApiOrigin !== "https://api.waflo.app"
-      ? ` ${configuredApiOrigin}`
-      : "";
+  const apiSource = configuredApiOrigin ?? "https://api.waflo.app";
 
-  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource}${configuredApiSource} https://api.waflo.app`;
+  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource} ${apiSource}`;
 }
 
 export const securityHeaders = {

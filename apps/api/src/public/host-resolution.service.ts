@@ -47,13 +47,16 @@ export class HostResolutionService {
         name: resolved.organization.name,
         slug: resolved.organization.merchantSlug,
         defaultLocale: resolved.organization.defaultLocale === "AR" ? "ar" : "en",
-        hostname: `${resolved.organization.merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
+        hostname:
+          this.environment.values.DEPLOYMENT_ENVIRONMENT === "staging"
+            ? new URL(this.environment.values.CUSTOMER_WEB_URL).hostname
+            : `${resolved.organization.merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
       },
     };
   }
 
   async resolveOrganization(host: string, developmentOverride?: string) {
-    if (developmentOverride && this.environment.values.NODE_ENV === "production") {
+    if (developmentOverride && this.environment.values.DEPLOYMENT_ENVIRONMENT === "production") {
       throw new AppError(
         "TENANT_OVERRIDE_FORBIDDEN",
         "Tenant overrides are disabled in production.",
@@ -61,7 +64,7 @@ export class HostResolutionService {
       );
     }
     const effectiveHost =
-      developmentOverride && this.environment.values.NODE_ENV !== "production"
+      developmentOverride && this.environment.values.DEPLOYMENT_ENVIRONMENT !== "production"
         ? `${developmentOverride}.localhost`
         : host;
     const parsed = parseMerchantHostname(
@@ -69,7 +72,7 @@ export class HostResolutionService {
       this.environment.values.MERCHANT_BASE_DOMAIN,
     );
     if (
-      this.environment.values.NODE_ENV === "production" &&
+      this.environment.values.DEPLOYMENT_ENVIRONMENT === "production" &&
       (parsed.normalizedHost?.endsWith(".localhost") || parsed.normalizedHost?.endsWith(".lvh.me"))
     ) {
       return { status: "malformed" as const };

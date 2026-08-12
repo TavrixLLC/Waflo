@@ -41,8 +41,9 @@ const secretPaths = Object.fromEntries(
 
 function render(environment) {
   const staging = environment === "staging";
-  const apiOrigin = staging ? "https://api.staging.waflo.app" : "https://api.waflo.app";
-  const customerOrigin = staging ? "https://card.staging.waflo.app" : "https://card.waflo.app";
+  const apiOrigin = staging ? "https://api-staging.waflo.app" : "https://api.waflo.app";
+  const customerOrigin = staging ? "https://card-staging.waflo.app" : "https://card.waflo.app";
+  const marketingOrigin = staging ? "https://staging.waflo.app" : "https://waflo.app";
   const applicationEnvironment = join(scratch, `application-${environment}.env`);
   const secretEnvironment = join(scratch, `application-${environment}.secret.env`);
   writeFileSync(
@@ -106,9 +107,9 @@ function render(environment) {
     OBJECT_STORAGE_BUCKET: staging ? "waflo-staging-private" : "waflo-production-private",
     WAFLO_EDGE_SUBNET: staging ? "10.210.10.0/24" : "10.210.20.0/24",
     WAFLO_BACKEND_SUBNET: staging ? "10.210.11.0/24" : "10.210.21.0/24",
-    NEXT_PUBLIC_API_URL: staging ? "https://api.staging.waflo.app" : "https://api.waflo.app",
-    NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app.staging.waflo.app" : "https://app.waflo.app",
-    NEXT_PUBLIC_MARKETING_URL: "https://waflo.app",
+    NEXT_PUBLIC_API_URL: staging ? "https://api-staging.waflo.app" : "https://api.waflo.app",
+    NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app-staging.waflo.app" : "https://app.waflo.app",
+    NEXT_PUBLIC_MARKETING_URL: marketingOrigin,
   };
   const result = spawnSync(
     "docker",

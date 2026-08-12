@@ -24,7 +24,8 @@ export default async function JoinProgramPage({
     directHost.includes("localhost") ||
     directHost.includes("127.0.0.1") ||
     directHost.includes(".lvh.me");
-  const tenant = localHost ? query.tenant : undefined;
+  const sharedStagingHost = directHost.split(":")[0] === "card-staging.waflo.app";
+  const tenant = localHost || sharedStagingHost ? query.tenant : undefined;
   const result = await fetchCustomerApi<{
     status: string;
     merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };

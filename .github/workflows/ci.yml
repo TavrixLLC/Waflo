@@ -278,7 +278,7 @@ jobs:
     timeout-minutes: 30
     environment:
       name: staging
-      url: https://app.staging.waflo.app
+      url: https://app-staging.waflo.app
     concurrency:
       group: waflo-deploy-staging
       cancel-in-progress: false

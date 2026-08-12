@@ -85,13 +85,27 @@ export function canonicalJoinUrl(input: {
   programSlug: string;
   customerBaseUrl: string;
 }): string {
+  return canonicalCustomerUrl({
+    merchantSlug: input.merchantSlug,
+    customerBaseUrl: input.customerBaseUrl,
+    pathname: `/join/${validateProgramPublicSlug(input.programSlug)}`,
+  });
+}
+
+export function canonicalCustomerUrl(input: {
+  merchantSlug: string;
+  customerBaseUrl: string;
+  pathname: string;
+}): string {
   const base = new URL(input.customerBaseUrl);
-  const local = base.hostname === "localhost" || base.hostname.endsWith(".lvh.me");
-  base.hostname = local
-    ? `${input.merchantSlug}.${base.hostname}`
-    : `${input.merchantSlug}.${base.hostname}`;
-  base.pathname = `/join/${validateProgramPublicSlug(input.programSlug)}`;
-  base.search = "";
+  const sharedStagingHost = base.hostname === "card-staging.waflo.app";
+  if (sharedStagingHost) {
+    base.searchParams.set("tenant", input.merchantSlug);
+  } else {
+    base.hostname = `${input.merchantSlug}.${base.hostname}`;
+  }
+  base.pathname = input.pathname;
+  if (!sharedStagingHost) base.search = "";
   base.hash = "";
   return base.toString();
 }

@@ -211,6 +211,9 @@ export class CustomerCsrfGuard implements CanActivate {
 
   private expectedOrigins(merchantSlug: string): string[] {
     const base = new URL(this.environment.values.CUSTOMER_WEB_URL);
+    if (this.environment.values.DEPLOYMENT_ENVIRONMENT === "staging") {
+      return [base.origin];
+    }
     const merchant = new URL(base);
     merchant.hostname = `${merchantSlug}.${base.hostname}`;
     if (this.environment.values.NODE_ENV === "production") {

@@ -15,8 +15,8 @@ verification or deployment. Values are installed separately for staging and prod
 | `GOOGLE_WALLET_MODE` | NON_SECRET_CONFIG | `REAL` for real issuance; `DISABLED` turns the provider off. `TEST_ADAPTER` is rejected in deployed environments. |
 | `GOOGLE_WALLET_ISSUER_ID` | NON_SECRET_CONFIG | Issuer ID from Google Wallet Business Console. Keep it stable after issuance. |
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64` | NON_SECRET_CONFIG | Container path `/run/waflo-provider-secrets/google-wallet-service-account.json`. The code also accepts base64, but deployed templates deliberately use a file. |
-| `GOOGLE_WALLET_ALLOWED_ORIGINS` | NON_SECRET_CONFIG | Staging: `https://card.staging.waflo.app`; production: `https://card.waflo.app`. These are copied into the signed Save JWT. |
-| `GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL` | NON_SECRET_CONFIG | Staging: `https://api.staging.waflo.app/v1/public/wallet-assets`; production: `https://api.waflo.app/v1/public/wallet-assets`. |
+| `GOOGLE_WALLET_ALLOWED_ORIGINS` | NON_SECRET_CONFIG | Staging: `https://card-staging.waflo.app`; production: `https://card.waflo.app`. These are copied into the signed Save JWT. |
+| `GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL` | NON_SECRET_CONFIG | Staging: `https://api-staging.waflo.app/v1/public/wallet-assets`; production: `https://api.waflo.app/v1/public/wallet-assets`. |
 | `GOOGLE_WALLET_PUBLISHING_MODE` | NON_SECRET_CONFIG | Staging while approval is pending: `DEMO`; public production after approval: `PUBLISHING`. This is a deployment gate, not a second issuance implementation. |
 | `google-wallet-service-account.json` | SECRET_FILE | Complete service-account JSON. Waflo reads `client_email`, PEM `private_key`, and optional `token_uri`. Project ID and private-key ID may remain in the normal JSON but are not separate Waflo settings. |
 
@@ -70,7 +70,7 @@ Object ID. The private key never reaches the browser.
 4. Deploy staging outside this repository task.
 5. Create and publish a Waflo Loyalty Card, then join it as a customer using the authorized Google
    test account.
-6. On Android, open `https://card.staging.waflo.app`, press **Add to Google Wallet**, follow the
+6. On Android, open `https://card-staging.waflo.app`, press **Add to Google Wallet**, follow the
    signed Google URL, and save the pass. In Demo Mode it is visibly test-only.
 7. Issue a Staff stamp. Wait for the Wallet command worker to PATCH the same object and confirm the
    pass progress changes.
@@ -98,7 +98,7 @@ unless the operator intentionally rotates them.
 | `APPLE_ORGANIZATION_NAME` | NON_SECRET_CONFIG | Display organization, currently `Waflo by Tavrix LLC`. |
 | `APPLE_PASS_CERTIFICATE_PATH_OR_BASE64` | NON_SECRET_CONFIG | Container path `/run/waflo-provider-secrets/apple-wallet-pass.p12`. |
 | `APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64` | NON_SECRET_CONFIG | Container path `/run/waflo-provider-secrets/apple-wwdr.pem`. |
-| `APPLE_PASS_WEB_SERVICE_URL` | NON_SECRET_CONFIG | Staging: `https://api.staging.waflo.app/v1/apple-wallet`; production: `https://api.waflo.app/v1/apple-wallet`. Do not append the protocol's second `/v1`. |
+| `APPLE_PASS_WEB_SERVICE_URL` | NON_SECRET_CONFIG | Staging: `https://api-staging.waflo.app/v1/apple-wallet`; production: `https://api.waflo.app/v1/apple-wallet`. Do not append the protocol's second `/v1`. |
 | `APPLE_APNS_ENVIRONMENT` | NON_SECRET_CONFIG | `production` in staging and production. Wallet pass pushes use the production APNs host. |
 | `APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION` | NON_SECRET_CONFIG | Positive integer present in the keyring; start at `1`. |
 | `apple-wallet-pass.p12` | SECRET_FILE | Password-protected PKCS#12/PFX containing the Pass Type ID certificate and matching private key. File bytes or base64 are accepted by code; the deployed contract uses the file. |
@@ -144,11 +144,11 @@ Apple's public protocol routes are:
 
 | Operation | Implemented path | Staging URL | Production URL |
 | --- | --- | --- | --- |
-| Register device | `POST /v1/apple-wallet/v1/devices/:deviceLibraryIdentifier/registrations/:passTypeIdentifier/:serialNumber` | `https://api.staging.waflo.app/v1/apple-wallet/v1/devices/.../registrations/.../...` | `https://api.waflo.app/v1/apple-wallet/v1/devices/.../registrations/.../...` |
+| Register device | `POST /v1/apple-wallet/v1/devices/:deviceLibraryIdentifier/registrations/:passTypeIdentifier/:serialNumber` | `https://api-staging.waflo.app/v1/apple-wallet/v1/devices/.../registrations/.../...` | `https://api.waflo.app/v1/apple-wallet/v1/devices/.../registrations/.../...` |
 | Unregister device | `DELETE` on the same path | same staging base | same production base |
 | List updated passes | `GET /v1/apple-wallet/v1/devices/:deviceLibraryIdentifier/registrations/:passTypeIdentifier?passesUpdatedSince=<tag>` | staging base plus path | production base plus path |
 | Retrieve updated pass | `GET /v1/apple-wallet/v1/passes/:passTypeIdentifier/:serialNumber` | staging base plus path | production base plus path |
-| Device logs | `POST /v1/apple-wallet/v1/log` | `https://api.staging.waflo.app/v1/apple-wallet/v1/log` | `https://api.waflo.app/v1/apple-wallet/v1/log` |
+| Device logs | `POST /v1/apple-wallet/v1/log` | `https://api-staging.waflo.app/v1/apple-wallet/v1/log` | `https://api.waflo.app/v1/apple-wallet/v1/log` |
 
 Routes parse `Authorization: ApplePass <token>`, verify the exact Pass Type ID and serial ownership,
 and constant-time verify the token against all retained pass-auth key versions. Device identifiers
@@ -186,6 +186,10 @@ Only completion of this procedure may mark Apple Wallet externally verified.
 
 ## Stripe
 
+The staging TEST webhook has been cut over externally to
+`https://api-staging.waflo.app/v1/webhooks/stripe`. Do not rotate or copy the endpoint signing
+secret as part of the hostname change.
+
 ### Current routes and behavior
 
 - billing summary: `GET /v1/organizations/:organizationId/billing`
@@ -194,7 +198,7 @@ Only completion of this procedure may mark Apple Wallet externally verified.
 - Customer Portal: `POST /v1/organizations/:organizationId/billing/portal`
 - manual canonical reconciliation: `POST /v1/organizations/:organizationId/billing/reconcile`
 - webhook: `POST /v1/webhooks/stripe`
-- exact staging webhook URL: `https://api.staging.waflo.app/v1/webhooks/stripe`
+- exact staging webhook URL: `https://api-staging.waflo.app/v1/webhooks/stripe`
 - exact production webhook URL: `https://api.waflo.app/v1/webhooks/stripe`
 
 Checkout is Stripe-hosted subscription Checkout. The API creates/associates one Stripe Customer per
@@ -202,8 +206,8 @@ organization under invariant locks and uses provider and local idempotency keys.
 Waflo `STARTER`, `GROWTH`, and `SCALE` plans only to their configured monthly Price IDs. Product IDs
 are not read. The success/cancel URLs are derived, not configurable:
 
-- staging success: `https://app.staging.waflo.app/en/dashboard/billing?checkout=returned`
-- staging cancel: `https://app.staging.waflo.app/en/dashboard/billing?checkout=canceled`
+- staging success: `https://app-staging.waflo.app/en/dashboard/billing?checkout=returned`
+- staging cancel: `https://app-staging.waflo.app/en/dashboard/billing?checkout=canceled`
 - production success: `https://app.waflo.app/en/dashboard/billing?checkout=returned`
 - production cancel: `https://app.waflo.app/en/dashboard/billing?checkout=canceled`
 
@@ -248,7 +252,7 @@ recover missing or delayed webhooks with multi-instance-safe leases.
 1. In Stripe TEST mode create the three existing monthly recurring Prices and, if Portal is used,
    a TEST Portal configuration. Do not use LIVE objects.
 2. Create a TEST webhook endpoint at exactly
-   `https://api.staging.waflo.app/v1/webhooks/stripe`, API version `2026-06-24.dahlia`, subscribing
+   `https://api-staging.waflo.app/v1/webhooks/stripe`, API version `2026-06-24.dahlia`, subscribing
    to the three handled subscription events. Install its `whsec_...` endpoint secret.
 3. Install `sk_test_...`, all three TEST Price IDs, optional TEST `bpc_...`, and reconciliation
    settings; validate readiness and deploy staging outside this task.

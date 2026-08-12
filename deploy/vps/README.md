@@ -79,6 +79,8 @@ All replicas in one environment receive exactly the same active and legacy versi
    real Apple Pass Type ID certificate with production Wallet APNs, then apply restrictive
    permissions.
 4. Configure the remotely managed `waflo-staging` tunnel routes from [CLOUDFLARE.md](CLOUDFLARE.md).
+   The required public hosts are `staging.waflo.app`, `app-staging.waflo.app`,
+   `card-staging.waflo.app`, and `api-staging.waflo.app`.
 5. Run Compose validation and the production configuration readiness command.
 6. The release job pulls the immutable GHCR images; it never builds source on the VPS.
 7. `deploy.sh staging <sha>` starts state, initializes the private bucket/user, migrates once, waits
@@ -128,4 +130,7 @@ The API exposes the existing `/health` liveness and `/ready` dependency readines
 
 ## Mobile compatibility
 
-This platform does not change Flutter, Staff/M2 request or response schemas, command-status schema, stamp payload, or redeem payload. Mobile endpoints are `https://api.staging.waflo.app` and `https://api.waflo.app`.
+This platform does not change Flutter, Staff/M2 request or response schemas, command-status schema,
+stamp payload, or redeem payload. The Mobile-facing API contract is unchanged. After Backend
+staging cutover is confirmed, Staff Mobile must change only its staging API base URL to
+`https://api-staging.waflo.app`; production remains `https://api.waflo.app`.

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import type { TransferRequestInput } from "@waflo/contracts";
-import { decodeQrImage } from "@waflo/qr-core";
+import { canonicalCustomerUrl, decodeQrImage } from "@waflo/qr-core";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
 import { walletCommandIdempotencyKey } from "@waflo/wallet-core";
 import { lockApplePassUpdateSequence, queueWalletPassStateChange } from "@waflo/database";
@@ -30,14 +30,13 @@ function transferActionUrl(
   transferPublicId: string,
   token: string,
 ) {
-  const url = new URL(baseUrl);
-  url.pathname = "/transfer/confirm";
-  url.search = "";
-  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-    url.searchParams.set("tenant", merchantSlug);
-  } else {
-    url.hostname = `${merchantSlug}.${url.hostname}`;
-  }
+  const url = new URL(
+    canonicalCustomerUrl({
+      customerBaseUrl: baseUrl,
+      merchantSlug,
+      pathname: "/transfer/confirm",
+    }),
+  );
   url.hash = `transfer=${encodeURIComponent(transferPublicId)}&token=${encodeURIComponent(token)}`;
   return url.toString();
 }

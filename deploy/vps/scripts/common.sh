@@ -251,10 +251,11 @@ wait_for_public_url() {
 assert_public_health() {
   case "${DEPLOYMENT_ENVIRONMENT}" in
     staging)
-      wait_for_public_url "https://api.staging.waflo.app/health"
-      wait_for_public_url "https://api.staging.waflo.app/ready"
-      wait_for_public_url "https://app.staging.waflo.app/en/login"
-      wait_for_public_url "https://card.staging.waflo.app/"
+      wait_for_public_url "https://api-staging.waflo.app/health"
+      wait_for_public_url "https://api-staging.waflo.app/ready"
+      wait_for_public_url "https://app-staging.waflo.app/en/login"
+      wait_for_public_url "https://card-staging.waflo.app/privacy"
+      wait_for_public_url "https://staging.waflo.app/en"
       ;;
     production)
       wait_for_public_url "https://api.waflo.app/health"

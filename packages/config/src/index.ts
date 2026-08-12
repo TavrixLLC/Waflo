@@ -478,6 +478,70 @@ export const environmentSchema = z
         });
       }
     }
+    const publicAuthority =
+      value.DEPLOYMENT_ENVIRONMENT === "staging"
+        ? {
+            MARKETING_WEB_URL: "https://staging.waflo.app",
+            MERCHANT_DASHBOARD_URL: "https://app-staging.waflo.app",
+            CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+            API_PUBLIC_URL: "https://api-staging.waflo.app",
+            WALLET_PUBLIC_BASE_URL: "https://api-staging.waflo.app/v1/public/wallet-assets",
+          }
+        : {
+            MARKETING_WEB_URL: "https://waflo.app",
+            MERCHANT_DASHBOARD_URL: "https://app.waflo.app",
+            CUSTOMER_WEB_URL: "https://card.waflo.app",
+            API_PUBLIC_URL: "https://api.waflo.app",
+            WALLET_PUBLIC_BASE_URL: "https://api.waflo.app/v1/public/wallet-assets",
+          };
+    for (const [key, expected] of Object.entries(publicAuthority) as Array<
+      [keyof typeof publicAuthority, string]
+    >) {
+      if (value[key].replace(/\/+$/u, "") !== expected) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `${value.DEPLOYMENT_ENVIRONMENT} requires the authoritative ${expected} URL.`,
+        });
+      }
+    }
+    const expectedWalletOrigin = new URL(publicAuthority.API_PUBLIC_URL).origin;
+    if (
+      value.APPLE_PASS_WEB_SERVICE_URL &&
+      value.APPLE_PASS_WEB_SERVICE_URL.replace(/\/+$/u, "") !==
+        `${expectedWalletOrigin}/v1/apple-wallet`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_PASS_WEB_SERVICE_URL"],
+        message: "Apple Wallet webServiceURL must use the authoritative API origin.",
+      });
+    }
+    if (
+      value.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL &&
+      value.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL.replace(/\/+$/u, "") !==
+        `${expectedWalletOrigin}/v1/public/wallet-assets`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL"],
+        message: "Google Wallet public assets must use the authoritative API origin.",
+      });
+    }
+    const googleWalletOrigins = value.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",").map((origin) =>
+      origin.trim(),
+    );
+    if (
+      googleWalletOrigins.length !== 1 ||
+      googleWalletOrigins[0] !== new URL(publicAuthority.CUSTOMER_WEB_URL).origin
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GOOGLE_WALLET_ALLOWED_ORIGINS"],
+        message:
+          "Google Wallet Save origins must contain only the authoritative Customer Web origin.",
+      });
+    }
     if (
       value.APPLE_PASS_WEB_SERVICE_URL &&
       !value.APPLE_PASS_WEB_SERVICE_URL.startsWith("https://")
@@ -675,5 +739,12 @@ export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
 export const platformDomains = {
   marketing: "waflo.app",
   dashboard: "app.waflo.app",
+  customer: "card.waflo.app",
   api: "api.waflo.app",
+  staging: {
+    marketing: "staging.waflo.app",
+    dashboard: "app-staging.waflo.app",
+    customer: "card-staging.waflo.app",
+    api: "api-staging.waflo.app",
+  },
 } as const;
