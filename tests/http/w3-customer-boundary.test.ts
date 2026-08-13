@@ -384,6 +384,21 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     const newSessionCookie = cookie(rotated, environment.values.CUSTOMER_COOKIE_NAME);
     expect(newSessionCookie).not.toBe(sessionCookie);
 
+    const staleRotation = await app.inject({
+      method: "POST",
+      url: "/v1/customer/session/rotate",
+      headers: {
+        host: merchantHost,
+        origin: new URL(environment.values.CUSTOMER_WEB_URL).origin,
+        cookie: `${sessionCookie}; ${csrfCookie}`,
+        "x-csrf-token": csrf,
+        "content-type": "application/json",
+      },
+      payload: {},
+    });
+    expect(staleRotation.statusCode).toBe(401);
+    expect(staleRotation.body).toContain("CUSTOMER_SESSION_EXPIRED");
+
     const staleSession = await app.inject({
       method: "GET",
       url: "/v1/customer/csrf",

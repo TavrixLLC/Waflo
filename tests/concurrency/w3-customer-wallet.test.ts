@@ -108,11 +108,16 @@ let prisma: PrismaService;
 let environment: EnvironmentService;
 let security: CustomerSecurityService;
 let fixture: W3CustomerWalletFixture;
-let membershipId = "";
 let applePassId = "";
 let appleSerial = "";
-let sessionCookie = "";
 const notificationLinks: Array<{ to: string; actionUrl: string }> = [];
+const rateLimitRunId = randomUUID().slice(0, 8);
+let remoteAddressCounter = 1;
+
+function testRemoteAddress(): string {
+  const value = remoteAddressCounter++;
+  return `10.124.${Math.floor(value / 250)}.${(value % 250) + 1}`;
+}
 
 function data<T>(response: { json(): unknown }): T {
   return (response.json() as { data: T }).data;
@@ -144,6 +149,39 @@ async function bootstrapCsrf(currentCookie: string) {
   };
 }
 
+async function enrollIsolatedCustomer(displayName: string) {
+  const enrollment = await app.inject({
+    method: "POST",
+    url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+    remoteAddress: testRemoteAddress(),
+    headers: {
+      host: fixture.merchantHost,
+      "content-type": "application/json",
+      "x-idempotency-key": `enroll:${randomUUID()}`,
+    },
+    payload: {
+      ...w3EnrollmentBase,
+      displayName,
+      formStartedAt: Date.now() - 2_000,
+    },
+  });
+  expect(enrollment.statusCode, enrollment.body).toBe(201);
+  const customerCookie = cookie(enrollment, environment.values.CUSTOMER_COOKIE_NAME);
+  expect(customerCookie).not.toBe("");
+  const publicMembershipId = data<{ membership: { publicMembershipId: string } }>(enrollment)
+    .membership.publicMembershipId;
+  const membership = await prisma.client.membership.findUniqueOrThrow({
+    where: { publicMembershipId },
+    include: {
+      accessSessions: true,
+      credentials: true,
+      walletCommands: true,
+      walletPassInstances: true,
+    },
+  });
+  return { customerCookie, membership };
+}
+
 async function drainProgramSyncJobs(programId: string) {
   const worker = new WalletWorker(prisma.client, {} as never, environment.values);
   const jobs = await prisma.client.programWalletSyncJob.findMany({
@@ -169,6 +207,7 @@ async function prepareTransferRace(displayName: string) {
   const enrollment = await app.inject({
     method: "POST",
     url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+    remoteAddress: testRemoteAddress(),
     headers: {
       host: fixture.merchantHost,
       "content-type": "application/json",
@@ -197,6 +236,7 @@ async function prepareTransferRace(displayName: string) {
     url: "/v1/customer/card",
     headers: { host: fixture.merchantHost, cookie: customerCookie },
   });
+  expect(card.statusCode, card.body).toBe(200);
   const requested = await app.inject({
     method: "POST",
     url: "/v1/public/transfers/request",
@@ -242,6 +282,7 @@ async function prepareEmailTransferRace(displayName: string) {
   const enrollment = await app.inject({
     method: "POST",
     url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+    remoteAddress: testRemoteAddress(),
     headers: {
       host: fixture.merchantHost,
       "content-type": "application/json",
@@ -267,6 +308,7 @@ async function prepareEmailTransferRace(displayName: string) {
     url: "/v1/customer/card",
     headers: { host: fixture.merchantHost, cookie: customerCookie },
   });
+  expect(card.statusCode, card.body).toBe(200);
   const requested = await app.inject({
     method: "POST",
     url: "/v1/public/transfers/request",
@@ -312,6 +354,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     process.env.APPLE_WALLET_MODE = "TEST_ADAPTER";
     process.env.GOOGLE_WALLET_MODE = "TEST_ADAPTER";
     process.env.GOOGLE_WALLET_ISSUER_ID = "w3-concurrency-issuer";
+    process.env.RATE_LIMIT_NAMESPACE = `w3-concurrency-${rateLimitRunId}`;
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);
@@ -331,29 +374,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       },
     };
     fixture = await createW3CustomerWalletFixture(prisma.client, "concurrency");
-    const enrollment = await app.inject({
-      method: "POST",
-      url: `/v1/public/programs/${fixture.programSlug}/enroll`,
-      headers: {
-        host: fixture.merchantHost,
-        "content-type": "application/json",
-        "x-idempotency-key": `enroll:${randomUUID()}`,
-      },
-      payload: {
-        ...w3EnrollmentBase,
-        displayName: "Concurrency Member",
-        formStartedAt: Date.now() - 2_000,
-      },
-    });
-    expect(enrollment.statusCode).toBe(201);
-    sessionCookie = cookie(enrollment, environment.values.CUSTOMER_COOKIE_NAME);
-    const publicMembershipId = data<{ membership: { publicMembershipId: string } }>(enrollment)
-      .membership.publicMembershipId;
-    const membership = await prisma.client.membership.findUniqueOrThrow({
-      where: { publicMembershipId },
-      include: { walletPassInstances: true },
-    });
-    membershipId = membership.id;
+    const { membership } = await enrollIsolatedCustomer("Concurrency Member");
     const apple = membership.walletPassInstances.find((pass) => pass.provider === "APPLE");
     if (!apple) throw new Error("Apple pass fixture was not created.");
     applePassId = apple.id;
@@ -429,6 +450,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     const enrollment = await app.inject({
       method: "POST",
       url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+      remoteAddress: testRemoteAddress(),
       headers: {
         host: fixture.merchantHost,
         "content-type": "application/json",
@@ -677,6 +699,7 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
       app.inject({
         method: "POST",
         url: `/v1/public/programs/${fixture.programSlug}/enroll`,
+        remoteAddress: testRemoteAddress(),
         headers: {
           host: fixture.merchantHost,
           "content-type": "application/json",
@@ -977,7 +1000,13 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
   }, 120_000);
 
   it("serializes customer session rotation and leaves the old session explicitly revoked", async () => {
-    const csrf = await bootstrapCsrf(sessionCookie);
+    const { customerCookie: oldCookie, membership } =
+      await enrollIsolatedCustomer("Session Rotation Race");
+    const oldToken = oldCookie.slice(`${environment.values.CUSTOMER_COOKIE_NAME}=`.length);
+    const oldSession = await prisma.client.membershipAccessSession.findUniqueOrThrow({
+      where: { tokenHash: security.hashSessionToken(oldToken) },
+    });
+    const csrf = await bootstrapCsrf(oldCookie);
     const rotate = () =>
       app.inject({
         method: "POST",
@@ -985,40 +1014,72 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
         headers: {
           host: fixture.merchantHost,
           origin: new URL(environment.values.CUSTOMER_WEB_URL).origin,
-          cookie: `${sessionCookie}; ${csrf.csrfCookie}`,
+          cookie: `${oldCookie}; ${csrf.csrfCookie}`,
           "x-csrf-token": csrf.token,
           "content-type": "application/json",
         },
         payload: {},
       });
     const results = await Promise.all([rotate(), rotate()]);
-    expect(results.map((response) => response.statusCode).sort()).toEqual([201, 409]);
+    expect(results.map((response) => response.statusCode).sort()).toEqual([201, 401]);
     const success = required(
       results.find((response) => response.statusCode === 201),
       "Successful rotation response",
     );
-    sessionCookie = cookie(success, environment.values.CUSTOMER_COOKIE_NAME);
-    const oldSession = required(
-      results.find((response) => response.statusCode === 409),
+    const newCookie = cookie(success, environment.values.CUSTOMER_COOKIE_NAME);
+    expect(newCookie).not.toBe("");
+    const rejected = required(
+      results.find((response) => response.statusCode === 401),
       "Rejected stale rotation response",
     );
-    expect(oldSession.body).toContain("CUSTOMER_SESSION_ALREADY_ROTATED");
+    expect(rejected.body).toContain("CUSTOMER_SESSION_EXPIRED");
+    const persistedMembership = await prisma.client.membership.findUniqueOrThrow({
+      where: { id: membership.id },
+      include: { accessSessions: true, credentials: true },
+    });
+    expect(
+      persistedMembership.accessSessions.find((session) => session.id === oldSession.id)?.revokedAt,
+    ).not.toBeNull();
+    const activeSessions = persistedMembership.accessSessions.filter(
+      (session) => !session.revokedAt && session.expiresAt > new Date(),
+    );
+    expect(activeSessions).toHaveLength(1);
+    const newToken = newCookie.slice(`${environment.values.CUSTOMER_COOKIE_NAME}=`.length);
+    expect(activeSessions[0]?.tokenHash).toBe(security.hashSessionToken(newToken));
+    expect(
+      persistedMembership.credentials.filter((credential) => credential.status === "ACTIVE"),
+    ).toHaveLength(1);
     const crossHost = await app.inject({
       method: "GET",
       url: "/v1/customer/csrf",
-      headers: { host: "today.lvh.me", cookie: sessionCookie },
+      headers: { host: "today.lvh.me", cookie: newCookie },
     });
     expect(crossHost.statusCode).toBe(403);
     expect(crossHost.body).toContain("CUSTOMER_SESSION_HOST_MISMATCH");
   });
 
   it("completes a transfer replay compatibly with one active credential and event", async () => {
+    const { customerCookie, membership: originalMembership } =
+      await enrollIsolatedCustomer("Transfer Replay Race");
+    const originalApplePass = required(
+      originalMembership.walletPassInstances.find((pass) => pass.provider === "APPLE"),
+      "Transfer replay Apple pass",
+    );
+    await prisma.client.walletPassInstance.update({
+      where: { id: originalApplePass.id },
+      data: { status: "ACTIVE" },
+    });
     const card = await app.inject({
       method: "GET",
       url: "/v1/customer/card",
-      headers: { host: fixture.merchantHost, cookie: sessionCookie },
+      headers: { host: fixture.merchantHost, cookie: customerCookie },
     });
-    const qrPayload = data<{ membershipQr: { payload: string } }>(card).membershipQr.payload;
+    expect(card.statusCode, card.body).toBe(200);
+    const membershipQr = required(
+      data<{ membershipQr: { payload: string } | null }>(card).membershipQr,
+      "Transfer replay membership QR",
+    );
+    const qrPayload = membershipQr.payload;
     const requested = await app.inject({
       method: "POST",
       url: "/v1/public/transfers/request",
@@ -1038,10 +1099,10 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     const passType = "pass.app.waflo.test-adapter";
     const registration = await app.inject({
       method: "POST",
-      url: `/v1/apple-wallet/v1/devices/${transferDevice}/registrations/${passType}/${appleSerial}`,
+      url: `/v1/apple-wallet/v1/devices/${transferDevice}/registrations/${passType}/${originalApplePass.providerIdentity}`,
       headers: {
         host: fixture.merchantHost,
-        authorization: `ApplePass ${security.appleAuthenticationToken(applePassId, appleSerial)}`,
+        authorization: `ApplePass ${security.appleAuthenticationToken(originalApplePass.id, originalApplePass.providerIdentity)}`,
         "content-type": "application/json",
       },
       payload: { pushToken: `transfer-push-${randomUUID().replaceAll("-", "")}` },
@@ -1081,10 +1142,10 @@ describe.sequential("W3 Customer and Wallet concurrency invariants", () => {
     });
     expect(transferInvalidation.statusCode).toBe(200);
     expect(transferInvalidation.json<{ serialNumbers: string[] }>().serialNumbers).toContain(
-      appleSerial,
+      originalApplePass.providerIdentity,
     );
     const membership = await prisma.client.membership.findUniqueOrThrow({
-      where: { id: membershipId },
+      where: { id: originalMembership.id },
       include: {
         credentials: true,
         transferEvents: true,

@@ -6669,6 +6669,9 @@ body {
   background: #241916;
   color: #fff;
 }
+.billing-latest-card > .dashboard-card__label {
+  color: var(--waflo-soft);
+}
 .billing-latest-card > strong {
   margin-block: 0.7rem 1rem;
   color: #ff9a7f;

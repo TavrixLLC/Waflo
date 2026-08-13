@@ -274,9 +274,9 @@ export class CustomerCardService {
         });
         if (!current || current.revokedAt || current.expiresAt <= new Date()) {
           throw new AppError(
-            "CUSTOMER_SESSION_ALREADY_ROTATED",
-            "This customer session was already rotated.",
-            HttpStatus.CONFLICT,
+            "CUSTOMER_SESSION_EXPIRED",
+            "This customer card session has expired.",
+            HttpStatus.UNAUTHORIZED,
           );
         }
         await transaction.membershipAccessSession.update({
