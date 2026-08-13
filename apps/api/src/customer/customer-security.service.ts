@@ -1,6 +1,8 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { parseVersionedSecretEntries } from "@waflo/config";
 import {
+  assertPublicIdentifier,
   constantTimeTokenEquals,
   createCustomerDataKeyring,
   createOpaqueCustomerToken,
@@ -9,8 +11,8 @@ import {
   decryptCustomerValue,
   deriveAppleAuthenticationToken,
   deriveEnrollmentSessionToken,
-  deriveTransferSessionToken,
   deriveMembershipCredentialSecret,
+  deriveTransferSessionToken,
   encryptCustomerValue,
   hashCustomerToken,
   hashNormalizedEmail,
@@ -19,9 +21,8 @@ import {
   normalizeEmail,
   type VersionedSecret,
 } from "@waflo/customer-security";
-import { formatMembershipQrPayload, parseMembershipQrPayload } from "@waflo/qr-core";
-import { parseVersionedSecretEntries } from "@waflo/config";
 import type { Prisma } from "@waflo/database";
+import { formatMembershipQrPayload, parseMembershipQrPayload } from "@waflo/qr-core";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 
@@ -155,6 +156,24 @@ export class CustomerSecurityService {
         secretVersion: this.activeCredentialSecret.version,
         secret,
       }),
+    };
+  }
+
+  deriveCredentialForProvisioning(
+    publicCredentialId: string,
+    credentialVersion: number,
+  ): {
+    secretVersion: number;
+    secretHash: string;
+  } {
+    assertPublicIdentifier(publicCredentialId, "cred");
+    return {
+      secretVersion: this.activeCredentialSecret.version,
+      secretHash: membershipCredentialHash(
+        publicCredentialId,
+        credentialVersion,
+        this.activeCredentialSecret,
+      ),
     };
   }
 

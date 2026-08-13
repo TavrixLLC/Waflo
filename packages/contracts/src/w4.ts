@@ -48,6 +48,36 @@ export const devicePairingClaimSchema = z
   })
   .strict();
 
+const reviewAccessCodeSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.toUpperCase())
+  .pipe(z.string().regex(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/));
+
+export const reviewAccessAuthorizeSchema = devicePairingClaimSchema
+  .omit({ pairingToken: true })
+  .extend({ reviewAccessCode: reviewAccessCodeSchema })
+  .strict();
+
+export const reviewScenarioIdSchema = z.enum([
+  "CUSTOMER_NEW",
+  "CUSTOMER_ACTIVE_5_OF_8",
+  "CUSTOMER_REWARD_READY_8_OF_8",
+  "MANAGER_APPROVAL_REQUIRED",
+  "PURCHASE_THRESHOLD_FAILURE",
+  "BILLING_BLOCKED",
+  "INVALID_QR",
+]);
+
+export const reviewScenarioSelectSchema = z
+  .object({
+    commandId: operationCommandIdSchema,
+    scenarioId: reviewScenarioIdSchema,
+  })
+  .strict();
+
+export const reviewResetSchema = z.object({ commandId: operationCommandIdSchema }).strict();
+
 export const devicePairingChallengeSchema = z
   .object({
     pairingPublicId: z.uuid(),
@@ -279,6 +309,10 @@ export const cohortAnalyticsItemSchema = z.object({
 export type CreateDevicePairingSessionInput = z.infer<typeof createDevicePairingSessionSchema>;
 export type DevicePairingClaimInput = z.infer<typeof devicePairingClaimSchema>;
 export type DevicePairingCompleteInput = z.infer<typeof devicePairingCompleteSchema>;
+export type ReviewAccessAuthorizeInput = z.infer<typeof reviewAccessAuthorizeSchema>;
+export type ReviewScenarioId = z.infer<typeof reviewScenarioIdSchema>;
+export type ReviewScenarioSelectInput = z.infer<typeof reviewScenarioSelectSchema>;
+export type ReviewResetInput = z.infer<typeof reviewResetSchema>;
 export type StaffLocationAssignmentUpsertInput = z.infer<
   typeof staffLocationAssignmentUpsertSchema
 >;

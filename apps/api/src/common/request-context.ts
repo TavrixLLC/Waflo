@@ -35,6 +35,7 @@ export interface WafloRequest extends FastifyRequest {
     appVersion: string;
     minimumSupportedAppVersion: string;
     appVersionSupported: true;
+    sessionMode: "NORMAL" | "REVIEW";
     requestId: string;
   };
 }

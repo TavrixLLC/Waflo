@@ -1,9 +1,10 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import type {
   CreateDevicePairingSessionInput,
   DevicePairingClaimInput,
   DevicePairingCompleteInput,
+  ReviewAccessAuthorizeInput,
   StaffLocationAssignmentUpsertInput,
 } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
@@ -25,6 +26,14 @@ import { withOrderedInvariantLocks } from "../common/organization-transaction.js
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  isExactActiveReviewDevice,
+  isReviewWindowActive,
+  REVIEW_FIXTURE_IDS,
+  reviewSessionMetadata,
+  sessionModeFromMetadata,
+} from "../review-access/review-session.js";
+import { RateLimitService } from "../security/rate-limit.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 import {
   revokeStaffAccessForLocation,
@@ -82,6 +91,7 @@ export class StaffDeviceService {
     private readonly tenant: TenantService,
     private readonly audit: AuditService,
     private readonly environment: EnvironmentService,
+    private readonly limiter: RateLimitService,
   ) {}
 
   async list(userId: string, organizationId: string, cursor?: string, limit = 30) {
@@ -443,6 +453,17 @@ export class StaffDeviceService {
     input: CreateDevicePairingSessionInput,
     request: WafloRequest,
   ) {
+    const pairingOrganization = await this.prisma.client.organization.findUnique({
+      where: { id: organizationId },
+      select: { merchantSlug: true },
+    });
+    if (pairingOrganization?.merchantSlug === this.environment.values.REVIEW_TENANT_SLUG) {
+      throw new AppError(
+        "REVIEW_SESSION_INVALID",
+        "The review environment uses Review Access.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
     const actor = await this.tenant.requireMembership(userId, organizationId, "devices.pair");
     const intended = await this.prisma.client.organizationMember.findFirst({
       where: { id: input.staffMemberId, organizationId, status: "ACTIVE" },
@@ -859,6 +880,223 @@ export class StaffDeviceService {
     );
   }
 
+  async createReviewPairing(input: ReviewAccessAuthorizeInput, request: WafloRequest) {
+    const normalizedCode = input.reviewAccessCode.toUpperCase();
+    const suppliedHash = createHmac("sha256", this.environment.values.DEVICE_SESSION_SECRET)
+      .update(`waflo-review-access-v1\n${normalizedCode}`, "utf8")
+      .digest("hex");
+    const sourceHash = createHash("sha256")
+      .update(request.ip || "unknown", "utf8")
+      .digest("hex");
+    const attemptAllowed = await this.limiter.consume(
+      `review-access:${sourceHash}`,
+      this.environment.values.REVIEW_ACCESS_ATTEMPT_LIMIT,
+      this.environment.values.REVIEW_ACCESS_ATTEMPT_WINDOW_SECONDS,
+    );
+    if (!attemptAllowed) {
+      await this.audit.security(
+        {
+          eventType: "review.authorization_failed",
+          severity: "MEDIUM",
+          metadata: { category: "RATE_LIMITED", platform: input.platform },
+        },
+        request,
+      );
+      throw new AppError(
+        "REVIEW_ACCESS_RATE_LIMITED",
+        "Review Access cannot be checked again yet.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    if (!this.environment.values.REVIEW_ACCESS_ENABLED) {
+      await this.audit.security(
+        {
+          eventType: "review.authorization_failed",
+          metadata: { category: "REVOKED", platform: input.platform },
+        },
+        request,
+      );
+      throw new AppError(
+        "REVIEW_ACCESS_REVOKED",
+        "Review Access is not available.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const expectedHash = this.environment.values.REVIEW_ACCESS_CODE_HASH;
+    const credentialMatches =
+      expectedHash.length === 64 &&
+      timingSafeEqual(Buffer.from(suppliedHash, "hex"), Buffer.from(expectedHash, "hex"));
+    if (!credentialMatches) {
+      await this.audit.security(
+        {
+          eventType: "review.authorization_failed",
+          severity: "MEDIUM",
+          metadata: { category: "INVALID", platform: input.platform },
+        },
+        request,
+      );
+      throw new AppError(
+        "REVIEW_ACCESS_INVALID",
+        "The Review Access code is not valid.",
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const expiresAt = new Date(this.environment.values.REVIEW_ACCESS_EXPIRES_AT);
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= new Date()) {
+      await this.audit.security(
+        {
+          eventType: "review.authorization_failed",
+          metadata: { category: "EXPIRED", platform: input.platform },
+        },
+        request,
+      );
+      throw new AppError(
+        "REVIEW_ACCESS_EXPIRED",
+        "The Review Access window has ended.",
+        HttpStatus.GONE,
+      );
+    }
+    if (input.platform === "TEST_CLIENT" && this.environment.values.NODE_ENV === "production") {
+      throw new AppError(
+        "STAFF_DEVICE_NOT_ACTIVE",
+        "The development Staff Test Client is disabled.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    try {
+      assertStaffMobileAppVersion({
+        platform: input.platform,
+        appVersion: input.appVersion,
+        minimumVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+      });
+    } catch (error) {
+      throw new AppError(
+        error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : "STAFF_APP_VERSION_UNSUPPORTED",
+        "This Staff mobile app version is not supported.",
+        426,
+      );
+    }
+    const publicKey = normalizeEd25519PublicKey(input.publicKey);
+    const [organization, member, location, assignment] = await Promise.all([
+      this.prisma.client.organization.findFirst({
+        where: {
+          id: REVIEW_FIXTURE_IDS.organization,
+          merchantSlug: this.environment.values.REVIEW_TENANT_SLUG,
+          status: "ACTIVE",
+        },
+      }),
+      this.prisma.client.organizationMember.findFirst({
+        where: {
+          id: REVIEW_FIXTURE_IDS.member,
+          organizationId: REVIEW_FIXTURE_IDS.organization,
+          status: "ACTIVE",
+          user: { status: "ACTIVE", interactiveLoginAllowed: false },
+        },
+      }),
+      this.prisma.client.location.findFirst({
+        where: {
+          id: REVIEW_FIXTURE_IDS.location,
+          organizationId: REVIEW_FIXTURE_IDS.organization,
+          status: "ACTIVE",
+        },
+      }),
+      this.prisma.client.staffLocationAssignment.findFirst({
+        where: {
+          organizationId: REVIEW_FIXTURE_IDS.organization,
+          organizationMemberId: REVIEW_FIXTURE_IDS.member,
+          locationId: REVIEW_FIXTURE_IDS.location,
+          active: true,
+          earningAllowed: true,
+          redemptionAllowed: true,
+        },
+      }),
+    ]);
+    if (!organization || !member || !location || !assignment) {
+      throw new AppError(
+        "REVIEW_TENANT_UNAVAILABLE",
+        "The review environment is temporarily unavailable.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    const publicId = randomUUID();
+    const challenge = pairingChallenge(this.environment.values.DEVICE_SESSION_SECRET, {
+      publicId,
+      installationId: input.installationId,
+      publicKey,
+    });
+    const challengeExpiresAt = new Date(Date.now() + 2 * 60_000);
+    return withOrderedInvariantLocks(
+      this.prisma.client,
+      [`review-pairing:${input.installationId}`, `pairing-member:${member.id}`],
+      async (transaction) => {
+        const duplicate = await transaction.staffDevice.findFirst({
+          where: { OR: [{ installationId: input.installationId }, { publicKey }] },
+        });
+        if (
+          duplicate &&
+          !isExactActiveReviewDevice(duplicate, {
+            installationId: input.installationId,
+            publicKey,
+          })
+        ) {
+          throw new AppError(
+            "DEVICE_PAIRING_ALREADY_USED",
+            "This device installation is already paired.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const session = await transaction.devicePairingSession.create({
+          data: {
+            publicId,
+            organizationId: organization.id,
+            intendedStaffMemberId: member.id,
+            pairingTokenHash: createHash("sha256").update(randomBytes(48)).digest("hex"),
+            requestedLocationAssignments: [
+              { locationId: location.id, earningAllowed: true, redemptionAllowed: true },
+            ],
+            deviceLabelSuggestion: "Waflo review device",
+            createdByUserId: REVIEW_FIXTURE_IDS.user,
+            status: "CLAIMED",
+            expiresAt: new Date(
+              Date.now() + this.environment.values.DEVICE_PAIRING_TTL_MINUTES * 60_000,
+            ),
+            claimedAt: new Date(),
+            challengeHash: createHash("sha256").update(challenge).digest("hex"),
+            challengeExpiresAt,
+            claimedInstallationId: input.installationId,
+            claimedPublicKey: publicKey,
+            claimedMetadata: reviewSessionMetadata({
+              platform: input.platform,
+              appVersion: input.appVersion,
+              osVersion: input.osVersion ?? null,
+              model: input.model ?? null,
+            }),
+          },
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId: organization.id,
+            action: "review.device_authorized",
+            targetType: "device_pairing_session",
+            targetId: session.id,
+            metadata: { platform: input.platform, appVersion: input.appVersion },
+          },
+          request,
+        );
+        return {
+          pairingPublicId: session.publicId,
+          challenge,
+          challengeExpiresAt,
+          signatureAlgorithm: "Ed25519" as const,
+          message: pairingMessage(session.publicId, challenge, input.installationId),
+        };
+      },
+    );
+  }
+
   async challenge(publicId: string) {
     const session = await this.prisma.client.devicePairingSession.findUnique({
       where: { publicId },
@@ -973,6 +1211,25 @@ export class StaffDeviceService {
           !Array.isArray(session.claimedMetadata)
             ? session.claimedMetadata
             : {};
+        const sessionMode = sessionModeFromMetadata(session.claimedMetadata);
+        const reviewBindingValid =
+          session.organizationId === REVIEW_FIXTURE_IDS.organization &&
+          session.intendedStaffMemberId === REVIEW_FIXTURE_IDS.member;
+        if (
+          (sessionMode === "REVIEW" &&
+            (!reviewBindingValid ||
+              !isReviewWindowActive(
+                this.environment.values.REVIEW_ACCESS_ENABLED,
+                this.environment.values.REVIEW_ACCESS_EXPIRES_AT,
+              ))) ||
+          (sessionMode === "NORMAL" && reviewBindingValid)
+        ) {
+          throw new AppError(
+            "REVIEW_SESSION_INVALID",
+            "The Review Access session is not valid.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
         const locations = safePairingLocations(session.requestedLocationAssignments);
         const authoritativeLocation = locations[0];
         if (!authoritativeLocation) {
@@ -1042,6 +1299,7 @@ export class StaffDeviceService {
               ? metadata.platform
               : ("ANDROID" as const),
           publicKey: session.claimedPublicKey,
+          trustLevel: sessionMode === "REVIEW" ? "REVIEW" : "PAIRED",
           status: "ACTIVE" as const,
           appVersion: typeof metadata.appVersion === "string" ? metadata.appVersion : "unknown",
           osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
@@ -1088,7 +1346,10 @@ export class StaffDeviceService {
               Date.now() + this.environment.values.DEVICE_SESSION_TTL_DAYS * 86_400_000,
             ),
             appVersion: device.appVersion,
-            deviceMetadata: { pairedThrough: session.publicId },
+            deviceMetadata:
+              sessionMode === "REVIEW"
+                ? reviewSessionMetadata({ pairedThrough: session.publicId })
+                : { pairedThrough: session.publicId, sessionMode: "NORMAL" },
           },
         });
         await transaction.devicePairingSession.update({
@@ -1124,6 +1385,7 @@ export class StaffDeviceService {
             organizationId: session.organizationId,
             role: intendedStaffMember.role,
             locationId: authoritativeLocation.locationId,
+            sessionMode,
           },
         };
       },

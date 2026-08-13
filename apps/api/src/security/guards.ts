@@ -8,26 +8,38 @@ import {
 import { Reflector } from "@nestjs/core";
 import { hashOpaqueToken, isSessionActive, safeTokenEquals } from "@waflo/auth";
 import { evaluateRiskRules, riskDeduplicationKey } from "@waflo/operational-analytics";
-import { AppError } from "../common/app-error.js";
-import { CUSTOMER_CSRF, IS_PUBLIC, RATE_LIMIT, SKIP_CSRF } from "../common/decorators.js";
-import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
-import type { WafloRequest } from "../common/request-context.js";
-import { EnvironmentService } from "../config/environment.service.js";
-import { PrismaService } from "../database/prisma.service.js";
-import { AuditService } from "../audit/audit.service.js";
-import { RateLimitService } from "./rate-limit.service.js";
-import { CustomerCardService } from "../customer/customer-card.service.js";
-import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import {
-  assertStaffMobileAppVersion,
   assertBodyDigest,
   assertDeviceOperational,
   assertDeviceRequestTimestamp,
+  assertStaffMobileAppVersion,
   assertTestClientAllowed,
   hashOpaqueDeviceToken,
   verifyDeviceRequestSignature,
 } from "@waflo/staff-device-security";
-import { STAFF_DEVICE_SIGNED } from "../common/decorators.js";
+import { AuditService } from "../audit/audit.service.js";
+import { AppError } from "../common/app-error.js";
+import {
+  CUSTOMER_CSRF,
+  IS_PUBLIC,
+  RATE_LIMIT,
+  REVIEW_DEVICE_ONLY,
+  SKIP_CSRF,
+  STAFF_DEVICE_SIGNED,
+} from "../common/decorators.js";
+import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
+import type { WafloRequest } from "../common/request-context.js";
+import { EnvironmentService } from "../config/environment.service.js";
+import { CustomerCardService } from "../customer/customer-card.service.js";
+import { CustomerSecurityService } from "../customer/customer-security.service.js";
+import { PrismaService } from "../database/prisma.service.js";
+import {
+  isExactReviewSessionBinding,
+  isReviewWindowActive,
+  REVIEW_FIXTURE_IDS,
+  sessionModeFromMetadata,
+} from "../review-access/review-session.js";
+import { RateLimitService } from "./rate-limit.service.js";
 
 @Injectable()
 export class SessionGuard implements CanActivate {
@@ -389,6 +401,22 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         HttpStatus.UNAUTHORIZED,
       );
     }
+    const sessionMode = sessionModeFromMetadata(session.deviceMetadata);
+    const reviewOrganization = session.organizationId === REVIEW_FIXTURE_IDS.organization;
+    const reviewWindowActive = isReviewWindowActive(
+      this.environment.values.REVIEW_ACCESS_ENABLED,
+      this.environment.values.REVIEW_ACCESS_EXPIRES_AT,
+    );
+    if (
+      (sessionMode === "REVIEW" && (!reviewWindowActive || !reviewOrganization)) ||
+      (sessionMode === "NORMAL" && reviewOrganization)
+    ) {
+      throw new AppError(
+        "REVIEW_SESSION_INVALID",
+        "The Review Access session is not valid.",
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
     const [location, staffAssignment, deviceAssignment] = await Promise.all([
       this.prisma.client.location.findFirst({
         where: {
@@ -610,6 +638,7 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       appVersion: session.staffDevice.appVersion,
       minimumSupportedAppVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
       appVersionSupported: true,
+      sessionMode,
       requestId,
     };
     void this.prisma.client.staffDeviceSession
@@ -618,6 +647,29 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         data: { lastActiveAt: new Date(), staffDevice: { update: { lastSeenAt: new Date() } } },
       })
       .catch(() => undefined);
+    return true;
+  }
+}
+
+@Injectable()
+export class ReviewDeviceGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const required = this.reflector.getAllAndOverride<boolean>(REVIEW_DEVICE_ONLY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (!required) return true;
+    const request = context.switchToHttp().getRequest<WafloRequest>();
+    const staff = request.staffDeviceContext;
+    if (!isExactReviewSessionBinding(staff)) {
+      throw new AppError(
+        "REVIEW_SESSION_INVALID",
+        "A valid Review Access session is required.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
     return true;
   }
 }

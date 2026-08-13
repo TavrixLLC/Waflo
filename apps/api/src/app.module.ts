@@ -39,6 +39,8 @@ import { AssetsService } from "./programs/assets.service.js";
 import { OBJECT_STORAGE, S3ObjectStorage } from "./programs/object-storage.js";
 import { ProgramsController } from "./programs/programs.controller.js";
 import { ProgramsService } from "./programs/programs.service.js";
+import { ReviewAccessController } from "./review-access/review-access.controller.js";
+import { ReviewAccessService } from "./review-access/review-access.service.js";
 import { HostResolutionService } from "./public/host-resolution.service.js";
 import { PublicController } from "./public/public.controller.js";
 import {
@@ -47,6 +49,7 @@ import {
   CustomerCsrfGuard,
   SessionGuard,
   StaffDeviceSignatureGuard,
+  ReviewDeviceGuard,
 } from "./security/guards.js";
 import { RateLimitService } from "./security/rate-limit.service.js";
 import {
@@ -95,6 +98,7 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     MerchantStaffDeviceController,
     StaffDevicePairingController,
     StaffOperationsController,
+    ReviewAccessController,
     MerchantOperationsController,
     MerchantWalletEngagementController,
     CustomerWalletEngagementController,
@@ -122,6 +126,7 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     WalletService,
     AppleUpdateService,
     StaffDeviceService,
+    ReviewAccessService,
     LoyaltyOperationService,
     MerchantOperationsService,
     WalletEngagementService,
@@ -151,6 +156,7 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: CustomerCsrfGuard },
     { provide: APP_GUARD, useClass: StaffDeviceSignatureGuard },
+    { provide: APP_GUARD, useClass: ReviewDeviceGuard },
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
     { provide: APP_FILTER, useClass: ErrorEnvelopeFilter },
   ],

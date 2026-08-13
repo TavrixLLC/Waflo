@@ -109,6 +109,17 @@ export const environmentSchema = z
     DEVICE_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     DEVICE_REQUEST_MAX_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     DEVICE_NONCE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
+    REVIEW_ACCESS_ENABLED: z.stringbool().default(false),
+    REVIEW_ACCESS_CODE_HASH: z
+      .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/)])
+      .default(""),
+    REVIEW_ACCESS_EXPIRES_AT: z.union([z.literal(""), z.iso.datetime()]).default(""),
+    REVIEW_TENANT_SLUG: z
+      .string()
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .default("waflo-app-review"),
+    REVIEW_ACCESS_ATTEMPT_LIMIT: z.coerce.number().int().min(1).max(20).default(5),
+    REVIEW_ACCESS_ATTEMPT_WINDOW_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
     STAFF_MOBILE_MINIMUM_APP_VERSION: z
       .string()
       .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
@@ -199,6 +210,22 @@ export const environmentSchema = z
   })
   .superRefine((value, context) => {
     const deployed = value.DEPLOYMENT_ENVIRONMENT !== "development";
+    if (value.REVIEW_ACCESS_ENABLED) {
+      if (!value.REVIEW_ACCESS_CODE_HASH) {
+        context.addIssue({
+          code: "custom",
+          path: ["REVIEW_ACCESS_CODE_HASH"],
+          message: "Review Access requires a hashed credential.",
+        });
+      }
+      if (!value.REVIEW_ACCESS_EXPIRES_AT) {
+        context.addIssue({
+          code: "custom",
+          path: ["REVIEW_ACCESS_EXPIRES_AT"],
+          message: "Review Access requires an explicit expiry.",
+        });
+      }
+    }
     if (deployed && value.NODE_ENV !== "production") {
       context.addIssue({
         code: "custom",

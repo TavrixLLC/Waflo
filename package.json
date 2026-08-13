@@ -52,6 +52,7 @@
     "w4:quality-gate": "node scripts/run-w4-quality-gate.mjs",
     "m2:contracts": "pnpm --filter @waflo/contracts build && node scripts/generate-m2-mobile-contracts.mjs",
     "m2:contracts:verify": "node scripts/verify-m2-mobile-contracts.mjs",
+    "review:provision": "tsx scripts/provision-m3e-review-access.ts --confirm-review-tenant",
     "handoff:archive": "node scripts/create-portable-archive.mjs",
     "handoff:inspect": "node scripts/inspect-portable-archive.mjs",
     "handoff:verify": "node scripts/verify-w4-portable-archive.mjs",

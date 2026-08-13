@@ -17,9 +17,11 @@ import {
   devicePairingChallengeSchema,
   devicePairingClaimSchema,
   devicePairingCompleteSchema,
+  reviewAccessAuthorizeSchema,
   staffDeviceSessionRefreshSchema,
   staffLocationAssignmentUpsertSchema,
 } from "@waflo/contracts";
+import { AppError } from "../common/app-error.js";
 import {
   CurrentUser,
   Public,
@@ -34,7 +36,6 @@ import {
   parseOptionalPaginationLimit,
   parseUuid,
 } from "../common/validation.js";
-import { AppError } from "../common/app-error.js";
 import { StaffDeviceService } from "./staff-device.service.js";
 
 @Controller("v1/organizations/:organizationId")
@@ -217,6 +218,13 @@ export class StaffDevicePairingController {
     return this.devices.claim(parseInput(devicePairingClaimSchema, body));
   }
 
+  @Post("review-access/authorize")
+  @RateLimit(5)
+  @HttpCode(HttpStatus.OK)
+  authorizeReview(@Body() body: unknown, @Req() request: WafloRequest) {
+    return this.devices.createReviewPairing(parseInput(reviewAccessAuthorizeSchema, body), request);
+  }
+
   @Post("devices/pairing/challenge")
   @RateLimit(20)
   @HttpCode(HttpStatus.OK)
@@ -266,6 +274,7 @@ export class StaffDevicePairingController {
       appVersion: context.appVersion,
       minimumSupportedAppVersion: context.minimumSupportedAppVersion,
       appVersionSupported: context.appVersionSupported,
+      sessionMode: context.sessionMode,
       requestId: context.requestId,
     };
   }
