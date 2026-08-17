@@ -41,6 +41,7 @@
     "test:w4:load": "pnpm test:prepare && node scripts/run-isolated-vitest.mjs unit tests/unit/w4-loyalty-operations.test.ts -t \"rebuilds 10,000 ordered ledger events\" && node scripts/run-isolated-vitest.mjs concurrency tests/concurrency/w4-loyalty-concurrency.test.ts -t \"returns compatible success for 100 concurrent same-key stamp requests\"",
     "test:e2e": "node scripts/run-playwright.mjs chromium",
     "test:a11y": "node scripts/run-playwright.mjs accessibility",
+    "review:screenshots": "node scripts/run-playwright.mjs design-review",
     "test:e2e:w4": "node scripts/run-playwright.mjs w4",
     "test:a11y:w4": "node scripts/run-playwright.mjs w4-accessibility",
     "w4:test-client": "node scripts/w4-staff-test-client.mjs",

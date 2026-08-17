@@ -18,6 +18,14 @@ variable "IMAGE_PLATFORM" {
   default = "linux/amd64"
 }
 
+variable "MAPBOX_PRODUCTION_PUBLIC_TOKEN" {
+  default = ""
+}
+
+variable "MAPBOX_STAGING_PUBLIC_TOKEN" {
+  default = ""
+}
+
 group "release" {
   targets = [
     "migrate",
@@ -61,6 +69,7 @@ target "_production-build" {
     NEXT_PUBLIC_API_URL             = "https://api.waflo.app"
     NEXT_PUBLIC_DASHBOARD_URL       = "https://app.waflo.app"
     NEXT_PUBLIC_MARKETING_URL       = "https://waflo.app"
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN = MAPBOX_PRODUCTION_PUBLIC_TOKEN
   }
 }
 
@@ -76,6 +85,7 @@ target "_staging-build" {
     NEXT_PUBLIC_API_URL             = "https://api-staging.waflo.app"
     NEXT_PUBLIC_DASHBOARD_URL       = "https://app-staging.waflo.app"
     NEXT_PUBLIC_MARKETING_URL       = "https://staging.waflo.app"
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN = MAPBOX_STAGING_PUBLIC_TOKEN
   }
 }
 

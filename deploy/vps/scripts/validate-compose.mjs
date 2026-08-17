@@ -110,6 +110,7 @@ function render(environment) {
     NEXT_PUBLIC_API_URL: staging ? "https://api-staging.waflo.app" : "https://api.waflo.app",
     NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app-staging.waflo.app" : "https://app.waflo.app",
     NEXT_PUBLIC_MARKETING_URL: marketingOrigin,
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: "pk.compose_validation.public",
   };
   const result = spawnSync(
     "docker",
@@ -174,6 +175,12 @@ for (const environment of ["staging", "production"]) {
     if (model.services[serviceName].build?.args?.DEPLOYMENT_ENVIRONMENT !== environment) {
       throw new Error(`${serviceName} did not receive the environment-qualified Web build flag.`);
     }
+  }
+  if (
+    model.services["merchant-web"].build?.args?.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN !==
+    "pk.compose_validation.public"
+  ) {
+    throw new Error("merchant-web did not receive a valid public Mapbox build token.");
   }
   if (model.services.cloudflared.environment?.TUNNEL_TOKEN) {
     throw new Error("Cloudflare token must not be an environment value.");

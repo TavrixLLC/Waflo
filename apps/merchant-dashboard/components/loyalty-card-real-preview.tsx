@@ -101,10 +101,14 @@ export function LoyaltyCardRealPreview({
             />
           ) : (
             <div className="loyalty-card-real-preview__stamps-fallback">
-              {Array.from({ length: Math.min(8, goal) }, (_, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: Static positional stamp placeholders
-                <span key={`stamp-dot-${internalName}-${i}`} className="loyalty-card-real-preview__stamp-dot" />
-              ))}
+              {["slot-0", "slot-1", "slot-2", "slot-3", "slot-4", "slot-5", "slot-6", "slot-7"]
+                .slice(0, Math.min(8, goal))
+                .map((slotId) => (
+                  <span
+                    key={`${internalName}-${slotId}`}
+                    className="loyalty-card-real-preview__stamp-dot"
+                  />
+                ))}
             </div>
           )}
         </div>
