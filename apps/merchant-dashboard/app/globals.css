@@ -743,7 +743,7 @@ body {
 }
 
 .location-card__meta-item--unconfirmed {
-  color: var(--waflo-warning);
+  color: #b45309;
 }
 
 .location-card__footer {
@@ -6040,7 +6040,7 @@ body {
 }
 
 .builder-readiness__missing {
-  color: var(--waflo-warning);
+  color: #b45309;
   background: color-mix(in srgb, var(--waflo-warning) 14%, white);
 }
 
