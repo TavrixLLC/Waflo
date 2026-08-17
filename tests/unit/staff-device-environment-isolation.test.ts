@@ -10,7 +10,8 @@ describe("Staff device pairing environment isolation contract", () => {
     const parts = token.split(".");
     expect(parts.length).toBe(4);
     expect(parts[0]).toBe("waflo-pair-v1");
-    const environmentSegment = Buffer.from(parts[3]!, "base64url").toString("utf8");
+    const environmentBase64 = parts[3] ?? "";
+    const environmentSegment = Buffer.from(environmentBase64, "base64url").toString("utf8");
     return environmentSegment;
   }
 
@@ -122,7 +123,7 @@ describe("Staff device pairing environment isolation contract", () => {
 
     const parts = pairing.token.split(".");
     // Secret portion is parts[2], environment is parts[3]
-    expect(parts[2]!.length).toBeGreaterThanOrEqual(40);
+    expect(parts[2]?.length).toBeGreaterThanOrEqual(40);
     const envOnly = decodeEnvironmentSegment(pairing.token);
     expect(envOnly).toBe("staging");
 

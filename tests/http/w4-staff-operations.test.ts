@@ -619,7 +619,10 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
       where: { organizationId: ORGANIZATION_ID, userId: STAFF_USER_ID },
     });
     const pairingPublicId = randomUUID();
-    const pairing = createPairingToken({ publicId: pairingPublicId, environmentId: environment.values.DEPLOYMENT_ENVIRONMENT });
+    const pairing = createPairingToken({
+      publicId: pairingPublicId,
+      environmentId: environment.values.DEPLOYMENT_ENVIRONMENT,
+    });
     await prisma.client.devicePairingSession.create({
       data: {
         publicId: pairingPublicId,
