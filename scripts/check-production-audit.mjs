@@ -28,8 +28,8 @@ try {
 }
 
 const advisories = Object.values(report.advisories ?? {});
-const acceptedAdvisory = "GHSA-f88m-g3jw-g9cj";
-const acceptedPaths = new Set([
+const acceptedSharpAdvisory = "GHSA-f88m-g3jw-g9cj";
+const acceptedSharpPaths = new Set([
   "apps__customer-web>next>sharp",
   "apps__marketing-web>next>sharp",
   "apps__merchant-dashboard>next>sharp",
@@ -37,7 +37,7 @@ const acceptedPaths = new Set([
 
 function isAcceptedSharpBaseline(advisory) {
   if (
-    advisory.github_advisory_id !== acceptedAdvisory ||
+    advisory.github_advisory_id !== acceptedSharpAdvisory ||
     advisory.module_name !== "sharp" ||
     advisory.severity !== "high"
   ) {
@@ -48,12 +48,39 @@ function isAcceptedSharpBaseline(advisory) {
   return (
     findings.length === 1 &&
     findings[0].optional === true &&
-    paths.length === acceptedPaths.size &&
-    paths.every((path) => acceptedPaths.has(path))
+    paths.length === acceptedSharpPaths.size &&
+    paths.every((path) => acceptedSharpPaths.has(path))
   );
 }
 
-const blocked = advisories.filter((advisory) => !isAcceptedSharpBaseline(advisory));
+const acceptedPrismaDeepmergeAdvisory = "GHSA-ggr8-5vv4-36mx";
+const acceptedPrismaDeepmergePaths = new Set([
+  "deploy__vps__migrate>prisma>@prisma/config>deepmerge-ts",
+  "packages__database>@prisma/client>prisma>@prisma/config>deepmerge-ts",
+]);
+
+function isAcceptedPrismaDeepmergeBaseline(advisory) {
+  if (
+    advisory.github_advisory_id !== acceptedPrismaDeepmergeAdvisory ||
+    advisory.module_name !== "deepmerge-ts" ||
+    advisory.severity !== "high"
+  ) {
+    return false;
+  }
+  const findings = advisory.findings ?? [];
+  const paths = findings.flatMap((finding) => finding.paths ?? []);
+  return (
+    findings.length === 1 &&
+    paths.length === acceptedPrismaDeepmergePaths.size &&
+    paths.every((path) => acceptedPrismaDeepmergePaths.has(path))
+  );
+}
+
+function isAcceptedAdvisory(advisory) {
+  return isAcceptedSharpBaseline(advisory) || isAcceptedPrismaDeepmergeBaseline(advisory);
+}
+
+const blocked = advisories.filter((advisory) => !isAcceptedAdvisory(advisory));
 if (blocked.length > 0) {
   const summary = blocked
     .map(
@@ -83,5 +110,5 @@ if (result.status !== 0 && advisories.length === 0) {
 process.stdout.write(
   advisories.length === 0
     ? "Production dependency audit passed with no advisories.\n"
-    : `Production dependency audit passed with only ${acceptedAdvisory}; Next image optimization remains disabled.\n`,
+    : `Production dependency audit passed with accepted baseline advisories; Next image optimization remains disabled.\n`,
 );
