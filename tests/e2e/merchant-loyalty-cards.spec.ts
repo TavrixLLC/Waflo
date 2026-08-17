@@ -246,10 +246,10 @@ test("keeps populated cards and actions responsive across supported widths", asy
       },
     ],
   });
+  await page.goto("/en/dashboard/programs");
 
   for (const width of [1440, 1280, 1024, 768, 390, 360]) {
     await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
-    await page.goto("/en/dashboard/programs");
     await page.waitForTimeout(50);
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 
