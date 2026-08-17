@@ -215,7 +215,7 @@ test("uses a neutral Library summary when renderer-ready data is unavailable", a
   await expect(card.locator(".loyalty-card-real-preview__title")).toHaveText(
     "Classic Roast rewards",
   );
-  await expect(card.locator(".loyalty-card-real-preview__stamps")).toBeVisible();
+  await expect(card.locator(".loyalty-card-real-preview__body")).toBeVisible();
   await expect(card.getByText("Design available in Studio", { exact: true })).toBeVisible();
 });
 

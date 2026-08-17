@@ -250,6 +250,7 @@ test("keeps populated cards and actions responsive across supported widths", asy
 
   for (const width of [1440, 1280, 1024, 768, 390, 360]) {
     await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
+    await page.waitForTimeout(100);
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 
     expect(
