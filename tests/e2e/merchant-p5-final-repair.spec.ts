@@ -437,9 +437,13 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
     .getByRole("navigation", { name: "Studio sections" })
     .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
     .click();
+  const summaryAnchor = launch
+    .locator(".publication-card-anchor, [aria-label='Loyalty card summary']")
+    .first();
+  await expect(summaryAnchor).toBeVisible();
   semanticPanels.push(
     await labeledPanel(
-      await launch.getByLabel("Loyalty card summary").screenshot({ animations: "disabled" }),
+      await summaryAnchor.screenshot({ animations: "disabled" }),
       "Launch · operational summary",
       500,
       430,
