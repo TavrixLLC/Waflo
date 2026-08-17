@@ -28,11 +28,7 @@ fi
 
 for token_name in MAPBOX_STAGING_PUBLIC_TOKEN MAPBOX_PRODUCTION_PUBLIC_TOKEN; do
   token_value="${!token_name:-}"
-  if [[ -z "${token_value}" ]]; then
-    printf '%s=UNSET; configure a URL-restricted public Mapbox token before publishing.\n' "${token_name}" >&2
-    exit 2
-  fi
-  if [[ ! "${token_value}" =~ ^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+  if [[ -n "${token_value}" && ! "${token_value}" =~ ^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
     printf '%s=INVALID_FORMAT; expected a Mapbox public token.\n' "${token_name}" >&2
     exit 2
   fi
