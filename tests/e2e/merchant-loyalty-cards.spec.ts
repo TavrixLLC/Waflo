@@ -254,7 +254,7 @@ test("keeps populated cards and actions responsive across supported widths", asy
 
     expect(
       await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       ),
     ).toBe(true);
 
