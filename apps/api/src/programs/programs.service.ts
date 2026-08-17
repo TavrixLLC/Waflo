@@ -198,10 +198,35 @@ export class ProgramsService {
             status: true,
             editingMode: true,
             revision: true,
+            stampRule: { select: { requiredStampCount: true } },
+            translations: { select: { locale: true, programName: true, rewardSummary: true } },
+            visualTheme: {
+              select: {
+                backgroundColor: true,
+                foregroundColor: true,
+                accentColor: true,
+                layoutType: true,
+              },
+            },
           },
         },
         currentPublishedVersion: {
-          select: { id: true, versionNumber: true, status: true, publishedAt: true },
+          select: {
+            id: true,
+            versionNumber: true,
+            status: true,
+            publishedAt: true,
+            stampRule: { select: { requiredStampCount: true } },
+            translations: { select: { locale: true, programName: true, rewardSummary: true } },
+            visualTheme: {
+              select: {
+                backgroundColor: true,
+                foregroundColor: true,
+                accentColor: true,
+                layoutType: true,
+              },
+            },
+          },
         },
         _count: { select: { versions: true } },
       },
@@ -2204,14 +2229,6 @@ export class ProgramsService {
                   },
                 },
                 validationRuns: { orderBy: { createdAt: "desc" }, take: 1 },
-                testSessions: {
-                  where: { status: "COMPLETED" },
-                  select: {
-                    id: true,
-                    versionRevision: true,
-                    validationFingerprint: true,
-                  },
-                },
               },
             },
           },
@@ -2242,13 +2259,14 @@ export class ProgramsService {
           );
         const version = program.currentDraftVersion;
         if (
-          version?.status !== "TEST_READY" ||
+          !version ||
+          !["VALIDATED", "TEST_READY"].includes(version.status) ||
           !version.validationFingerprint ||
-          !version.testReadyAt
+          !version.validatedAt
         )
           throw new AppError(
-            "PROGRAM_TEST_REQUIRED",
-            "Complete Test Mode after the latest validation before publishing.",
+            "PROGRAM_PUBLICATION_VALIDATION_REQUIRED",
+            "Validate the latest draft before publishing.",
             HttpStatus.CONFLICT,
           );
         if (program.organization.status !== "ACTIVE")
@@ -2426,17 +2444,6 @@ export class ProgramsService {
               validationStatus: validation?.status ?? null,
             },
           );
-        const completedTest = version.testSessions.find(
-          (session) =>
-            session.versionRevision === version.revision &&
-            session.validationFingerprint === expectedFingerprint,
-        );
-        if (!completedTest)
-          throw new AppError(
-            "PROGRAM_TEST_REQUIRED",
-            "Complete the synthetic customer journey before publishing.",
-            HttpStatus.CONFLICT,
-          );
         const currentPreviews = await transaction.generatedProgramPreview.findMany({
           where: {
             organizationId,
@@ -2487,22 +2494,6 @@ export class ProgramsService {
             where: { id: program.currentPublishedVersionId },
             data: { status: "SUPERSEDED", supersededAt: now },
           });
-        const shouldStartTrial =
-          billing.subscriptionStatus === "PENDING_ACTIVATION" && billing.trialStart === null;
-        const trialEnd = shouldStartTrial
-          ? new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000)
-          : null;
-        if (shouldStartTrial)
-          await transaction.organizationBillingProfile.update({
-            where: { organizationId },
-            data: {
-              subscriptionStatus: "TRIALING",
-              trialStart: now,
-              trialEnd,
-              trialTriggeringProgramId: programId,
-              trialTriggeringUserId: userId,
-            },
-          });
         await transaction.loyaltyProgram.update({
           where: { id: programId },
           data: {
@@ -2522,9 +2513,9 @@ export class ProgramsService {
           data: {
             status: "COMPLETED",
             publishedVersionId: published.id,
-            trialStarted: shouldStartTrial,
-            trialStart: shouldStartTrial ? now : null,
-            trialEnd,
+            trialStarted: false,
+            trialStart: null,
+            trialEnd: null,
             completedAt: new Date(),
           },
         });
@@ -2539,7 +2530,7 @@ export class ProgramsService {
             metadata: {
               commandId: completedCommand.id,
               versionId: version.id,
-              trialStarted: shouldStartTrial,
+              trialStarted: false,
               previousOperationalState: publicationState.previousOperationalState,
               resultingOperationalState: publicationState.resultingOperationalState,
               publicationType: publicationState.publicationType,
@@ -2560,24 +2551,6 @@ export class ProgramsService {
               metadata: {
                 commandId: completedCommand.id,
                 replacementVersionId: version.id,
-              },
-            },
-            request,
-          );
-        if (shouldStartTrial)
-          await this.audit.recordInTransaction(
-            transaction,
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "trial.started_by_program_publication",
-              targetType: "organization_billing_profile",
-              targetId: billing.id,
-              metadata: {
-                commandId: completedCommand.id,
-                programId,
-                versionId: version.id,
-                trialEnd: trialEnd?.toISOString() ?? null,
               },
             },
             request,

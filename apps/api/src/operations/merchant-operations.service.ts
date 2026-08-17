@@ -101,6 +101,7 @@ export class MerchantOperationsService {
     const customers = await this.prisma.client.customer.findMany({
       where: {
         organizationId,
+        archivedAt: null,
         ...(search
           ? search.includes("@")
             ? { id: { in: exactCustomerIds ?? [] } }

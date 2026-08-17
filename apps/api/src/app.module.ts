@@ -3,6 +3,7 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { createErrorReporter } from "@waflo/security";
 import { AuditController } from "./audit/audit.controller.js";
 import { AuditService } from "./audit/audit.service.js";
+import { AccountAccessService } from "./account/account-access.service.js";
 import { AuthController } from "./auth/auth.controller.js";
 import { AuthService } from "./auth/auth.service.js";
 import { ExternalAuthController } from "./auth/external-auth.controller.js";
@@ -25,7 +26,7 @@ import { PublicEnrollmentController } from "./enrollment/public-enrollment.contr
 import { PublicEnrollmentService } from "./enrollment/public-enrollment.service.js";
 import { CapabilitiesController } from "./health/capabilities.controller.js";
 import { HealthController } from "./health/health.controller.js";
-import { LocationsController } from "./locations/locations.controller.js";
+import { LocationsController, LocationToolsController } from "./locations/locations.controller.js";
 import { LocationsService } from "./locations/locations.service.js";
 import { LoyaltyOperationService } from "./loyalty/loyalty-operation.service.js";
 import { StaffOperationsController } from "./loyalty/staff-operations.controller.js";
@@ -75,6 +76,7 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     ExternalAuthController,
     OrganizationsController,
     LocationsController,
+    LocationToolsController,
     TeamController,
     InvitationsController,
     BillingController,
@@ -103,6 +105,7 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     EnvironmentService,
     PrismaService,
     AuditService,
+    AccountAccessService,
     NotificationService,
     RateLimitService,
     TenantService,

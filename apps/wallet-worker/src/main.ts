@@ -9,6 +9,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { hasMerchantOperationalBillingAccess } from "@waflo/billing";
 import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
 import {
   createCustomerDataKeyring,
@@ -1072,6 +1073,23 @@ export class WalletWorker {
   }
 
   private async execute(command: WalletCommand) {
+    if (["ENSURE_TEMPLATE", "ISSUE", "SEND_PROMOTION"].includes(command.commandType)) {
+      const profile = await this.prisma.organizationBillingProfile.findUnique({
+        where: { organizationId: command.organizationId },
+        select: { subscriptionStatus: true, trialEnd: true, gracePeriodEnd: true },
+      });
+      if (
+        !profile ||
+        !hasMerchantOperationalBillingAccess({
+          status: profile.subscriptionStatus,
+          trialEnd: profile.trialEnd,
+          gracePeriodEnd: profile.gracePeriodEnd,
+        })
+      ) {
+        await this.deadLetter(command, "BILLING_ACTION_REQUIRED");
+        return;
+      }
+    }
     const provider = this.providerMap.get(command.provider);
     if (!provider || provider.mode === "DISABLED") {
       await this.fail(command, normalizeWalletProviderError(new Error("Provider disabled.")));

@@ -113,6 +113,13 @@ async function seedUsersAndOrganization(now: Date) {
         displayName: user.displayName,
         email: user.email,
         normalizedEmail: user.email,
+        emailVerifiedAt: now,
+        passwordHash,
+        preferredLocale: user.locale,
+        termsVersion: environment.LEGAL_TERMS_VERSION,
+        privacyVersion: environment.LEGAL_PRIVACY_VERSION,
+        legalAcceptedAt: now,
+        ...(user.id === IDs.owner ? { lastSelectedOrganizationId: IDs.organization } : {}),
       },
       create: {
         id: user.id,
@@ -702,7 +709,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4ZeroMembership0001",
       targetStamps: 0,
       redeemFinal: false,
-      email: "zero@example.test",
+      email: "zero@example.com",
       displayName: "Noor Zero",
     },
     {
@@ -711,7 +718,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4PartialMembership02",
       targetStamps: 5,
       redeemFinal: false,
-      email: "partial@example.test",
+      email: "partial@example.com",
       displayName: "Ali Partial",
     },
     {
@@ -720,7 +727,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4MilestoneReady003",
       targetStamps: program.milestoneThreshold + 1,
       redeemFinal: false,
-      email: "milestone@example.test",
+      email: "milestone@example.com",
       displayName: "Sara Milestone",
     },
     {
@@ -729,7 +736,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4FinalReady000004",
       targetStamps: program.goal,
       redeemFinal: false,
-      email: "ready@example.test",
+      email: "ready@example.com",
       displayName: "Maha Reward Ready",
     },
     {
@@ -738,7 +745,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4CompletedCycle005",
       targetStamps: program.goal,
       redeemFinal: true,
-      email: "cycle@example.test",
+      email: "cycle@example.com",
       displayName: "Zaid Completed Cycle",
     },
   ];

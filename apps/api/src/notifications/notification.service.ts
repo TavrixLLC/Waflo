@@ -34,6 +34,8 @@ class SmtpNotificationProvider implements NotificationProvider {
   private readonly transporter;
 
   constructor(private readonly environment: EnvironmentService) {
+    // Development resolves to the repository Mailpit service; staging and production
+    // environment validation requires an authenticated SMTP provider instead.
     this.transporter = nodemailer.createTransport({
       host: environment.values.SMTP_HOST,
       port: environment.values.SMTP_PORT,
@@ -146,27 +148,35 @@ export function renderNotificationHtml(
   const direction = message.locale === "ar" ? "rtl" : "ltr";
   const actionLabel =
     message.locale === "ar"
-      ? message.kind === "password_reset"
-        ? "إعادة تعيين كلمة المرور"
-        : "متابعة"
-      : message.kind === "password_reset"
-        ? "Reset password"
-        : "Continue";
+      ? message.kind === "email_verification"
+        ? "تأكيد البريد الإلكتروني"
+        : message.kind === "password_reset"
+          ? "إعادة تعيين كلمة المرور"
+          : "متابعة"
+      : message.kind === "email_verification"
+        ? "Verify email"
+        : message.kind === "password_reset"
+          ? "Reset password"
+          : "Continue";
   const organizationName = message.organizationName
     ? ` ${message.locale === "ar" ? "في" : "at"} ${escapeHtml(message.organizationName)}`
     : "";
   const body =
-    message.kind === "membership_transfer_confirmation"
+    message.kind === "email_verification"
       ? message.locale === "ar"
-        ? `تم طلب نقل بطاقة الولاء${organizationName}${message.programName ? ` لبرنامج ${escapeHtml(message.programName)}` : ""}. أكد الطلب فقط إذا بدأت عملية النقل. إذا لم تطلب ذلك، فتجاهل هذه الرسالة.`
-        : `A loyalty card transfer was requested${organizationName}${message.programName ? ` for ${escapeHtml(message.programName)}` : ""}. Confirm only if you started this transfer. If you did not request it, ignore this message.`
-      : message.kind === "membership_transfer_completed"
+        ? "أكّد عنوان بريدك الإلكتروني لإكمال إنشاء حساب التاجر في Waflo."
+        : "Confirm your email address to finish creating your Waflo merchant account."
+      : message.kind === "membership_transfer_confirmation"
         ? message.locale === "ar"
-          ? `اكتمل نقل بطاقة الولاء${organizationName}. أصبحت البطاقة السابقة ورمزها غير صالحين.`
-          : `Your loyalty card transfer${organizationName} is complete. The previous card and QR credential are no longer valid.`
-        : message.locale === "ar"
-          ? `تم إرسال هذه الرسالة بخصوص حسابك${organizationName}.`
-          : `This message was sent about your Waflo account${organizationName}.`;
+          ? `تم طلب نقل بطاقة الولاء${organizationName}${message.programName ? ` لبرنامج ${escapeHtml(message.programName)}` : ""}. أكد الطلب فقط إذا بدأت عملية النقل. إذا لم تطلب ذلك، فتجاهل هذه الرسالة.`
+          : `A loyalty card transfer was requested${organizationName}${message.programName ? ` for ${escapeHtml(message.programName)}` : ""}. Confirm only if you started this transfer. If you did not request it, ignore this message.`
+        : message.kind === "membership_transfer_completed"
+          ? message.locale === "ar"
+            ? `اكتمل نقل بطاقة الولاء${organizationName}. أصبحت البطاقة السابقة ورمزها غير صالحين.`
+            : `Your loyalty card transfer${organizationName} is complete. The previous card and QR credential are no longer valid.`
+          : message.locale === "ar"
+            ? `تم إرسال هذه الرسالة بخصوص حسابك${organizationName}.`
+            : `This message was sent about your Waflo account${organizationName}.`;
   const actionUrl = safeNotificationActionUrl(message.actionUrl, allowedOrigins);
   const action = actionUrl
     ? `<a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:#AE3115;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:700">${escapeHtml(actionLabel)}</a>`
@@ -174,7 +184,7 @@ export function renderNotificationHtml(
   const expiration = message.expiresAt
     ? `<p style="color:#76645F">${message.locale === "ar" ? "تنتهي صلاحية هذا الرابط في" : "This link expires at"} ${escapeHtml(message.expiresAt.toISOString())}.</p>`
     : "";
-  return `<!doctype html><html lang="${message.locale}" dir="${direction}"><body style="margin:0;background:#F7F9FF;color:#241916;font-family:Arial,sans-serif"><div style="max-width:600px;margin:32px auto;background:#fff;border-radius:22px;padding:32px"><div style="font-size:28px;font-weight:800;color:#AE3115">waflo</div><h1 style="font-size:24px">${escapeHtml(subjects[message.locale][message.kind])}</h1><p style="line-height:1.7">${body}</p>${expiration}${action}<p style="margin-top:32px;color:#76645F;font-size:12px">Waflo is owned and operated by Tavrix LLC.</p></div></body></html>`;
+  return `<!doctype html><html lang="${message.locale}" dir="${direction}"><body style="margin:0;background:#F7F9FF;color:#241916;font-family:Arial,sans-serif"><div style="max-width:600px;margin:32px auto;background:#fff;border-radius:22px;padding:32px"><div style="font-size:28px;font-weight:800;color:#AE3115">Waflo</div><h1 style="font-size:24px">${escapeHtml(subjects[message.locale][message.kind])}</h1><p style="line-height:1.7">${body}</p>${expiration}${action}<p style="margin-top:32px;color:#76645F;font-size:12px">Waflo is owned and operated by Tavrix LLC.</p></div></body></html>`;
 }
 
 @Injectable()
@@ -185,10 +195,14 @@ export class NotificationService {
   constructor(private readonly environment: EnvironmentService) {
     this.provider = new SmtpNotificationProvider(environment);
     const customer = new URL(environment.values.CUSTOMER_WEB_URL);
+    const customerTenantDomain =
+      customer.hostname === "localhost" || customer.hostname === "127.0.0.1"
+        ? "localhost"
+        : environment.values.MERCHANT_BASE_DOMAIN;
     this.allowedActionOrigins = [
       new URL(environment.values.MERCHANT_DASHBOARD_URL).origin,
       customer.origin,
-      `${customer.protocol}//*.${customer.hostname}${customer.port ? `:${customer.port}` : ""}`,
+      `${customer.protocol}//*.${customerTenantDomain}${customer.port ? `:${customer.port}` : ""}`,
     ];
   }
 

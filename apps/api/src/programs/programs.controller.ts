@@ -1,13 +1,5 @@
 import { Body, Controller, Get, HttpStatus, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import {
-  programCreateSchema,
-  programPublishSchema,
-  programTestRedeemSchema,
-  programTestResetSchema,
-  programTestReverseSchema,
-  programTestStampSchema,
-  programUpdateSchema,
-} from "@waflo/contracts";
+import { programCreateSchema, programPublishSchema, programUpdateSchema } from "@waflo/contracts";
 import { AppError } from "../common/app-error.js";
 import { pageLimit } from "../common/cursor-pagination.js";
 import { CurrentUser } from "../common/decorators.js";
@@ -250,104 +242,6 @@ export class ProgramsController {
       parseUuid(organizationId),
       parseUuid(programId),
       request,
-    );
-  }
-
-  @Post(":programId/test-sessions")
-  createTestSession(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Param("programId") programId: string,
-    @Req() request: WafloRequest,
-  ) {
-    return this.programs.createTestSession(
-      user.id,
-      parseUuid(organizationId),
-      parseUuid(programId),
-      request,
-    );
-  }
-
-  @Get("test-sessions/:sessionId")
-  getTestSession(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Param("sessionId") sessionId: string,
-  ) {
-    return this.programs.getTestSession(user.id, parseUuid(organizationId), parseUuid(sessionId));
-  }
-
-  @Post("test-sessions/:sessionId/stamps")
-  addStamps(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Param("sessionId") sessionId: string,
-    @Body() body: unknown,
-    @Req() request: WafloRequest,
-  ) {
-    const input = parseInput(programTestStampSchema, body);
-    return this.programs.addTestStamps(
-      user.id,
-      parseUuid(organizationId),
-      parseUuid(sessionId),
-      input,
-      request,
-    );
-  }
-
-  @Post("test-sessions/:sessionId/redeem/:rewardId")
-  redeem(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Param("sessionId") sessionId: string,
-    @Param("rewardId") rewardId: string,
-    @Body() body: unknown,
-    @Req() request: WafloRequest,
-  ) {
-    const input = parseInput(programTestRedeemSchema, body);
-    return this.programs.redeemTestReward(
-      user.id,
-      parseUuid(organizationId),
-      parseUuid(sessionId),
-      parseUuid(rewardId),
-      input,
-      request,
-    );
-  }
-
-  @Post("test-sessions/:sessionId/reverse")
-  reverse(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Param("sessionId") sessionId: string,
-    @Body() body: unknown,
-    @Req() request: WafloRequest,
-  ) {
-    const input = parseInput(programTestReverseSchema, body);
-    return this.programs.reverseTestStamp(
-      user.id,
-      parseUuid(organizationId),
-      parseUuid(sessionId),
-      input,
-      request,
-    );
-  }
-
-  @Post("test-sessions/:sessionId/reset")
-  reset(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Param("sessionId") sessionId: string,
-    @Body() body: unknown,
-    @Req() request: WafloRequest,
-  ) {
-    const input = parseInput(programTestResetSchema, body ?? {});
-    return this.programs.resetTestSession(
-      user.id,
-      parseUuid(organizationId),
-      parseUuid(sessionId),
-      request,
-      input.idempotencyKey,
     );
   }
 

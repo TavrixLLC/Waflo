@@ -5,6 +5,7 @@ import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client
 import {
   billingFailurePolicy,
   billingRecoverySchedule,
+  hasMerchantOperationalBillingAccess,
   isExactlyTwoLocalCalendarDaysBefore,
   type BillingEmailKind,
   type BillingEmailPayload,
@@ -704,10 +705,26 @@ export class OperationalWorker {
       where: {
         status: { in: ["ACTIVE", "TRIALING"] },
         cancelAtPeriodEnd: false,
-        currentPeriodEnd: {
-          gt: now,
-          lte: new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000),
-        },
+        OR: [
+          {
+            status: "ACTIVE",
+            currentPeriodEnd: {
+              gt: now,
+              lte: new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000),
+            },
+          },
+          {
+            status: "TRIALING",
+            organization: {
+              billingProfile: {
+                trialEnd: {
+                  gt: now,
+                  lte: new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000),
+                },
+              },
+            },
+          },
+        ],
         organization: { status: "ACTIVE" },
       },
       include: {
@@ -727,8 +744,11 @@ export class OperationalWorker {
     });
     let queued = 0;
     for (const subscription of subscriptions) {
-      const renewalAt = subscription.currentPeriodEnd;
       const profile = subscription.organization.billingProfile;
+      const renewalAt =
+        subscription.status === "TRIALING"
+          ? (profile?.trialEnd ?? subscription.currentPeriodEnd)
+          : subscription.currentPeriodEnd;
       const customerId = profile?.stripeCustomerId;
       const recipient = profile?.billingEmail ?? subscription.organization.members[0]?.user.email;
       if (
@@ -2177,6 +2197,42 @@ export class OperationalWorker {
       },
     });
     if (claimed.count !== 1) return false;
+    const profile = await this.prisma.organizationBillingProfile.findUnique({
+      where: { organizationId: candidate.organizationId },
+      select: { subscriptionStatus: true, trialEnd: true, gracePeriodEnd: true },
+    });
+    if (
+      !profile ||
+      !hasMerchantOperationalBillingAccess({
+        status: profile.subscriptionStatus,
+        trialEnd: profile.trialEnd,
+        gracePeriodEnd: profile.gracePeriodEnd,
+      })
+    ) {
+      await this.prisma.$transaction([
+        this.prisma.exportCommand.update({
+          where: { id: candidate.id },
+          data: {
+            status: "DEAD_LETTER",
+            safeFailureCode: "BILLING_ACTION_REQUIRED",
+            leaseOwner: null,
+            leaseExpiresAt: null,
+          },
+        }),
+        this.prisma.auditLog.create({
+          data: {
+            organizationId: candidate.organizationId,
+            actorUserId: candidate.requestedByUserId,
+            action: "export.blocked_billing",
+            targetType: "export_command",
+            targetId: candidate.id,
+            requestId: `export-worker:${candidate.publicId}`,
+            metadata: { safeFailureCode: "BILLING_ACTION_REQUIRED" },
+          },
+        }),
+      ]);
+      return true;
+    }
     try {
       const rows = await this.exportRows(
         candidate.organizationId,

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1095.0",
+    "@waflo/billing": "workspace:*",
     "@waflo/config": "workspace:*",
     "@waflo/customer-security": "workspace:*",
     "@waflo/database": "workspace:*",

@@ -20,6 +20,7 @@ import {
   verifyEd25519Message,
 } from "@waflo/staff-device-security";
 import { AuditService } from "../audit/audit.service.js";
+import { AccountAccessService } from "../account/account-access.service.js";
 import { AppError } from "../common/app-error.js";
 import { withOrderedInvariantLocks } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
@@ -82,6 +83,7 @@ export class StaffDeviceService {
     private readonly tenant: TenantService,
     private readonly audit: AuditService,
     private readonly environment: EnvironmentService,
+    private readonly accountAccess: AccountAccessService,
   ) {}
 
   async list(userId: string, organizationId: string, cursor?: string, limit = 30) {
@@ -723,6 +725,11 @@ export class StaffDeviceService {
       );
     }
     const publicKey = normalizeEd25519PublicKey(input.publicKey);
+    const pairing = await this.prisma.client.devicePairingSession.findUnique({
+      where: { publicId: parsed.publicId },
+      select: { organizationId: true },
+    });
+    if (pairing) await this.accountAccess.requireOperationalAccess(pairing.organizationId);
     return withOrderedInvariantLocks(
       this.prisma.client,
       [`pairing:${parsed.publicId}`],
@@ -863,6 +870,7 @@ export class StaffDeviceService {
     const session = await this.prisma.client.devicePairingSession.findUnique({
       where: { publicId },
     });
+    if (session) await this.accountAccess.requireOperationalAccess(session.organizationId);
     if (
       session?.status !== "CLAIMED" ||
       !session.claimedInstallationId ||
@@ -899,7 +907,7 @@ export class StaffDeviceService {
   async complete(input: DevicePairingCompleteInput) {
     const preflight = await this.prisma.client.devicePairingSession.findUnique({
       where: { publicId: input.pairingPublicId },
-      select: { intendedStaffMemberId: true },
+      select: { intendedStaffMemberId: true, organizationId: true },
     });
     if (!preflight) {
       throw new AppError(
@@ -908,6 +916,7 @@ export class StaffDeviceService {
         HttpStatus.GONE,
       );
     }
+    await this.accountAccess.requireOperationalAccess(preflight.organizationId);
     const token = createOpaqueDeviceSessionToken(this.environment.values.DEVICE_SESSION_SECRET);
     const refreshToken = randomBytes(48).toString("base64url");
     return withOrderedInvariantLocks(

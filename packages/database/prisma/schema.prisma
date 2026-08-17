@@ -565,6 +565,7 @@ enum ExternalIdentityProvider {
 
 enum OAuthAuthorizationIntent {
   SIGN_IN
+  SIGN_UP
   LINK
 }
 
@@ -679,6 +680,9 @@ model OAuthAuthorizationRequest {
   browserBindingHash       String                    @map("browser_binding_hash") @db.Char(64)
   codeVerifierCiphertext   String                    @map("code_verifier_ciphertext") @db.Text
   allowRegistration       Boolean                   @default(false) @map("allow_registration")
+  termsVersion            String?                   @map("terms_version") @db.VarChar(60)
+  privacyVersion          String?                   @map("privacy_version") @db.VarChar(60)
+  legalAcceptedAt         DateTime?                 @map("legal_accepted_at") @db.Timestamptz(6)
   locale                   Locale                    @default(EN)
   expiresAt                DateTime                  @map("expires_at") @db.Timestamptz(6)
   consumedAt               DateTime?                 @map("consumed_at") @db.Timestamptz(6)
@@ -800,6 +804,8 @@ model Organization {
   selectedPlan          PlanCode                 @default(STARTER) @map("selected_plan")
   onboardingState       OnboardingState          @default(BUSINESS) @map("onboarding_state")
   onboardingCompletedAt DateTime?                @map("onboarding_completed_at") @db.Timestamptz(6)
+  onboardingCommandId   String?                  @unique @map("onboarding_command_id") @db.Uuid
+  onboardingRequestFingerprint String?           @map("onboarding_request_fingerprint") @db.Char(64)
   createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
   archivedAt            DateTime?                @map("archived_at") @db.Timestamptz(6)
@@ -1191,20 +1197,30 @@ model SecurityEvent {
   @@map("security_events")
 }
 
-// Persists caller-provided command IDs for Stripe Checkout creation idempotency.
-// Prevents duplicate sessions when the same (organizationId, planCode, idempotencyKey) is retried.
+// Persists caller-provided billing onboarding command IDs. Historical hosted Checkout
+// fields remain nullable so pre-v1 records stay readable while new signups use SetupIntents.
 model CheckoutIdempotencyKey {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   idempotencyKey String       @map("idempotency_key") @db.VarChar(255)
   planCode       String       @map("plan_code") @db.VarChar(40)
+  selectedCadence BillingCadence @default(MONTHLY) @map("selected_cadence")
+  requestFingerprint String?  @map("request_fingerprint") @db.Char(64)
+  stripeCustomerId String?    @map("stripe_customer_id") @db.VarChar(255)
+  stripeSetupIntentId String? @unique @map("stripe_setup_intent_id") @db.VarChar(255)
+  stripePaymentMethodId String? @map("stripe_payment_method_id") @db.VarChar(255)
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id") @db.VarChar(255)
   stripeSessionId String?     @map("stripe_session_id") @db.VarChar(255)
   stripeSessionUrl String?    @map("stripe_session_url") @db.Text
+  status          String       @default("LEGACY_CHECKOUT") @db.VarChar(40)
+  expiresAt       DateTime?    @map("expires_at") @db.Timestamptz(6)
+  completedAt     DateTime?    @map("completed_at") @db.Timestamptz(6)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, createdAt])
+  @@index([organizationId, status, expiresAt])
   @@map("checkout_idempotency_keys")
 }
 

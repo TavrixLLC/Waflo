@@ -12,6 +12,9 @@ import {
   Res,
 } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
+import { googleSignupIntentSchema } from "@waflo/contracts";
+import { AppError } from "../common/app-error.js";
+import { parseInput } from "../common/validation.js";
 import { CurrentSession, CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
@@ -22,6 +25,15 @@ type Provider = "google" | "apple";
 function parseProvider(value: string): Provider {
   if (value === "google" || value === "apple") return value;
   throw new Error("Unsupported external authentication provider.");
+}
+
+function parseEnabledProvider(value: string): "google" {
+  if (value === "google") return value;
+  throw new AppError(
+    "APPLE_SIGNIN_REMOVED",
+    "Apple Sign-In is no longer available. Use Google or your email and password.",
+    HttpStatus.GONE,
+  );
 }
 
 function parseLocale(value: unknown): "en" | "ar" {
@@ -49,15 +61,28 @@ export class ExternalAuthController {
     @Query() query: Record<string, unknown>,
     @Res() reply: FastifyReply,
   ) {
-    const registration = query.registration === "true";
-    const started = await this.externalAuth.start(parseProvider(providerValue), {
+    const provider = parseEnabledProvider(providerValue);
+    const started = await this.externalAuth.start(provider, {
       locale: parseLocale(query.locale),
-      allowRegistration: registration,
-      legalAccepted:
-        registration && query.termsAccepted === "true" && query.privacyAccepted === "true",
+      allowRegistration: false,
+      legalAccepted: false,
     });
-    this.setBrowserBindingCookie(reply, parseProvider(providerValue), started.browserBinding);
+    this.setBrowserBindingCookie(reply, provider, started.browserBinding);
     return reply.redirect(started.authorizationUrl, HttpStatus.FOUND);
+  }
+
+  @Post("google/signup")
+  @Public()
+  @RateLimit(10, 300)
+  async startGoogleSignup(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const input = parseInput(googleSignupIntentSchema, body);
+    const started = await this.externalAuth.start("google", {
+      locale: input.locale,
+      allowRegistration: true,
+      legalAccepted: input.termsAccepted && input.privacyAccepted,
+    });
+    this.setBrowserBindingCookie(reply, "google", started.browserBinding);
+    return { authorizationUrl: started.authorizationUrl };
   }
 
   @Post(":provider/link")
@@ -69,7 +94,7 @@ export class ExternalAuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const value = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    const provider = parseProvider(providerValue);
+    const provider = parseEnabledProvider(providerValue);
     const started = await this.externalAuth.startLink(
       provider,
       user.id,
@@ -126,15 +151,11 @@ export class ExternalAuthController {
   @Public()
   @SkipCsrf()
   @RateLimit(30, 300)
-  appleCallback(@Body() body: unknown, @Req() request: WafloRequest, @Res() reply: FastifyReply) {
-    const value = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    return this.completeCallback(
-      "apple",
-      typeof value.state === "string" ? value.state : "",
-      typeof value.code === "string" ? value.code : "",
-      typeof value.user === "string" ? value.user : undefined,
-      request,
-      reply,
+  appleCallback() {
+    throw new AppError(
+      "APPLE_SIGNIN_REMOVED",
+      "Apple Sign-In is no longer available. Use Google or your email and password.",
+      HttpStatus.GONE,
     );
   }
 
@@ -175,8 +196,11 @@ export class ExternalAuthController {
       this.setSessionCookie(reply, completed.session.rawToken, completed.session.expiresAt);
       result = "authenticated";
       redirectLocale = completed.locale;
-    } catch {
-      result = "failed";
+    } catch (error) {
+      result =
+        error instanceof AppError && error.code === "EXTERNAL_AUTH_ACCOUNT_NOT_FOUND"
+          ? "no_account"
+          : "failed";
     } finally {
       this.clearBrowserBindingCookie(reply, provider, cookieName);
     }

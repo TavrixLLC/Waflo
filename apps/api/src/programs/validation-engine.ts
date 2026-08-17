@@ -603,23 +603,8 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
         ),
       );
   }
-  if (
-    input.completedTestSessions.some(
-      (session) =>
-        session.versionRevision !== input.versionRevision ||
-        session.validationFingerprint !== input.expectedFingerprint,
-    )
-  )
-    issues.push(
-      issue(
-        "TEST_MODE_FINGERPRINT_STALE",
-        "warning",
-        "testMode",
-        "TEST_MODE",
-        "An older completed Test Mode journey no longer matches this draft.",
-        "Run Test Mode again after validation.",
-      ),
-    );
+  // Historical test-session records are intentionally ignored. Publication
+  // safety is provided by current server-side validation and fingerprints.
 
   return {
     errors: issues.filter((item) => item.severity === "error"),

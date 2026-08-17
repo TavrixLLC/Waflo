@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { verifyPassword } from "@waflo/auth";
 import type { OrganizationInput } from "@waflo/contracts";
@@ -8,6 +9,7 @@ import { withOrganizationInvariantLock } from "../common/organization-transactio
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { validateBusinessCoordinate } from "../locations/location-coordinate.js";
 import { oldSlugReservedUntil, validateSlug } from "../tenancy/slug.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 
@@ -62,6 +64,28 @@ export class OrganizationsService {
         HttpStatus.FORBIDDEN,
       );
     }
+    const requestFingerprint = createHash("sha256")
+      .update(JSON.stringify(input), "utf8")
+      .digest("hex");
+    const replay = input.commandId
+      ? await this.prisma.client.organization.findUnique({
+          where: { onboardingCommandId: input.commandId },
+          include: { members: { where: { userId, status: "ACTIVE" }, take: 1 } },
+        })
+      : null;
+    if (replay) {
+      if (
+        replay.members.length !== 1 ||
+        replay.onboardingRequestFingerprint !== requestFingerprint
+      ) {
+        throw new AppError(
+          "ONBOARDING_COMMAND_CONFLICT",
+          "This onboarding action was already used with different details.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      return replay;
+    }
     const availability = await this.slugAvailability(input.merchantSlug);
     if (!availability.available) {
       throw new AppError(
@@ -72,6 +96,9 @@ export class OrganizationsService {
     }
     const merchantSlug = availability.slug;
     const selectedPlan = planToDb(input.selectedPlan);
+    const firstLocationCoordinate = input.firstLocation
+      ? validateBusinessCoordinate(input.firstLocation.latitude, input.firstLocation.longitude)
+      : null;
     const organization = await this.prisma.client.$transaction(
       async (transaction: Prisma.TransactionClient) => {
         const created = await transaction.organization.create({
@@ -81,9 +108,15 @@ export class OrganizationsService {
             merchantSlug,
             businessCategory: input.businessCategory ?? null,
             defaultLocale: localeToDb(input.defaultLocale),
-            timezone: input.timezone,
+            timezone: firstLocationCoordinate?.timezone ?? input.timezone,
             selectedPlan,
             onboardingState: "LOCATION",
+            ...(input.commandId
+              ? {
+                  onboardingCommandId: input.commandId,
+                  onboardingRequestFingerprint: requestFingerprint,
+                }
+              : {}),
           },
         });
         await transaction.organizationMember.create({
@@ -98,6 +131,23 @@ export class OrganizationsService {
             trialEnd: null,
           },
         });
+        if (input.firstLocation && firstLocationCoordinate) {
+          await transaction.location.create({
+            data: {
+              organizationId: created.id,
+              name: input.firstLocation.name,
+              addressLine1: input.firstLocation.addressLine1 ?? null,
+              addressLine2: input.firstLocation.addressLine2 ?? null,
+              city: input.firstLocation.city ?? null,
+              region: input.firstLocation.region ?? null,
+              postalCode: input.firstLocation.postalCode ?? null,
+              countryCode: input.firstLocation.countryCode,
+              timezone: firstLocationCoordinate.timezone,
+              latitude: firstLocationCoordinate.latitude,
+              longitude: firstLocationCoordinate.longitude,
+            },
+          });
+        }
         if (this.environment.values.DEPLOYMENT_ENVIRONMENT !== "staging") {
           await transaction.organizationDomain.create({
             data: {
@@ -335,7 +385,7 @@ export class OrganizationsService {
   }
 
   async completeOnboarding(userId: string, organizationId: string, request: WafloRequest) {
-    await this.tenant.requireMembership(userId, organizationId, "organization.manage");
+    await this.tenant.requireOnboardingMembership(userId, organizationId, "organization.manage");
     const activeLocations = await this.prisma.client.location.count({
       where: { organizationId, status: "ACTIVE" },
     });
@@ -343,6 +393,23 @@ export class OrganizationsService {
       throw new AppError(
         "FIRST_LOCATION_REQUIRED",
         "Create your first active location before completing onboarding.",
+      );
+    }
+    const billing = await this.prisma.client.organizationBillingProfile.findUnique({
+      where: { organizationId },
+    });
+    if (
+      !billing ||
+      !["TRIALING", "ACTIVE", "GRACE_PERIOD"].includes(billing.subscriptionStatus) ||
+      (billing.subscriptionStatus === "TRIALING" &&
+        (!billing.trialEnd || billing.trialEnd <= new Date())) ||
+      (billing.subscriptionStatus === "GRACE_PERIOD" &&
+        (!billing.gracePeriodEnd || billing.gracePeriodEnd <= new Date()))
+    ) {
+      throw new AppError(
+        "BILLING_ACTIVATION_REQUIRED",
+        "Complete payment setup and start your 7-day trial before finishing onboarding.",
+        HttpStatus.PAYMENT_REQUIRED,
       );
     }
     const organization = await this.prisma.client.organization.update({

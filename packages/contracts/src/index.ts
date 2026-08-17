@@ -81,6 +81,14 @@ export const registerSchema = z
   })
   .strict();
 
+export const googleSignupIntentSchema = z
+  .object({
+    locale: localeSchema.default("en"),
+    termsAccepted: z.literal(true),
+    privacyAccepted: z.literal(true),
+  })
+  .strict();
+
 export const loginSchema = z
   .object({
     email: emailSchema,
@@ -117,6 +125,23 @@ export const organizationSchema = z
     defaultLocale: localeSchema,
     timezone: timezoneSchema,
     selectedPlan: planCodeSchema.default("starter"),
+    commandId: z.uuid().optional(),
+    firstLocation: z
+      .object({
+        name: z.string().trim().min(2).max(120),
+        addressLine1: z.string().trim().max(160).optional(),
+        addressLine2: z.string().trim().max(160).optional(),
+        city: z.string().trim().max(100).optional(),
+        region: z.string().trim().max(100).optional(),
+        postalCode: z.string().trim().max(30).optional(),
+        countryCode: countryCodeSchema,
+        timezone: timezoneSchema,
+        latitude: z.number().finite().min(-90).max(90),
+        longitude: z.number().finite().min(-180).max(180),
+        coordinatesConfirmed: z.literal(true),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -139,28 +164,60 @@ const locationObjectSchema = z.object({
   countryCode: countryCodeSchema.optional(),
   phone: z.string().trim().min(5).max(30).optional(),
   timezone: timezoneSchema.optional(),
-  latitude: z.number().min(-90).max(90).nullable().optional(),
-  longitude: z.number().min(-180).max(180).nullable().optional(),
+  latitude: z.number().finite().min(-90).max(90).optional(),
+  longitude: z.number().finite().min(-180).max(180).optional(),
+  coordinatesConfirmed: z.literal(true).optional(),
 });
 
 function validateCoordinatePair(
-  value: { latitude?: number | null | undefined; longitude?: number | null | undefined },
+  value: {
+    latitude?: number | undefined;
+    longitude?: number | undefined;
+    coordinatesConfirmed?: true | undefined;
+  },
   context: z.RefinementCtx,
 ) {
   const latitudeProvided = Object.hasOwn(value, "latitude");
   const longitudeProvided = Object.hasOwn(value, "longitude");
-  const latitudeSet = value.latitude !== undefined && value.latitude !== null;
-  const longitudeSet = value.longitude !== undefined && value.longitude !== null;
-  if (latitudeProvided !== longitudeProvided || latitudeSet !== longitudeSet) {
+  if (latitudeProvided !== longitudeProvided) {
     context.addIssue({
       code: "custom",
-      path: [latitudeSet ? "longitude" : "latitude"],
+      path: [latitudeProvided ? "longitude" : "latitude"],
       message: "Latitude and longitude must be configured together.",
+    });
+  }
+  if ((latitudeProvided || longitudeProvided) && value.coordinatesConfirmed !== true) {
+    context.addIssue({
+      code: "custom",
+      path: ["coordinatesConfirmed"],
+      message: "Confirm the exact location on the map.",
+    });
+  }
+  if (Object.hasOwn(value, "timezone") && !latitudeProvided && !longitudeProvided) {
+    context.addIssue({
+      code: "custom",
+      path: ["timezone"],
+      message: "Timezone is determined from the confirmed map coordinate.",
     });
   }
 }
 
-export const locationSchema = locationObjectSchema.strict().superRefine(validateCoordinatePair);
+export const locationCoordinateSchema = z
+  .object({
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+  })
+  .strict();
+
+export const locationSchema = locationObjectSchema
+  .extend({
+    countryCode: countryCodeSchema,
+    timezone: timezoneSchema,
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+    coordinatesConfirmed: z.literal(true),
+  })
+  .strict();
 
 export const locationUpdateSchema = locationObjectSchema
   .partial()
@@ -209,7 +266,30 @@ export const billingIdentitySchema = z
   })
   .strict();
 
+export const billingTrialSetupSchema = z
+  .object({
+    plan: planCodeSchema,
+    cadence: billingCadenceSchema,
+    billingIdentity: billingIdentitySchema.extend({
+      countryCode: countryCodeSchema,
+      addressLine1: z.string().trim().min(1).max(200),
+      city: z.string().trim().min(1).max(120),
+    }),
+  })
+  .strict();
+
+export const billingTrialCompleteSchema = z
+  .object({
+    setupIntentId: z
+      .string()
+      .trim()
+      .regex(/^seti_[A-Za-z0-9_]+$/)
+      .max(255),
+  })
+  .strict();
+
 export type BillingIdentityInput = z.infer<typeof billingIdentitySchema>;
+export type BillingTrialSetupInput = z.infer<typeof billingTrialSetupSchema>;
 
 export const refundReasons = [
   "duplicate_charge",

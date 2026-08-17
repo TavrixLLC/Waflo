@@ -21,7 +21,7 @@ import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycl
 import { AuthService } from "./auth.service.js";
 
 type PublicProvider = "google" | "apple";
-type CapabilityStatus = "AVAILABLE" | "NOT_CONFIGURED";
+type CapabilityStatus = "AVAILABLE" | "NOT_CONFIGURED" | "REMOVED";
 
 interface VerifiedIdentity {
   issuer: string;
@@ -78,9 +78,9 @@ export class ExternalAuthService {
   publicCapabilities() {
     return {
       googleSignIn: this.providerStatus("google"),
-      appleSignIn: this.providerStatus("apple"),
+      appleSignIn: "REMOVED" as const,
       googleSignInAvailable: this.providerStatus("google") === "AVAILABLE",
-      appleSignInAvailable: this.providerStatus("apple") === "AVAILABLE",
+      appleSignInAvailable: false,
     };
   }
 
@@ -95,17 +95,7 @@ export class ExternalAuthService {
         ? "AVAILABLE"
         : "NOT_CONFIGURED";
     }
-    return this.environment.values.APPLE_SIGNIN_CLIENT_ID &&
-      this.environment.values.APPLE_SIGNIN_TEAM_ID &&
-      this.environment.values.APPLE_SIGNIN_KEY_ID &&
-      this.applePrivateKey() &&
-      this.externalAuthTokenKeyring() &&
-      this.validCallback(
-        this.environment.values.APPLE_SIGNIN_REDIRECT_URI,
-        "/v1/auth/external/apple/callback",
-      )
-      ? "AVAILABLE"
-      : "NOT_CONFIGURED";
+    return "REMOVED";
   }
 
   async verifyProviderReachability(provider: PublicProvider): Promise<void> {
@@ -148,6 +138,7 @@ export class ExternalAuthService {
       reauthenticatedSessionId?: string | undefined;
     },
   ) {
+    if (provider === "apple") this.appleSignInRemoved();
     this.requireConfigured(provider);
     if (input.allowRegistration && !input.legalAccepted) {
       throw new AppError(
@@ -169,13 +160,18 @@ export class ExternalAuthService {
       data: {
         stateHash: hashOpaqueToken(state),
         provider: providerCode(provider),
-        intent: input.linkUserId ? "LINK" : "SIGN_IN",
+        intent: input.linkUserId ? "LINK" : input.allowRegistration ? "SIGN_UP" : "SIGN_IN",
         userId: input.linkUserId ?? null,
         reauthenticatedSessionId: input.reauthenticatedSessionId ?? null,
         nonceHash: hashOpaqueToken(nonce),
         browserBindingHash: hashOpaqueToken(browserBinding),
         codeVerifierCiphertext: this.encryptVerifier(verifier),
         allowRegistration: input.allowRegistration,
+        termsVersion: input.allowRegistration ? this.environment.values.LEGAL_TERMS_VERSION : null,
+        privacyVersion: input.allowRegistration
+          ? this.environment.values.LEGAL_PRIVACY_VERSION
+          : null,
+        legalAcceptedAt: input.allowRegistration ? new Date() : null,
         locale,
         expiresAt,
       },
@@ -201,6 +197,7 @@ export class ExternalAuthService {
     currentPassword: string,
     locale: "en" | "ar",
   ) {
+    if (provider === "apple") this.appleSignInRemoved();
     const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
     const recentSession = !user.passwordHash
       ? await this.prisma.client.session.findFirst({
@@ -274,10 +271,17 @@ export class ExternalAuthService {
       flow.intent === "LINK"
         ? await this.linkIdentity(flow.userId, flow.provider, identity, request)
         : await this.signInIdentity(
-            flow.allowRegistration,
+            flow.intent === "SIGN_UP",
             flow.provider,
             identity,
             flow.locale,
+            flow.intent === "SIGN_UP"
+              ? {
+                  termsVersion: flow.termsVersion,
+                  privacyVersion: flow.privacyVersion,
+                  acceptedAt: flow.legalAcceptedAt,
+                }
+              : null,
             request,
           );
     const session = await this.auth.createSession(
@@ -305,7 +309,16 @@ export class ExternalAuthService {
   }
 
   async handleAppleNotification(payload: string, request: WafloRequest) {
-    this.requireConfigured("apple");
+    // Apple authentication is removed, but Apple can still send lifecycle
+    // notifications for historical identities. Keep that cleanup channel
+    // available without re-enabling sign-in or account linking.
+    if (!this.environment.values.APPLE_SIGNIN_CLIENT_ID) {
+      throw new AppError(
+        "APPLE_NOTIFICATION_NOT_CONFIGURED",
+        "Apple identity cleanup is temporarily unavailable.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
     if (!payload || payload.length > 32_768) this.providerFailure();
     const verified = await jwtVerify(payload, this.appleJwks, {
       issuer: APPLE_ISSUER,
@@ -632,10 +645,15 @@ export class ExternalAuthService {
   }
 
   private async signInIdentity(
-    allowRegistration: boolean,
+    signup: boolean,
     provider: ExternalIdentityProvider,
     identity: VerifiedIdentity,
     locale: Locale,
+    legalAcceptance: {
+      termsVersion: string | null;
+      privacyVersion: string | null;
+      acceptedAt: Date | null;
+    } | null,
     request: WafloRequest,
   ) {
     const existingIdentity = await this.prisma.client.externalIdentity.findUnique({
@@ -677,7 +695,14 @@ export class ExternalAuthService {
         });
       });
     }
-    if (!allowRegistration || !identity.email || !identity.emailVerified) {
+    if (!signup) this.noAccountIdentity();
+    if (
+      !identity.email ||
+      !identity.emailVerified ||
+      !legalAcceptance?.termsVersion ||
+      !legalAcceptance.privacyVersion ||
+      !legalAcceptance.acceptedAt
+    ) {
       this.deniedIdentity();
     }
     const normalizedEmail = normalizeEmail(identity.email);
@@ -707,9 +732,9 @@ export class ExternalAuthService {
         emailVerifiedAt: now,
         passwordHash: null,
         preferredLocale: locale,
-        termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
-        privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
-        legalAcceptedAt: now,
+        termsVersion: legalAcceptance.termsVersion,
+        privacyVersion: legalAcceptance.privacyVersion,
+        legalAcceptedAt: legalAcceptance.acceptedAt,
         lastLoginAt: now,
         externalIdentities: {
           create: {
@@ -1173,6 +1198,22 @@ export class ExternalAuthService {
       "EXTERNAL_AUTH_ACTION_REQUIRED",
       "This sign-in could not be completed. Use another sign-in method or contact support.",
       HttpStatus.CONFLICT,
+    );
+  }
+
+  private noAccountIdentity(): never {
+    throw new AppError(
+      "EXTERNAL_AUTH_ACCOUNT_NOT_FOUND",
+      "No Waflo account was found for this Google account. Create an account first.",
+      HttpStatus.NOT_FOUND,
+    );
+  }
+
+  private appleSignInRemoved(): never {
+    throw new AppError(
+      "APPLE_SIGNIN_REMOVED",
+      "Apple Sign-In is no longer available. Use Google or your email and password.",
+      HttpStatus.GONE,
     );
   }
 

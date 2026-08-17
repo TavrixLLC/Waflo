@@ -505,6 +505,7 @@ export class PublicEnrollmentService {
         publicMembershipId: membership.publicMembershipId,
         cardUrl: canonicalCustomerUrl({
           customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+          merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
           merchantSlug,
           pathname: `/card/${membership.publicMembershipId}`,
         }),

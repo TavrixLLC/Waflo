@@ -3,6 +3,14 @@ import { z } from "zod";
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
 const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
+const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+
+export type PublicMapboxTokenStatus = "SET" | "UNSET" | "INVALID_FORMAT";
+
+export function classifyPublicMapboxToken(value: string | undefined): PublicMapboxTokenStatus {
+  if (!value?.trim()) return "UNSET";
+  return publicMapboxTokenPattern.test(value.trim()) ? "SET" : "INVALID_FORMAT";
+}
 
 export const environmentSchema = z
   .object({
@@ -136,6 +144,9 @@ export const environmentSchema = z
     GOOGLE_SIGNIN_CLIENT_ID: z.string().optional(),
     GOOGLE_SIGNIN_CLIENT_SECRET: z.string().optional(),
     GOOGLE_SIGNIN_REDIRECT_URI: optionalUrl,
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: z
+      .union([z.literal(""), z.string().regex(publicMapboxTokenPattern)])
+      .optional(),
     APPLE_SIGNIN_CLIENT_ID: z.string().optional(),
     APPLE_SIGNIN_TEAM_ID: z.string().optional(),
     APPLE_SIGNIN_KEY_ID: z.string().optional(),
@@ -198,6 +209,16 @@ export const environmentSchema = z
     GOOGLE_WALLET_PUBLISHING_MODE: z.enum(["DEMO", "PUBLISHING"]).default("DEMO"),
   })
   .superRefine((value, context) => {
+    if (
+      !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value.MERCHANT_BASE_DOMAIN)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["MERCHANT_BASE_DOMAIN"],
+        message:
+          "Merchant base domain must be a lowercase ASCII DNS name without a scheme or port.",
+      });
+    }
     const deployed = value.DEPLOYMENT_ENVIRONMENT !== "development";
     if (deployed && value.NODE_ENV !== "production") {
       context.addIssue({

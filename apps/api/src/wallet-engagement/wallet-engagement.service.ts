@@ -10,6 +10,7 @@ import {
   resolveWalletNearbyText,
 } from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
+import { AccountAccessService } from "../account/account-access.service.js";
 import { AppError } from "../common/app-error.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
@@ -102,6 +103,7 @@ export class WalletEngagementService {
     private readonly providers: WalletProviderRegistry,
     private readonly customerCards: CustomerCardService,
     private readonly environment: EnvironmentService,
+    private readonly accountAccess: AccountAccessService,
   ) {}
 
   private async program(userId: string, organizationId: string, programId: string, manage = false) {
@@ -758,6 +760,9 @@ export class WalletEngagementService {
   ) {
     const context = await this.customerCards.requireSession(request, developmentOverride);
     const membership = context.session.membership;
+    if (input.granted) {
+      await this.accountAccess.requireOperationalAccess(membership.organizationId, true);
+    }
     const now = new Date();
     const consent = await this.prisma.client.$transaction(async (transaction) => {
       const created = await transaction.customerConsent.create({

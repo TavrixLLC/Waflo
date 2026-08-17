@@ -8,6 +8,7 @@ import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { validateBusinessCoordinate } from "./location-coordinate.js";
 
 function toPlanCode(plan: "STARTER" | "GROWTH" | "SCALE"): "starter" | "growth" | "scale" {
   return plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
@@ -21,6 +22,10 @@ export class LocationsService {
     private readonly environment: EnvironmentService,
     private readonly audit: AuditService,
   ) {}
+
+  resolveCoordinate(_userId: string, latitude: number, longitude: number) {
+    return validateBusinessCoordinate(latitude, longitude);
+  }
 
   async list(userId: string, organizationId: string, cursor?: string) {
     const membership = await this.tenant.requireMembership(
@@ -70,6 +75,7 @@ export class LocationsService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "locations.create");
+    const coordinate = validateBusinessCoordinate(input.latitude, input.longitude);
     const location = await withOrganizationInvariantLock(
       this.prisma.client,
       organizationId,
@@ -120,9 +126,9 @@ export class LocationsService {
             postalCode: input.postalCode ?? null,
             countryCode: input.countryCode ?? null,
             phone: input.phone ?? null,
-            timezone: input.timezone ?? organization.timezone,
-            latitude: input.latitude ?? null,
-            longitude: input.longitude ?? null,
+            timezone: coordinate.timezone,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
           },
         });
       },
@@ -155,13 +161,18 @@ export class LocationsService {
       countryCode?: string | undefined;
       phone?: string | undefined;
       timezone?: string | undefined;
-      latitude?: number | null | undefined;
-      longitude?: number | null | undefined;
+      latitude?: number | undefined;
+      longitude?: number | undefined;
+      coordinatesConfirmed?: true | undefined;
     },
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "locations.manage");
     await this.get(userId, organizationId, locationId);
+    const coordinate =
+      input.latitude !== undefined && input.longitude !== undefined
+        ? validateBusinessCoordinate(input.latitude, input.longitude)
+        : null;
     const location = await this.prisma.client.location.update({
       where: { id: locationId },
       data: {
@@ -173,12 +184,16 @@ export class LocationsService {
         ...(input.postalCode !== undefined ? { postalCode: input.postalCode } : {}),
         ...(input.countryCode !== undefined ? { countryCode: input.countryCode } : {}),
         ...(input.phone !== undefined ? { phone: input.phone } : {}),
-        ...(input.timezone ? { timezone: input.timezone } : {}),
-        ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
-        ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
+        ...(coordinate
+          ? {
+              timezone: coordinate.timezone,
+              latitude: coordinate.latitude,
+              longitude: coordinate.longitude,
+            }
+          : {}),
       },
     });
-    if (input.latitude !== undefined || input.longitude !== undefined) {
+    if (coordinate) {
       await this.queueNearbyLocationRefresh(organizationId, locationId, location.updatedAt);
     }
     await this.audit.record(
@@ -280,6 +295,13 @@ export class LocationsService {
           throw new AppError("LOCATION_NOT_FOUND", "Location not found.", HttpStatus.NOT_FOUND);
         }
         if (location.status === "ACTIVE") return location;
+        if (location.latitude === null || location.longitude === null) {
+          throw new AppError(
+            "LOCATION_MAP_CONFIRMATION_REQUIRED",
+            "Confirm this location on the map before restoring it.",
+            HttpStatus.CONFLICT,
+          );
+        }
         const activeCount = await transaction.location.count({
           where: { organizationId, status: "ACTIVE" },
         });

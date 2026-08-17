@@ -77,14 +77,16 @@ export const billingCadenceCatalog: Readonly<
     BillingCadence,
     {
       readonly months: 1 | 3 | 12;
-      readonly discountRate: 0 | 0.07 | 0.17;
+      readonly discountRate: number;
       readonly label: string;
     }
   >
 > = {
   monthly: { months: 1, discountRate: 0, label: "Monthly" },
-  quarterly: { months: 3, discountRate: 0.07, label: "Quarterly" },
-  yearly: { months: 12, discountRate: 0.17, label: "Yearly" },
+  // Quarterly receives half of the yearly discount: one quarter of a month free.
+  quarterly: { months: 3, discountRate: 1 / 12, label: "Quarterly" },
+  // Yearly is billed as ten months instead of twelve: two months free.
+  yearly: { months: 12, discountRate: 1 / 6, label: "Yearly" },
 };
 
 export function cadencePrice(
@@ -98,12 +100,14 @@ export function cadencePrice(
   const monthly = planCatalog[plan].monthlyPriceUsd;
   const definition = billingCadenceCatalog[cadence];
   const undiscountedMinorUnits = monthly * 100 * definition.months;
-  const discountPercent = Math.round(definition.discountRate * 100);
-  // Stripe Prices use integer currency minor units. Round half-up exactly once
-  // after applying the cadence discount to the undiscounted minor-unit total.
-  const billedMinorUnits = Math.floor(
-    (undiscountedMinorUnits * (100 - discountPercent) + 50) / 100,
-  );
+  // Keep the business rule explicit so Stripe validation and every UI surface
+  // agree exactly: quarterly is 2.75 months and yearly is 10 months.
+  const billedMinorUnits =
+    cadence === "monthly"
+      ? monthly * 100
+      : cadence === "quarterly"
+        ? Math.round((monthly * 100 * 11) / 4)
+        : monthly * 100 * 10;
   const undiscountedAmountUsd = undiscountedMinorUnits / 100;
   const billedAmountUsd = billedMinorUnits / 100;
   return {
@@ -198,7 +202,7 @@ export function isExactlyTwoLocalCalendarDaysBefore(
 }
 
 export function formatBillingDate(date: Date, locale: "en" | "ar", timeZone: string): string {
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-IQ" : "en-US", {
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-IQ-u-nu-latn" : "en-US", {
     timeZone,
     dateStyle: "full",
     timeStyle: "short",
@@ -206,7 +210,7 @@ export function formatBillingDate(date: Date, locale: "en" | "ar", timeZone: str
 }
 
 export function formatMinorUnits(amount: number, currency: string, locale: "en" | "ar"): string {
-  return new Intl.NumberFormat(locale === "ar" ? "ar-IQ" : "en-US", {
+  return new Intl.NumberFormat(locale === "ar" ? "ar-IQ-u-nu-latn" : "en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(amount / 100);
@@ -509,7 +513,6 @@ export function canPublishWithinProgramLimit(
 }
 
 export const programPublicationAllowedBillingStatuses = [
-  "pending_activation",
   "trialing",
   "active",
   "grace_period",
@@ -579,6 +582,29 @@ export function effectiveBillingStatus(
   return status === "trialing" && trialEnd !== null && trialEnd !== undefined && trialEnd <= now
     ? "past_due"
     : status;
+}
+
+export interface MerchantOperationalBillingSnapshot {
+  readonly status: BillingStatus | Uppercase<BillingStatus>;
+  readonly trialEnd?: Date | null | undefined;
+  readonly gracePeriodEnd?: Date | null | undefined;
+}
+
+/**
+ * The shared, time-aware billing policy used immediately before an operational
+ * mutation or an irreversible provider/worker side effect.
+ */
+export function hasMerchantOperationalBillingAccess(
+  snapshot: MerchantOperationalBillingSnapshot,
+  now = new Date(),
+): boolean {
+  const status = snapshot.status.toLocaleLowerCase("en-US") as BillingStatus;
+  if (status === "active") return true;
+  if (status === "trialing") return Boolean(snapshot.trialEnd && snapshot.trialEnd > now);
+  if (status === "grace_period") {
+    return Boolean(snapshot.gracePeriodEnd && snapshot.gracePeriodEnd > now);
+  }
+  return false;
 }
 
 export function walletIncludedForPlan(_plan: PlanCode): boolean {

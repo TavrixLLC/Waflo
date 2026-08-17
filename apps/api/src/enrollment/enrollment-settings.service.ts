@@ -58,6 +58,7 @@ export class EnrollmentSettingsService {
             merchantSlug: program.organization.merchantSlug,
             programSlug: program.publicSlug,
             customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+            merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
           })
         : null;
     return {
@@ -265,6 +266,7 @@ export class EnrollmentSettingsService {
       merchantSlug: program.organization.merchantSlug,
       programSlug: program.publicSlug,
       customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+      merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
     });
     await this.audit.record(
       {
@@ -289,6 +291,7 @@ export class EnrollmentSettingsService {
         merchantSlug,
         programSlug,
         customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+        merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
       }),
     };
   }

@@ -30,7 +30,7 @@ export const messages = {
     },
     trial: {
       pending:
-        "Your 15-day free trial has not started yet. It will begin when you publish your first loyalty program.",
+        "7 days free. Add a payment method now; your first charge is shown before you confirm.",
     },
   },
   ar: {
@@ -43,7 +43,7 @@ export const messages = {
       signup: "ابدأ مجاناً",
     },
     trial: {
-      pending: "لم تبدأ تجربتك المجانية لمدة 15 يوماً بعد. ستبدأ عند نشر أول برنامج ولاء.",
+      pending: "7 أيام مجاناً. أضف طريقة الدفع الآن، وسنوضح لك موعد أول دفعة قبل التأكيد.",
     },
   },
 } as const;
@@ -57,7 +57,7 @@ export function formatUsd(amount: number): string {
 }
 
 export function formatDate(value: Date | string, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-IQ" : "en-US", {
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-IQ-u-nu-latn" : "en-US", {
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(new Date(value));

@@ -59,7 +59,7 @@ export const canonicalTimeZoneSchema = z
   .refine(isCanonicalTimeZone, { message: "Invalid canonical IANA timezone." });
 
 export function timeZoneOptions(locale: "en" | "ar", at = new Date()) {
-  const formatterLocale = locale === "ar" ? "ar-IQ" : "en-US";
+  const formatterLocale = locale === "ar" ? "ar-IQ-u-nu-latn" : "en-US";
   return timeZoneIds.map((id) => {
     const offset = new Intl.DateTimeFormat(formatterLocale, {
       timeZone: id,

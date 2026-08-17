@@ -9,6 +9,7 @@ import {
 } from "@waflo/auth";
 import type { Locale, RegisterInput } from "@waflo/contracts";
 import type { FastifyRequest } from "fastify";
+import { AccountAccessService } from "../account/account-access.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
@@ -66,6 +67,7 @@ export class AuthService {
     private readonly environment: EnvironmentService,
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
+    private readonly accountAccess: AccountAccessService = new AccountAccessService(prisma),
   ) {}
 
   async register(input: RegisterInput, request: WafloRequest) {
@@ -74,38 +76,36 @@ export class AuthService {
     const passwordHash = await hashPassword(input.password);
     const existing = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
     if (existing) {
-      // Deliberately match the successful public registration response so this
-      // endpoint cannot be used as an account-existence oracle.
-      if (
-        existing.interactiveLoginAllowed &&
-        !existing.emailVerifiedAt &&
-        existing.status === "ACTIVE"
-      ) {
-        await this.issueVerification(
-          existing.id,
-          existing.email,
-          localeFromDb(existing.preferredLocale),
-          request,
-        );
-      }
-      return {
-        status: "verification_required",
-        email: input.email.replace(/^(.{2}).*(@.*)$/, "$1•••$2"),
-      };
+      throw new AppError(
+        "ACCOUNT_NOT_CREATED",
+        "We couldn't create a new account with this email. If you've used Waflo before, sign in or reset your password.",
+        HttpStatus.CONFLICT,
+      );
     }
     const legalAcceptedAt = new Date();
-    const user = await this.prisma.client.user.create({
-      data: {
-        displayName: input.displayName,
-        email: input.email,
-        normalizedEmail,
-        passwordHash,
-        preferredLocale: input.locale === "ar" ? "AR" : "EN",
-        termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
-        privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
-        legalAcceptedAt,
-      },
-    });
+    const user = await this.prisma.client.user
+      .create({
+        data: {
+          displayName: input.displayName,
+          email: input.email,
+          normalizedEmail,
+          passwordHash,
+          preferredLocale: input.locale === "ar" ? "AR" : "EN",
+          termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
+          privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
+          legalAcceptedAt,
+        },
+      })
+      .catch((error: unknown) => {
+        if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+          throw new AppError(
+            "ACCOUNT_NOT_CREATED",
+            "We couldn't create a new account with this email. If you've used Waflo before, sign in or reset your password.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw error;
+      });
     await this.audit.record(
       {
         actorUserId: user.id,
@@ -115,10 +115,11 @@ export class AuthService {
       },
       request,
     );
-    await this.issueVerification(user.id, user.email, input.locale, request);
+    await this.issueVerification(user.id, user.email, input.locale, request, true);
     return {
       status: "verification_required",
       email: user.email.replace(/^(.{2}).*(@.*)$/, "$1•••$2"),
+      emailAcceptedForDelivery: true,
     };
   }
 
@@ -127,6 +128,7 @@ export class AuthService {
     email: string,
     locale: Locale,
     request: WafloRequest,
+    accountCreatedOnThisRequest = false,
   ): Promise<void> {
     const rawToken = createOpaqueToken();
     const expiresAt = new Date(
@@ -152,7 +154,7 @@ export class AuthService {
       },
     );
     const url = `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/verify-email#token=${encodeURIComponent(rawToken)}`;
-    await this.sendNotificationAfterCommit(
+    const accepted = await this.sendNotificationAfterCommit(
       {
         to: email,
         locale,
@@ -162,6 +164,16 @@ export class AuthService {
       userId,
       request,
     );
+    if (!accepted) {
+      throw new AppError(
+        "EMAIL_DELIVERY_UNAVAILABLE",
+        accountCreatedOnThisRequest
+          ? "We created your account, but we couldn't send the verification email. Try again."
+          : "We couldn't send the verification email. Try again.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+        { accountCreated: accountCreatedOnThisRequest, retryAllowed: true },
+      );
+    }
     await this.audit.record(
       {
         actorUserId: userId,
@@ -232,11 +244,24 @@ export class AuthService {
         user.email,
         localeFromDb(user.preferredLocale),
         request,
-      );
+      ).catch(async () => {
+        await this.audit
+          .record(
+            {
+              actorUserId: user.id,
+              action: "notification.delivery_failed",
+              targetType: "user",
+              targetId: user.id,
+              metadata: { kind: "email_verification" },
+            },
+            request,
+          )
+          .catch(() => undefined);
+      });
     }
     return {
       status: "accepted",
-      message: "If verification is available for that address, a new email has been sent.",
+      message: "If verification is available for that address, the request was accepted.",
     };
   }
 
@@ -261,7 +286,19 @@ export class AuthService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    if (!user.emailVerifiedAt || user.status !== "ACTIVE") {
+    if (!user.emailVerifiedAt && user.status === "ACTIVE") {
+      await this.audit.security(
+        { userId: user.id, eventType: "login.verification_required", severity: "LOW" },
+        request,
+      );
+      throw new AppError(
+        "EMAIL_VERIFICATION_REQUIRED",
+        "Verify your email before continuing.",
+        HttpStatus.FORBIDDEN,
+        { verificationRequired: true },
+      );
+    }
+    if (user.status !== "ACTIVE") {
       await this.audit.security(
         { userId: user.id, eventType: "login.denied", severity: "LOW" },
         request,
@@ -547,7 +584,7 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    return this.prisma.client.user.findUniqueOrThrow({
+    const user = await this.prisma.client.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
         id: true,
@@ -575,6 +612,10 @@ export class AuthService {
         },
       },
     });
+    return {
+      ...user,
+      accountState: await this.accountAccess.resolveUser(userId, user.lastSelectedOrganizationId),
+    };
   }
 
   async updateMe(
@@ -880,9 +921,10 @@ export class AuthService {
     message: NotificationMessage,
     userId: string,
     request: WafloRequest,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await this.notifications.send(message);
+      return true;
     } catch {
       await this.audit
         .record(
@@ -896,6 +938,7 @@ export class AuthService {
           request,
         )
         .catch(() => undefined);
+      return false;
     }
   }
 }

@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from "@nestjs/common";
 import {
-  billingCheckoutSchema,
   billingIdentitySchema,
+  billingTrialCompleteSchema,
+  billingTrialSetupSchema,
   refundRequestSchema,
   refundReviewSchema,
   selectedPlanSchema,
@@ -57,20 +58,88 @@ export class BillingController {
     );
   }
 
-  @Post("checkout")
+  @Post("trial/setup")
   @RateLimit(5, 300)
-  checkout(
+  prepareTrial(
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Body() body: unknown,
     @Req() request: WafloRequest,
   ) {
-    const input = parseInput(billingCheckoutSchema, body);
-    return this.billing.checkout(
+    const input = parseInput(billingTrialSetupSchema, body);
+    return this.billing.prepareTrialSetup(
       user.id,
       parseUuid(organizationId),
-      input.cadence,
+      input,
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("trial/complete")
+  @RateLimit(5, 300)
+  completeTrial(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.completeTrialSetup(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingTrialCompleteSchema, body),
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("trial/preview")
+  @RateLimit(10, 300)
+  previewTrial(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+  ) {
+    return this.billing.previewTrialSetup(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingTrialCompleteSchema, body),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("payment-method/setup")
+  @RateLimit(5, 300)
+  preparePaymentMethod(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.preparePaymentMethodReplacement(
+      user.id,
+      parseUuid(organizationId),
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("payment-method/complete")
+  @RateLimit(5, 300)
+  completePaymentMethod(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.completePaymentMethodReplacement(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingTrialCompleteSchema, body),
       request,
       parseCheckoutIdempotencyKey(idempotencyKey),
     );
