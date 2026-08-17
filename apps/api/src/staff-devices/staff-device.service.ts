@@ -499,7 +499,7 @@ export class StaffDeviceService {
     const publicId = randomUUID();
     const pairing = createPairingToken({
       publicId,
-      environmentId: this.environment.values.NODE_ENV,
+      environmentId: this.environment.values.DEPLOYMENT_ENVIRONMENT,
     });
     const expiresInMinutes = Math.min(
       input.expiresInMinutes,
@@ -691,7 +691,7 @@ export class StaffDeviceService {
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
-    if (parsed.environmentId !== this.environment.values.NODE_ENV) {
+    if (parsed.environmentId !== this.environment.values.DEPLOYMENT_ENVIRONMENT) {
       throw new AppError(
         "DEVICE_PAIRING_INVALID",
         "Pairing token is for another environment.",

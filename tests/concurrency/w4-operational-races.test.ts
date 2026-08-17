@@ -633,7 +633,7 @@ describe.sequential("W4 Repair Round 1 operational races", () => {
       data: { status: "CANCELED" },
     });
     const publicId = randomUUID();
-    const pairing = createPairingToken({ publicId, environmentId: "test" });
+    const pairing = createPairingToken({ publicId, environmentId: "development" });
     const session = await prisma.client.devicePairingSession.create({
       data: {
         publicId,

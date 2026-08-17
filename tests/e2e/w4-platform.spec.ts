@@ -166,7 +166,7 @@ test.describe
       const pairingPublicId = randomUUID();
       const pairing = createPairingToken({
         publicId: pairingPublicId,
-        environmentId: process.env.NODE_ENV ?? "development",
+        environmentId: process.env.DEPLOYMENT_ENVIRONMENT ?? "development",
       });
       wrongLocationPairingToken = pairing.token;
       await prisma.devicePairingSession.create({

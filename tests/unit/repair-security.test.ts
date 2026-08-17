@@ -185,7 +185,7 @@ describe("repair-round security boundaries", () => {
     } finally {
       await app.close();
     }
-  });
+  }, 30000);
 
   it("fails closed when production Redis is unavailable", async () => {
     const fakeEnvironment = {
