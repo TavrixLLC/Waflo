@@ -1,14 +1,17 @@
 import type { Locale } from "@waflo/contracts";
 import { LanguageSwitcher } from "@waflo/ui";
+import { Gift, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import type { ReactNode } from "react";
+
+const STAMP_IDS = ["stamp-1", "stamp-2", "stamp-3", "stamp-4", "stamp-5", "stamp-6"] as const;
 
 export function AuthLayout({ locale, children }: { locale: Locale; children: ReactNode }) {
   const ar = locale === "ar";
   return (
     <main className="auth-layout">
       <section className="auth-brand">
-        <a href={process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}>
+        <a href={process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}>
           <Image
             className="auth-brand__logo"
             src="/brand/waflo-logo-white-horizontal.svg"
@@ -18,15 +21,40 @@ export function AuthLayout({ locale, children }: { locale: Locale; children: Rea
           />
         </a>
         <div className="auth-brand__message">
-          <span>{ar ? "LOYALTY THAT FLOWS" : "LOYALTY THAT FLOWS"}</span>
-          <h1>{ar ? "أساس قوي لعلاقة تدوم." : "A stronger foundation for every return."}</h1>
+          <span>LOYALTY THAT FLOWS</span>
+          <h1>{ar ? "كل زيارة تصبح سبباً للعودة." : "Every visit becomes a reason to return."}</h1>
           <p>
             {ar
-              ? "أنشئ حساب مؤسستك، جهّز فروعك وفريقك، واعرف بالضبط متى تبدأ تجربتك المجانية."
-              : "Set up your organization, locations, and team—and know exactly when your free trial begins."}
+              ? "أنشئ برنامج ولاء رقمياً واضحاً لعملائك، من أول زيارة إلى أول مكافأة."
+              : "A calm, secure home for your loyalty program—from the first visit to the first reward."}
           </p>
+          <div className="auth-loyalty-preview" aria-hidden="true">
+            <div className="auth-loyalty-preview__identity">
+              <span>W</span>
+              <div>
+                <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
+                <strong>{ar ? "مقهى وافلو" : "Waflo Coffee"}</strong>
+              </div>
+            </div>
+            <div className="auth-loyalty-preview__stamps">
+              {STAMP_IDS.map((stampId, index) => (
+                <i className={index < 4 ? "is-filled" : ""} key={stampId} />
+              ))}
+            </div>
+            <p>
+              <span>
+                <Gift size={15} /> {ar ? "باقي زيارتان للمكافأة" : "2 visits to your reward"}
+              </span>
+              <b dir="ltr" className="numeric-fraction">
+                4 / 6
+              </b>
+            </p>
+          </div>
         </div>
-        <small>Waflo · Tavrix LLC</small>
+        <small className="auth-brand__security">
+          <ShieldCheck size={16} />
+          {ar ? "محمي بعناية من Waflo" : "Protected with care by Waflo"}
+        </small>
       </section>
       <section className="auth-panel">
         <div className="wf-card auth-card">
@@ -39,7 +67,7 @@ export function AuthLayout({ locale, children }: { locale: Locale; children: Rea
             />
             <LanguageSwitcher locale={locale} href={`/${locale === "ar" ? "en" : "ar"}/login`} />
           </div>
-          {children}
+          <div className="auth-card__body">{children}</div>
         </div>
       </section>
     </main>

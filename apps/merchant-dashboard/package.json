@@ -9,14 +9,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "6.8.1",
+    "@stripe/stripe-js": "9.13.0",
     "@tailwindcss/postcss": "4.3.3",
     "@waflo/billing": "workspace:*",
     "@waflo/brand": "workspace:*",
     "@waflo/contracts": "workspace:*",
     "@waflo/i18n": "workspace:*",
     "@waflo/security": "workspace:*",
+    "@waflo/stamp-engine": "workspace:*",
     "@waflo/ui": "workspace:*",
     "lucide-react": "1.27.0",
+    "mapbox-gl": "3.28.1",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8",

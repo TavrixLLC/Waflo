@@ -60,6 +60,19 @@ interface CardView {
   };
 }
 
+function walletStatusLabel(status: string, ar: boolean): string {
+  if (status === "READY") return ar ? "جاهزة" : "Ready";
+  if (status === "PREPARING" || status === "PENDING") return ar ? "قيد التجهيز" : "Preparing";
+  return ar ? "غير متاحة" : "Unavailable";
+}
+
+function membershipStateLabel(state: string, ar: boolean): string {
+  if (state === "ACTIVE") return ar ? "نشطة" : "Active";
+  if (state === "TRANSFERRED") return ar ? "منقولة" : "Transferred";
+  if (state === "SUSPENDED") return ar ? "موقوفة" : "Suspended";
+  return ar ? "غير متاحة" : "Unavailable";
+}
+
 export function CustomerCard({
   publicMembershipId,
   tenant,
@@ -149,7 +162,12 @@ export function CustomerCard({
   return (
     <main className="customer-page card-page" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
       <header className="customer-header card-header">
-        <span className="waflo-wordmark">waflo</span>
+        <span className="customer-merchant-identity">
+          <i aria-hidden="true">
+            {card.merchant.name.slice(0, 1).toLocaleUpperCase(ar ? "ar" : "en")}
+          </i>
+          <strong>{card.merchant.name}</strong>
+        </span>
         <button type="button" className="customer-language" onClick={() => void logout()}>
           <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
         </button>
@@ -170,7 +188,7 @@ export function CustomerCard({
             <h1>{card.program.name}</h1>
           </div>
           <Badge tone={active ? "success" : "warning"}>
-            {card.membership.state.replaceAll("_", " ")}
+            {membershipStateLabel(card.membership.state, ar)}
           </Badge>
         </div>
         {!active ? (
@@ -208,7 +226,7 @@ export function CustomerCard({
           unoptimized
         />
         <div className="progress-copy">
-          <strong>
+          <strong dir="ltr" className="numeric-fraction">
             {card.progress.currentCycleStampCount} / {card.progress.goal}
           </strong>
           <span>
@@ -231,7 +249,9 @@ export function CustomerCard({
             />
             <p>
               <ShieldCheck />{" "}
-              {ar ? "يحتوي على بيانات اعتماد عشوائية فقط" : "Contains an opaque credential only"}
+              {ar
+                ? "استخدم رمز QR هذا مع بطاقة الولاء."
+                : "Use this QR code with your loyalty card."}
             </p>
           </div>
         ) : null}
@@ -241,11 +261,11 @@ export function CustomerCard({
           <div className="card-actions__heading">
             <WalletCards />
             <div>
-              <h2>{ar ? "أضف إلى Wallet" : "Add to Wallet"}</h2>
+              <h2>{ar ? "أضف إلى المحفظة" : "Add to Wallet"}</h2>
               <p>
                 {ar
-                  ? "تظهر الأزرار فقط عندما تصبح البطاقة جاهزة."
-                  : "Buttons appear only when provider issuance is ready."}
+                  ? "ستظهر خيارات المحفظة هنا عند توفرها."
+                  : "Wallet options will appear here when available."}
               </p>
             </div>
           </div>
@@ -259,7 +279,9 @@ export function CustomerCard({
                   Add to Apple Wallet
                 </a>
               ) : (
-                <span className="wallet-state">Apple Wallet · {card.wallet.apple.status}</span>
+                <span className="wallet-state">
+                  Apple Wallet · {walletStatusLabel(card.wallet.apple.status, ar)}
+                </span>
               )
             ) : platform === "android" ? (
               card.wallet.google.status === "READY" ? (
@@ -271,7 +293,9 @@ export function CustomerCard({
                   Add to Google Wallet
                 </Button>
               ) : (
-                <span className="wallet-state">Google Wallet · {card.wallet.google.status}</span>
+                <span className="wallet-state">
+                  Google Wallet · {walletStatusLabel(card.wallet.google.status, ar)}
+                </span>
               )
             ) : (
               <p className="wallet-platform-note">
@@ -281,16 +305,15 @@ export function CustomerCard({
               </p>
             )}
           </div>
-          {card.wallet.apple.testAdapter || card.wallet.google.testAdapter ? (
-            <Alert tone="info" title={ar ? "وضع اختبار" : "Test Adapter mode"}>
-              {ar
-                ? "لا يمثل هذا تثبيتًا حقيقيًا لدى مزود Wallet."
-                : "This does not claim a real provider installation."}
-            </Alert>
-          ) : null}
         </Card>
         {card.transfer.allowed ? (
-          <a className="transfer-action" href={`/transfer${tenantQuery}`}>
+          <a
+            className="transfer-action"
+            href={`/transfer?${new URLSearchParams({
+              lang: ar ? "ar" : "en",
+              ...(tenant ? { tenant } : {}),
+            }).toString()}`}
+          >
             <ArrowRightLeft />
             <span>
               <strong>{ar ? "نقل البطاقة إلى جهاز آخر" : "Transfer to another device"}</strong>
@@ -300,13 +323,16 @@ export function CustomerCard({
                     ? "يتطلب تأكيد البريد"
                     : "Email confirmation required"
                   : ar
-                    ? "مسار أقل أمانًا باستخدام رمز البطاقة"
-                    : "Lower-security QR proof path"}
+                    ? "استخدم رمز QR الخاص ببطاقتك للمتابعة"
+                    : "Use your card QR code to continue"}
               </small>
             </span>
           </a>
         ) : null}
       </section>
+      <footer className="customer-footer">
+        <ShieldCheck size={15} /> {ar ? "مدعوم من Waflo" : "Powered by Waflo"}
+      </footer>
     </main>
   );
 }

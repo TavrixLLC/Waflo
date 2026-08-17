@@ -47,8 +47,8 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
           <h2>{ar ? "الخطط والفوترة" : "Plans and billing"}</h2>
           <p>
             {ar
-              ? "اختيار خطة أثناء الإعداد لا ينشئ اشتراكاً مدفوعاً. التجربة المجانية لا تبدأ حتى نشر أول برنامج ولاء في مرحلة لاحقة."
-              : "Selecting a plan during setup does not create a paid subscription. The free trial does not begin until the first loyalty program is published in a later phase."}
+              ? "تبدأ التجربة المجانية لمدة 7 أيام بعد اختيار الباقة ووتيرة الدفع وإضافة طريقة دفع صالحة وتأكيد الاشتراك. نوضح السعر وتاريخ أول دفعة قبل التأكيد."
+              : "The seven-day free trial starts after you choose a plan and billing cadence, add a valid payment method, and confirm the subscription. We show the price and first charge date before confirmation."}
           </p>
           <h2>{ar ? "المراجعة القانونية" : "Legal review"}</h2>
           <p>

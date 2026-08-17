@@ -14,7 +14,7 @@ export const brandColors = {
 
 export const brandTypography = {
   latin: "Manrope, system-ui, sans-serif",
-  arabic: "Noto Sans Arabic, system-ui, sans-serif",
+  arabic: "Cairo, system-ui, sans-serif",
   weights: [400, 500, 600, 700, 800],
   scale: {
     display: { size: "3rem", lineHeight: "3.5rem", weight: 800 },
@@ -47,13 +47,15 @@ export const brandRadii = {
 export const brandShadows = {
   card: "0 12px 32px rgba(36, 25, 22, 0.10)",
   raised: "0 18px 48px rgba(36, 25, 22, 0.14)",
+  lift: "0 28px 70px -24px rgba(36, 25, 22, 0.32)",
+  pass: "0 32px 80px -28px rgba(125, 35, 17, 0.55)",
 } as const;
 
 export const brandMotion = {
   quick: "160ms",
   standard: "200ms",
   reassuring: "240ms",
-  easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+  easing: "cubic-bezier(0.22, 1, 0.36, 1)",
 } as const;
 
 export const brandAssets = {

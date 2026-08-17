@@ -4,7 +4,6 @@ export const studioAreas = [
   "overview",
   "how-it-works",
   "customers-locations",
-  "test",
   "launch",
   "engagement",
   "settings",
@@ -17,8 +16,6 @@ export type StudioOperationErrorContext =
   | "save"
   | "preview"
   | "readiness"
-  | "test-start"
-  | "test-action"
   | "lifecycle"
   | "create-draft";
 
@@ -28,9 +25,6 @@ const studioOperationErrorCopy = {
     save: "Changes could not be saved. Your last saved version is still safe. Try saving again.",
     preview: "The preview could not be refreshed. Your saved card is unchanged. Try again.",
     readiness: "Readiness checks could not run. Your saved card is unchanged. Try again.",
-    "test-start": "Test Mode could not start. No real customer activity was created. Try again.",
-    "test-action":
-      "The test action could not be completed. Real customer activity is unaffected. Try again.",
     lifecycle: "The card status could not be updated. Its current status is unchanged. Try again.",
     "create-draft": "A change draft could not be created. The live card is unchanged. Try again.",
   },
@@ -39,8 +33,6 @@ const studioOperationErrorCopy = {
     save: "تعذر حفظ التغييرات. آخر نسخة محفوظة من بطاقتك لا تزال آمنة. حاول الحفظ مرة أخرى.",
     preview: "تعذر تحديث المعاينة. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
     readiness: "تعذر تشغيل فحوصات الجاهزية. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
-    "test-start": "تعذر بدء وضع الاختبار. لم يتم إنشاء أي نشاط حقيقي للعملاء. حاول مرة أخرى.",
-    "test-action": "تعذر إكمال إجراء الاختبار. نشاط العملاء الحقيقي لم يتأثر. حاول مرة أخرى.",
     lifecycle: "تعذر تحديث حالة البطاقة. حالتها الحالية لم تتغير. حاول مرة أخرى.",
     "create-draft": "تعذر إنشاء مسودة تغييرات. البطاقة المباشرة لم تتغير. حاول مرة أخرى.",
   },
@@ -50,30 +42,6 @@ const studioOperationErrorCopy = {
 
 export function studioOperationError(context: StudioOperationErrorContext, locale: Locale): string {
   return studioOperationErrorCopy[locale][context];
-}
-
-const studioTestActionErrorCopy = {
-  DAILY_STAMP_LIMIT_REACHED: {
-    en: "The demo customer reached the daily stamp limit. Real customers are unaffected. Change the simulated day or reset the demo customer.",
-    ar: "وصل العميل التجريبي إلى حد الأختام اليومي. لم يتأثر العملاء الحقيقيون. غيّر اليوم المحاكى أو أعد ضبط العميل التجريبي.",
-  },
-  PURCHASE_AMOUNT_REQUIRED: {
-    en: "Enter a purchase amount to continue this demo. Real customers are unaffected.",
-    ar: "أدخل مبلغ الشراء لمتابعة هذا الاختبار. لم يتأثر العملاء الحقيقيون.",
-  },
-  PURCHASE_CURRENCY_MISMATCH: {
-    en: "The demo purchase currency must match the card's configured currency. Real customers are unaffected.",
-    ar: "يجب أن تتطابق عملة الشراء التجريبي مع العملة المضبوطة للبطاقة. لم يتأثر العملاء الحقيقيون.",
-  },
-  PURCHASE_THRESHOLD_NOT_MET: {
-    en: "The demo purchase does not meet the card's minimum amount. Real customers are unaffected.",
-    ar: "لا يفي الشراء التجريبي بالحد الأدنى للبطاقة. لم يتأثر العملاء الحقيقيون.",
-  },
-} as const;
-
-export function studioTestActionError(code: string, locale: Locale): string {
-  const copy = studioTestActionErrorCopy[code as keyof typeof studioTestActionErrorCopy];
-  return copy?.[locale] ?? studioOperationError("test-action", locale);
 }
 
 export const studioAreaCopy = {
@@ -88,7 +56,6 @@ export const studioAreaCopy = {
       label: "Wallet Engagement",
       description: "Nearby relevance and consented messages",
     },
-    test: { label: "Test", description: "Try a complete reward cycle" },
     launch: { label: "Review & launch", description: "Resolve checks, then publish safely" },
     settings: { label: "Settings", description: "Advanced controls and history" },
   },
@@ -100,7 +67,6 @@ export const studioAreaCopy = {
       description: "أماكن وطريقة انضمام العملاء",
     },
     engagement: { label: "تفاعل Wallet", description: "التذكير القريب والرسائل بموافقة العميل" },
-    test: { label: "الاختبار", description: "جرّب دورة مكافأة كاملة" },
     launch: { label: "الإطلاق", description: "فحوصات الجاهزية والنشر" },
     settings: { label: "الإعدادات", description: "التحكم المتقدم وسجل التغييرات" },
   },
@@ -112,7 +78,6 @@ export function studioAreaForValidationPath(path: string): StudioArea {
   if (path.startsWith("earning") || path.startsWith("rewards") || path.startsWith("policies"))
     return "how-it-works";
   if (path.startsWith("locations") || path.startsWith("enrollment")) return "customers-locations";
-  if (path.startsWith("test")) return "test";
   if (
     path.startsWith("content") ||
     path.startsWith("artwork") ||
@@ -127,7 +92,7 @@ export function studioAreaForValidationPath(path: string): StudioArea {
 
 export function studioAreaForPublicationError(code: string): StudioArea {
   if (code === "PROGRAM_PUBLICATION_LOCATION_STALE") return "customers-locations";
-  if (code === "PROGRAM_TEST_REQUIRED") return "test";
+  if (code === "PROGRAM_TEST_REQUIRED") return "launch";
   if (code === "PROGRAM_PUBLICATION_ASSET_STALE" || code === "PROGRAM_PUBLICATION_PREVIEW_STALE")
     return "overview";
   return "launch";
@@ -158,7 +123,7 @@ export type StudioPresentationAction =
   | { kind: "publish" | "run-checks"; label: string };
 
 export interface StudioJourneyStagePresentation {
-  key: "design" | "checks" | "test" | "live";
+  key: "design" | "checks" | "live";
   label: string;
   hint: string;
   state: StudioJourneyStageState;
@@ -167,7 +132,7 @@ export interface StudioJourneyStagePresentation {
 }
 
 export interface StudioLaunchRequirementPresentation {
-  key: "automated" | "test" | "locations" | "plan";
+  key: "automated" | "locations" | "plan";
   label: string;
   status: string;
   description: string;
@@ -210,7 +175,6 @@ export interface StudioLifecyclePresentationInput {
   draftVersionStatus: string | null;
   locale: Locale;
   validationState: "not-run" | "passed" | "failed";
-  testState: "incomplete" | "complete";
   designComplete: boolean;
   locationsReady: boolean;
   hasPublishedVersion: boolean;
@@ -229,7 +193,7 @@ const stateCopy = {
     },
     ready: {
       label: "Ready to launch",
-      description: "Required checks and testing are complete. The card is not live yet.",
+      description: "Required checks are complete. The card is not live yet.",
       tone: "brand",
     },
     live: {
@@ -266,7 +230,7 @@ const stateCopy = {
     },
     ready: {
       label: "جاهزة للإطلاق",
-      description: "اكتملت الفحوصات المطلوبة والاختبار، ولم تصبح البطاقة مباشرة بعد.",
+      description: "اكتملت الفحوصات المطلوبة، ولم تصبح البطاقة مباشرة بعد.",
       tone: "brand",
     },
     live: {
@@ -303,7 +267,6 @@ const journeyCopy = {
   en: {
     design: "Design",
     checks: "Review",
-    test: "Test",
     live: "Live",
     complete: "Complete",
     current: "Next required",
@@ -315,7 +278,6 @@ const journeyCopy = {
   ar: {
     design: "التصميم",
     checks: "الفحوصات",
-    test: "الاختبار",
     live: "مباشرة",
     complete: "مكتملة",
     current: "المطلوبة تاليًا",
@@ -335,14 +297,13 @@ function lifecycleKey(
   if (programStatus === "ARCHIVED") return "archived";
   if (programStatus === "SCHEDULED") return "scheduled";
   if (programStatus === "SUSPENDED") return "suspended";
-  if (draftVersionStatus === "TEST_READY") return "ready";
+  if (draftVersionStatus === "VALIDATED" || draftVersionStatus === "TEST_READY") return "ready";
   return "draft";
 }
 
 function presentationAction(
   key: MerchantStudioState["key"],
   checksComplete: boolean,
-  testComplete: boolean,
   designComplete: boolean,
   locationsReady: boolean,
   locale: Locale,
@@ -426,14 +387,6 @@ function presentationAction(
         label: ar ? "تشغيل فحوصات الجاهزية" : "Run readiness checks",
       },
     };
-  if (!testComplete)
-    return {
-      primary: {
-        kind: "navigate",
-        area: "test",
-        label: ar ? "بدء الاختبار" : "Start test",
-      },
-    };
   return {
     primary: {
       kind: "navigate",
@@ -445,8 +398,6 @@ function presentationAction(
 
 function guidanceFor(
   key: MerchantStudioState["key"],
-  checksComplete: boolean,
-  testComplete: boolean,
   designComplete: boolean,
   locationsReady: boolean,
   locale: Locale,
@@ -510,12 +461,6 @@ function guidanceFor(
       description: ar ? "التالي: اختر موقعاً نشطاً" : "Next: Choose an active location",
       tone: "brand",
     };
-  if (checksComplete && !testComplete)
-    return {
-      title: ar ? "اجتازت الفحوصات الآلية" : "Automated checks passed",
-      description: ar ? "التالي: اختبر دورة المكافأة" : "Next: Test your reward cycle",
-      tone: "brand",
-    };
   return {
     title: ar ? "اكتمل تصميم البطاقة" : "Card design complete",
     description: ar ? "التالي: شغّل فحوصات الجاهزية" : "Next: Run readiness checks",
@@ -526,7 +471,6 @@ function guidanceFor(
 function launchRequirements(
   input: StudioLifecyclePresentationInput,
   checksComplete: boolean,
-  testComplete: boolean,
 ): { requirements: StudioLaunchRequirementPresentation[]; planBlocked: boolean } {
   const ar = input.locale === "ar";
   const planBlocked = (input.validationIssues ?? []).some((issue) =>
@@ -555,30 +499,13 @@ function launchRequirements(
               ? "توجد عناصر تمنع الإطلاق. افتح التفاصيل لإصلاحها."
               : "Launch blockers need to be fixed in the check details."
             : ar
-              ? "شغّل الفحوصات الآلية قبل الاختبار."
-              : "Run the automated checks before testing.",
+              ? "شغّل الفحوصات الآلية قبل النشر."
+              : "Run the automated checks before publishing.",
         complete: checksComplete,
         blocking: !checksComplete,
         action: checksComplete
           ? undefined
           : { kind: "run-checks", label: ar ? "تشغيل الفحوصات" : "Run checks" },
-      },
-      {
-        key: "test",
-        label: ar ? "دورة المكافأة التجريبية" : "Demo reward cycle",
-        status: testComplete ? (ar ? "مكتملة" : "Complete") : ar ? "مطلوبة" : "Required",
-        description: testComplete
-          ? ar
-            ? "اكتملت دورة المكافأة المعزولة."
-            : "The isolated reward cycle is complete."
-          : ar
-            ? "مطلوبة قبل الإطلاق ولا تؤثر في العملاء الحقيقيين."
-            : "Required before launch and isolated from real customers.",
-        complete: testComplete,
-        blocking: !testComplete,
-        action: testComplete
-          ? undefined
-          : { kind: "navigate", area: "test", label: ar ? "الانتقال إلى الاختبار" : "Go to Test" },
       },
       {
         key: "locations",
@@ -660,21 +587,14 @@ export function deriveStudioLifecyclePresentation(
     (input.validationState !== "failed" &&
       (input.validationState === "passed" ||
         ["VALIDATED", "TEST_READY", "PUBLISHED", "SUPERSEDED"].includes(draftVersionStatus ?? "")));
-  const testComplete =
-    input.testState === "complete" ||
-    ["TEST_READY", "PUBLISHED", "SUPERSEDED"].includes(draftVersionStatus ?? "") ||
-    (!updateInProgress && operationallyCompleted) ||
-    archivedAfterPublication;
   const key =
-    domainKey === "ready" &&
-    !(input.designComplete && input.locationsReady && checksComplete && testComplete)
+    domainKey === "ready" && !(input.designComplete && input.locationsReady && checksComplete)
       ? "draft"
       : domainKey;
   const lifecycle = { key, ...stateCopy[locale][key] } as MerchantStudioState;
   const baseActions = presentationAction(
     key,
     checksComplete,
-    testComplete,
     input.designComplete,
     input.locationsReady,
     locale,
@@ -687,17 +607,11 @@ export function deriveStudioLifecyclePresentation(
               area: "launch",
               label: ar ? "مراجعة التغييرات" : "Review changes",
             } as const)
-          : !testComplete
-            ? ({
-                kind: "navigate",
-                area: "test",
-                label: ar ? "اختبار التغييرات" : "Test changes",
-              } as const)
-            : ({
-                kind: "navigate",
-                area: "launch",
-                label: ar ? "مراجعة التغييرات" : "Review changes",
-              } as const),
+          : ({
+              kind: "navigate",
+              area: "launch",
+              label: ar ? "مراجعة التغييرات" : "Review changes",
+            } as const),
         secondary: baseActions.secondary,
       }
     : baseActions;
@@ -713,9 +627,7 @@ export function deriveStudioLifecyclePresentation(
       ? "design"
       : !checksComplete
         ? "checks"
-        : !testComplete
-          ? "test"
-          : "live";
+        : "live";
 
   const stateFor = (stage: StudioJourneyStagePresentation["key"]): StudioJourneyStageState => {
     if (stage === "live") {
@@ -728,15 +640,12 @@ export function deriveStudioLifecyclePresentation(
     }
     if (key === "archived" && !archivedAfterPublication) {
       if (stage === "design") return input.designComplete ? "complete" : "archived";
-      if (stage === "checks") return checksComplete ? "complete" : "archived";
-      return testComplete ? "complete" : "archived";
+      return checksComplete ? "complete" : "archived";
     }
     const complete =
       stage === "design"
         ? input.designComplete || operationallyCompleted || archivedAfterPublication
-        : stage === "checks"
-          ? checksComplete
-          : testComplete;
+        : checksComplete;
     if (complete) return "complete";
     return currentJourneyStage === stage ? "current" : "pending";
   };
@@ -760,7 +669,6 @@ export function deriveStudioLifecyclePresentation(
   const journeyStages = [
     makeStage("design", ar ? "أساسيات البطاقة" : "Card essentials", "overview"),
     makeStage("checks", ar ? "الفحوصات الآلية" : "Automated checks", "launch"),
-    makeStage("test", ar ? "دورة مكافأة تجريبية" : "Demo reward cycle", "test"),
     makeStage(
       "live",
       key === "paused"
@@ -786,7 +694,7 @@ export function deriveStudioLifecyclePresentation(
     ),
   ];
 
-  const { requirements, planBlocked } = launchRequirements(input, checksComplete, testComplete);
+  const { requirements, planBlocked } = launchRequirements(input, checksComplete);
   const lifecycleOwnsLaunch =
     ["live", "paused", "archived", "scheduled", "suspended"].includes(key) &&
     !(updateInProgress && (key === "live" || key === "paused"));
@@ -794,7 +702,6 @@ export function deriveStudioLifecyclePresentation(
     (key === "ready" || (updateInProgress && (key === "live" || key === "paused"))) &&
     input.designComplete &&
     checksComplete &&
-    testComplete &&
     input.locationsReady &&
     !planBlocked &&
     input.publicationAllowed;
@@ -855,12 +762,12 @@ export function deriveStudioLifecyclePresentation(
     updateInProgress && (key === "live" || key === "paused")
       ? launchReady
         ? ar
-          ? "اكتملت فحوصات التحديث واختباره. البطاقة الحالية لم تتغير بعد."
-          : "The update has passed checks and testing. The current live card is unchanged."
+          ? "اكتملت فحوصات التحديث. البطاقة الحالية لم تتغير بعد."
+          : "The update has passed its checks. The current live card is unchanged."
         : (firstBlocker?.description ??
           (ar
-            ? "أكمل فحوصات التحديث واختباره قبل النشر. البطاقة الحالية لم تتغير."
-            : "Complete the update checks and test before publishing. The current live card is unchanged."))
+            ? "أكمل فحوصات التحديث قبل النشر. البطاقة الحالية لم تتغير."
+            : "Complete the update checks before publishing. The current live card is unchanged."))
       : lifecycleOwnsLaunch
         ? lifecycle.description
         : launchReady
@@ -883,14 +790,7 @@ export function deriveStudioLifecyclePresentation(
               : "Review the saved changes before publishing them. The current live card is unchanged.",
             tone: "brand",
           }
-        : guidanceFor(
-            key,
-            checksComplete,
-            testComplete,
-            input.designComplete,
-            input.locationsReady,
-            locale,
-          ),
+        : guidanceFor(key, input.designComplete, input.locationsReady, locale),
     journeyStages,
     currentJourneyStage,
     primaryAction: actions.primary,

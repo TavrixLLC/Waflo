@@ -712,7 +712,7 @@ export function WalletEngagementPanel({
                       <div>
                         <strong>{campaign.title}</strong>
                         <small>
-                          {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en", {
+                          {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en", {
                             dateStyle: "medium",
                             timeStyle: "short",
                           }).format(new Date(campaign.createdAt))}{" "}

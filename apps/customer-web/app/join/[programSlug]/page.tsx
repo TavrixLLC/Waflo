@@ -16,10 +16,7 @@ export default async function JoinProgramPage({
   const query = await searchParams;
   const requestHeaders = await headers();
   const directHost = requestHeaders.get("host") ?? "";
-  const host =
-    directHost.includes(".localhost") || directHost.includes(".lvh.me")
-      ? directHost
-      : (requestHeaders.get("x-forwarded-host") ?? directHost);
+  const host = directHost;
   const localHost =
     directHost.includes("localhost") ||
     directHost.includes("127.0.0.1") ||
@@ -66,7 +63,11 @@ export default async function JoinProgramPage({
         } as React.CSSProperties
       }
     >
-      <CustomerHeader locale={locale} {...(tenant ? { tenant } : {})} />
+      <CustomerHeader
+        locale={locale}
+        merchantName={result.merchant.name}
+        {...(tenant ? { tenant } : {})}
+      />
       <EnrollmentForm
         merchant={result.merchant}
         program={result.program}

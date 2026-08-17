@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { isLocale } from "@waflo/i18n";
-import { LocationOnboarding } from "../../../../components/onboarding";
 
 export default async function LocationPage({
   params,
@@ -15,10 +14,9 @@ export default async function LocationPage({
   const organization = Array.isArray(query.organization)
     ? query.organization[0]
     : query.organization;
-  return (
-    <LocationOnboarding
-      locale={locale}
-      {...(organization ? { organizationId: organization } : {})}
-    />
+  redirect(
+    organization
+      ? `/${locale}/onboarding/business?organization=${encodeURIComponent(organization)}`
+      : `/${locale}/onboarding/business`,
   );
 }

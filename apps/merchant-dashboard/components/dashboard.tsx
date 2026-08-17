@@ -1,36 +1,35 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
-import {
-  Alert,
-  Avatar,
-  DropdownMenu,
-  MobileNavigation,
-  OrganizationSwitcher,
-  Sidebar,
-  TopNavigation,
-} from "@waflo/ui";
+import { Alert, Avatar, DropdownMenu, Modal, OrganizationSwitcher, Sidebar } from "@waflo/ui";
 import {
   BarChart3,
   CreditCard,
   Download,
-  FileClock,
   Gauge,
+  Languages,
   LockKeyhole,
   LogOut,
   MapPin,
+  Menu,
   Settings,
-  ShieldAlert,
-  ShieldCheck,
   Users,
   WalletCards,
 } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import {
-  AuditScreen,
   BillingScreen,
   FutureScreen,
   LocationsScreen,
@@ -44,9 +43,7 @@ import type { StudioArea } from "./program-studio-presentation";
 import {
   CustomersOperationsScreen,
   ExportsOperationsScreen,
-  ManagerApprovalsScreen,
   OperationalAnalyticsScreen,
-  RiskOperationsScreen,
 } from "./w4-operations-screens";
 
 export interface MembershipView {
@@ -69,22 +66,91 @@ export interface MeView {
   preferredLocale: "EN" | "AR";
   lastSelectedOrganizationId: string | null;
   memberships: MembershipView[];
+  accountState: {
+    email: "unverified" | "verified";
+    onboarding:
+      | "business_required"
+      | "location_required"
+      | "billing_identity_required"
+      | "payment_method_required"
+      | "trial_confirmation_required"
+      | "complete";
+    billing:
+      | "none"
+      | "trialing"
+      | "active"
+      | "past_due_grace"
+      | "action_required"
+      | "restricted"
+      | "canceled"
+      | "paused";
+    access: "onboarding_only" | "full" | "read_only_billing_recovery";
+    organizationId: string | null;
+    billingAttention: boolean;
+  } | null;
+}
+
+function billingAttentionCopy(state: NonNullable<MeView["accountState"]>, locale: Locale) {
+  const ar = locale === "ar";
+  if (state.billing === "action_required") {
+    return {
+      message: ar
+        ? "تحتاج دفعتك إلى تأكيد إضافي. أكمل الإجراء للحفاظ على خدمات Waflo."
+        : "Your payment needs confirmation. Complete the required action to keep using Waflo.",
+      action: ar ? "إكمال إجراء الدفع" : "Complete payment action",
+    };
+  }
+  if (state.billing === "past_due_grace") {
+    return {
+      message: ar
+        ? "تعذرت دفعتك، وما زالت حسابك ضمن مهلة الاسترداد. حدّث الفوترة الآن."
+        : "Your payment failed, and your account is in its recovery window. Update billing now.",
+      action: ar ? "تحديث الفوترة" : "Update billing",
+    };
+  }
+  if (state.billing === "paused") {
+    return {
+      message: ar
+        ? "اشتراك Waflo موقوف. استأنفه قبل إجراء التغييرات."
+        : "Your Waflo subscription is paused. Resume it before making changes.",
+      action: ar ? "استئناف الاشتراك" : "Resume subscription",
+    };
+  }
+  if (state.billing === "canceled") {
+    return {
+      message: ar
+        ? "انتهى اشتراك Waflo. جدده قبل إجراء التغييرات."
+        : "Your Waflo subscription has ended. Renew it before making changes.",
+      action: ar ? "تجديد الاشتراك" : "Renew subscription",
+    };
+  }
+  if (state.billing === "none") {
+    return {
+      message: ar
+        ? "يلزم إكمال إعداد الفوترة لتفعيل الوصول الكامل إلى Waflo."
+        : "Finish billing setup to activate full Waflo access.",
+      action: ar ? "إكمال إعداد الفوترة" : "Finish billing setup",
+    };
+  }
+  return {
+    message: ar
+      ? "يحتاج اشتراك Waflo إلى التجديد قبل إجراء التغييرات."
+      : "Your Waflo subscription needs to be renewed before you can make changes.",
+    action: ar ? "تجديد الاشتراك" : "Renew subscription",
+  };
 }
 
 const sectionIcons = {
   overview: Gauge,
   programs: WalletCards,
   customers: Users,
-  approvals: ShieldCheck,
-  risk: ShieldAlert,
   locations: MapPin,
   team: Users,
   analytics: BarChart3,
   exports: Download,
   billing: CreditCard,
-  audit: FileClock,
   settings: Settings,
-  security: ShieldCheck,
+  security: LockKeyhole,
 } as const;
 
 const labels = {
@@ -92,62 +158,119 @@ const labels = {
     overview: "Overview",
     programs: "Loyalty Cards",
     customers: "Customers",
-    approvals: "Manager approvals",
-    risk: "Risk",
     locations: "Locations",
     team: "Team",
     analytics: "Analytics",
     exports: "Exports",
     billing: "Billing",
-    audit: "Audit",
     settings: "Settings",
     security: "Security",
+    administration: "Account",
+    more: "More",
     logout: "Log out",
   },
   ar: {
-    approvals: "موافقات المدير",
-    risk: "المخاطر",
-    exports: "التصدير",
     overview: "نظرة عامة",
     programs: "بطاقات الولاء",
     customers: "العملاء",
-    locations: "المواقع",
+    locations: "الفروع",
     team: "الفريق",
     analytics: "التحليلات",
-    billing: "الفوترة",
-    audit: "سجل التدقيق",
+    exports: "التصدير",
+    billing: "الفوترة والدفع",
     settings: "الإعدادات",
     security: "الأمان",
+    administration: "الحساب",
+    more: "المزيد",
     logout: "تسجيل الخروج",
   },
 } as const;
 
 export type DashboardSection = keyof typeof sectionIcons;
 
-export function DashboardApplication({
-  locale,
-  section,
-  programsView = "library",
-  legacyProgramCreate = false,
-  builderProgramId,
-  studioProgramId,
-  studioArea,
-  changeProgramId,
-}: {
+const primarySections: DashboardSection[] = [
+  "overview",
+  "programs",
+  "customers",
+  "locations",
+  "team",
+  "analytics",
+  "exports",
+  "billing",
+];
+const accountSections: DashboardSection[] = ["settings", "security"];
+const mobilePrimarySections: DashboardSection[] = ["overview", "programs", "customers", "team"];
+
+interface DashboardContextValue {
   locale: Locale;
-  section: DashboardSection;
-  programsView?: "library" | "gallery" | "builder" | "studio";
-  legacyProgramCreate?: boolean;
-  builderProgramId?: string;
-  studioProgramId?: string;
-  studioArea?: StudioArea;
-  changeProgramId?: string;
-}) {
+  me: MeView;
+  membership: MembershipView;
+  reloadMemberships: () => Promise<void>;
+}
+
+const DashboardContext = createContext<DashboardContextValue | null>(null);
+
+function useDashboard(): DashboardContextValue {
+  const context = useContext(DashboardContext);
+  if (!context) throw new Error("Dashboard content must be rendered inside DashboardShell.");
+  return context;
+}
+
+function allowedSections(role: MembershipView["role"]): DashboardSection[] {
+  if (role === "STAFF") return ["overview", "security"];
+  if (role === "MANAGER") {
+    return ["overview", "programs", "customers", "locations", "team", "analytics", "security"];
+  }
+  return [...primarySections, ...accountSections];
+}
+
+function sectionHref(locale: Locale, section: DashboardSection): string {
+  return `/${locale}/dashboard${section === "overview" ? "" : `/${section}`}`;
+}
+
+function DashboardBoot({ locale, error }: { locale: Locale; error: string }) {
+  return (
+    <div className="dashboard-layout dashboard-layout--boot" aria-busy={!error}>
+      <aside className="wf-sidebar dashboard-sidebar-placeholder">
+        <Image src="/brand/waflo-logo-white-horizontal.svg" alt="Waflo" width={280} height={80} />
+        <div className="dashboard-boot-lines" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      </aside>
+      <main className="dashboard-main">
+        <header className="dashboard-mobile-header">
+          <Image
+            src="/brand/waflo-logo-primary-horizontal.svg"
+            alt="Waflo"
+            width={280}
+            height={80}
+          />
+        </header>
+        <div className="dashboard-content">
+          {error ? (
+            <Alert tone="danger" title={error} />
+          ) : (
+            <div className="dashboard-route-loading" role="status">
+              <span className="wf-spinner" aria-hidden="true" />
+              {locale === "ar" ? "جارٍ تجهيز حسابك…" : "Preparing your account…"}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export function DashboardShell({ locale, children }: { locale: Locale; children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [me, setMe] = useState<MeView | null>(null);
-  const [activeId, setActiveId] = useState<string>("");
+  const [activeId, setActiveId] = useState("");
   const [error, setError] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const copy = labels[locale];
 
   const loadMe = useCallback(async () => {
@@ -157,14 +280,22 @@ export function DashboardApplication({
         router.replace(`/${locale}/onboarding/business`);
         return;
       }
+      if (result.accountState?.access === "onboarding_only") {
+        const query = new URLSearchParams();
+        if (result.accountState.organizationId)
+          query.set("organization", result.accountState.organizationId);
+        query.set("resume", result.accountState.onboarding);
+        router.replace(`/${locale}/onboarding/business?${query.toString()}`);
+        return;
+      }
+      const nextActiveId = result.memberships.some(
+        (membership) => membership.organization.id === result.lastSelectedOrganizationId,
+      )
+        ? (result.lastSelectedOrganizationId ?? result.memberships[0]?.organization.id ?? "")
+        : (result.memberships[0]?.organization.id ?? "");
       setMe(result);
-      setActiveId(
-        result.memberships.some(
-          (membership) => membership.organization.id === result.lastSelectedOrganizationId,
-        )
-          ? (result.lastSelectedOrganizationId ?? result.memberships[0]?.organization.id ?? "")
-          : (result.memberships[0]?.organization.id ?? ""),
-      );
+      setActiveId(nextActiveId);
+      setError("");
     } catch (caught) {
       if (
         caught instanceof ApiClientError &&
@@ -177,8 +308,8 @@ export function DashboardApplication({
         caught instanceof ApiClientError
           ? caught.message
           : locale === "ar"
-            ? "تعذر تحميل لوحة التحكم."
-            : "Unable to load the dashboard.",
+            ? "تعذر تحميل الحساب. حاول مرة أخرى."
+            : "Unable to load your account. Try again.",
       );
     }
   }, [locale, router]);
@@ -186,13 +317,19 @@ export function DashboardApplication({
   useEffect(() => {
     void loadMe();
   }, [loadMe]);
+  useEffect(() => {
+    const refresh = () => void loadMe();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [loadMe]);
 
   const membership = me?.memberships.find((item) => item.organization.id === activeId);
+  const sections = useMemo(() => allowedSections(membership?.role ?? "STAFF"), [membership?.role]);
 
   async function switchOrganization(organizationId: string) {
-    if (!me) return;
+    if (!me || organizationId === activeId) return;
     await apiFetch(`/v1/organizations/${organizationId}/select`, { method: "POST" });
-    setActiveId(organizationId);
+    await loadMe();
   }
 
   async function logout() {
@@ -207,157 +344,200 @@ export function DashboardApplication({
       method: "PATCH",
       body: JSON.stringify({ preferredLocale: target }),
     });
-    const nextPath = pathname.replace(/^\/(en|ar)/, `/${target}`);
-    window.location.assign(nextPath);
+    router.push(pathname.replace(/^\/(en|ar)/, `/${target}`));
   }
 
-  if (!me || !membership) {
-    return (
-      <div className="dashboard-loading">
-        {error ? (
-          <Alert tone="danger" title={error} />
-        ) : (
-          <Image
-            src="/brand/waflo-logo-primary-horizontal.svg"
-            alt="Waflo"
-            width={280}
-            height={80}
-            loading="eager"
-          />
-        )}
-      </div>
-    );
-  }
+  if (!me || !membership) return <DashboardBoot locale={locale} error={error} />;
 
-  const allSections = Object.keys(sectionIcons) as DashboardSection[];
-  const accessibleSections =
-    membership.role === "STAFF"
-      ? allSections.filter((item) => ["overview", "security"].includes(item))
-      : membership.role === "MANAGER"
-        ? allSections.filter((item) => !["billing", "audit", "settings", "exports"].includes(item))
-        : allSections;
-  const navigation = accessibleSections.map((item) => {
-    const Icon = sectionIcons[item];
+  const currentSection =
+    sections.find((section) => {
+      const href = sectionHref(locale, section);
+      return pathname === href || (section !== "overview" && pathname.startsWith(`${href}/`));
+    }) ?? "overview";
+
+  function navLink(section: DashboardSection, mobile = false) {
+    const Icon = sectionIcons[section];
     return (
-      <a
-        href={`/${locale}/dashboard${item === "overview" ? "" : `/${item}`}`}
-        className={`dashboard-nav-link ${item === section ? "dashboard-nav-link--active" : ""}`}
-        key={item}
+      <Link
+        href={sectionHref(locale, section)}
+        className={`dashboard-nav-link ${currentSection === section ? "dashboard-nav-link--active" : ""}`}
+        key={section}
+        aria-current={currentSection === section ? "page" : undefined}
+        data-mobile={mobile || undefined}
+        {...(mobile ? { onClick: () => setMobileMenuOpen(false) } : {})}
       >
-        <Icon size={18} aria-hidden="true" />
-        {copy[item]}
-      </a>
+        <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
+        <span>{copy[section]}</span>
+      </Link>
     );
-  });
-  const screen = (
-    <DashboardScreen
-      section={section}
-      locale={locale}
-      membership={membership}
-      onOrganizationChanged={loadMe}
-      programsView={programsView}
-      legacyProgramCreate={legacyProgramCreate}
-      {...(builderProgramId ? { builderProgramId } : {})}
-      {...(studioProgramId ? { studioProgramId } : {})}
-      {...(studioArea ? { studioArea } : {})}
-      {...(changeProgramId ? { changeProgramId } : {})}
-    />
-  );
+  }
+
+  const desktopPrimary = primarySections.filter((section) => sections.includes(section));
+  const desktopAccount = accountSections.filter((section) => sections.includes(section));
+  const mobilePrimary = mobilePrimarySections.filter((section) => sections.includes(section));
+  const mobileMore = sections.filter((section) => !mobilePrimary.includes(section));
 
   return (
-    <div className="dashboard-layout">
-      <Sidebar
-        logo={
-          <Image src="/brand/waflo-logo-white-horizontal.svg" alt="Waflo" width={280} height={80} />
-        }
-        organization={
-          <OrganizationSwitcher
-            label={locale === "ar" ? "تبديل المؤسسة" : "Switch organization"}
-            organizations={me.memberships.map((item) => ({
-              id: item.organization.id,
-              name: item.organization.name,
-            }))}
-            value={activeId}
-            onChange={(id) => void switchOrganization(id)}
-          />
-        }
-        navigation={navigation}
-        footer={
-          <a className="dashboard-sidebar-user" href={`/${locale}/dashboard/security`}>
-            <Avatar name={me.displayName} />
-            <span>
-              <strong>{me.displayName}</strong>
-              <small>{membership.role}</small>
-            </span>
-          </a>
-        }
-      />
-      <div className="dashboard-main">
-        <TopNavigation
-          title={copy[section]}
-          actions={
+    <DashboardContext.Provider value={{ locale, me, membership, reloadMemberships: loadMe }}>
+      <div className="dashboard-layout">
+        <Sidebar
+          logo={
+            <Link
+              href={`/${locale}/dashboard`}
+              aria-label={locale === "ar" ? "الرئيسية" : "Overview"}
+            >
+              <Image
+                src="/brand/waflo-logo-primary-horizontal.svg"
+                alt="Waflo"
+                width={280}
+                height={80}
+              />
+            </Link>
+          }
+          organization={
+            <OrganizationSwitcher
+              label={locale === "ar" ? "اختيار المؤسسة" : "Choose organization"}
+              organizations={me.memberships.map((item) => ({
+                id: item.organization.id,
+                name: item.organization.name,
+              }))}
+              value={activeId}
+              onChange={(id) => void switchOrganization(id)}
+            />
+          }
+          navigation={
             <>
-              <MobileNavigation label={locale === "ar" ? "فتح التنقل" : "Open navigation"}>
-                {navigation}
-              </MobileNavigation>
-              <button
-                type="button"
-                className="wf-language-switcher"
-                onClick={() => void switchLanguage()}
-              >
-                {locale === "ar" ? "English" : "العربية"}
-              </button>
-              <DropdownMenu label={<Avatar name={me.displayName} />}>
-                <a className="dashboard-nav-link" href={`/${locale}/dashboard/security`}>
-                  <LockKeyhole size={17} /> {copy.security}
-                </a>
-                <button type="button" className="dashboard-nav-link" onClick={() => void logout()}>
-                  <LogOut size={17} /> {copy.logout}
-                </button>
-              </DropdownMenu>
+              <div className="dashboard-nav-group">
+                {desktopPrimary.map((item) => navLink(item))}
+              </div>
+              {desktopAccount.length ? (
+                <div className="dashboard-nav-group dashboard-nav-group--account">
+                  <span className="dashboard-nav-label">{copy.administration}</span>
+                  {desktopAccount.map((item) => navLink(item))}
+                </div>
+              ) : null}
             </>
           }
+          footer={
+            <Link className="dashboard-sidebar-user" href={`/${locale}/dashboard/security`}>
+              <Avatar name={me.displayName} />
+              <span>
+                <strong>{me.displayName}</strong>
+                <small>{me.email}</small>
+              </span>
+            </Link>
+          }
         />
-        <main className="dashboard-content">{screen}</main>
+
+        <div className="dashboard-main">
+          <header className="dashboard-topbar">
+            <div className="dashboard-mobile-brand">
+              <Image
+                src="/brand/waflo-logo-primary-horizontal.svg"
+                alt="Waflo"
+                width={280}
+                height={80}
+              />
+              <span>{copy[currentSection]}</span>
+            </div>
+            <div className="dashboard-topbar__actions">
+              <button
+                type="button"
+                className="wf-language-switcher dashboard-language"
+                onClick={() => void switchLanguage()}
+                aria-label={locale === "ar" ? "Switch to English" : "التبديل إلى العربية"}
+              >
+                <Languages size={17} aria-hidden="true" />
+                <span>{locale === "ar" ? "English" : "العربية"}</span>
+              </button>
+              <DropdownMenu label={<Avatar name={me.displayName} />}>
+                <Link className="dashboard-menu-link" href={`/${locale}/dashboard/security`}>
+                  <LockKeyhole size={17} aria-hidden="true" /> {copy.security}
+                </Link>
+                <button type="button" className="dashboard-menu-link" onClick={() => void logout()}>
+                  <LogOut size={17} aria-hidden="true" /> {copy.logout}
+                </button>
+              </DropdownMenu>
+            </div>
+          </header>
+
+          {me.accountState?.billingAttention ? (
+            <div
+              className={`billing-attention-banner billing-attention-banner--${me.accountState.access}`}
+              role="status"
+            >
+              <span>{billingAttentionCopy(me.accountState, locale).message}</span>
+              <Link href={`/${locale}/dashboard/billing`}>
+                {billingAttentionCopy(me.accountState, locale).action}
+              </Link>
+            </div>
+          ) : null}
+
+          <main className="dashboard-content">{children}</main>
+
+          <nav
+            className="dashboard-mobile-tabs"
+            aria-label={locale === "ar" ? "التنقل الرئيسي" : "Primary navigation"}
+          >
+            {mobilePrimary.map((item) => navLink(item, true))}
+            <button
+              type="button"
+              className={`dashboard-nav-link ${mobileMenuOpen || mobileMore.includes(currentSection) ? "dashboard-nav-link--active" : ""}`}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="dashboard-mobile-more"
+              aria-haspopup="dialog"
+              onClick={() => setMobileMenuOpen(true)}
+            >
+              <Menu size={19} strokeWidth={1.75} aria-hidden="true" />
+              <span>{copy.more}</span>
+            </button>
+          </nav>
+
+          <Modal
+            open={mobileMenuOpen}
+            title={copy.more}
+            closeLabel={locale === "ar" ? "إغلاق" : "Close"}
+            onClose={() => setMobileMenuOpen(false)}
+            className="dashboard-mobile-more__dialog"
+          >
+            <nav id="dashboard-mobile-more" className="dashboard-mobile-more__navigation">
+              {mobileMore.map((item) => navLink(item, true))}
+            </nav>
+          </Modal>
+        </div>
       </div>
-    </div>
+    </DashboardContext.Provider>
   );
 }
 
-function DashboardScreen({
+export function DashboardRoute({
   section,
-  locale,
-  membership,
-  onOrganizationChanged,
-  programsView,
-  legacyProgramCreate,
+  programsView = "library",
+  legacyProgramCreate = false,
   builderProgramId,
   studioProgramId,
   studioArea,
   changeProgramId,
 }: {
   section: DashboardSection;
-  locale: Locale;
-  membership: MembershipView;
-  onOrganizationChanged: () => Promise<void>;
-  programsView: "library" | "gallery" | "builder" | "studio";
-  legacyProgramCreate: boolean;
+  programsView?: "library" | "gallery" | "builder" | "studio";
+  legacyProgramCreate?: boolean;
   builderProgramId?: string;
   studioProgramId?: string;
   studioArea?: StudioArea;
   changeProgramId?: string;
 }) {
+  const { locale, me, membership, reloadMemberships } = useDashboard();
   if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
+  if (
+    me.accountState?.access === "read_only_billing_recovery" &&
+    !["billing", "security", "analytics"].includes(section)
+  ) {
+    return <BillingRecoveryOnly locale={locale} />;
+  }
   if (section === "programs") {
     return membership.role === "STAFF" ? (
-      <Alert
-        title={
-          locale === "ar"
-            ? "لا يسمح لدورك بفتح استوديو الولاء."
-            : "Your role does not allow access to Loyalty Studio."
-        }
-        tone="danger"
-      />
+      <MerchantOperationsDenied locale={locale} />
     ) : (
       <ProgramsScreen
         locale={locale}
@@ -377,18 +557,6 @@ function DashboardScreen({
     ) : (
       <CustomersOperationsScreen locale={locale} membership={membership} />
     );
-  if (section === "approvals")
-    return membership.role === "STAFF" ? (
-      <MerchantOperationsDenied locale={locale} />
-    ) : (
-      <ManagerApprovalsScreen locale={locale} membership={membership} />
-    );
-  if (section === "risk")
-    return membership.role === "STAFF" ? (
-      <MerchantOperationsDenied locale={locale} />
-    ) : (
-      <RiskOperationsScreen locale={locale} membership={membership} />
-    );
   if (section === "analytics")
     return membership.role === "STAFF" ? (
       <MerchantOperationsDenied locale={locale} />
@@ -404,18 +572,39 @@ function DashboardScreen({
   if (section === "locations") return <LocationsScreen locale={locale} membership={membership} />;
   if (section === "team") return <TeamScreen locale={locale} membership={membership} />;
   if (section === "billing") return <BillingScreen locale={locale} membership={membership} />;
-  if (section === "audit") return <AuditScreen locale={locale} membership={membership} />;
   if (section === "settings") {
     return (
       <SettingsScreen
         locale={locale}
         membership={membership}
-        onOrganizationChanged={onOrganizationChanged}
+        onOrganizationChanged={reloadMemberships}
       />
     );
   }
   if (section === "security") return <SecurityScreen locale={locale} membership={membership} />;
   return <FutureScreen locale={locale} section={section} />;
+}
+
+function BillingRecoveryOnly({ locale }: { locale: Locale }) {
+  return (
+    <div className="dashboard-restricted-state">
+      <Alert
+        tone="warning"
+        title={
+          locale === "ar"
+            ? "هذا القسم متاح للعرض بعد استعادة الاشتراك"
+            : "Restore your subscription to use this section"
+        }
+      >
+        {locale === "ar"
+          ? "بياناتك محفوظة. حدّث الفوترة لاستعادة التغييرات والعمليات."
+          : "Your data is preserved. Update billing to restore changes and operations."}
+      </Alert>
+      <Link className="wf-button wf-button--primary" href={`/${locale}/dashboard/billing`}>
+        {locale === "ar" ? "فتح الفوترة" : "Open Billing"}
+      </Link>
+    </div>
+  );
 }
 
 function MerchantOperationsDenied({ locale }: { locale: Locale }) {
@@ -424,8 +613,8 @@ function MerchantOperationsDenied({ locale }: { locale: Locale }) {
       tone="danger"
       title={
         locale === "ar"
-          ? "يتطلب هذا القسم صلاحيات المدير أو المالك."
-          : "This section requires Manager or Owner permission."
+          ? "لا تملك الصلاحية لفتح هذا القسم."
+          : "You do not have permission to open this section."
       }
     />
   );

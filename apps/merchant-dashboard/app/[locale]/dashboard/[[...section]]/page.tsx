@@ -1,21 +1,18 @@
 import type { Locale } from "@waflo/contracts";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { DashboardApplication, type DashboardSection } from "../../../../components/dashboard";
+import { DashboardRoute, type DashboardSection } from "../../../../components/dashboard";
 import type { StudioArea } from "../../../../components/program-studio-presentation";
 
 const dashboardSections = new Set<DashboardSection>([
   "overview",
   "programs",
   "customers",
-  "approvals",
-  "risk",
   "locations",
   "team",
   "analytics",
   "exports",
   "billing",
-  "audit",
   "settings",
   "security",
 ]);
@@ -25,7 +22,6 @@ const studioAreaSegments = new Map<string, StudioArea>([
   ["how-it-works", "how-it-works"],
   ["customers-locations", "customers-locations"],
   ["engagement", "engagement"],
-  ["test", "test"],
   ["launch", "launch"],
   ["settings", "settings"],
 ]);
@@ -34,14 +30,11 @@ const dashboardSectionTitles = new Map<DashboardSection, string>([
   ["overview", "Overview"],
   ["programs", "Loyalty Cards"],
   ["customers", "Customers"],
-  ["approvals", "Manager approvals"],
-  ["risk", "Risk"],
   ["locations", "Locations"],
   ["team", "Team"],
   ["analytics", "Analytics"],
   ["exports", "Exports"],
   ["billing", "Billing"],
-  ["audit", "Audit"],
   ["settings", "Settings"],
   ["security", "Security"],
 ]);
@@ -51,7 +44,6 @@ const studioAreaTitles = new Map<string, string>([
   ["how-it-works", "How it works"],
   ["customers-locations", "Customers & locations"],
   ["engagement", "Wallet Engagement"],
-  ["test", "Test loyalty card"],
   ["launch", "Launch loyalty card"],
   ["settings", "Loyalty card settings"],
 ]);
@@ -105,8 +97,7 @@ export default async function DashboardPage({
   if (!dashboardSections.has(selected)) notFound();
 
   return (
-    <DashboardApplication
-      locale={locale}
+    <DashboardRoute
       section={selected}
       programsView={
         programsBuilder

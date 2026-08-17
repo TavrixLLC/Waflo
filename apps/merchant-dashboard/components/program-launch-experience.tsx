@@ -29,6 +29,7 @@ import type {
   WalletHealth,
 } from "./program-enrollment-settings";
 import {
+  canonicalPublicUrlForDisplay,
   deriveProgramSharingPresentation,
   isLocalPreviewUrl,
   type PublicationFailurePresentation,
@@ -204,7 +205,7 @@ export function PublicationConfirmationDialog({
               >
                 {ar
                   ? "تبدأ الفترة التجريبية الحالية لمدة 15 يوماً عند نجاح النشر."
-                  : "The existing 15-day trial starts when publication succeeds."}
+                  : "Publishing makes this loyalty card available to customers. Your billing trial is managed separately."}
               </Alert>
             ) : null}
             {paused ? (
@@ -296,13 +297,14 @@ export function ShareLoyaltyCard({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const publicUrl = access?.publicUrl ?? null;
+  const displayedPublicUrl = canonicalPublicUrlForDisplay(publicUrl);
   const qrAvailable = Boolean(access?.publicSlug);
   const qrBase = `${apiUrl}/v1/organizations/${organizationId}/programs/${programId}/enrollment-qr`;
 
   async function copyLink() {
     if (!publicUrl || !presentation.canCopyJoinLink) return;
     try {
-      await navigator.clipboard.writeText(publicUrl);
+      await navigator.clipboard.writeText(displayedPublicUrl ?? publicUrl);
       setCopied(true);
       setCopyError(false);
       window.setTimeout(() => setCopied(false), 2_500);
@@ -348,11 +350,11 @@ export function ShareLoyaltyCard({
             {!presentation.canShare ? (
               <small>{ar ? "رابط محفوظ وغير نشط" : "Saved inactive link"}</small>
             ) : isLocalPreviewUrl(publicUrl) ? (
-              <small>{ar ? "معاينة محلية للتطوير" : "Local development preview"}</small>
+              <small>{ar ? "رابط المعاينة" : "Preview link"}</small>
             ) : (
               <small>{ar ? "رابط الانضمام العام" : "Public join link"}</small>
             )}
-            <code dir="ltr">{publicUrl}</code>
+            <code dir="ltr">{displayedPublicUrl}</code>
           </div>
           {presentation.canCopyJoinLink || presentation.canOpenJoinPage ? (
             <div className="publication-share__actions">
@@ -714,7 +716,7 @@ function LaunchReview({
             >
               {ar
                 ? "يبدأ هذا الإطلاق الفترة التجريبية الحالية لمدة 15 يوماً داخل عملية النشر نفسها."
-                : "This first launch starts the existing 15-day trial in the same publication transaction."}
+                : "This first launch makes the loyalty card available to customers. It does not change your billing dates."}
             </Alert>
           ) : null}
           {detail.status === "PAUSED" && mode === "update" ? (

@@ -18,7 +18,7 @@ import {
   useState,
 } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "tertiary" | "ghost" | "destructive" | "danger";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -154,9 +154,11 @@ export function SearchableSelect({
 }) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const hasInteractedRef = useRef(false);
   const controlled = value !== undefined;
   const [selectedValue, setSelectedValue] = useState(value ?? defaultValue);
   const selected = options.find((option) => option.value === selectedValue) ?? null;
+  const controlledLabel = options.find((option) => option.value === value)?.label ?? "";
   const [query, setQuery] = useState(selected?.label ?? "");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -164,21 +166,34 @@ export function SearchableSelect({
   useEffect(() => {
     if (!controlled) return;
     setSelectedValue(value ?? "");
-    setQuery(options.find((option) => option.value === value)?.label ?? "");
-  }, [controlled, options, value]);
+    setQuery(controlledLabel);
+  }, [controlled, controlledLabel, value]);
+
+  useEffect(() => {
+    if (controlled || hasInteractedRef.current || selectedValue || !defaultValue) return;
+    const defaultOption = options.find((option) => option.value === defaultValue);
+    if (!defaultOption) return;
+    setSelectedValue(defaultOption.value);
+    setQuery(defaultOption.label);
+  }, [controlled, defaultValue, options, selectedValue]);
 
   const filtered = useMemo(() => {
     const normalized = query.normalize("NFKC").trim().toLocaleLowerCase();
-    if (!normalized || selected?.label === query) return options;
+    if (!normalized) return options;
     return options.filter((option) =>
       `${option.label} ${option.value} ${option.group ?? ""}`
         .normalize("NFKC")
         .toLocaleLowerCase()
         .includes(normalized),
     );
-  }, [options, query, selected?.label]);
+  }, [options, query]);
+
+  useEffect(() => {
+    setActiveIndex((index) => Math.min(index, Math.max(0, filtered.length - 1)));
+  }, [filtered.length]);
 
   function choose(option: SearchableSelectOption) {
+    hasInteractedRef.current = true;
     setSelectedValue(option.value);
     setQuery(option.label);
     setOpen(false);
@@ -202,6 +217,7 @@ export function SearchableSelect({
     } else if (event.key === "Escape") {
       setOpen(false);
       setQuery(selected?.label ?? "");
+      setActiveIndex(0);
     }
   }
 
@@ -225,8 +241,19 @@ export function SearchableSelect({
         value={query}
         required={required}
         disabled={disabled}
-        onFocus={() => setOpen(true)}
-        onClick={() => setOpen(true)}
+        onFocus={() => {
+          // Clear the search query so all options are visible when the dropdown opens.
+          // The selected value (selectedValue) is preserved; the label is restored on blur
+          // if the user does not pick a different option.
+          setQuery("");
+          setOpen(true);
+          setActiveIndex(0);
+        }}
+        onClick={() => {
+          setQuery("");
+          setOpen(true);
+          setActiveIndex(0);
+        }}
         onBlur={() => {
           setOpen(false);
           const exact = options.find(
@@ -244,12 +271,12 @@ export function SearchableSelect({
         }}
         onKeyDown={onKeyDown}
         onChange={(event) => {
+          hasInteractedRef.current = true;
           setQuery(event.currentTarget.value);
           setSelectedValue("");
           event.currentTarget.setCustomValidity(required ? "Choose a listed option." : "");
           setActiveIndex(0);
           setOpen(true);
-          onValueChange?.("");
         }}
       />
       {open ? (
@@ -702,13 +729,15 @@ export function Table({
   headers,
   rows,
   caption,
+  className = "",
 }: {
   headers: readonly string[];
   rows: readonly (readonly ReactNode[])[];
   caption: string;
+  className?: string;
 }) {
   return (
-    <div className="wf-table-wrap">
+    <div className={`wf-table-wrap ${className}`}>
       <table className="wf-table">
         <caption className="wf-sr-only">{caption}</caption>
         <thead>
@@ -724,7 +753,9 @@ export function Table({
           {rows.map((row, rowIndex) => (
             <tr key={`row-${rowIndex.toString()}`}>
               {row.map((cell, cellIndex) => (
-                <td key={`cell-${cellIndex.toString()}`}>{cell}</td>
+                <td key={`cell-${cellIndex.toString()}`} data-label={headers[cellIndex]}>
+                  {cell}
+                </td>
               ))}
             </tr>
           ))}
@@ -863,18 +894,42 @@ export function OrganizationSwitcher({
   value: string;
   onChange: (organizationId: string) => void;
 }) {
+  const selected = organizations.find((organization) => organization.id === value);
+  const [open, setOpen] = useState(false);
   return (
-    <label className="wf-org-switcher">
-      <span className="wf-sr-only">{label}</span>
-      <Building2 size={18} aria-hidden="true" />
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
-        {organizations.map((organization) => (
-          <option key={organization.id} value={organization.id}>
-            {organization.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="wf-org-switcher">
+      <button
+        type="button"
+        className="wf-org-switcher__trigger"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Building2 size={18} strokeWidth={1.75} aria-hidden="true" />
+        <span>{selected?.name ?? label}</span>
+        <ChevronRight className="wf-org-switcher__chevron" size={16} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="wf-org-switcher__menu" role="listbox" aria-label={label}>
+          {organizations.map((organization) => (
+            <button
+              key={organization.id}
+              type="button"
+              role="option"
+              aria-selected={organization.id === value}
+              onClick={() => {
+                onChange(organization.id);
+                setOpen(false);
+              }}
+            >
+              <span>{organization.name}</span>
+              {organization.id === value ? <Check size={16} aria-hidden="true" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -895,6 +950,15 @@ export function PlanCard({
   const pricing = cadencePrice(plan, cadence);
   const cadenceDefinition = billingCadenceCatalog[cadence];
   const copy = locale === "ar";
+  const cadenceLabel = copy
+    ? cadence === "monthly"
+      ? "شهري"
+      : cadence === "quarterly"
+        ? "كل ثلاثة أشهر"
+        : "سنوي"
+    : cadenceDefinition.label;
+  const discountLabel = cadence === "quarterly" ? "8.33%" : cadence === "yearly" ? "16.67%" : "";
+  const savings = pricing.undiscountedAmountUsd - pricing.billedAmountUsd;
   const count = (value: number | null, singular: string, plural: string, unboundedLabel: string) =>
     value === null ? unboundedLabel : `${value} ${value === 1 ? singular : plural}`;
   const benefits = [
@@ -916,57 +980,39 @@ export function PlanCard({
       copy ? "مقاعد للمديرين والموظفين" : "Manager and Staff seats",
       copy ? "حد مقاعد Scale قابل للضبط" : "Configurable Scale Manager and Staff limit",
     ),
-    copy
-      ? "جميع قوالب وتصاميم البطاقات وApple Wallet وGoogle Wallet"
-      : "All card templates and designs, Apple Wallet, and Google Wallet",
-    copy
-      ? "عمليات المسح والختم والاستبدال والتحليلات الأساسية"
-      : "Resolve, stamp, redeem, and basic analytics",
-    ...(definition.features.advancedCustomization
-      ? [
-          copy
-            ? "الوضع الاحترافي والمكافآت المتعددة ومكافآت المراحل"
-            : "Pro Mode, multiple rewards, and milestone rewards",
-        ]
-      : []),
-    ...(definition.features.advancedAnalytics
-      ? [
-          copy
-            ? "تحليلات متقدمة حسب البرنامج والموقع والموظف"
-            : "Advanced program, location, and Staff analytics",
-        ]
-      : []),
-    ...(definition.features.advancedExports
-      ? [copy ? "تصديرات CSV المتقدمة" : "Advanced CSV exports"]
-      : []),
+    definition.features.advancedExports
+      ? copy
+        ? "تخصيص وتحليلات وتصدير متقدم"
+        : "Advanced customization, analytics, and exports"
+      : definition.features.advancedAnalytics
+        ? copy
+          ? "تخصيص وتحليلات متقدمة"
+          : "Advanced customization and analytics"
+        : copy
+          ? "التحليلات الأساسية"
+          : "Essential analytics",
   ];
   return (
     <Card className={`wf-plan-card ${selected ? "wf-plan-card--selected" : ""}`}>
-      <span className="wf-plan-card__tier">{copy ? "فئة الخطة" : "Plan tier"}</span>
       <div className="wf-plan-card__heading">
-        <h3>{definition.name}</h3>
+        <h3>
+          <bdi dir="ltr">{definition.name}</bdi>
+        </h3>
         {selected ? <Badge tone="brand">{copy ? "الخطة المختارة" : "Selected"}</Badge> : null}
       </div>
       <p className="wf-plan-card__price">
-        ${pricing.billedAmountUsd.toFixed(2)}
-        <span>
-          /
-          {copy
-            ? cadence === "monthly"
-              ? "شهرياً"
-              : cadence === "quarterly"
-                ? "ربع سنوي"
-                : "سنوياً"
-            : cadenceDefinition.label.toLocaleLowerCase("en-US")}
-        </span>
+        <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi>
+        <span>/{copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}</span>
       </p>
       <small className="wf-plan-card__cadence">
-        {copy ? "وتيرة الفوترة:" : "Billing cadence:"} {cadenceDefinition.label}
+        {copy ? "وتيرة الفوترة:" : "Billing cadence:"} {cadenceLabel}
       </small>
       {cadenceDefinition.discountRate ? (
         <small className="wf-plan-card__equivalent">
-          ${pricing.monthlyEquivalentUsd.toFixed(2)}/{copy ? "شهر" : "month"} ·{" "}
-          {Math.round(cadenceDefinition.discountRate * 100)}% {copy ? "خصم" : "off"}
+          <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>/{copy ? "شهر" : "month"} ·{" "}
+          {cadence === "yearly" ? (copy ? "شهران مجاناً" : "2 months free") : null}
+          {cadence === "yearly" ? " · " : null}
+          {copy ? "وفّر" : "Save"} <bdi dir="ltr">${savings.toFixed(2)}</bdi> ({discountLabel})
         </small>
       ) : null}
       <ul className="wf-plan-card__benefits">
@@ -994,10 +1040,12 @@ export function UsageMeter({
   label,
   current,
   limit,
+  unlimitedLabel,
 }: {
   label: string;
   current: number;
   limit: number | null;
+  unlimitedLabel?: string;
 }) {
   const percentage = limit === null ? 0 : Math.min(100, Math.round((current / limit) * 100));
   return (
@@ -1005,10 +1053,10 @@ export function UsageMeter({
       <div>
         <span>{label}</span>
         <strong>
-          {current} / {limit ?? "∞"}
+          {limit === null ? (unlimitedLabel ?? `${current} · Unlimited`) : `${current} / ${limit}`}
         </strong>
       </div>
-      <progress max={100} value={percentage} aria-label={label} />
+      {limit === null ? null : <progress max={100} value={percentage} aria-label={label} />}
     </div>
   );
 }

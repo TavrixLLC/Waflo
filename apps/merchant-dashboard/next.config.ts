@@ -26,7 +26,7 @@ const nextConfig: NextConfig = {
           { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
-          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Content-Security-Policy",
             value: createNextContentSecurityPolicy(process.env.NODE_ENV, {
@@ -35,6 +35,8 @@ const nextConfig: NextConfig = {
                 : {}),
               allowLoopbackApi: process.env.WAFLO_LOCAL_PRODUCTION_SMOKE === "1",
               googleFonts: true,
+              stripeJs: true,
+              mapboxGl: true,
             }),
           },
           ...(process.env.NODE_ENV === "production"

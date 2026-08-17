@@ -3,18 +3,8 @@
 import { planCatalog } from "@waflo/billing";
 import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
 import { formatDate } from "@waflo/i18n";
-import { Alert, AlertDialog, Badge, Button, Card, DropdownMenu, PageHeader } from "@waflo/ui";
-import {
-  Archive,
-  ArrowRight,
-  CreditCard,
-  Ellipsis,
-  Layers3,
-  Pause,
-  Play,
-  Plus,
-  RotateCcw,
-} from "lucide-react";
+import { Alert, AlertDialog, Badge, Button, DropdownMenu, PageHeader } from "@waflo/ui";
+import { Archive, ArrowRight, Ellipsis, Layers3, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
@@ -24,6 +14,7 @@ import {
   merchantProgramLifecycleLabel,
   merchantProgramStatus,
 } from "./loyalty-card-presentation";
+import { LoyaltyCardRealPreview } from "./loyalty-card-real-preview";
 import { ProgramCardBuilder } from "./program-card-builder";
 import { applyBuilderTemplate, createBuilderDraft } from "./program-card-builder-state";
 import { ProgramQuickWizard } from "./program-quick-wizard";
@@ -57,8 +48,6 @@ const planCodes = {
   SCALE: "scale",
 } as const;
 
-const emptyStateStampSlots = [true, true, true, false, false] as const;
-
 type CardLifecycleAction = Exclude<MerchantProgramLifecycleAction, "publish" | "abandon">;
 
 const loyaltyCardCopy = {
@@ -79,27 +68,27 @@ const loyaltyCardCopy = {
     currentPlan: "Current workspace plan",
     emptyTitle: "Create your first loyalty card",
     emptyDescription:
-      "Choose a design, customize your reward, test the customer experience, and publish when you’re ready.",
+      "Choose a design, customize your reward, review the customer experience, and publish when you’re ready.",
     loading: "Loading loyalty cards…",
     loadError:
       "Loyalty cards could not be loaded. Your cards were not changed. Reload and try again.",
     libraryTitle: "Your loyalty cards",
-    libraryDescription: "Open a card to review its setup, test it, or prepare the next update.",
+    libraryDescription: "Open a card to review its setup or prepare the next update.",
     visualSummary: "Design available in Studio",
     updated: "Updated",
     published: "Published",
     open: "Open card",
     loadMore: "Load more loyalty cards",
     loadMoreAssets: "Load more design assets",
-    draftOnly: "Finish setup, test the customer experience, then publish this card.",
+    draftOnly: "Finish setup, review the customer experience, then publish this card.",
     unpublishedChanges: "Unpublished changes are safely separate from the live card.",
     live: "Live for customers. Create a draft when you’re ready to make changes.",
     paused: "This card is paused and is not currently live for customers.",
     archived: "This card is archived. Its setup and history remain preserved.",
     suspended: "This card is suspended. Contact support before publishing changes.",
     scheduled: "This card is scheduled, but scheduled publishing is not available yet.",
-    readyToTest: "The setup is ready for customer-experience testing.",
-    testing: "Customer-experience testing is in progress.",
+    readyToTest: "The setup is validated and ready to publish.",
+    testing: "The setup is validated and ready to publish.",
     moreActions: "More actions",
     confirm: "Confirm",
     cancel: "Cancel",
@@ -130,26 +119,26 @@ const loyaltyCardCopy = {
     currentPlan: "خطة مساحة العمل الحالية",
     emptyTitle: "أنشئ أول بطاقة ولاء",
     emptyDescription:
-      "اختر تصميمًا، وخصّص المكافأة، واختبر تجربة العميل، ثم انشر البطاقة عندما تصبح جاهزة.",
+      "اختر تصميمًا، وخصّص المكافأة، وراجع التجربة، ثم انشر البطاقة عندما تصبح جاهزة.",
     loading: "جارٍ تحميل بطاقات الولاء…",
     loadError: "تعذر تحميل بطاقات الولاء. لم تتغير بطاقاتك. أعد تحميل الصفحة وحاول مرة أخرى.",
     libraryTitle: "بطاقات الولاء الخاصة بك",
-    libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو اختبارها أو تحضير التحديث التالي.",
+    libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو تحضير التحديث التالي.",
     visualSummary: "التصميم متاح في الاستوديو",
     updated: "آخر تحديث",
     published: "نُشرت في",
     open: "فتح البطاقة",
     loadMore: "تحميل المزيد من بطاقات الولاء",
     loadMoreAssets: "تحميل المزيد من أصول التصميم",
-    draftOnly: "أكمل الإعداد، واختبر تجربة العميل، ثم انشر هذه البطاقة.",
+    draftOnly: "أكمل الإعداد، وراجع التجربة، ثم انشر هذه البطاقة.",
     unpublishedChanges: "التغييرات غير المنشورة منفصلة بأمان عن البطاقة المباشرة.",
     live: "البطاقة مباشرة للعملاء. أنشئ مسودة عندما تصبح مستعدًا لإجراء تغييرات.",
     paused: "هذه البطاقة متوقفة مؤقتًا وليست مباشرة للعملاء حاليًا.",
     archived: "هذه البطاقة مؤرشفة، مع الاحتفاظ بإعداداتها وسجلها.",
     suspended: "هذه البطاقة موقوفة. تواصل مع الدعم قبل نشر أي تغييرات.",
     scheduled: "هذه البطاقة مجدولة، لكن النشر المجدول غير متاح بعد.",
-    readyToTest: "أصبحت الإعدادات جاهزة لاختبار تجربة العميل.",
-    testing: "يجري الآن اختبار تجربة العميل.",
+    readyToTest: "تم التحقق من الإعدادات وأصبحت جاهزة للنشر.",
+    testing: "تم التحقق من الإعدادات وأصبحت جاهزة للنشر.",
     moreActions: "المزيد من الإجراءات",
     confirm: "تأكيد",
     cancel: "إلغاء",
@@ -594,7 +583,6 @@ export function ProgramsScreen({
       dir={ar ? "rtl" : "ltr"}
     >
       <PageHeader
-        eyebrow={copy.eyebrow}
         title={copy.title}
         description={copy.description}
         actions={
@@ -612,42 +600,28 @@ export function ProgramsScreen({
       {error ? <Alert tone="danger" title={error} /> : null}
 
       <section className="programs-home__summary" aria-label={copy.summaryLabel}>
-        <Card className="loyalty-card-summary loyalty-card-summary--count">
+        <div className="loyalty-card-summary loyalty-card-summary--count">
           <span className="dashboard-card__label">{copy.yourCards}</span>
           <div className="loyalty-card-summary__value">
             <strong>{displayedCardCount}</strong>
             <span>{cardCountNoun}</span>
           </div>
           <small>{planCapacity}</small>
-        </Card>
-        <Card className="loyalty-card-summary loyalty-card-summary--plan">
+        </div>
+        <div className="loyalty-card-summary loyalty-card-summary--plan">
           <span className="dashboard-card__label">{copy.plan}</span>
           <strong translate="no">{plan.name}</strong>
           <small>{planInclusion}</small>
-        </Card>
+        </div>
       </section>
 
       {loading ? (
-        <Card className="programs-home__loading" role="status">
+        <div className="programs-home__loading" role="status">
           <Layers3 size={24} aria-hidden="true" />
           {copy.loading}
-        </Card>
+        </div>
       ) : programs.length === 0 ? (
-        <section className="wf-card loyalty-card-empty" aria-labelledby="loyalty-card-empty-title">
-          <div className="loyalty-card-empty__preview" aria-hidden="true">
-            <div className="loyalty-card-visual__brand">
-              <span>W</span>
-              <CreditCard size={22} />
-            </div>
-            <div className="loyalty-card-visual__stamps">
-              {emptyStateStampSlots.map((filled, index) => (
-                <span
-                  className={filled ? "loyalty-card-visual__stamp--filled" : ""}
-                  key={`empty-card-stamp-${index.toString()}`}
-                />
-              ))}
-            </div>
-          </div>
+        <section className="loyalty-card-empty" aria-labelledby="loyalty-card-empty-title">
           <div className="loyalty-card-empty__content">
             <h2 id="loyalty-card-empty-title">{copy.emptyTitle}</h2>
             <p>{copy.emptyDescription}</p>
@@ -681,23 +655,22 @@ export function ProgramsScreen({
                 program.currentDraftVersion || !program.currentPublishedVersion
                   ? copy.updated
                   : copy.published;
+              const version = program.currentDraftVersion ?? program.currentPublishedVersion;
+              const theme = version?.visualTheme;
+              const translation = version?.translations?.find(
+                (item) => item.locale === (ar ? "AR" : "EN"),
+              );
 
               return (
                 <article className="wf-card program-list__card" key={program.id}>
-                  <div
-                    className="loyalty-card-visual loyalty-card-visual--summary"
-                    role="img"
-                    aria-label={`${copy.visualSummary}: ${program.internalName}`}
-                  >
-                    <div className="loyalty-card-visual__brand">
-                      <span>{program.internalName.charAt(0).toLocaleUpperCase(locale)}</span>
-                      <Layers3 size={22} aria-hidden="true" />
-                    </div>
-                    <div className="loyalty-card-visual__summary-copy">
-                      <small>{copy.visualSummary}</small>
-                      <strong>{program.internalName}</strong>
-                    </div>
-                  </div>
+                  <LoyaltyCardRealPreview
+                    programName={translation?.programName ?? program.internalName}
+                    internalName={program.internalName}
+                    requiredStampCount={version?.stampRule?.requiredStampCount ?? 8}
+                    rewardSummary={translation?.rewardSummary ?? copy.visualSummary}
+                    visualTheme={theme}
+                    locale={locale}
+                  />
                   <div className="program-list__content">
                     <div className="program-list__heading">
                       <h3>{program.internalName}</h3>

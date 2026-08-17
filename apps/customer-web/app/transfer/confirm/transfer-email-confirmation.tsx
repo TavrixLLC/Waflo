@@ -5,27 +5,34 @@ import { Check, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { customerApi } from "../../client-api";
 
-export function TransferEmailConfirmation() {
+export function TransferEmailConfirmation({ locale }: { locale: "en" | "ar" }) {
   const proof = useRef<{ transferPublicId: string; token: string } | null>(null);
   const [state, setState] = useState<"ready" | "working" | "complete" | "invalid">("ready");
   const [message, setMessage] = useState("");
   const [membershipId, setMembershipId] = useState("");
-  const [tenantQuery, setTenantQuery] = useState("");
+  const [cardQuery, setCardQuery] = useState("");
+  const ar = locale === "ar";
 
   useEffect(() => {
     const tenant = new URLSearchParams(window.location.search).get("tenant");
-    setTenantQuery(tenant ? `?tenant=${encodeURIComponent(tenant)}` : "");
+    const nextQuery = new URLSearchParams({ lang: locale });
+    if (tenant) nextQuery.set("tenant", tenant);
+    setCardQuery(`?${nextQuery.toString()}`);
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     const transferPublicId = fragment.get("transfer") ?? "";
     const token = fragment.get("token") ?? "";
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     if (!transferPublicId || !token) {
       setState("invalid");
-      setMessage("This confirmation link is incomplete or has already been removed.");
+      setMessage(
+        ar
+          ? "رابط التأكيد غير مكتمل أو تمت إزالة بياناته بالفعل."
+          : "This confirmation link is incomplete or has already been removed.",
+      );
       return;
     }
     proof.current = { transferPublicId, token };
-  }, []);
+  }, [ar, locale]);
 
   async function confirm() {
     if (!proof.current) return;
@@ -44,25 +51,45 @@ export function TransferEmailConfirmation() {
       setState("complete");
     } catch (caught) {
       setState("invalid");
-      setMessage(caught instanceof Error ? caught.message : "Transfer confirmation failed.");
+      setMessage(
+        caught instanceof Error
+          ? caught.message
+          : ar
+            ? "تعذر تأكيد نقل البطاقة."
+            : "Transfer confirmation failed.",
+      );
     }
   }
 
   return (
-    <main className="customer-page customer-centered">
+    <main className="customer-page customer-centered" lang={locale} dir={ar ? "rtl" : "ltr"}>
       <Card className="transfer-result">
         {state === "complete" ? <Check /> : <ShieldCheck />}
-        <Badge tone={state === "invalid" ? "warning" : "brand"}>SECURE CARD TRANSFER</Badge>
-        <h1>{state === "complete" ? "Card transferred" : "Confirm this transfer"}</h1>
+        <Badge tone={state === "invalid" ? "warning" : "brand"}>
+          {ar ? "نقل آمن للبطاقة" : "SECURE CARD TRANSFER"}
+        </Badge>
+        <h1>
+          {state === "complete"
+            ? ar
+              ? "تم نقل البطاقة"
+              : "Card transferred"
+            : ar
+              ? "تأكيد نقل البطاقة"
+              : "Confirm this transfer"}
+        </h1>
         <p>
           {state === "complete"
-            ? "The old QR credential and old Wallet objects are no longer valid. Provider updates may finish shortly."
-            : "Continue only if you requested this transfer. Confirmation proves control of the stored email."}
+            ? ar
+              ? "لم تعد بيانات اعتماد الرمز القديمة وبطاقات Wallet القديمة صالحة. قد يكتمل التحديث خلال وقت قصير."
+              : "The old QR credential and old Wallet objects are no longer valid. Wallet updates may finish shortly."
+            : ar
+              ? "تابع فقط إذا طلبت هذا النقل. يؤكد هذا الإجراء تحكمك بالبريد الإلكتروني المحفوظ."
+              : "Continue only if you requested this transfer. Confirmation proves control of the stored email."}
         </p>
         {message ? <Alert tone="danger" title={message} /> : null}
         {state === "complete" ? (
-          <a href={`/card/${membershipId}${tenantQuery}`}>
-            <Button>Open the new card</Button>
+          <a href={`/card/${membershipId}${cardQuery}`}>
+            <Button>{ar ? "فتح البطاقة الجديدة" : "Open the new card"}</Button>
           </a>
         ) : (
           <Button
@@ -70,7 +97,7 @@ export function TransferEmailConfirmation() {
             loading={state === "working"}
             disabled={state === "invalid"}
           >
-            Confirm and transfer
+            {ar ? "تأكيد ونقل البطاقة" : "Confirm and transfer"}
           </Button>
         )}
       </Card>

@@ -21,7 +21,7 @@ export default async function ContactPage({ params }: { params: Promise<{ locale
   if (!isLocale(locale)) notFound();
   const ar = locale === "ar";
   const supportEmail = configuredSupportEmail();
-  const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? "http://localhost:3001";
+  const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? "https://dashboard.waflo.app";
   return (
     <MarketingShell locale={locale} path="/contact">
       <section className="marketing-container marketing-content">

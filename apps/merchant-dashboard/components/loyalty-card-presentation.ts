@@ -16,8 +16,8 @@ export type MerchantProgramLifecycleAction =
 const merchantProgramStatuses = {
   en: {
     DRAFT: { label: "Draft", tone: "neutral" },
-    VALIDATED: { label: "Ready to test", tone: "brand" },
-    TEST: { label: "Testing", tone: "warning" },
+    VALIDATED: { label: "Ready to publish", tone: "brand" },
+    TEST: { label: "Ready to publish", tone: "brand" },
     SCHEDULED: { label: "Scheduled", tone: "brand" },
     PUBLISHED: { label: "Live", tone: "success" },
     PAUSED: { label: "Paused", tone: "warning" },
@@ -26,8 +26,8 @@ const merchantProgramStatuses = {
   },
   ar: {
     DRAFT: { label: "مسودة", tone: "neutral" },
-    VALIDATED: { label: "جاهزة للاختبار", tone: "brand" },
-    TEST: { label: "قيد الاختبار", tone: "warning" },
+    VALIDATED: { label: "جاهزة للنشر", tone: "brand" },
+    TEST: { label: "جاهزة للنشر", tone: "brand" },
     SCHEDULED: { label: "مجدولة", tone: "brand" },
     PUBLISHED: { label: "مباشرة", tone: "success" },
     PAUSED: { label: "متوقفة مؤقتًا", tone: "warning" },

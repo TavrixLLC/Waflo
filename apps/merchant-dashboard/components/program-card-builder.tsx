@@ -22,12 +22,10 @@ import {
   ChevronRight,
   CircleAlert,
   Eye,
-  FlaskConical,
   Globe2,
   MapPin,
   Palette,
   RefreshCcw,
-  RotateCcw,
   Save,
   Settings2,
   Sparkles,
@@ -71,7 +69,6 @@ import {
   type ProgramDraftInput,
   type ProgramVersion,
   type TemplateItem,
-  type TestSession,
   type ValidationResult,
   versionToDraft,
 } from "./program-studio-types";
@@ -156,7 +153,7 @@ const copy = {
       languages: "Languages",
       locations: "Locations",
       appearance: "Appearance",
-      review: "Review & test",
+      review: "Review & validate",
     },
     sectionDescriptions: {
       basics: "Name the card and confirm how customers earn stamps.",
@@ -164,7 +161,7 @@ const copy = {
       languages: "Keep English and Arabic together and see what remains.",
       locations: "Choose where earning and redemption are available.",
       appearance: "Keep the template identity, then adjust supported visual controls.",
-      review: "Resolve readiness issues and test the customer experience.",
+      review: "Resolve readiness issues before publishing.",
     },
     saved: "Saved",
     unsaved: "Unsaved changes",
@@ -192,16 +189,7 @@ const copy = {
     checksPassed: "Readiness checks passed",
     issuesFound: "Readiness issues found",
     fix: "Fix",
-    testMode: "Test the reward cycle",
-    testModeDescription:
-      "Test safely with a demo customer. No real customer activity will be created.",
-    startTest: "Start Test Mode",
-    addStamp: "Add one stamp",
-    resetTest: "Reset test",
-    redeemReward: "Redeem test reward",
-    rewardReady: "Reward ready outside the stamp grid",
-    testRequired: "Run readiness checks before starting Test Mode.",
-    noPublish: "Publishing remains in Studio. Saving this draft does not start your trial.",
+    noPublish: "Publishing remains in Studio. Saving this draft does not change your billing.",
     starterAdvanced: "Pro Mode requires Growth or Scale. Quick Mode remains fully available.",
     mode: "Editing mode",
     basicsSummary: "Card name, earning rule, and goal",
@@ -251,7 +239,7 @@ const copy = {
       languages: "اللغات",
       locations: "المواقع",
       appearance: "المظهر",
-      review: "المراجعة والاختبار",
+      review: "المراجعة والتحقق",
     },
     sectionDescriptions: {
       basics: "سمّ البطاقة وأكّد طريقة حصول العملاء على الأختام.",
@@ -259,7 +247,7 @@ const copy = {
       languages: "أدر الإنجليزية والعربية معًا واعرف ما تبقى.",
       locations: "اختر المواقع التي يتاح فيها الكسب والاسترداد.",
       appearance: "حافظ على هوية القالب وعدّل عناصر المظهر المدعومة.",
-      review: "عالج ملاحظات الجاهزية واختبر تجربة العميل.",
+      review: "عالج ملاحظات الجاهزية قبل النشر.",
     },
     saved: "تم الحفظ",
     unsaved: "تغييرات غير محفوظة",
@@ -287,14 +275,6 @@ const copy = {
     checksPassed: "اجتازت البطاقة فحوصات الجاهزية",
     issuesFound: "توجد ملاحظات على الجاهزية",
     fix: "إصلاح",
-    testMode: "اختبار دورة المكافأة",
-    testModeDescription: "اختبر بأمان مع عميل تجريبي. لن يُنشأ أي نشاط حقيقي للعملاء.",
-    startTest: "بدء وضع الاختبار",
-    addStamp: "إضافة ختم واحد",
-    resetTest: "إعادة ضبط الاختبار",
-    redeemReward: "استرداد المكافأة التجريبية",
-    rewardReady: "المكافأة جاهزة خارج شبكة الأختام",
-    testRequired: "شغّل فحوصات الجاهزية قبل بدء وضع الاختبار.",
     noPublish: "يبقى النشر داخل الاستوديو. حفظ المسودة لا يبدأ الفترة التجريبية.",
     starterAdvanced: "يتطلب وضع Pro خطة Growth أو Scale. يبقى الوضع السريع متاحًا بالكامل.",
     mode: "وضع التحرير",
@@ -385,7 +365,6 @@ export function ProgramCardBuilder({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -594,60 +573,6 @@ export function ProgramCardBuilder({
         { method: "POST" },
       );
       setValidation(result);
-      await load();
-    } catch (caught) {
-      setError(merchantError(caught, locale));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function startTest(): Promise<void> {
-    if (!validation || validation.errors.length > 0) return;
-    setWorking(true);
-    try {
-      if (!(await saveNow())) return;
-      const session = await apiFetch<TestSession>(
-        `/v1/organizations/${organizationId}/programs/${programId}/test-sessions`,
-        { method: "POST" },
-      );
-      setTestSession(session);
-      setProgress(session.currentStampCount);
-    } catch (caught) {
-      setError(merchantError(caught, locale));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function testCommand(kind: "add" | "reset" | "redeem"): Promise<void> {
-    if (!testSession) return;
-    setWorking(true);
-    const base = `/v1/organizations/${organizationId}/programs/test-sessions/${testSession.id}`;
-    try {
-      if (kind === "add") {
-        await apiFetch(`${base}/stamps`, {
-          method: "POST",
-          body: JSON.stringify({ amount: 1, idempotencyKey: crypto.randomUUID() }),
-        });
-      } else if (kind === "reset") {
-        await apiFetch(`${base}/reset`, {
-          method: "POST",
-          body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
-        });
-      } else {
-        const reward = testSession.version.rewards.find(
-          (item) => item.thresholdStampCount === testSession.version.stampRule?.requiredStampCount,
-        );
-        if (!reward) return;
-        await apiFetch(`${base}/redeem/${reward.id}`, {
-          method: "POST",
-          body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), managerApproved: true }),
-        });
-      }
-      const refreshed = await apiFetch<TestSession>(base);
-      setTestSession(refreshed);
-      setProgress(refreshed.currentStampCount);
       await load();
     } catch (caught) {
       setError(merchantError(caught, locale));
@@ -925,17 +850,13 @@ export function ProgramCardBuilder({
             ) : null}
             {activeSection === "review" ? (
               <ReviewSection
-                draft={draft}
                 readiness={readiness}
                 validation={validation}
                 canRunChecks={localReadiness.ready}
-                testSession={testSession}
                 working={working}
                 locale={locale}
                 onSection={setActiveSection}
                 onRunChecks={() => void runChecks()}
-                onStartTest={() => void startTest()}
-                onTestCommand={(kind) => void testCommand(kind)}
               />
             ) : null}
           </section>
@@ -1933,29 +1854,21 @@ function AdvancedSection({
 }
 
 function ReviewSection({
-  draft,
   readiness,
   validation,
   canRunChecks,
-  testSession,
   working,
   locale,
   onSection,
   onRunChecks,
-  onStartTest,
-  onTestCommand,
 }: {
-  draft: ProgramDraftInput;
   readiness: ReturnType<typeof builderReadiness>;
   validation: ValidationResult | null;
   canRunChecks: boolean;
-  testSession: TestSession | null;
   working: boolean;
   locale: Locale;
   onSection: (section: BuilderSection) => void;
   onRunChecks: () => void;
-  onStartTest: () => void;
-  onTestCommand: (kind: "add" | "reset" | "redeem") => void;
 }) {
   const ar = locale === "ar";
   const text = copy[locale];
@@ -1996,8 +1909,6 @@ function ReviewSection({
       complete: readiness.appearance,
     },
   ];
-  const goal = testSession?.version.stampRule?.requiredStampCount ?? draft.requiredStampCount;
-  const rewardReady = Boolean(testSession && testSession.currentStampCount >= goal);
   return (
     <div className="builder-form-stack">
       <Alert
@@ -2073,61 +1984,6 @@ function ReviewSection({
             ) : null}
           </div>
         ) : null}
-      </Card>
-      <Card className="builder-test-mode">
-        <FlaskConical size={26} aria-hidden="true" />
-        <div>
-          <h3>{text.testMode}</h3>
-          <p>{text.testModeDescription}</p>
-        </div>
-        {!testSession ? (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!validation || validation.errors.length > 0}
-            onClick={onStartTest}
-            loading={working}
-          >
-            {text.startTest}
-          </Button>
-        ) : (
-          <div className="builder-test-controls">
-            <div className="builder-test-meter">
-              <strong>
-                {testSession.currentStampCount}/{goal}
-              </strong>
-              <progress value={testSession.currentStampCount} max={goal} />
-            </div>
-            {rewardReady ? <Alert tone="success" title={text.rewardReady} /> : null}
-            <div className="builder-test-actions">
-              <Button
-                type="button"
-                disabled={working || rewardReady}
-                onClick={() => onTestCommand("add")}
-              >
-                {text.addStamp}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={working}
-                onClick={() => onTestCommand("reset")}
-              >
-                <RotateCcw size={15} aria-hidden="true" />
-                {text.resetTest}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={working || !rewardReady}
-                onClick={() => onTestCommand("redeem")}
-              >
-                {text.redeemReward}
-              </Button>
-            </div>
-          </div>
-        )}
-        {!validation ? <small>{text.testRequired}</small> : null}
       </Card>
     </div>
   );

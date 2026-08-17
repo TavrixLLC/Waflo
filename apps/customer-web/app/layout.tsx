@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
+import { Cairo, Manrope } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
+
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Waflo",
@@ -20,7 +24,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={`${manrope.variable} ${cairo.variable}`}>{children}</body>
     </html>
   );
 }

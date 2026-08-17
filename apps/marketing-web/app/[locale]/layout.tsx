@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { Cairo, Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { directionFor, isLocale } from "@waflo/i18n";
 import { createMarketingMetadata, marketingOrigin } from "../../lib/seo";
 import "../globals.css";
+
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", display: "swap" });
 
 export async function generateMetadata({
   params,
@@ -39,7 +43,7 @@ export default async function LocaleLayout({
   if (!isLocale(locale)) notFound();
   return (
     <html lang={locale} dir={directionFor(locale)}>
-      <body>{children}</body>
+      <body className={`${manrope.variable} ${cairo.variable}`}>{children}</body>
     </html>
   );
 }

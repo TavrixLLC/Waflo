@@ -10,7 +10,7 @@ import {
   type ValidationResult,
 } from "./program-studio-types";
 
-export const BUILDER_AUTOSAVE_DELAY_MS = 850;
+export const BUILDER_AUTOSAVE_DELAY_MS = 2_000;
 export const BUILDER_PREVIEW_DELAY_MS = 300;
 
 export function shouldScheduleBuilderAutosave(

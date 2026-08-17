@@ -10,6 +10,8 @@ import {
   PasswordInput,
   TextInput,
 } from "@waflo/ui";
+import { CheckCircle2, Mail } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { apiFetch, ApiClientError, apiUrl, resetCsrf } from "../lib/api-client";
@@ -20,6 +22,27 @@ function errorMessage(error: unknown, fallback: string): string {
 
 interface MeResponse {
   lastSelectedOrganizationId: string | null;
+  accountState: {
+    email: "unverified" | "verified";
+    onboarding:
+      | "business_required"
+      | "location_required"
+      | "billing_identity_required"
+      | "payment_method_required"
+      | "trial_confirmation_required"
+      | "complete";
+    billing:
+      | "none"
+      | "trialing"
+      | "active"
+      | "past_due_grace"
+      | "action_required"
+      | "restricted"
+      | "canceled"
+      | "paused";
+    access: "onboarding_only" | "full" | "read_only_billing_recovery";
+    organizationId: string | null;
+  } | null;
   memberships: {
     organization: { id: string; onboardingState: "BUSINESS" | "LOCATION" | "COMPLETE" };
   }[];
@@ -27,20 +50,47 @@ interface MeResponse {
 
 export async function destinationAfterLogin(locale: Locale): Promise<string> {
   const me = await apiFetch<MeResponse>("/v1/auth/me");
+  if (me.accountState?.email === "unverified") return `/${locale}/verify-email`;
   if (me.memberships.length === 0) return `/${locale}/onboarding/business`;
   const membership =
     me.memberships.find((item) => item.organization.id === me.lastSelectedOrganizationId) ??
     me.memberships[0];
   if (!membership) return `/${locale}/onboarding/business`;
-  if (membership.organization.onboardingState === "LOCATION") {
-    return `/${locale}/onboarding/location?organization=${membership.organization.id}`;
+  if (me.accountState && me.accountState.onboarding !== "complete") {
+    const query = new URLSearchParams({
+      organization: membership.organization.id,
+      resume: me.accountState.onboarding,
+    });
+    return `/${locale}/onboarding/business?${query.toString()}`;
   }
   return `/${locale}/dashboard`;
 }
 
 interface ExternalCapabilities {
   googleSignInAvailable: boolean;
-  appleSignInAvailable: boolean;
+}
+
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 18 18" width="18" height="18">
+      <path
+        fill="#4285F4"
+        d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.482h4.844a4.14 4.14 0 0 1-1.797 2.716v2.259h2.909c1.702-1.567 2.684-3.875 2.684-6.616Z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.468-.806 5.956-2.179l-2.909-2.259c-.806.54-1.835.859-3.047.859-2.344 0-4.328-1.585-5.037-3.714H.956v2.332A9 9 0 0 0 9 18Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.963 10.707A5.41 5.41 0 0 1 3.681 9c0-.593.102-1.17.282-1.707V4.961H.956A9 9 0 0 0 0 9c0 1.452.347 2.827.956 4.039l3.007-2.332Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.579c1.321 0 2.507.454 3.44 1.346l2.582-2.582C13.464.892 11.427 0 9 0A9 9 0 0 0 .956 4.961l3.007 2.332C4.672 5.164 6.656 3.579 9 3.579Z"
+      />
+    </svg>
+  );
 }
 
 function ExternalAuthRail({
@@ -54,67 +104,86 @@ function ExternalAuthRail({
 }) {
   const ar = locale === "ar";
   const [capabilities, setCapabilities] = useState<ExternalCapabilities | null>(null);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
   useEffect(() => {
     void apiFetch<ExternalCapabilities>("/v1/auth/external/providers")
       .then(setCapabilities)
-      .catch(() => setCapabilities({ googleSignInAvailable: false, appleSignInAvailable: false }));
+      .catch(() => setCapabilities({ googleSignInAvailable: false }));
   }, []);
-  const providers = [
-    {
-      code: "google",
-      available: capabilities?.googleSignInAvailable === true,
-      label: ar ? "المتابعة باستخدام Google" : "Continue with Google",
-      mark: "G",
-    },
-    {
-      code: "apple",
-      available: capabilities?.appleSignInAvailable === true,
-      label: ar ? "المتابعة باستخدام Apple" : "Continue with Apple",
-      mark: "●",
-    },
-  ].filter((provider) => provider.available);
-  if (providers.length === 0) return null;
+  if (capabilities?.googleSignInAvailable !== true) return null;
+
+  async function startGoogleSignup() {
+    if (!registration || !legalAccepted || working) return;
+    setWorking(true);
+    setError("");
+    try {
+      const result = await apiFetch<{ authorizationUrl: string }>(
+        "/v1/auth/external/google/signup",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            locale,
+            termsAccepted: true,
+            privacyAccepted: true,
+          }),
+        },
+      );
+      window.location.assign(result.authorizationUrl);
+    } catch (caught) {
+      setError(
+        errorMessage(
+          caught,
+          ar ? "تعذر بدء التسجيل باستخدام Google." : "Unable to start Google signup.",
+        ),
+      );
+      setWorking(false);
+    }
+  }
+
+  const label = registration
+    ? ar
+      ? "المتابعة باستخدام Google"
+      : "Continue with Google"
+    : ar
+      ? "تسجيل الدخول باستخدام Google"
+      : "Sign in with Google";
   return (
     <fieldset className="external-auth">
       <legend className="external-auth__legend">
         {ar ? "خيارات تسجيل الدخول" : "Sign-in options"}
       </legend>
       <div className="external-auth__providers">
-        {providers.map((provider) => {
-          const query = new URLSearchParams({ locale });
-          if (registration) {
-            query.set("registration", "true");
-            query.set("termsAccepted", "true");
-            query.set("privacyAccepted", "true");
-          }
-          const disabled = registration && !legalAccepted;
-          return disabled ? (
-            <button className="external-auth__button" disabled key={provider.code} type="button">
-              <span
-                aria-hidden="true"
-                className={`external-auth__mark external-auth__mark--${provider.code}`}
-              >
-                {provider.mark}
-              </span>
-              {provider.label}
-            </button>
-          ) : (
-            <a
-              className="external-auth__button"
-              href={`${apiUrl}/v1/auth/external/${provider.code}/start?${query.toString()}`}
-              key={provider.code}
-            >
-              <span
-                aria-hidden="true"
-                className={`external-auth__mark external-auth__mark--${provider.code}`}
-              >
-                {provider.mark}
-              </span>
-              {provider.label}
-            </a>
-          );
-        })}
+        {registration ? (
+          <button
+            className="external-auth__button"
+            disabled={!legalAccepted || working}
+            type="button"
+            aria-busy={working}
+            onClick={() => void startGoogleSignup()}
+          >
+            <span className="external-auth__mark external-auth__mark--google">
+              <GoogleMark />
+            </span>
+            {working ? (ar ? "جارٍ المتابعة…" : "Continuing…") : label}
+          </button>
+        ) : (
+          <a
+            className="external-auth__button"
+            href={`${apiUrl}/v1/auth/external/google/start?${new URLSearchParams({ locale }).toString()}`}
+          >
+            <span className="external-auth__mark external-auth__mark--google">
+              <GoogleMark />
+            </span>
+            {label}
+          </a>
+        )}
       </div>
+      {error ? (
+        <p className="external-auth__error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {registration && !legalAccepted ? (
         <p className="external-auth__hint">
           {ar
@@ -136,6 +205,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
   const [error, setError] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [verificationRecoveryAvailable, setVerificationRecoveryAvailable] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -150,20 +220,27 @@ export function SignupForm({ locale }: { locale: Locale }) {
       return;
     }
     try {
+      const email = String(form.get("email") ?? "");
       await apiFetch("/v1/auth/register", {
         method: "POST",
         body: JSON.stringify({
           displayName: String(form.get("displayName") ?? ""),
-          email: String(form.get("email") ?? ""),
+          email,
           password,
           locale,
           termsAccepted: form.get("terms") === "on",
           privacyAccepted: form.get("privacy") === "on",
         }),
       });
-      sessionStorage.setItem("waflo:verification-email", String(form.get("email") ?? ""));
+      sessionStorage.setItem("waflo:verification-email", email);
+      sessionStorage.setItem("waflo:verification-delivery-accepted", "true");
       router.push(`/${locale}/verify-email`);
     } catch (caught) {
+      if (caught instanceof ApiClientError && caught.code === "EMAIL_DELIVERY_UNAVAILABLE") {
+        sessionStorage.setItem("waflo:verification-email", String(form.get("email") ?? ""));
+        sessionStorage.removeItem("waflo:verification-delivery-accepted");
+        setVerificationRecoveryAvailable(true);
+      }
       setError(errorMessage(caught, ar ? "تعذر إنشاء الحساب." : "Unable to create account."));
     } finally {
       setLoading(false);
@@ -175,10 +252,15 @@ export function SignupForm({ locale }: { locale: Locale }) {
       <h2>{ar ? "أنشئ حساب التاجر" : "Create your merchant account"}</h2>
       <p className="auth-card__intro">
         {ar
-          ? "ابدأ الإعداد الآن. لن تبدأ التجربة المجانية حتى تنشر أول بطاقة ولاء."
-          : "Start setting up now. Your free trial will not begin until you publish your first loyalty card."}
+          ? "أنشئ حسابك، ثم اختر باقتك وابدأ 7 أيام مجاناً بعد إضافة طريقة الدفع."
+          : "Create your account, choose a plan, and start 7 days free after adding a payment method."}
       </p>
       {error ? <Alert tone="danger" title={error} /> : null}
+      {verificationRecoveryAvailable ? (
+        <Link className="auth-link" href={`/${locale}/verify-email`}>
+          {ar ? "حاول إرسال رسالة التأكيد مرة أخرى" : "Try sending the verification email again"}
+        </Link>
+      ) : null}
       <ExternalAuthRail
         locale={locale}
         registration
@@ -233,7 +315,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
               <>
                 أوافق على{" "}
                 <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/ar/terms`}
+                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/ar/terms`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -245,7 +327,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
               <>
                 I agree to the{" "}
                 <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/en/terms`}
+                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/en/terms`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -266,7 +348,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
               <>
                 قرأت{" "}
                 <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/ar/privacy`}
+                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/ar/privacy`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -278,7 +360,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
               <>
                 I have read the{" "}
                 <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/en/privacy`}
+                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/en/privacy`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -292,7 +374,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
         <p className="auth-form__legal-support">
           {ar ? "توضح " : "The "}
           <a
-            href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/${locale}/refunds`}
+            href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${locale}/refunds`}
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -312,7 +394,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
       </form>
       <p className="auth-form__footer">
         {ar ? "لديك حساب؟" : "Already have an account?"}{" "}
-        <a href={`/${locale}/login`}>{ar ? "سجّل الدخول" : "Log in"}</a>
+        <Link href={`/${locale}/login`}>{ar ? "سجّل الدخول" : "Log in"}</Link>
       </p>
     </>
   );
@@ -339,6 +421,12 @@ export function LoginForm({ locale }: { locale: Locale }) {
       });
       router.push(await destinationAfterLogin(locale));
     } catch (caught) {
+      if (caught instanceof ApiClientError && caught.code === "EMAIL_VERIFICATION_REQUIRED") {
+        sessionStorage.setItem("waflo:verification-email", String(form.get("email") ?? ""));
+        sessionStorage.removeItem("waflo:verification-delivery-accepted");
+        router.replace(`/${locale}/verify-email`);
+        return;
+      }
       setError(errorMessage(caught, ar ? "تعذر تسجيل الدخول." : "Unable to sign in."));
     } finally {
       setLoading(false);
@@ -384,12 +472,19 @@ export function LoginForm({ locale }: { locale: Locale }) {
 }
 
 export function VerificationForm({ locale }: { locale: Locale }) {
+  const router = useRouter();
   const ar = locale === "ar";
   const [state, setState] = useState<"pending" | "verifying" | "verified" | "error">("pending");
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "danger">("success");
   const [resending, setResending] = useState(false);
-  const email =
-    typeof window === "undefined" ? "" : (sessionStorage.getItem("waflo:verification-email") ?? "");
+  const [email, setEmail] = useState("");
+  const [deliveryAccepted, setDeliveryAccepted] = useState(false);
+
+  useEffect(() => {
+    setEmail(sessionStorage.getItem("waflo:verification-email") ?? "");
+    setDeliveryAccepted(sessionStorage.getItem("waflo:verification-delivery-accepted") === "true");
+  }, []);
 
   useEffect(() => {
     // Tokens travel in the URL fragment (#token=...) so the browser never
@@ -434,7 +529,10 @@ export function VerificationForm({ locale }: { locale: Locale }) {
   }, [ar]);
 
   async function resend() {
-    if (!email) return;
+    if (!email) {
+      router.push(`/${locale}/login`);
+      return;
+    }
     setResending(true);
     try {
       await apiFetch("/v1/auth/resend-verification", {
@@ -443,11 +541,13 @@ export function VerificationForm({ locale }: { locale: Locale }) {
       });
       setMessage(
         ar
-          ? "أرسلنا رسالة جديدة إذا كان البريد مؤهلاً."
-          : "A new email was sent if the address is eligible.",
+          ? "إذا كان العنوان مؤهلاً، فقد قُبل طلب إرسال رسالة تأكيد جديدة."
+          : "If the address is eligible, the verification request was accepted.",
       );
+      setMessageTone("success");
     } catch (caught) {
       setMessage(errorMessage(caught, ar ? "تعذرت إعادة الإرسال." : "Unable to resend."));
+      setMessageTone("danger");
     } finally {
       setResending(false);
     }
@@ -455,22 +555,30 @@ export function VerificationForm({ locale }: { locale: Locale }) {
 
   if (state === "verified") {
     return (
-      <>
-        <Alert tone="success" title={ar ? "تم تأكيد بريدك" : "Email verified"}>
+      <div className="auth-verify-state">
+        <div className="auth-verify__icon-box auth-verify__icon-box--success">
+          <CheckCircle2 size={28} aria-hidden="true" />
+        </div>
+        <h2>{ar ? "تم تأكيد بريدك" : "Email verified"}</h2>
+        <p className="auth-card__intro">
           {ar
             ? "يمكنك الآن تسجيل الدخول وإكمال إعداد مؤسستك."
             : "You can now sign in and complete your organization setup."}
-        </Alert>
-        <a href={`/${locale}/login`}>
-          <Button style={{ width: "100%", marginTop: "1rem" }}>
-            {ar ? "متابعة إلى تسجيل الدخول" : "Continue to sign in"}
-          </Button>
-        </a>
-      </>
+        </p>
+        <Link
+          className="wf-button wf-button--primary auth-primary-action"
+          href={`/${locale}/login`}
+        >
+          {ar ? "متابعة إلى تسجيل الدخول" : "Continue to sign in"}
+        </Link>
+      </div>
     );
   }
   return (
-    <>
+    <div className="auth-verify-state">
+      <div className="auth-verify__icon-box">
+        <Mail size={28} aria-hidden="true" />
+      </div>
       <h2>
         {state === "verifying"
           ? ar
@@ -482,22 +590,38 @@ export function VerificationForm({ locale }: { locale: Locale }) {
       </h2>
       <p className="auth-card__intro">
         {ar
-          ? "أرسلنا رابطاً آمناً لتأكيد البريد. يجب إتمام هذه الخطوة قبل إعداد المؤسسة."
-          : "We sent a secure verification link. Complete this step before organization setup."}
+          ? "أكّد بريدك الإلكتروني للمتابعة إلى إعداد مؤسستك."
+          : "Verify your email to continue setting up your business."}
       </p>
-      {state === "error" ? <Alert tone="danger" title={message} /> : null}
-      {message && state !== "error" ? <Alert tone="success" title={message} /> : null}
-      {state === "pending" ? (
-        <Button variant="secondary" onClick={resend} loading={resending} disabled={!email}>
-          {ar ? "إعادة إرسال الرسالة" : "Resend verification email"}
-        </Button>
+      {deliveryAccepted && email ? (
+        <div className="auth-verify__recipient">
+          <span>{ar ? "أرسلنا رسالة التأكيد إلى:" : "Verification email sent to:"}</span>
+          <strong dir="ltr">{email.replace(/^(.{2}).*(@.*)$/, "$1•••$2")}</strong>
+        </div>
       ) : null}
-      <p className="auth-form__footer">
+      {state === "error" ? <Alert tone="danger" title={message} /> : null}
+      {message && state !== "error" ? <Alert tone={messageTone} title={message} /> : null}
+      {state === "pending" ? (
+        <div className="auth-verify__actions">
+          <Button
+            className="wf-button wf-button--primary auth-primary-action auth-verify__action"
+            variant="primary"
+            onClick={() => void resend()}
+            loading={resending}
+          >
+            {ar ? "إعادة إرسال الرسالة" : "Resend verification email"}
+          </Button>
+          <Link className="auth-link auth-verify__back-link" href={`/${locale}/login`}>
+            {ar ? "العودة إلى تسجيل الدخول" : "Back to sign in"}
+          </Link>
+        </div>
+      ) : null}
+      <p className="auth-form__footer auth-verify__help">
         {ar
-          ? "في بيئة التطوير، افتح Mailpit على localhost:8025."
-          : "In local development, open Mailpit at localhost:8025."}
+          ? "لم تصلك الرسالة؟ تحقّق من مجلد الرسائل غير المرغوب فيها."
+          : "Didn’t receive it? Check your spam or junk folder."}
       </p>
-    </>
+    </div>
   );
 }
 
@@ -613,11 +737,12 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
     return (
       <>
         <Alert tone="success" title={ar ? "تم تغيير كلمة المرور" : "Password changed"} />
-        <a href={`/${locale}/login`}>
-          <Button style={{ width: "100%", marginTop: "1rem" }}>
-            {ar ? "تسجيل الدخول" : "Sign in"}
-          </Button>
-        </a>
+        <Link
+          className="wf-button wf-button--primary auth-primary-action"
+          href={`/${locale}/login`}
+        >
+          {ar ? "تسجيل الدخول" : "Sign in"}
+        </Link>
       </>
     );
   }
@@ -681,11 +806,9 @@ export function LoggedOutState({ locale, expired = false }: { locale: Locale; ex
             ? "تم إنهاء الجلسة بأمان."
             : "Your session ended securely."}
       </Alert>
-      <a href={`/${locale}/login`}>
-        <Button style={{ width: "100%", marginTop: "1rem" }}>
-          {ar ? "تسجيل الدخول" : "Sign in"}
-        </Button>
-      </a>
+      <Link className="wf-button wf-button--primary auth-primary-action" href={`/${locale}/login`}>
+        {ar ? "تسجيل الدخول" : "Sign in"}
+      </Link>
     </>
   );
 }

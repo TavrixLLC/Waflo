@@ -34,7 +34,6 @@ import {
   Copy,
   Download,
   Eye,
-  FlaskConical,
   Gift,
   History,
   LayoutDashboard,
@@ -88,7 +87,6 @@ import {
 import {
   selectStudioLocalizedProgramContent,
   selectStudioLocalizedRewardContent,
-  selectStudioLocalizedServerRewardName,
 } from "./program-studio-localization";
 import {
   deriveStudioLifecyclePresentation,
@@ -99,7 +97,6 @@ import {
   studioAreaForValidationPath,
   studioAreas,
   studioOperationError,
-  studioTestActionError,
 } from "./program-studio-presentation";
 import {
   type AssetItem,
@@ -111,7 +108,6 @@ import {
   type ProgramVersion,
   type RewardInput,
   type StudioSection,
-  type TestSession,
   type ValidationIssue,
   type ValidationResult,
   versionToDraft,
@@ -182,8 +178,8 @@ function lifecycleActionDescription(
         : "The new changes will be published, but the card will remain paused. Resume it separately when you are ready to make it live.";
     }
     return ar
-      ? "تصبح التغييرات المختبرة مباشرة للعملاء بعد إكمال التحقق ووضع الاختبار."
-      : "The tested changes become live for customers after validation and Test Mode are complete.";
+      ? "تصبح التغييرات التي راجعتها مباشرة للعملاء بعد اكتمال التحقق الآلي."
+      : "The reviewed changes become live for customers after automatic validation is complete.";
   }
   if (action === "abandon") {
     return ar
@@ -297,7 +293,6 @@ export function ProgramStudioEditor({
   const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewResult>>>({});
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>("idle");
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [historicalVersion, setHistoricalVersion] = useState<ProgramVersion | null>(null);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
@@ -525,92 +520,6 @@ export function ProgramStudioEditor({
     }
   }
 
-  async function startTest() {
-    setWorking(true);
-    try {
-      const session = await apiFetch<TestSession>(
-        `/v1/organizations/${organizationId}/programs/${programId}/test-sessions`,
-        { method: "POST" },
-      );
-      setTestSession(session);
-      setProgress(0);
-    } catch {
-      setError(studioOperationError("test-start", ar ? "ar" : "en"));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function testCommand(
-    action:
-      | {
-          kind: "add";
-          amount: number;
-          purchaseAmountMinor?: number;
-          purchaseCurrency?: string;
-          managerApproved?: boolean;
-          managerReason?: string;
-          simulatedOccurredAt?: string;
-        }
-      | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
-      | { kind: "reset" }
-      | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
-  ) {
-    if (!testSession) return;
-    setWorking(true);
-    try {
-      const key = crypto.randomUUID();
-      const base = `/v1/organizations/${organizationId}/programs/test-sessions/${testSession.id}`;
-      if (action.kind === "add")
-        await apiFetch(`${base}/stamps`, {
-          method: "POST",
-          body: JSON.stringify({
-            amount: action.amount,
-            idempotencyKey: key,
-            purchaseAmountMinor: action.purchaseAmountMinor,
-            purchaseCurrency: action.purchaseCurrency,
-            managerApproved: action.managerApproved,
-            managerReason: action.managerReason,
-            simulatedOccurredAt: action.simulatedOccurredAt,
-          }),
-        });
-      if (action.kind === "reverse")
-        await apiFetch(`${base}/reverse`, {
-          method: "POST",
-          body: JSON.stringify({
-            idempotencyKey: key,
-            managerActor: action.managerActor,
-            simulatedOccurredAt: action.simulatedOccurredAt,
-          }),
-        });
-      if (action.kind === "reset")
-        await apiFetch(`${base}/reset`, {
-          method: "POST",
-          body: JSON.stringify({ idempotencyKey: key }),
-        });
-      if (action.kind === "redeem")
-        await apiFetch(`${base}/redeem/${action.rewardId}`, {
-          method: "POST",
-          body: JSON.stringify({
-            idempotencyKey: key,
-            managerApproved: action.managerApproved,
-          }),
-        });
-      const refreshed = await apiFetch<TestSession>(base);
-      setTestSession(refreshed);
-      setProgress(refreshed.currentStampCount);
-      await load();
-    } catch (caught) {
-      setError(
-        caught instanceof ApiClientError
-          ? studioTestActionError(caught.code, ar ? "ar" : "en")
-          : studioOperationError("test-action", ar ? "ar" : "en"),
-      );
-    } finally {
-      setWorking(false);
-    }
-  }
-
   async function lifecycle(action: NonNullable<typeof confirmation>) {
     if (working) return;
     setWorking(true);
@@ -622,13 +531,25 @@ export function ProgramStudioEditor({
         const remainedPaused = detail?.status === "PAUSED";
         const idempotencyKey = publishKeyRef.current ?? crypto.randomUUID();
         publishKeyRef.current = idempotencyKey;
-        const command = await apiFetch<PublicationCommandResult>(
-          `/v1/organizations/${organizationId}/programs/${programId}/publish`,
-          {
-            method: "POST",
-            body: JSON.stringify({ idempotencyKey }),
-          },
-        );
+        let command: PublicationCommandResult | null = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            command = await apiFetch<PublicationCommandResult>(
+              `/v1/organizations/${organizationId}/programs/${programId}/publish`,
+              {
+                method: "POST",
+                body: JSON.stringify({ idempotencyKey }),
+              },
+            );
+            break;
+          } catch (caught) {
+            const transientConflict =
+              caught instanceof ApiClientError && caught.code === "CONCURRENT_MODIFICATION_RETRY";
+            if (!transientConflict || attempt === 1) throw caught;
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 180));
+          }
+        }
+        if (!command) throw new ApiClientError("PUBLICATION_FAILED", "Publication failed.");
         setConfirmation(null);
         await load();
         await onChanged();
@@ -755,7 +676,6 @@ export function ProgramStudioEditor({
   const validated =
     ["VALIDATED", "TEST_READY"].includes(editingVersion?.status ?? "") ||
     Boolean(validation && validation.errors.length === 0);
-  const testReady = editingVersion?.status === "TEST_READY" || testSession?.status === "COMPLETED";
   const selectedPreview = previews[selectedProfile];
 
   if (!detail) {
@@ -821,7 +741,6 @@ export function ProgramStudioEditor({
     draftVersionStatus: editingVersion?.status ?? displayVersion.status,
     locale,
     validationState: validated ? "passed" : validation ? "failed" : "not-run",
-    testState: testReady ? "complete" : "incomplete",
     designComplete,
     locationsReady,
     hasPublishedVersion: detail.currentPublishedVersion !== null,
@@ -934,6 +853,7 @@ export function ProgramStudioEditor({
         <button
           ref={mobileNavigationTriggerRef}
           type="button"
+          disabled={working}
           aria-expanded={mobileNavigationOpen}
           aria-controls="studio-mobile-navigation-menu"
           data-studio-area={activeArea}
@@ -950,6 +870,7 @@ export function ProgramStudioEditor({
         <StudioNavigation
           activeArea={activeArea}
           ar={ar}
+          disabled={working}
           mobileOpen={mobileNavigationOpen}
           onArea={selectArea}
         />
@@ -958,13 +879,7 @@ export function ProgramStudioEditor({
           <div className="studio-panel-heading">
             <div>
               <span className="dashboard-card__label">
-                {activeArea === "test"
-                  ? ar
-                    ? "عميل تجريبي فقط"
-                    : "DEMO CUSTOMER ONLY"
-                  : ar
-                    ? "إدارة بطاقة الولاء"
-                    : "MANAGE LOYALTY CARD"}
+                {ar ? "إدارة بطاقة الولاء" : "MANAGE LOYALTY CARD"}
               </span>
               <h2>{areaCopy.label}</h2>
               <p>{areaCopy.description}</p>
@@ -1007,9 +922,6 @@ export function ProgramStudioEditor({
             onArea={selectArea}
             onValidate={() => void validate()}
             onIssue={(issue) => selectArea(studioAreaForValidationPath(issue.path))}
-            testSession={testSession}
-            onStartTest={() => void startTest()}
-            onTestCommand={(command) => void testCommand(command)}
             onCreateDraft={() => void createDraft()}
             onPublish={() => setConfirmation("publish")}
             onLifecycle={setConfirmation}
@@ -1088,7 +1000,6 @@ function StudioAreaIcon({ area }: { area: StudioArea }) {
   if (area === "how-it-works") return <Workflow size={19} aria-hidden="true" />;
   if (area === "customers-locations") return <MapPinned size={19} aria-hidden="true" />;
   if (area === "engagement") return <BellRing size={19} aria-hidden="true" />;
-  if (area === "test") return <FlaskConical size={19} aria-hidden="true" />;
   if (area === "launch") return <Rocket size={19} aria-hidden="true" />;
   return <Settings2 size={19} aria-hidden="true" />;
 }
@@ -1108,13 +1019,11 @@ function StudioJourney({
   const locationStage =
     activeArea === "launch"
       ? "checks"
-      : activeArea === "test"
-        ? "test"
-        : activeArea === "overview"
-          ? presentation.currentJourneyStage === "live"
-            ? "live"
-            : "design"
-          : null;
+      : activeArea === "overview"
+        ? presentation.currentJourneyStage === "live"
+          ? "live"
+          : "design"
+        : null;
   const currentIndex = presentation.journeyStages.findIndex(
     (stage) => stage.key === presentation.currentJourneyStage,
   );
@@ -1203,11 +1112,13 @@ function StudioJourney({
 function StudioNavigation({
   activeArea,
   ar,
+  disabled,
   mobileOpen,
   onArea,
 }: {
   activeArea: StudioArea;
   ar: boolean;
+  disabled: boolean;
   mobileOpen: boolean;
   onArea: (area: StudioArea) => void;
 }) {
@@ -1225,7 +1136,7 @@ function StudioNavigation({
             ? ar
               ? "البناء"
               : "Build"
-            : area === "test"
+            : area === "launch"
               ? ar
                 ? "الإطلاق"
                 : "Go live"
@@ -1239,6 +1150,7 @@ function StudioNavigation({
             {group ? <span className="studio-section-nav__group">{group}</span> : null}
             <button
               type="button"
+              disabled={disabled}
               className={activeArea === area ? "studio-section-nav__active" : ""}
               onClick={() => onArea(area)}
               aria-current={activeArea === area ? "page" : undefined}
@@ -1258,20 +1170,6 @@ function StudioNavigation({
     </nav>
   );
 }
-
-type StudioTestCommand =
-  | {
-      kind: "add";
-      amount: number;
-      purchaseAmountMinor?: number;
-      purchaseCurrency?: string;
-      managerApproved?: boolean;
-      managerReason?: string;
-      simulatedOccurredAt?: string;
-    }
-  | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
-  | { kind: "reset" }
-  | { kind: "redeem"; rewardId: string; managerApproved?: boolean };
 
 function StudioAreaContent({
   area,
@@ -1304,9 +1202,6 @@ function StudioAreaContent({
   onArea,
   onValidate,
   onIssue,
-  testSession,
-  onStartTest,
-  onTestCommand,
   onCreateDraft,
   onPublish,
   onLifecycle,
@@ -1352,9 +1247,6 @@ function StudioAreaContent({
   onArea: (area: StudioArea) => void;
   onValidate: () => void;
   onIssue: (issue: ValidationIssue) => void;
-  testSession: TestSession | null;
-  onStartTest: () => void;
-  onTestCommand: (command: StudioTestCommand) => void;
   onCreateDraft: () => void;
   onPublish: () => void;
   onLifecycle: (action: LifecycleAction) => void;
@@ -1386,9 +1278,6 @@ function StudioAreaContent({
         onValidate={onValidate}
         validating={validating}
         onIssue={onIssue}
-        testSession={testSession}
-        onStartTest={onStartTest}
-        onTestCommand={onTestCommand}
         detail={detail}
         auditEvents={auditEvents}
         onViewVersion={onViewVersion}
@@ -1460,25 +1349,6 @@ function StudioAreaContent({
         ar={ar}
         canManage={canManageEngagement}
       />
-    );
-
-  if (area === "test")
-    return editableDraft ? (
-      <div className="studio-area-stack">
-        <Alert
-          tone="info"
-          title={ar ? "اختبر بأمان مع عميل تجريبي" : "Test safely with a demo customer"}
-        >
-          {ar ? "لن يتم إنشاء أي نشاط لعميل حقيقي." : "No real customer activity will be created."}
-        </Alert>
-        {nestedSection("test-mode")}
-        <Button variant="secondary" onClick={() => onArea("launch")}>
-          {ar ? "الانتقال إلى جاهزية الإطلاق" : "Go to launch readiness"}
-          <ChevronRight className="studio-logical-next" size={16} aria-hidden="true" />
-        </Button>
-      </div>
-    ) : (
-      <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} />
     );
 
   if (area === "launch")
@@ -1748,9 +1618,9 @@ function StudioOverview({
             <strong>
               {changedAt ? (
                 <time dateTime={changedAt}>
-                  {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-IQ", { dateStyle: "medium" }).format(
-                    new Date(changedAt),
-                  )}
+                  {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
+                    dateStyle: "medium",
+                  }).format(new Date(changedAt))}
                 </time>
               ) : ar ? (
                 "محفوظ"
@@ -2309,7 +2179,7 @@ function CreateUpdatePrompt({
         <p>
           {ar
             ? "ستبقى البطاقة المباشرة كما هي حتى تختبر التحديث وتنشره."
-            : "The live card stays unchanged until you test and publish the update."}
+            : "The live card stays unchanged until you review and publish the update."}
         </p>
       </div>
       <Button onClick={onCreate}>{ar ? "إنشاء تحديث" : "Create update"}</Button>
@@ -2430,9 +2300,6 @@ function StudioSectionContent({
   onValidate,
   validating,
   onIssue,
-  testSession,
-  onStartTest,
-  onTestCommand,
   detail,
   auditEvents,
   onViewVersion,
@@ -2452,23 +2319,6 @@ function StudioSectionContent({
   onValidate: () => void;
   validating: boolean;
   onIssue: (issue: ValidationIssue) => void;
-  testSession: TestSession | null;
-  onStartTest: () => void;
-  onTestCommand: (
-    command:
-      | {
-          kind: "add";
-          amount: number;
-          purchaseAmountMinor?: number;
-          purchaseCurrency?: string;
-          managerApproved?: boolean;
-          managerReason?: string;
-          simulatedOccurredAt?: string;
-        }
-      | { kind: "reverse"; managerActor?: boolean; simulatedOccurredAt?: string }
-      | { kind: "reset" }
-      | { kind: "redeem"; rewardId: string; managerApproved?: boolean },
-  ) => void;
   detail: ProgramDetail;
   auditEvents: ProgramAuditEvent[];
   onViewVersion: (versionId: string) => void;
@@ -2565,11 +2415,6 @@ function StudioSectionContent({
           {ar
             ? "تُطبّق حدود العملية واليوم وسياسة الشراء من إصدار البرنامج المثبت للعضوية."
             : "Operation limits, daily caps, purchase policy, and reset behavior follow the setup each customer joined under."}
-        </Alert>
-        <Alert tone="info" title={ar ? "محاكاة آمنة" : "Safe simulation"}>
-          {ar
-            ? "يدعم وضع الاختبار حدود اليوم والشراء والعملة وموافقة المدير ووقت العكس الاصطناعي."
-            : "Test Mode simulates daily caps, purchase/currency checks, manager approval, and reversal time without creating a Customer or production ledger entry."}
         </Alert>
       </div>
     );
@@ -2756,17 +2601,6 @@ function StudioSectionContent({
         onValidate={onValidate}
         validating={validating}
         onIssue={onIssue}
-        ar={ar}
-      />
-    );
-
-  if (section === "test-mode")
-    return (
-      <TestModePanel
-        session={testSession}
-        onStart={onStartTest}
-        onCommand={onTestCommand}
-        working={validating}
         ar={ar}
       />
     );
@@ -3676,8 +3510,8 @@ function ValidationPanel({
           >
             {result.errors.length === 0
               ? ar
-                ? "اجتازت الفحوصات الآلية. يمكنك الانتقال إلى الاختبار."
-                : "Automated checks passed. You can move to testing."
+                ? "اجتازت الفحوصات الآلية. يمكنك المراجعة والنشر."
+                : "Automated checks passed. You can review and publish."
               : ar
                 ? "افتح كل عنصر لإصلاحه في مكانه الصحيح."
                 : "Open each item to fix it in the right place."}
@@ -3700,281 +3534,6 @@ function ValidationPanel({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-function testEventLabel(eventType: string, ar: boolean): string {
-  const labels: Record<string, [string, string]> = {
-    TEST_SESSION_STARTED: ["Demo customer started", "بدأ العميل التجريبي"],
-    TEST_STAMPS_ADDED: ["Stamps added", "تمت إضافة الأختام"],
-    TEST_STAMP_ADDED: ["Stamp added", "تمت إضافة ختم"],
-    TEST_STAMP_REVERSED: ["Latest stamp corrected", "تم تصحيح آخر ختم"],
-    TEST_REWARD_UNLOCKED: ["Reward unlocked", "أصبحت المكافأة جاهزة"],
-    TEST_REWARD_RELOCKED: ["Reward locked again", "أُغلقت المكافأة مجددًا"],
-    TEST_REWARD_REDEEMED: ["Reward used", "تم استخدام المكافأة"],
-    TEST_SESSION_RESET: ["Demo customer reset", "أُعيد ضبط العميل التجريبي"],
-    TEST_SESSION_COMPLETED: ["Test completed", "اكتمل الاختبار"],
-  };
-  return labels[eventType]?.[ar ? 1 : 0] ?? (ar ? "نشاط تجريبي" : "Test activity");
-}
-
-function TestModePanel({
-  session,
-  onStart,
-  onCommand,
-  working,
-  ar,
-}: {
-  session: TestSession | null;
-  onStart: () => void;
-  onCommand: (command: StudioTestCommand) => void;
-  working: boolean;
-  ar: boolean;
-}) {
-  const [testPurchaseAmount, setTestPurchaseAmount] = useState("");
-  const [testPurchaseCurrency, setTestPurchaseCurrency] = useState("IQD");
-  const [testManagerApproved, setTestManagerApproved] = useState(false);
-  const [testManagerActor, setTestManagerActor] = useState(false);
-  const [testOccurredAt, setTestOccurredAt] = useState("");
-  if (!session)
-    return (
-      <div className="studio-section-content">
-        <FlaskConical size={34} />
-        <h3>{ar ? "ابدأ بعميل تجريبي" : "Start with a demo customer"}</h3>
-        <p>
-          {ar
-            ? "لن يتم إنشاء أي نشاط لعميل حقيقي. يمكنك إعادة التجربة متى شئت."
-            : "No real customer activity will be created. You can reset and try again at any time."}
-        </p>
-        <Button onClick={onStart} loading={working}>
-          {ar ? "بدء عميل تجريبي" : "Start demo customer"}
-        </Button>
-      </div>
-    );
-  const goal = session.version.stampRule?.requiredStampCount ?? 8;
-  const rewardReady = session.currentStampCount >= goal;
-  const unlocks = session.events.filter((event) => event.eventType === "TEST_REWARD_UNLOCKED");
-  const relocks = session.events.filter((event) => event.eventType === "TEST_REWARD_RELOCKED");
-  const redemptions = session.events.filter((event) => event.eventType === "TEST_REWARD_REDEEMED");
-  const syntheticOperation = {
-    ...(testPurchaseAmount ? { purchaseAmountMinor: Number.parseInt(testPurchaseAmount, 10) } : {}),
-    ...(testPurchaseCurrency ? { purchaseCurrency: testPurchaseCurrency } : {}),
-    managerApproved: testManagerApproved,
-    ...(testManagerApproved ? { managerReason: "Synthetic Test Mode manager approval." } : {}),
-    ...(testOccurredAt ? { simulatedOccurredAt: new Date(testOccurredAt).toISOString() } : {}),
-  };
-  const testSteps = [
-    { label: ar ? "بدء عميل تجريبي" : "Start demo customer", complete: true },
-    {
-      label: ar ? "إضافة أختام" : "Add stamps",
-      complete: session.currentStampCount > 0 || unlocks.length > 0 || redemptions.length > 0,
-    },
-    {
-      label: ar ? "الوصول إلى المكافأة" : "Reach the reward",
-      complete: rewardReady || unlocks.length > 0 || redemptions.length > 0,
-    },
-    { label: ar ? "استخدام المكافأة" : "Use the reward", complete: redemptions.length > 0 },
-    {
-      label: ar ? "التأكد من بدء دورة جديدة" : "Verify the reset",
-      complete: session.cycleCount > 0,
-    },
-    { label: ar ? "إنهاء الاختبار" : "Finish test", complete: session.status === "COMPLETED" },
-  ];
-  return (
-    <div className="studio-section-content">
-      <ol className="studio-test-steps" aria-label={ar ? "خطوات الاختبار" : "Test steps"}>
-        {testSteps.map((step) => (
-          <li className={step.complete ? "studio-test-steps__complete" : ""} key={step.label}>
-            <span>{step.complete ? <Check size={15} aria-hidden="true" /> : null}</span>
-            <strong>{step.label}</strong>
-          </li>
-        ))}
-      </ol>
-      <div className="test-mode-meter">
-        <div>
-          <small>{ar ? "التقدم الحالي" : "Current progress"}</small>
-          <strong dir="ltr">
-            <span>
-              {session.currentStampCount} / {goal}
-            </span>
-            <small>{ar ? "أختام" : "stamps"}</small>
-          </strong>
-        </div>
-        <div>
-          <small>{ar ? "الدورات المكتملة" : "Completed cycles"}</small>
-          <strong>
-            <span>{session.cycleCount}</span>
-          </strong>
-        </div>
-        <Badge tone={session.status === "COMPLETED" ? "success" : "brand"}>
-          {session.status === "COMPLETED"
-            ? ar
-              ? "اكتمل"
-              : "Complete"
-            : ar
-              ? "قيد الاختبار"
-              : "In progress"}
-        </Badge>
-      </div>
-      <div className="dashboard-actions studio-test-actions">
-        <Button
-          onClick={() => onCommand({ kind: "add", amount: 1, ...syntheticOperation })}
-          disabled={working || rewardReady}
-        >
-          {ar ? "إضافة ختم" : "Add a stamp"}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => onCommand({ kind: "add", amount: 5, ...syntheticOperation })}
-          disabled={working || rewardReady}
-        >
-          {ar ? "+٥ أختام" : "+5 stamps"}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() =>
-            onCommand({
-              kind: "reverse",
-              managerActor: testManagerActor,
-              ...(testOccurredAt
-                ? { simulatedOccurredAt: new Date(testOccurredAt).toISOString() }
-                : {}),
-            })
-          }
-          disabled={working}
-        >
-          <RotateCcw size={16} /> {ar ? "تصحيح آخر ختم" : "Correct latest stamp"}
-        </Button>
-        <Button variant="secondary" onClick={() => onCommand({ kind: "reset" })} disabled={working}>
-          {ar ? "إعادة ضبط العميل التجريبي" : "Reset demo customer"}
-        </Button>
-      </div>
-      <details className="studio-test-advanced">
-        <summary>
-          <span>
-            <Settings2 size={18} aria-hidden="true" />{" "}
-            {ar ? "تفاصيل عملية الشراء التجريبية" : "Demo purchase details"}
-          </span>
-          <ChevronDown size={18} aria-hidden="true" />
-        </summary>
-        <div className="studio-field-grid">
-          <FormField
-            label={ar ? "قيمة الشراء" : "Purchase amount"}
-            hint={ar ? "أدخلها بأصغر وحدة للعملة" : "Enter the smallest unit of the currency"}
-          >
-            <TextInput
-              inputMode="numeric"
-              value={testPurchaseAmount}
-              onChange={(event) => setTestPurchaseAmount(event.target.value.replace(/\D/g, ""))}
-            />
-          </FormField>
-          <FormField label={ar ? "عملة الشراء" : "Purchase currency"}>
-            <TextInput
-              maxLength={3}
-              value={testPurchaseCurrency}
-              onChange={(event) => setTestPurchaseCurrency(event.target.value.toUpperCase())}
-            />
-          </FormField>
-          <FormField label={ar ? "وقت العملية التجريبية" : "Demo purchase time"}>
-            <TextInput
-              type="datetime-local"
-              value={testOccurredAt}
-              onChange={(event) => setTestOccurredAt(event.target.value)}
-            />
-          </FormField>
-        </div>
-        <label className="studio-checkbox-row">
-          <input
-            type="checkbox"
-            checked={testManagerApproved}
-            onChange={(event) => setTestManagerApproved(event.target.checked)}
-          />
-          <span>
-            {ar ? "اعتبار العملية معتمدة من المدير" : "Treat this purchase as manager approved"}
-          </span>
-        </label>
-        <label className="studio-checkbox-row">
-          <input
-            type="checkbox"
-            checked={testManagerActor}
-            onChange={(event) => setTestManagerActor(event.target.checked)}
-          />
-          <span>{ar ? "استخدام مهلة تصحيح المدير" : "Use the manager correction window"}</span>
-        </label>
-        <Alert tone="info" title={ar ? "القواعد الجاري اختبارها" : "Rules used in this test"}>
-          {session.version.operationalTimezone} ·{" "}
-          {ar ? "أقصى أختام للعملية" : "stamps per purchase"}{" "}
-          {session.version.stampRule?.maximumStampsPerOperation ?? 5} ·{" "}
-          {ar ? "الحد اليومي" : "daily limit"}{" "}
-          {session.version.stampRule?.maximumStampsPerCustomerPerDay ?? "—"} ·{" "}
-          {ar ? "الحد الأدنى للشراء" : "minimum purchase"}{" "}
-          {session.version.stampRule?.minimumPurchaseAmountMinor ?? "—"}{" "}
-          {session.version.stampRule?.minimumPurchaseCurrency ?? ""}
-        </Alert>
-      </details>
-      {rewardReady ? (
-        <Alert tone="success" title={ar ? "المكافأة جاهزة" : "Reward ready"}>
-          {ar
-            ? "اكتملت كل الخانات. استرد المكافأة النهائية لبدء دورة جديدة من الصفر."
-            : "Every slot is filled. Redeem the final reward to reset the grid and begin a new cycle."}
-        </Alert>
-      ) : null}
-      <div className="studio-test-rewards">
-        {session.version.rewards.map((reward) => {
-          const earned =
-            unlocks.filter((event) => event.rewardDefinitionId === reward.id).length -
-            relocks.filter((event) => event.rewardDefinitionId === reward.id).length;
-          const redeemed = redemptions.filter(
-            (event) => event.rewardDefinitionId === reward.id,
-          ).length;
-          const name = selectStudioLocalizedServerRewardName(reward, ar ? "ar" : "en");
-          return (
-            <Card key={reward.id}>
-              <Badge tone={earned > redeemed ? "success" : "neutral"}>
-                {ar
-                  ? `عند ${reward.thresholdStampCount} أختام`
-                  : `At ${reward.thresholdStampCount} stamps`}
-              </Badge>
-              <h4>{name}</h4>
-              <p>
-                {ar
-                  ? `${earned} مكتسبة · ${redeemed} مستخدمة`
-                  : `${earned} earned · ${redeemed} used`}
-              </p>
-              <Button
-                disabled={earned <= redeemed || working}
-                onClick={() =>
-                  onCommand({
-                    kind: "redeem",
-                    rewardId: reward.id,
-                    managerApproved: testManagerApproved,
-                  })
-                }
-              >
-                {ar ? "استخدام المكافأة التجريبية" : "Use demo reward"}
-              </Button>
-            </Card>
-          );
-        })}
-      </div>
-      <details className="studio-event-log">
-        <summary>{ar ? "عرض نشاط الاختبار" : "Show test activity"}</summary>
-        <div>
-          {session.events.slice(0, 20).map((event) => (
-            <div key={event.id}>
-              <strong>{testEventLabel(event.eventType, ar)}</strong>
-              <small>
-                {event.safeMetadata?.cycle
-                  ? ar
-                    ? `الدورة ${event.safeMetadata.cycle}`
-                    : `Cycle ${event.safeMetadata.cycle}`
-                  : ""}
-              </small>
-            </div>
-          ))}
-        </div>
-      </details>
     </div>
   );
 }
@@ -4041,7 +3600,7 @@ function VersionHistory({
                 <small>{event.actor?.displayName ?? (ar ? "النظام" : "System")}</small>
               </div>
               <time dateTime={event.createdAt}>
-                {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-IQ", {
+                {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
                   dateStyle: "medium",
                   timeStyle: "short",
                 }).format(new Date(event.createdAt))}
@@ -4115,7 +3674,7 @@ function VersionHistory({
                 <dd>
                   {timestamp ? (
                     <time dateTime={timestamp}>
-                      {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-IQ", {
+                      {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
                         dateStyle: "medium",
                         timeStyle: "short",
                       }).format(new Date(timestamp))}

@@ -1,9 +1,11 @@
 "use client";
 
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 import { billingCadenceCatalog, cadencePrice } from "@waflo/billing";
 import {
-  countryOptions,
   type BillingCadence,
+  countryOptions,
   type Locale,
   type PlanCode,
   timeZoneOptions,
@@ -14,6 +16,7 @@ import {
   Badge,
   Button,
   Card,
+  DropdownMenu,
   EmptyState,
   FormField,
   Modal,
@@ -30,20 +33,27 @@ import {
   UsageMeter,
 } from "@waflo/ui";
 import {
-  CalendarClock,
   CheckCircle2,
+  Clock,
   Copy,
   CreditCard,
   Gift,
   MapPin,
+  MoreHorizontal,
   Plus,
   QrCode,
   RefreshCcw,
 } from "lucide-react";
 import Image from "next/image";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import type { DashboardSection, MembershipView } from "./dashboard";
+import {
+  LocationAddressFields,
+  LocationMapPicker,
+  type LocationMapSelection,
+} from "./location-map-picker";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiClientError ? error.message : fallback;
@@ -77,15 +87,6 @@ interface OrganizationView {
   _count: { locations: number; members: number };
 }
 
-interface AuditItem {
-  id: string;
-  action: string;
-  targetType: string;
-  targetId: string | null;
-  createdAt: string;
-  actor: { id: string; displayName: string } | null;
-}
-
 export function OverviewScreen({
   locale,
   membership,
@@ -95,26 +96,17 @@ export function OverviewScreen({
 }) {
   const ar = locale === "ar";
   const [organization, setOrganization] = useState<OrganizationView | null>(null);
-  const [audit, setAudit] = useState<AuditItem[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
     const id = membership.organization.id;
-    void Promise.all([
-      apiFetch<OrganizationView>(`/v1/organizations/${id}`),
-      membership.role === "OWNER"
-        ? apiFetch<{ items: AuditItem[] }>(`/v1/organizations/${id}/audit`)
-        : Promise.resolve({ items: [] }),
-    ])
-      .then(([org, events]) => {
-        setOrganization(org);
-        setAudit(events.items.slice(0, 5));
-      })
+    void apiFetch<OrganizationView>(`/v1/organizations/${id}`)
+      .then(setOrganization)
       .catch((caught: unknown) =>
         setError(
           message(caught, ar ? "تعذر تحميل البيانات." : "Unable to load organization data."),
         ),
       );
-  }, [membership.organization.id, membership.role, ar]);
+  }, [membership.organization.id, ar]);
   if (error) return <Alert tone="danger" title={error} />;
   if (!organization) {
     return (
@@ -126,118 +118,132 @@ export function OverviewScreen({
       </>
     );
   }
+  const status = organization.billingProfile.subscriptionStatus;
+  const statusCopy = {
+    PENDING_ACTIVATION: ar ? "جاهز لبدء التجربة" : "Ready to start",
+    TRIALING: ar ? "تجربة مجانية" : "Free trial",
+    ACTIVE: ar ? "نشط" : "Active",
+    PAST_DUE: ar ? "تعذّر الدفع" : "Payment needed",
+    GRACE_PERIOD: ar ? "يتطلب انتباهك" : "Needs attention",
+    SUSPENDED: ar ? "متوقف مؤقتاً" : "Paused",
+    CANCELED: ar ? "ملغي" : "Canceled",
+  }[status];
+  const statusTone =
+    status === "ACTIVE" || status === "TRIALING"
+      ? "success"
+      : status === "PENDING_ACTIVATION"
+        ? "warning"
+        : "danger";
+  const trialEnd = organization.billingProfile.trialEnd
+    ? new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", { dateStyle: "medium" }).format(
+        new Date(organization.billingProfile.trialEnd),
+      )
+    : null;
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "لوحة التاجر" : "Merchant dashboard"}
-        title={ar ? `مرحباً في ${organization.name}` : `Welcome to ${organization.name}`}
-        description={
-          ar
-            ? "هذه النظرة مبنية على حالة مؤسستك الفعلية، من دون أرقام أو بطاقات ولاء وهمية."
-            : "This overview uses your organization’s real state—no fabricated loyalty metrics or cards."
-        }
+        title={ar ? `مرحباً، ${organization.name}` : `Welcome, ${organization.name}`}
+        description={ar ? "كل ما يحتاج انتباهك اليوم." : "What needs your attention today."}
       />
-      <div className="dashboard-grid">
-        <Card className="dashboard-card dashboard-card--full dashboard-trial">
+      <div className="overview-layout">
+        <section className="overview-status" aria-labelledby="overview-status-title">
           <div>
-            <span className="dashboard-card__label">{ar ? "حالة التجربة" : "TRIAL STATUS"}</span>
-            <span className="dashboard-card__value">{ar ? "لم تبدأ بعد" : "Not started yet"}</span>
+            <div className="overview-status__title">
+              <h2 id="overview-status-title">{ar ? "اشتراكك" : "Your subscription"}</h2>
+              <Badge tone={statusTone}>{statusCopy}</Badge>
+            </div>
             <p>
-              {ar
-                ? "تجربتك المجانية لمدة 15 يوماً لم تبدأ. ستبدأ عند نشر أول بطاقة ولاء."
-                : "Your 15-day free trial has not started. It will begin when you publish your first loyalty card."}
+              {status === "PENDING_ACTIVATION"
+                ? ar
+                  ? "اختر باقتك وأضف طريقة الدفع لبدء 7 أيام مجاناً."
+                  : "Choose a plan and add a payment method to start 7 days free."
+                : status === "TRIALING" && trialEnd
+                  ? ar
+                    ? `تجربتك مجانية حتى ${trialEnd}.`
+                    : `Your trial is free through ${trialEnd}.`
+                  : status === "ACTIVE"
+                    ? ar
+                      ? "اشتراكك يعمل بشكل طبيعي."
+                      : "Your subscription is running normally."
+                    : ar
+                      ? "افتح الفوترة لمعرفة الإجراء المطلوب."
+                      : "Open Billing to see what needs attention."}
             </p>
           </div>
-          <StatusBadge status="pending" label="pending_activation" />
-        </Card>
-        <Card className="dashboard-card">
-          <span className="dashboard-card__label">{ar ? "الخطة المختارة" : "SELECTED PLAN"}</span>
-          <span className="dashboard-card__value">{organization.selectedPlan}</span>
-          <p style={{ color: "var(--waflo-muted)" }}>
-            {ar ? "ليست دليلاً على اشتراك مدفوع." : "This does not imply a paid subscription."}
-          </p>
-        </Card>
-        <Card className="dashboard-card">
-          <span className="dashboard-card__label">
-            {ar ? "المواقع النشطة" : "ACTIVE LOCATIONS"}
-          </span>
-          <span className="dashboard-card__value">{organization._count.locations}</span>
-          <UsageMeter
-            label={ar ? "استخدام المواقع" : "Location usage"}
-            current={organization._count.locations}
-            limit={
-              organization.selectedPlan === "STARTER"
-                ? 1
-                : organization.selectedPlan === "GROWTH"
-                  ? 3
-                  : null
-            }
-          />
-        </Card>
-        <Card className="dashboard-card">
-          <span className="dashboard-card__label">{ar ? "أعضاء الفريق" : "TEAM MEMBERS"}</span>
-          <span className="dashboard-card__value">{organization._count.members}</span>
-          <p style={{ color: "var(--waflo-muted)" }}>
-            {ar ? "يشمل المالك." : "Includes the Owner."}
-          </p>
-        </Card>
-        <Card className="dashboard-card dashboard-card--wide">
-          <h2>{ar ? "رابط التاجر" : "Merchant URL"}</h2>
-          <p style={{ color: "var(--waflo-muted)" }}>
-            {ar
-              ? "تظهر صفحة تحضير تحمل هوية Waflo إلى أن تصبح بطاقة الولاء جاهزة."
-              : "A branded preparation page is live until a loyalty card is ready."}
-          </p>
-          <div className="dashboard-url" dir="ltr">
-            <span>https://{organization.merchantSlug}.waflo.app</span>
-            <button
-              type="button"
-              className="wf-icon-button wf-button--ghost"
-              aria-label={ar ? "نسخ الرابط" : "Copy URL"}
-              onClick={() =>
-                void navigator.clipboard.writeText(`https://${organization.merchantSlug}.waflo.app`)
-              }
-            >
-              <Copy size={18} />
-            </button>
-          </div>
-        </Card>
-        <Card className="dashboard-card">
-          <h2>{ar ? "الخطوة التالية" : "Next step"}</h2>
-          <p style={{ color: "var(--waflo-muted)", lineHeight: 1.65 }}>
-            {ar
-              ? "أنشئ بطاقة ولاء أو تابع إدارة بطاقاتك المنشورة."
-              : "Create a loyalty card or continue managing your published cards."}
-          </p>
-          <a
-            className="wf-button wf-button--primary dashboard-action-link"
-            href={`/${locale}/dashboard/programs`}
+          <Link
+            className="wf-button wf-button--secondary dashboard-action-link"
+            href={`/${locale}/dashboard/billing`}
           >
-            {ar ? "إدارة بطاقات الولاء" : "Manage loyalty cards"}
-          </a>
-        </Card>
-        {membership.role === "OWNER" ? (
-          <Card className="dashboard-card dashboard-card--full">
-            <h2>{ar ? "أحدث التغييرات" : "Recent activity"}</h2>
-            {audit.length ? (
-              <Table
-                caption={ar ? "أحدث أحداث التدقيق" : "Recent audit events"}
-                headers={ar ? ["الإجراء", "المنفذ", "التاريخ"] : ["Action", "Actor", "Date"]}
-                rows={audit.map((event) => [
-                  event.action,
-                  event.actor?.displayName ?? (ar ? "النظام" : "System"),
-                  new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", { dateStyle: "medium" }).format(
-                    new Date(event.createdAt),
-                  ),
-                ])}
-              />
-            ) : (
-              <p style={{ color: "var(--waflo-muted)" }}>
-                {ar ? "لا توجد تغييرات حديثة." : "No recent changes."}
-              </p>
-            )}
-          </Card>
-        ) : null}
+            {status === "PENDING_ACTIVATION"
+              ? ar
+                ? "ابدأ التجربة"
+                : "Start trial"
+              : ar
+                ? "عرض الفوترة"
+                : "View billing"}
+          </Link>
+        </section>
+
+        <dl className="overview-metrics" aria-label={ar ? "ملخص النشاط" : "Business summary"}>
+          <div>
+            <dt>{ar ? "الباقة" : "Plan"}</dt>
+            <dd>{organization.selectedPlan}</dd>
+          </div>
+          <div>
+            <dt>{ar ? "الفروع" : "Locations"}</dt>
+            <dd>{organization._count.locations}</dd>
+          </div>
+          <div>
+            <dt>{ar ? "أعضاء الفريق" : "Team members"}</dt>
+            <dd>{organization._count.members}</dd>
+          </div>
+        </dl>
+
+        <div className="overview-columns">
+          <section className="overview-next">
+            <div className="overview-section-heading">
+              <h2>{ar ? "خطوتك التالية" : "Next step"}</h2>
+              <span aria-hidden="true">01</span>
+            </div>
+            <p>
+              {ar
+                ? "أنشئ بطاقة الولاء الأولى، ثم شاركها مع عملائك."
+                : "Create your first loyalty card, then share it with customers."}
+            </p>
+            <Link
+              className="wf-button wf-button--primary dashboard-action-link"
+              href={`/${locale}/dashboard/programs`}
+            >
+              {ar ? "إنشاء بطاقة ولاء" : "Create loyalty card"}
+            </Link>
+          </section>
+
+          <section className="overview-link">
+            <div className="overview-section-heading">
+              <h2>{ar ? "رابط نشاطك" : "Your business link"}</h2>
+            </div>
+            <p>
+              {ar
+                ? "استخدمه عندما تصبح بطاقتك جاهزة."
+                : "Share it when your loyalty card is ready."}
+            </p>
+            <div className="dashboard-url" dir="ltr">
+              <span>https://{organization.merchantSlug}.waflo.app</span>
+              <button
+                type="button"
+                className="wf-icon-button wf-button--ghost"
+                aria-label={ar ? "نسخ الرابط" : "Copy URL"}
+                onClick={() =>
+                  void navigator.clipboard.writeText(
+                    `https://${organization.merchantSlug}.waflo.app`,
+                  )
+                }
+              >
+                <Copy size={18} />
+              </button>
+            </div>
+          </section>
+        </div>
       </div>
     </>
   );
@@ -246,13 +252,48 @@ export function OverviewScreen({
 interface LocationItem {
   id: string;
   name: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
   city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  countryCode: string | null;
   phone: string | null;
   timezone: string;
   latitude: number | null;
   longitude: number | null;
   status: "ACTIVE" | "ARCHIVED";
   createdAt: string;
+}
+
+function emptyLocationSelection(): LocationMapSelection {
+  return {
+    latitude: null,
+    longitude: null,
+    coordinatesConfirmed: false,
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    region: "",
+    postalCode: "",
+    countryCode: "",
+    timezone: "",
+  };
+}
+
+function selectionFromLocation(location: LocationItem): LocationMapSelection {
+  return {
+    latitude: location.latitude,
+    longitude: location.longitude,
+    coordinatesConfirmed: location.latitude !== null && location.longitude !== null,
+    addressLine1: location.addressLine1 ?? "",
+    addressLine2: location.addressLine2 ?? "",
+    city: location.city ?? "",
+    region: location.region ?? "",
+    postalCode: location.postalCode ?? "",
+    countryCode: location.countryCode ?? "",
+    timezone: location.timezone,
+  };
 }
 
 interface UsageDecision {
@@ -274,22 +315,10 @@ export function LocationsScreen({
   const [data, setData] = useState<{ items: LocationItem[]; usage: UsageDecision } | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<LocationItem | null>(null);
+  const [selection, setSelection] = useState<LocationMapSelection>(emptyLocationSelection);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const canManage = membership.role !== "STAFF";
-  const countries = useMemo(
-    () => countryOptions(locale).map((option) => ({ value: option.code, label: option.name })),
-    [locale],
-  );
-  const timezones = useMemo(
-    () =>
-      timeZoneOptions(locale).map((option) => ({
-        value: option.id,
-        label: option.label,
-        group: option.group,
-      })),
-    [locale],
-  );
   const load = useCallback(async () => {
     try {
       setData(await apiFetch(`/v1/organizations/${membership.organization.id}/locations`));
@@ -300,53 +329,72 @@ export function LocationsScreen({
   useEffect(() => {
     void load();
   }, [load]);
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
+  function startAdd() {
+    setEditing(null);
+    setSelection(emptyLocationSelection());
     setError("");
-    const form = new FormData(event.currentTarget);
-    try {
-      await apiFetch(`/v1/organizations/${membership.organization.id}/locations`, {
-        method: "POST",
-        body: JSON.stringify({
-          name: String(form.get("name") ?? ""),
-          city: String(form.get("city") ?? "") || undefined,
-          phone: String(form.get("phone") ?? "") || undefined,
-          countryCode: String(form.get("countryCode") ?? "") || undefined,
-          timezone: String(form.get("timezone") ?? "Asia/Baghdad"),
-          latitude: form.get("latitude") ? Number(form.get("latitude")) : undefined,
-          longitude: form.get("longitude") ? Number(form.get("longitude")) : undefined,
-        }),
-      });
-      setOpen(false);
-      await load();
-    } catch (caught) {
-      setError(message(caught, ar ? "تعذر إنشاء الموقع." : "Unable to create location."));
-    } finally {
-      setSaving(false);
-    }
+    setOpen(true);
   }
-  async function updateCoordinates(event: FormEvent<HTMLFormElement>) {
+  function startEdit(location: LocationItem) {
+    setEditing(location);
+    setSelection(selectionFromLocation(location));
+    setError("");
+    setOpen(true);
+  }
+  function closeEditor() {
+    if (saving) return;
+    setOpen(false);
+    setEditing(null);
+  }
+  async function saveLocation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing) return;
+    if (
+      selection.latitude === null ||
+      selection.longitude === null ||
+      !selection.coordinatesConfirmed ||
+      !selection.countryCode ||
+      !selection.timezone
+    ) {
+      setError(
+        ar
+          ? "حدّد موقع الفرع بدقة على الخريطة ثم أكّده قبل الحفظ."
+          : "Choose the exact branch location on the map and confirm it before saving.",
+      );
+      return;
+    }
     setSaving(true);
     setError("");
     const form = new FormData(event.currentTarget);
-    const latitude = String(form.get("latitude") ?? "").trim();
-    const longitude = String(form.get("longitude") ?? "").trim();
     try {
-      await apiFetch(`/v1/organizations/${membership.organization.id}/locations/${editing.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          latitude: latitude ? Number(latitude) : null,
-          longitude: longitude ? Number(longitude) : null,
-        }),
-      });
+      await apiFetch(
+        `/v1/organizations/${membership.organization.id}/locations${editing ? `/${editing.id}` : ""}`,
+        {
+          method: editing ? "PATCH" : "POST",
+          body: JSON.stringify({
+            name: String(form.get("name") ?? ""),
+            phone: String(form.get("phone") ?? "") || undefined,
+            addressLine1: selection.addressLine1 || undefined,
+            addressLine2: selection.addressLine2 || undefined,
+            city: selection.city || undefined,
+            region: selection.region || undefined,
+            postalCode: selection.postalCode || undefined,
+            countryCode: selection.countryCode,
+            timezone: selection.timezone,
+            latitude: selection.latitude,
+            longitude: selection.longitude,
+            coordinatesConfirmed: true,
+          }),
+        },
+      );
+      setOpen(false);
       setEditing(null);
       await load();
     } catch (caught) {
       setError(
-        message(caught, ar ? "تعذر حفظ إحداثيات الموقع." : "Unable to save location coordinates."),
+        message(
+          caught,
+          ar ? "تعذر حفظ الموقع. حاول مرة أخرى." : "Unable to save the location. Try again.",
+        ),
       );
     } finally {
       setSaving(false);
@@ -375,16 +423,25 @@ export function LocationsScreen({
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "المؤسسة" : "Organization"}
         title={ar ? "المواقع" : "Locations"}
         description={
           ar
-            ? "أدر المواقع النشطة والمؤرشفة ضمن حدود خطتك."
-            : "Manage active and archived locations within your plan limits."
+            ? "أدر فروع نشاطك وحدد موقع كل فرع بدقة."
+            : "Manage the places where your team serves customers."
         }
         actions={
           canManage ? (
-            <Button onClick={() => setOpen(true)} disabled={data ? !data.usage.allowed : true}>
+            <Button
+              onClick={startAdd}
+              disabled={data ? !data.usage.allowed : true}
+              title={
+                data && !data.usage.allowed
+                  ? ar
+                    ? "وصلت إلى حد المواقع في باقتك"
+                    : "Your plan's location limit has been reached"
+                  : undefined
+              }
+            >
               <Plus size={17} />
               {ar ? "إضافة موقع" : "Add location"}
             </Button>
@@ -394,203 +451,232 @@ export function LocationsScreen({
       {error ? <Alert tone="danger" title={error} /> : null}
       {data ? (
         <>
-          <Card className="dashboard-form-card" style={{ marginBottom: "1rem" }}>
-            <UsageMeter
-              label={ar ? "استخدام المواقع النشطة" : "Active location usage"}
-              current={data.usage.currentUsage}
-              limit={data.usage.limit}
-            />
-            {!data.usage.allowed ? (
-              <Alert tone="warning" title={ar ? "وصلت إلى حد المواقع" : "Location limit reached"}>
-                {ar
-                  ? `تقترح Waflo الترقية إلى ${data.usage.recommendedPlan ?? "خطة أعلى"} قبل إضافة موقع آخر.`
-                  : `Upgrade to ${data.usage.recommendedPlan ?? "a higher plan"} before adding another active location.`}
-              </Alert>
-            ) : null}
-          </Card>
+          {(() => {
+            const readyLocations = data.items.filter(
+              (location) =>
+                location.status === "ACTIVE" &&
+                location.latitude !== null &&
+                location.longitude !== null,
+            ).length;
+            const unlimitedLabel =
+              readyLocations === data.usage.currentUsage
+                ? ar
+                  ? `${readyLocations} مواقع نشطة · غير محدود`
+                  : `${readyLocations} active locations · Unlimited`
+                : ar
+                  ? `${readyLocations} جاهزة · ${data.usage.currentUsage} إجمالاً · غير محدود`
+                  : `${readyLocations} ready · ${data.usage.currentUsage} total · Unlimited`;
+            return (
+              <section
+                className="dashboard-usage-row"
+                aria-label={ar ? "استخدام المواقع" : "Location usage"}
+              >
+                <UsageMeter
+                  label={ar ? "المواقع المستخدمة" : "Locations used"}
+                  current={data.usage.currentUsage}
+                  limit={data.usage.limit}
+                  unlimitedLabel={unlimitedLabel}
+                />
+                {!data.usage.allowed ? (
+                  <Alert
+                    tone="warning"
+                    title={ar ? "وصلت إلى حد المواقع" : "Location limit reached"}
+                  >
+                    {ar
+                      ? "غيّر الباقة أو أرشف موقعاً قبل إضافة موقع جديد."
+                      : "Change plan or archive a location before adding another."}
+                  </Alert>
+                ) : null}
+              </section>
+            );
+          })()}
           {data.items.length ? (
-            <Table
-              caption={ar ? "مواقع المؤسسة" : "Organization locations"}
-              headers={
-                ar
-                  ? ["الموقع", "المدينة", "الإحداثيات", "المنطقة الزمنية", "الحالة", "الإجراء"]
-                  : ["Location", "City", "Coordinates", "Timezone", "Status", "Action"]
-              }
-              rows={data.items.map((location) => [
-                <strong key="name">{location.name}</strong>,
-                location.city ?? "—",
-                location.latitude !== null && location.longitude !== null ? (
-                  <span dir="ltr" key="coordinates">
-                    {location.latitude}, {location.longitude}
-                  </span>
-                ) : (
-                  <span key="coordinates">{ar ? "غير مهيأة" : "Not configured"}</span>
-                ),
-                <span dir="ltr" key="timezone">
-                  {location.timezone}
-                </span>,
-                <StatusBadge
-                  key="status"
-                  status={location.status === "ACTIVE" ? "active" : "archived"}
-                  label={location.status}
-                />,
-                canManage ? (
-                  <div className="dashboard-actions" key="action">
-                    <Button type="button" variant="ghost" onClick={() => setEditing(location)}>
-                      {ar ? "الإحداثيات" : "Coordinates"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        void (location.status === "ACTIVE"
-                          ? archive(location.id)
-                          : restore(location.id))
-                      }
-                    >
-                      {location.status === "ACTIVE"
-                        ? ar
-                          ? "أرشفة"
-                          : "Archive"
-                        : ar
-                          ? "استعادة"
-                          : "Restore"}
-                    </Button>
-                  </div>
-                ) : (
-                  "—"
-                ),
-              ])}
-            />
+            <section
+              className="location-grid"
+              aria-label={ar ? "مواقع النشاط" : "Organization locations"}
+            >
+              {data.items.map((location) => {
+                const hasCoordinates = location.latitude !== null && location.longitude !== null;
+                const isArchived = location.status !== "ACTIVE";
+                const statusLabel = isArchived
+                  ? ar
+                    ? "مؤرشف"
+                    : "Archived"
+                  : hasCoordinates
+                    ? ar
+                      ? "نشط"
+                      : "Active"
+                    : ar
+                      ? "الموقع مطلوب"
+                      : "Location required";
+                const statusToneVal = isArchived
+                  ? "archived"
+                  : hasCoordinates
+                    ? "active"
+                    : "pending";
+
+                return (
+                  <article className="location-card" key={location.id}>
+                    <div className="location-card__header">
+                      <div className="location-card__identity">
+                        <div className="location-card__icon" aria-hidden="true">
+                          <MapPin size={20} />
+                        </div>
+                        <div className="location-card__titles">
+                          <h3>{location.name}</h3>
+                          <p className="location-card__address">
+                            {location.addressLine1 || location.city
+                              ? [location.addressLine1, location.city].filter(Boolean).join(" · ")
+                              : ar
+                                ? "لا يوجد عنوان مسجل"
+                                : "No registered address"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="location-card__status">
+                        <StatusBadge status={statusToneVal} label={statusLabel} />
+                      </div>
+                    </div>
+
+                    <div className="location-card__meta">
+                      <span className="location-card__meta-item">
+                        <Clock size={14} aria-hidden="true" />
+                        <span dir="ltr">{location.timezone}</span>
+                      </span>
+                      <span
+                        className={`location-card__meta-item ${hasCoordinates ? "location-card__meta-item--confirmed" : "location-card__meta-item--unconfirmed"}`}
+                      >
+                        <MapPin size={14} aria-hidden="true" />
+                        <span>
+                          {hasCoordinates
+                            ? ar
+                              ? "الموقع الدقيق مؤكد"
+                              : "Exact location set"
+                            : ar
+                              ? "حدّد الموقع على الخريطة"
+                              : "Map pin needed"}
+                        </span>
+                      </span>
+                    </div>
+
+                    {canManage ? (
+                      <div className="location-card__footer">
+                        <Button
+                          type="button"
+                          variant={!hasCoordinates ? "primary" : "secondary"}
+                          onClick={() => startEdit(location)}
+                        >
+                          {!hasCoordinates
+                            ? ar
+                              ? "تحديد الموقع"
+                              : "Set location"
+                            : ar
+                              ? "تعديل الفرع"
+                              : "Edit location"}
+                        </Button>
+                        <DropdownMenu
+                          label={
+                            <span className="location-card__menu-trigger">
+                              <MoreHorizontal size={18} aria-hidden="true" />
+                              <span className="wf-sr-only">
+                                {ar ? "المزيد" : "More actions"}: {location.name}
+                              </span>
+                            </span>
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={
+                              location.status === "ACTIVE" ? "dashboard-team-menu-danger" : ""
+                            }
+                            onClick={() =>
+                              void (location.status === "ACTIVE"
+                                ? archive(location.id)
+                                : restore(location.id))
+                            }
+                          >
+                            {location.status === "ACTIVE"
+                              ? ar
+                                ? "أرشفة الموقع"
+                                : "Archive location"
+                              : ar
+                                ? "استعادة الموقع"
+                                : "Restore location"}
+                          </button>
+                        </DropdownMenu>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </section>
           ) : (
-            <Card>
+            <div className="dashboard-empty-inline">
               <EmptyState
                 icon={<MapPin />}
                 title={ar ? "لا توجد مواقع" : "No locations yet"}
                 description={
-                  ar ? "أنشئ موقعك الأول للمتابعة." : "Create your first location to continue."
+                  ar
+                    ? "أضف فرعك الأول وحدد مكانه على الخريطة."
+                    : "Add your first location and place it on the map."
                 }
               />
-            </Card>
+            </div>
           )}
         </>
       ) : (
         <Skeleton height="16rem" />
       )}
-      <Modal open={open} title={ar ? "إضافة موقع" : "Add location"} onClose={() => setOpen(false)}>
-        <form className="dashboard-form" onSubmit={create}>
-          <FormField label={ar ? "اسم الموقع" : "Location name"} required>
-            <TextInput name="name" minLength={2} required />
-          </FormField>
-          <FormField label={ar ? "المدينة" : "City"}>
-            <TextInput name="city" />
-          </FormField>
-          <FormField label={ar ? "الهاتف" : "Phone"}>
-            <TextInput name="phone" type="tel" />
-          </FormField>
-          <FormField label={ar ? "البلد" : "Country"} required>
-            <SearchableSelect
-              name="countryCode"
-              options={countries}
-              defaultValue="IQ"
-              placeholder={ar ? "ابحث عن بلد" : "Search countries"}
-              required
-            />
-          </FormField>
-          <FormField label={ar ? "المنطقة الزمنية" : "Timezone"} required>
-            <SearchableSelect
-              name="timezone"
-              options={timezones}
-              defaultValue="Asia/Baghdad"
-              placeholder={ar ? "ابحث عن منطقة زمنية" : "Search timezones"}
-              required
-            />
-          </FormField>
-          <div className="dashboard-grid-two">
-            <FormField label={ar ? "خط العرض" : "Latitude"} hint="−90 … 90">
-              <TextInput
-                name="latitude"
-                type="number"
-                inputMode="decimal"
-                min={-90}
-                max={90}
-                step="any"
-              />
-            </FormField>
-            <FormField label={ar ? "خط الطول" : "Longitude"} hint="−180 … 180">
-              <TextInput
-                name="longitude"
-                type="number"
-                inputMode="decimal"
-                min={-180}
-                max={180}
-                step="any"
-              />
-            </FormField>
-          </div>
-          <div className="dashboard-actions">
-            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-              {ar ? "إلغاء" : "Cancel"}
-            </Button>
-            <Button type="submit" loading={saving}>
-              {ar ? "إنشاء الموقع" : "Create location"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
       <Modal
-        open={Boolean(editing)}
-        title={ar ? "إحداثيات الموقع التجاري" : "Business location coordinates"}
+        open={open}
+        className="location-map-dialog"
+        title={
+          editing ? (ar ? "تعديل الموقع" : "Edit location") : ar ? "إضافة موقع" : "Add location"
+        }
         description={
           ar
-            ? "أدخل إحداثيات الموقع التجاري الموثقة. لا تستخدم إحداثيات جهاز العميل."
-            : "Enter verified business coordinates. Customer device coordinates are never used."
+            ? "ابحث عن الفرع ثم ضع العلامة على مدخله بدقة."
+            : "Search for the branch, then place the pin on its exact entrance."
         }
-        descriptionVisible
-        onClose={() => setEditing(null)}
+        onClose={closeEditor}
+        locked={saving}
       >
-        {editing ? (
-          <form className="dashboard-form" onSubmit={updateCoordinates}>
-            <Alert tone="info" title={editing.name}>
-              {ar
-                ? "تستخدم Apple وGoogle هذه الإحداثيات لتحديد صلة بطاقة Wallet بالقرب من النشاط."
-                : "Apple and Google use these coordinates for provider-native Wallet relevance near the business."}
-            </Alert>
-            <div className="dashboard-grid-two">
-              <FormField label={ar ? "خط العرض" : "Latitude"} hint="−90 … 90">
+        {open ? (
+          <form className="location-editor-form" onSubmit={saveLocation}>
+            <div className="dashboard-form__row">
+              <FormField label={ar ? "اسم الفرع" : "Location name"} required>
                 <TextInput
-                  name="latitude"
-                  type="number"
-                  inputMode="decimal"
-                  min={-90}
-                  max={90}
-                  step="any"
-                  defaultValue={editing.latitude ?? ""}
+                  name="name"
+                  minLength={2}
+                  maxLength={120}
+                  defaultValue={editing?.name ?? ""}
+                  autoComplete="organization"
+                  required
                 />
               </FormField>
-              <FormField label={ar ? "خط الطول" : "Longitude"} hint="−180 … 180">
+              <FormField label={ar ? "الهاتف (اختياري)" : "Phone (optional)"}>
                 <TextInput
-                  name="longitude"
-                  type="number"
-                  inputMode="decimal"
-                  min={-180}
-                  max={180}
-                  step="any"
-                  defaultValue={editing.longitude ?? ""}
+                  name="phone"
+                  type="tel"
+                  defaultValue={editing?.phone ?? ""}
+                  autoComplete="tel"
                 />
               </FormField>
             </div>
-            <p className="dashboard-form__hint">
-              {ar
-                ? "اترك الحقلين فارغين لإزالة الإحداثيات."
-                : "Leave both fields empty to remove coordinates."}
-            </p>
+            <LocationMapPicker locale={locale} value={selection} onChange={setSelection} />
+            <LocationAddressFields locale={locale} value={selection} onChange={setSelection} />
             <div className="dashboard-actions">
-              <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
+              <Button type="button" variant="secondary" onClick={closeEditor}>
                 {ar ? "إلغاء" : "Cancel"}
               </Button>
-              <Button type="submit" loading={saving}>
-                {ar ? "حفظ الإحداثيات" : "Save coordinates"}
+              <Button type="submit" loading={saving} disabled={!selection.coordinatesConfirmed}>
+                {editing
+                  ? ar
+                    ? "حفظ التغييرات"
+                    : "Save changes"
+                  : ar
+                    ? "إضافة الموقع"
+                    : "Add location"}
               </Button>
             </div>
           </form>
@@ -769,12 +855,11 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "الوصول والصلاحيات" : "Access and roles"}
         title={ar ? "الفريق" : "Team"}
         description={
           ar
-            ? "الأدوار والصلاحيات تُفرض في الخادم لكل مؤسسة."
-            : "Create local staff identities, then pair one current device with a short-lived QR."
+            ? "أضف الموظفين واربط هواتفهم من دون بريد إلكتروني."
+            : "Add staff and pair their phones—no staff email needed."
         }
         actions={
           canManage ? (
@@ -787,119 +872,182 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
       />
       {error ? <Alert tone="danger" title={error} /> : null}
       {data ? (
-        <div className="dashboard-grid">
-          <Card className="dashboard-card dashboard-card--full">
+        <div className="dashboard-open-sections">
+          <section
+            className="dashboard-usage-row"
+            aria-label={ar ? "استخدام الفريق" : "Team usage"}
+          >
             <UsageMeter
-              label={
-                ar
-                  ? "مقاعد الفريق المستخدمة (المالك الأول لا يُحتسب)"
-                  : "Team seats used (first Owner excluded)"
-              }
+              label={ar ? "أعضاء الفريق المستخدمون" : "Team members used"}
               current={data.usage.currentUsage}
               limit={data.usage.limit}
+              unlimitedLabel={
+                ar
+                  ? `${data.usage.currentUsage} أعضاء فريق · غير محدود`
+                  : `${data.usage.currentUsage} team members · Unlimited`
+              }
             />
             {!data.usage.allowed ? (
               <Alert tone="warning" title={ar ? "وصلت إلى حد الفريق" : "Team limit reached"}>
                 {ar
-                  ? "غيّر الخطة قبل إرسال دعوة أخرى."
-                  : "Choose a higher plan or remove a seat before adding another staff member."}
+                  ? "غيّر الباقة أو أزل عضواً قبل إضافة موظف جديد."
+                  : "Change plan or remove a member before adding another."}
               </Alert>
             ) : null}
-          </Card>
-          <Card className="dashboard-card dashboard-card--full">
-            <h2>{ar ? "الأعضاء النشطون" : "Active members"}</h2>
+          </section>
+          <section className="dashboard-table-section">
+            <div className="dashboard-section-heading">
+              <h2>{ar ? "أعضاء الفريق" : "Team members"}</h2>
+            </div>
             <Table
+              className="dashboard-team-table"
               caption={ar ? "أعضاء الفريق" : "Team members"}
               headers={
                 ar
                   ? ["العضو", "الدور", "الوصول", "الحالة", "الإجراء"]
                   : ["Member", "Role", "Access", "Status", "Action"]
               }
-              rows={data.members.map((item) => [
-                <div className="dashboard-member" key="member">
-                  <Avatar name={item.user.displayName} />
-                  <span>
-                    <strong>{item.user.displayName}</strong>
-                    <small>
-                      {item.user.email ?? (ar ? "دخول QR من دون بريد" : "QR sign-in · no email")}
-                    </small>
-                  </span>
-                </div>,
-                <Badge key="role" tone={item.role === "OWNER" ? "brand" : "neutral"}>
-                  {item.role}
-                </Badge>,
-                <div className="dashboard-access-state" key="access">
-                  <Badge tone={item.accessType === "QR" ? "brand" : "neutral"}>
-                    {item.accessType === "QR" ? "QR" : ar ? "حساب" : "Account"}
-                  </Badge>
-                  {devices.some(
-                    (device) => device.staff?.id === item.id && device.status === "ACTIVE",
-                  ) ? (
-                    <small>{ar ? "جهاز مرتبط" : "Device paired"}</small>
-                  ) : item.accessType === "QR" ? (
-                    <small>{ar ? "بانتظار الربط" : "Awaiting pairing"}</small>
-                  ) : null}
-                </div>,
-                <StatusBadge
-                  key="status"
-                  status={item.status === "ACTIVE" ? "active" : "suspended"}
-                  label={item.status}
-                />,
-                item.role === "OWNER" ? (
-                  <span key="protected">{ar ? "مالك محمي" : "Protected Owner"}</span>
-                ) : membership.role === "OWNER" ? (
-                  <div className="dashboard-actions" key="actions">
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setPairing(null);
-                        setPairingMemberId(item.id);
-                      }}
-                    >
-                      <QrCode size={16} />
-                      {ar ? "رمز الدخول" : "Sign-in QR"}
-                    </Button>
-                    <Select
-                      aria-label={
-                        ar ? `دور ${item.user.displayName}` : `Role for ${item.user.displayName}`
-                      }
-                      value={item.role}
-                      onChange={(event) =>
-                        void updateRole(item.id, event.currentTarget.value as "MANAGER" | "STAFF")
-                      }
-                    >
-                      <option value="STAFF">{ar ? "موظف" : "Staff"}</option>
-                      <option value="MANAGER">{ar ? "مدير" : "Manager"}</option>
-                    </Select>
-                    <Button variant="ghost" onClick={() => void removeMember(item.id)}>
-                      {ar ? "إزالة" : "Remove"}
-                    </Button>
-                  </div>
-                ) : membership.role === "MANAGER" && item.role === "STAFF" ? (
-                  <div className="dashboard-actions" key="manager-actions">
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setPairing(null);
-                        setPairingMemberId(item.id);
-                      }}
-                    >
-                      <QrCode size={16} />
-                      {ar ? "رمز الدخول" : "Sign-in QR"}
-                    </Button>
-                    <Button variant="ghost" onClick={() => void removeMember(item.id)}>
-                      {ar ? "إزالة" : "Remove"}
-                    </Button>
-                  </div>
-                ) : (
-                  "—"
-                ),
-              ])}
+              rows={data.members.map((item) => {
+                const roleLabel =
+                  item.role === "OWNER"
+                    ? ar
+                      ? "مالك"
+                      : "Owner"
+                    : item.role === "MANAGER"
+                      ? ar
+                        ? "مدير"
+                        : "Manager"
+                      : ar
+                        ? "موظف"
+                        : "Staff";
+                const phonePaired = devices.some(
+                  (device) => device.staff?.id === item.id && device.status === "ACTIVE",
+                );
+                const accessLabel = phonePaired
+                  ? ar
+                    ? "هاتف مرتبط"
+                    : "Phone paired"
+                  : item.accessType === "QR"
+                    ? ar
+                      ? "بانتظار الربط"
+                      : "Not paired"
+                    : ar
+                      ? "حساب Waflo"
+                      : "Waflo account";
+                const canEditMember =
+                  item.role !== "OWNER" &&
+                  (membership.role === "OWNER" ||
+                    (membership.role === "MANAGER" && item.role === "STAFF"));
+                const needsPairing = item.accessType === "QR" && !phonePaired;
+                const openPairing = () => {
+                  setPairing(null);
+                  setPairingMemberId(item.id);
+                };
+                return [
+                  <div className="dashboard-member" key="member">
+                    <Avatar name={item.user.displayName} />
+                    <span>
+                      <strong>{item.user.displayName}</strong>
+                      <small>
+                        {item.user.email ?? (ar ? "دخول QR من دون بريد" : "QR sign-in · no email")}
+                      </small>
+                      <small className="dashboard-member__mobile-meta">
+                        {roleLabel} · {accessLabel} ·{" "}
+                        {item.status === "ACTIVE"
+                          ? ar
+                            ? "نشط"
+                            : "Active"
+                          : ar
+                            ? "موقوف"
+                            : "Suspended"}
+                      </small>
+                    </span>
+                  </div>,
+                  <span key="role">{roleLabel}</span>,
+                  <div className="dashboard-access-state" key="access">
+                    <span>{accessLabel}</span>
+                  </div>,
+                  <StatusBadge
+                    key="status"
+                    status={item.status === "ACTIVE" ? "active" : "suspended"}
+                    label={
+                      item.status === "ACTIVE"
+                        ? ar
+                          ? "نشط"
+                          : "Active"
+                        : ar
+                          ? "موقوف"
+                          : "Suspended"
+                    }
+                  />,
+                  item.role === "OWNER" ? (
+                    <span key="protected">{ar ? "مالك محمي" : "Protected Owner"}</span>
+                  ) : canEditMember ? (
+                    <div className="dashboard-team-actions" key="actions">
+                      {needsPairing ? (
+                        <Button variant="secondary" onClick={openPairing}>
+                          <QrCode size={16} />
+                          {ar ? "ربط الهاتف" : "Pair phone"}
+                        </Button>
+                      ) : null}
+                      <DropdownMenu
+                        label={
+                          <span className="dashboard-team-menu-trigger">
+                            <MoreHorizontal size={18} aria-hidden="true" />
+                            <span className="dashboard-team-menu-label">
+                              {ar ? "المزيد" : "More"}
+                            </span>
+                            <span className="wf-sr-only">: {item.user.displayName}</span>
+                          </span>
+                        }
+                      >
+                        {!needsPairing && item.accessType === "QR" ? (
+                          <button type="button" onClick={openPairing}>
+                            <QrCode size={16} aria-hidden="true" />
+                            {ar ? "ربط هاتف آخر" : "Pair another phone"}
+                          </button>
+                        ) : null}
+                        {membership.role === "OWNER" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void updateRole(
+                                item.id,
+                                item.role === "MANAGER" ? "STAFF" : "MANAGER",
+                              )
+                            }
+                          >
+                            {item.role === "MANAGER"
+                              ? ar
+                                ? "تغيير الدور إلى موظف"
+                                : "Change role to Staff"
+                              : ar
+                                ? "تغيير الدور إلى مدير"
+                                : "Change role to Manager"}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="dashboard-team-menu-danger"
+                          onClick={() => void removeMember(item.id)}
+                        >
+                          {ar ? "إزالة العضو" : "Remove member"}
+                        </button>
+                      </DropdownMenu>
+                    </div>
+                  ) : (
+                    "—"
+                  ),
+                ];
+              })}
             />
-          </Card>
-          <Card className="dashboard-card dashboard-card--full">
-            <h2>{ar ? "الدعوات القديمة المعلقة" : "Legacy pending invitations"}</h2>
-            {data.invitations.length ? (
+          </section>
+          {data.invitations.length ? (
+            <details className="dashboard-disclosure">
+              <summary>
+                {ar ? "دعوات قديمة معلقة" : "Legacy pending invitations"}{" "}
+                <span>{data.invitations.length}</span>
+              </summary>
               <Table
                 caption={ar ? "الدعوات المعلقة" : "Pending invitations"}
                 headers={
@@ -910,20 +1058,16 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
                 rows={data.invitations.map((item) => [
                   item.email,
                   item.intendedRole,
-                  new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", { dateStyle: "medium" }).format(
-                    new Date(item.expiresAt),
-                  ),
+                  new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
+                    dateStyle: "medium",
+                  }).format(new Date(item.expiresAt)),
                   <Button key="cancel" variant="ghost" onClick={() => void cancel(item.id)}>
                     {ar ? "إلغاء" : "Cancel"}
                   </Button>,
                 ])}
               />
-            ) : (
-              <p style={{ color: "var(--waflo-muted)" }}>
-                {ar ? "لا توجد دعوات معلقة." : "No pending invitations."}
-              </p>
-            )}
-          </Card>
+            </details>
+          ) : null}
         </div>
       ) : (
         <Skeleton height="18rem" />
@@ -938,18 +1082,23 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
             <TextInput name="name" minLength={2} maxLength={100} required autoFocus />
           </FormField>
           <FormField label={ar ? "الدور" : "Role"} required>
-            <Select name="role" defaultValue="STAFF">
-              <option value="STAFF">{ar ? "موظف" : "Staff"}</option>
-              {membership.role === "OWNER" ? (
-                <option value="MANAGER">{ar ? "مدير" : "Manager"}</option>
-              ) : null}
-            </Select>
+            <SearchableSelect
+              name="role"
+              defaultValue="STAFF"
+              options={[
+                { value: "STAFF", label: ar ? "موظف" : "Staff" },
+                ...(membership.role === "OWNER"
+                  ? [{ value: "MANAGER", label: ar ? "مدير" : "Manager" }]
+                  : []),
+              ]}
+              required
+            />
           </FormField>
-          <Alert tone="info" title={ar ? "لا حاجة إلى بريد إلكتروني" : "No email required"}>
+          <p className="dashboard-form__hint">
             {ar
-              ? "بعد إنشاء الموظف، أنشئ رمز QR من صفه لربط تطبيق الهاتف."
-              : "After creation, generate a QR from the staff row to pair the mobile app."}
-          </Alert>
+              ? "لا يحتاج الموظف إلى بريد إلكتروني. اربط هاتفه برمز QR بعد الإنشاء."
+              : "No email is needed. Pair the staff phone with a QR after creation."}
+          </p>
           <div className="dashboard-actions">
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               {ar ? "إلغاء" : "Cancel"}
@@ -977,7 +1126,7 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
             </Alert>
             <div className="dashboard-pairing-qr">
               <Image
-                src={pairing.pairingQrSvg}
+                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairing.pairingQrSvg)}`}
                 width={280}
                 height={280}
                 unoptimized
@@ -988,7 +1137,7 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
               <strong>{pairing.staffDisplayName}</strong>
               <span>
                 {ar ? "ينتهي" : "Expires"}{" "}
-                {new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", {
+                {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
                   dateStyle: "medium",
                   timeStyle: "short",
                 }).format(new Date(pairing.expiresAt))}
@@ -1009,13 +1158,16 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
                 : "Choose a location for this staff member before generating the code."}
             </p>
             <FormField label={ar ? "الموقع" : "Location"} required>
-              <Select name="locationId" required defaultValue={locations[0]?.id ?? ""}>
-                {locations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name}
-                  </option>
-                ))}
-              </Select>
+              <SearchableSelect
+                name="locationId"
+                required
+                defaultValue={locations[0]?.id ?? ""}
+                options={locations.map((location) => ({
+                  value: location.id,
+                  label: location.name,
+                }))}
+                placeholder={ar ? "اختر موقعاً" : "Choose a location"}
+              />
             </FormField>
             <Alert
               tone="warning"
@@ -1152,6 +1304,77 @@ interface BillingView {
   }>;
 }
 
+interface PaymentMethodSetup {
+  clientSecret: string;
+  setupIntentId: string;
+  publishableKey: string;
+}
+
+function PaymentMethodReplacementForm({
+  locale,
+  organizationId,
+  commandId,
+  onSaved,
+}: {
+  locale: Locale;
+  organizationId: string;
+  commandId: string;
+  onSaved: () => Promise<void>;
+}) {
+  const ar = locale === "ar";
+  const stripe = useStripe();
+  const elements = useElements();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stripe || !elements) return;
+    setSaving(true);
+    setError("");
+    const result = await stripe.confirmSetup({
+      elements,
+      confirmParams: {
+        return_url: `${window.location.origin}/${locale}/dashboard/billing`,
+      },
+      redirect: "if_required",
+    });
+    if (result.error || result.setupIntent?.status !== "succeeded") {
+      setError(
+        result.error?.message ??
+          (ar ? "أكمل التحقق من البطاقة للمتابعة." : "Complete card verification to continue."),
+      );
+      setSaving(false);
+      return;
+    }
+    try {
+      await apiFetch(`/v1/organizations/${organizationId}/billing/payment-method/complete`, {
+        method: "POST",
+        headers: { "x-idempotency-key": commandId },
+        body: JSON.stringify({ setupIntentId: result.setupIntent.id }),
+      });
+      await onSaved();
+    } catch (caught) {
+      setError(message(caught, ar ? "تعذر حفظ البطاقة." : "Unable to save the card."));
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <form className="dashboard-form billing-payment-element" onSubmit={submit}>
+      {error ? <Alert tone="danger" title={error} /> : null}
+      <p className="dashboard-form__hint">
+        {ar
+          ? "تتم معالجة بيانات البطاقة بأمان بواسطة Stripe. لا تحفظ Waflo رقم البطاقة أو رمز CVC."
+          : "Stripe securely handles the card details. Waflo never stores the card number or CVC."}
+      </p>
+      <PaymentElement options={{ layout: "tabs" }} />
+      <Button type="submit" loading={saving} disabled={!stripe || !elements}>
+        {ar ? "حفظ طريقة الدفع" : "Save payment method"}
+      </Button>
+    </form>
+  );
+}
+
 export function BillingScreen({
   locale,
   membership,
@@ -1160,19 +1383,29 @@ export function BillingScreen({
   membership: MembershipView;
 }) {
   const ar = locale === "ar";
+  const cadenceLabel = (value: BillingCadence) =>
+    ar
+      ? value === "monthly"
+        ? "شهري"
+        : value === "quarterly"
+          ? "كل 3 أشهر"
+          : "سنوي"
+      : billingCadenceCatalog[value].label;
   const [data, setData] = useState<BillingView | null>(null);
   const [cadence, setCadence] = useState<BillingCadence>("monthly");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<PlanCode | null>(null);
-  const [stripeActionInFlight, setStripeActionInFlight] = useState<"checkout" | "portal" | null>(
-    null,
-  );
-  const stripeActionInFlightRef = useRef<"checkout" | "portal" | null>(null);
-  const [checkoutCommandId, setCheckoutCommandId] = useState<string | null>(null);
+  const [paymentSetup, setPaymentSetup] = useState<PaymentMethodSetup | null>(null);
+  const [paymentCommandId, setPaymentCommandId] = useState("");
+  const [paymentSetupLoading, setPaymentSetupLoading] = useState(false);
   const [identitySaving, setIdentitySaving] = useState(false);
   const [refundInvoiceId, setRefundInvoiceId] = useState<string | null>(null);
   const [refundSaving, setRefundSaving] = useState(false);
   const selectedRefundInvoice = data?.invoices.find((invoice) => invoice.id === refundInvoiceId);
+  const paymentStripe = useMemo(
+    () => (paymentSetup ? loadStripe(paymentSetup.publishableKey) : null),
+    [paymentSetup],
+  );
   const billingCountries = useMemo(
     () =>
       countryOptions(locale).map((country) => ({
@@ -1184,7 +1417,7 @@ export function BillingScreen({
   const formatBillingDate = useCallback(
     (value: string | null) =>
       value
-        ? new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", {
+        ? new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
             dateStyle: "medium",
             timeStyle: "short",
             timeZone: data?.billingIdentity.timezone ?? "UTC",
@@ -1200,7 +1433,7 @@ export function BillingScreen({
         ? ar
           ? "غير متوفر"
           : "Not available"
-        : new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {
+        : new Intl.NumberFormat("en-US", {
             style: "currency",
             currency,
           }).format(amount / 100),
@@ -1217,6 +1450,39 @@ export function BillingScreen({
         OTHER: { en: "Other", ar: "سبب آخر" },
       };
       return labels[normalized]?.[ar ? "ar" : "en"] ?? reason;
+    },
+    [ar],
+  );
+  const formatBillingStatus = useCallback(
+    (status: string) => {
+      const normalized = status.toLocaleUpperCase("en-US");
+      const labels: Record<string, { en: string; ar: string }> = {
+        ACTIVE: { en: "Active", ar: "نشط" },
+        TRIALING: { en: "Free trial", ar: "تجربة مجانية" },
+        PAST_DUE: { en: "Past due", ar: "متأخر" },
+        GRACE_PERIOD: { en: "Payment recovery", ar: "مهلة استرداد الدفع" },
+        SUSPENDED: { en: "Access restricted", ar: "الوصول مقيّد" },
+        PENDING_ACTIVATION: { en: "Setup needed", ar: "يحتاج إلى إكمال" },
+        CANCELED: { en: "Canceled", ar: "ملغى" },
+        PAID: { en: "Paid", ar: "مدفوعة" },
+        OPEN: { en: "Open", ar: "مفتوحة" },
+        DRAFT: { en: "Draft", ar: "مسودة" },
+        VOID: { en: "Canceled", ar: "ملغاة" },
+        UNCOLLECTIBLE: { en: "Payment failed", ar: "تعذر الدفع" },
+        REQUESTED: { en: "Requested", ar: "تم الطلب" },
+        APPROVED: { en: "Reviewing", ar: "قيد المراجعة" },
+        PROCESSING: { en: "Processing", ar: "قيد المعالجة" },
+        SUCCEEDED: { en: "Refunded", ar: "تم الاسترداد" },
+        REJECTED: { en: "Rejected", ar: "مرفوض" },
+        FAILED: { en: "Failed", ar: "متعذر" },
+      };
+      return (
+        labels[normalized]?.[ar ? "ar" : "en"] ??
+        normalized
+          .toLocaleLowerCase("en-US")
+          .replaceAll("_", " ")
+          .replace(/^./u, (character) => character.toLocaleUpperCase("en-US"))
+      );
     },
     [ar],
   );
@@ -1280,42 +1546,27 @@ export function BillingScreen({
     setCadence(nextCadence);
     if (data) await select(data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode, nextCadence);
   }
-  async function stripeAction(kind: "checkout" | "portal") {
-    if (stripeActionInFlightRef.current) return;
-    const commandId =
-      kind === "checkout" ? (checkoutCommandId ?? globalThis.crypto.randomUUID()) : null;
-    if (kind === "checkout" && !checkoutCommandId) setCheckoutCommandId(commandId);
-    stripeActionInFlightRef.current = kind;
-    setStripeActionInFlight(kind);
+  async function replacePaymentMethod() {
+    if (paymentSetupLoading) return;
+    const commandId = globalThis.crypto.randomUUID();
+    setPaymentSetupLoading(true);
+    setError("");
     try {
-      const result = await apiFetch<{ url: string | null; sessionId?: string | null }>(
-        `/v1/organizations/${membership.organization.id}/billing/${kind}`,
+      const result = await apiFetch<PaymentMethodSetup>(
+        `/v1/organizations/${membership.organization.id}/billing/payment-method/setup`,
         {
           method: "POST",
-          ...(commandId ? { headers: { "x-idempotency-key": commandId } } : {}),
-          ...(kind === "checkout" ? { body: JSON.stringify({ cadence }) } : {}),
+          headers: { "x-idempotency-key": commandId },
         },
       );
-      if (result.url) {
-        if (kind === "checkout") setCheckoutCommandId(null);
-        window.location.assign(result.url);
-      }
+      setPaymentCommandId(commandId);
+      setPaymentSetup(result);
     } catch (caught) {
-      if (
-        kind === "checkout" &&
-        caught instanceof ApiClientError &&
-        [
-          "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
-          "CHECKOUT_IDEMPOTENCY_KEY_REQUIRED",
-          "CHECKOUT_IDEMPOTENCY_KEY_CONFLICT",
-        ].includes(caught.code)
-      ) {
-        setCheckoutCommandId(null);
-      }
-      setError(message(caught, ar ? "تعذر فتح Stripe." : "Unable to open Stripe."));
+      setError(
+        message(caught, ar ? "تعذر فتح نموذج البطاقة الآمن." : "Unable to open secure card setup."),
+      );
     } finally {
-      stripeActionInFlightRef.current = null;
-      setStripeActionInFlight(null);
+      setPaymentSetupLoading(false);
     }
   }
   async function reconcile() {
@@ -1326,7 +1577,7 @@ export function BillingScreen({
       });
       await load();
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر تحديث حالة Stripe." : "Unable to refresh Stripe state."));
+      setError(message(caught, ar ? "تعذر تحديث بيانات الفوترة." : "Unable to refresh billing."));
     }
   }
   async function saveBillingIdentity(event: FormEvent<HTMLFormElement>) {
@@ -1390,12 +1641,11 @@ export function BillingScreen({
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "الاشتراك" : "Subscription"}
-        title={ar ? "الفوترة والخطط" : "Billing and plans"}
+        title={ar ? "الفوترة والدفع" : "Billing"}
         description={
           ar
-            ? "الخطة المختارة مستقلة عن حالة الاشتراك والدفع والتجربة."
-            : "Your selected plan is distinct from payment, subscription, and trial status."
+            ? "أدر باقتك وطريقة الدفع والفواتير."
+            : "Manage your plan, payment method, and invoices."
         }
       />
       {error ? <Alert tone="danger" title={error} /> : null}
@@ -1407,65 +1657,114 @@ export function BillingScreen({
       ) : null}
       {data ? (
         <>
-          <div className="dashboard-status-band dashboard-status-band--billing">
-            <div>
-              <span>{ar ? "إعداد الفوترة" : "Billing setup"}</span>
-              <strong>
-                {data.paymentMethod.status === "saved"
-                  ? ar
-                    ? "طريقة دفع محفوظة"
-                    : "Payment method saved"
-                  : ar
-                    ? "لا توجد بطاقة محفوظة"
-                    : "No saved card yet"}
-              </strong>
+          <div className="billing-summary-grid">
+            <div className="billing-summary-card">
+              <span className="dashboard-card__label">
+                {ar ? "خطة الاشتراك" : "SUBSCRIPTION PLAN"}
+              </span>
+              <dl className="dashboard-metric-grid dashboard-metric-grid--open dashboard-metric-grid--billing-group">
+                <div>
+                  <dt>{ar ? "الباقة الحالية" : "Current plan"}</dt>
+                  <dd>
+                    <bdi dir="ltr">
+                      {data.selectedPlan.charAt(0) +
+                        data.selectedPlan.slice(1).toLocaleLowerCase("en-US")}
+                    </bdi>
+                  </dd>
+                  <dd className="dashboard-metric-detail">
+                    <small>{cadenceLabel(data.selectedCadence)}</small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>{ar ? "حالة الخطة" : "Plan status"}</dt>
+                  <dd>{formatBillingStatus(data.authoritativeState.subscriptionStatus)}</dd>
+                  <dd className="dashboard-metric-detail">
+                    <small>
+                      {data.authoritativeState.subscriptionStatus === "TRIALING"
+                        ? `${ar ? "تنتهي" : "Ends"} ${formatBillingDate(data.authoritativeState.trialEnd)}`
+                        : data.subscriptions[0]?.cancelAtPeriodEnd
+                          ? ar
+                            ? "سيُلغى في نهاية المدة"
+                            : "Cancels at period end"
+                          : data.subscriptions[0]?.currentPeriodEnd
+                            ? `${ar ? "التجديد" : "Renews"} ${formatBillingDate(data.subscriptions[0].currentPeriodEnd)}`
+                            : ar
+                              ? "خطة نشطة لمساحة العمل"
+                              : "Active workspace plan"}
+                    </small>
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <Badge
-              tone={data.authoritativeState.subscriptionStatus === "ACTIVE" ? "success" : "neutral"}
-            >
-              {data.authoritativeState.subscriptionStatus}
-            </Badge>
+            <div className="billing-summary-card">
+              <span className="dashboard-card__label">
+                {ar ? "إعدادات الدفع" : "PAYMENT METHOD & SCHEDULE"}
+              </span>
+              <dl className="dashboard-metric-grid dashboard-metric-grid--open dashboard-metric-grid--billing-group">
+                <div>
+                  <dt>{ar ? "الدفعة القادمة" : "Next payment"}</dt>
+                  <dd>
+                    <bdi dir="ltr">
+                      {formatMoney(
+                        data.authoritativeState.nextExpectedAmount,
+                        data.authoritativeState.currency,
+                      )}
+                    </bdi>
+                  </dd>
+                  <dd className="dashboard-metric-detail">
+                    <small>
+                      {data.authoritativeState.nextExpectedChargeDate
+                        ? formatBillingDate(data.authoritativeState.nextExpectedChargeDate)
+                        : data.paymentMethod.status === "saved"
+                          ? ar
+                            ? "مجدولة تلقائياً"
+                            : "Auto-scheduled"
+                          : ar
+                            ? "بانتظار وسيلة دفع"
+                            : "Awaiting payment method"}
+                    </small>
+                  </dd>
+                </div>
+                <div className="dashboard-payment-card">
+                  <dt>{ar ? "طريقة الدفع" : "Payment method"}</dt>
+                  {data.paymentMethod.status === "saved" ? (
+                    <>
+                      <dd className="dashboard-payment-card__brand" dir="ltr">
+                        <CreditCard size={20} />
+                        {data.paymentMethod.brand.toLocaleUpperCase("en-US")} ••••{" "}
+                        {data.paymentMethod.last4}
+                      </dd>
+                      <dd className="dashboard-metric-detail">
+                        <small>
+                          {ar ? "تنتهي" : "Expires"}{" "}
+                          {String(data.paymentMethod.expMonth).padStart(2, "0")}/
+                          {data.paymentMethod.expYear}
+                        </small>
+                      </dd>
+                    </>
+                  ) : data.paymentMethod.status === "unavailable" ? (
+                    <>
+                      <dd>{ar ? "تعذر تحميلها" : "Unavailable"}</dd>
+                      <dd className="dashboard-metric-detail">
+                        <small>
+                          {ar ? "حدّث الفوترة للمحاولة مرة أخرى" : "Refresh billing to try again"}
+                        </small>
+                      </dd>
+                    </>
+                  ) : (
+                    <>
+                      <dd>{ar ? "غير مضافة" : "Not added"}</dd>
+                      <dd className="dashboard-metric-detail">
+                        <small>
+                          {ar ? "أضف بطاقة لإكمال الإعداد" : "Add a card to complete setup"}
+                        </small>
+                      </dd>
+                    </>
+                  )}
+                </div>
+              </dl>
+            </div>
           </div>
-          <section
-            className="billing-charge-rail"
-            aria-label={ar ? "ملخص دورة الفوترة" : "Billing cycle summary"}
-          >
-            <div className="billing-charge-rail__step">
-              <span>01</span>
-              <small>{ar ? "الخطة" : "Plan"}</small>
-              <strong>{data.selectedPlan}</strong>
-              <p>{billingCadenceCatalog[data.selectedCadence].label}</p>
-            </div>
-            <div className="billing-charge-rail__step billing-charge-rail__step--charge">
-              <span>02</span>
-              <small>{ar ? "الدفعة القادمة" : "Next charge"}</small>
-              <strong>
-                {formatMoney(
-                  data.authoritativeState.nextExpectedAmount,
-                  data.authoritativeState.currency,
-                )}
-              </strong>
-              <p>{formatBillingDate(data.authoritativeState.nextExpectedChargeDate)}</p>
-            </div>
-            <div className="billing-charge-rail__step">
-              <span>03</span>
-              <small>{ar ? "البطاقة التي ستُخصم" : "Card to charge"}</small>
-              <strong dir="ltr">
-                {data.paymentMethod.status === "saved"
-                  ? `${data.paymentMethod.brand.toLocaleUpperCase("en-US")} •••• ${data.paymentMethod.last4}`
-                  : ar
-                    ? "تحتاج طريقة دفع"
-                    : "Payment method needed"}
-              </strong>
-              <p>
-                {data.paymentMethod.status === "saved"
-                  ? `${ar ? "تنتهي" : "Expires"} ${String(data.paymentMethod.expMonth).padStart(2, "0")}/${data.paymentMethod.expYear}`
-                  : ar
-                    ? "أضف بطاقة بأمان عبر Stripe"
-                    : "Add a card securely in Stripe"}
-              </p>
-            </div>
-          </section>
           {data.authoritativeState.outstandingInvoice ? (
             <Alert tone="danger" title={ar ? "دفعة تحتاج إجراء" : "A payment needs attention"}>
               {ar ? "الفاتورة" : "Invoice"}{" "}
@@ -1483,85 +1782,7 @@ export function BillingScreen({
                 : "Update the payment method to retry this same invoice."}
             </Alert>
           ) : null}
-          <div className="dashboard-metric-grid dashboard-metric-grid--billing">
-            <Card className="dashboard-card dashboard-card--metric">
-              <span className="dashboard-card__label">
-                {ar ? "الخطة المختارة" : "SELECTED PLAN"}
-              </span>
-              <span className="dashboard-card__value">{data.selectedPlan}</span>
-              <small>{billingCadenceCatalog[data.selectedCadence].label}</small>
-            </Card>
-            <Card className="dashboard-card dashboard-card--metric">
-              <span className="dashboard-card__label">
-                {ar ? "اشتراك المزود" : "PROVIDER SUBSCRIPTION"}
-              </span>
-              <span className="dashboard-card__value">
-                {data.authoritativeState.subscriptionStatus}
-              </span>
-              <small>
-                {data.subscriptions[0]?.cancelAtPeriodEnd
-                  ? ar
-                    ? "سيُلغى في نهاية المدة"
-                    : "Cancels at period end"
-                  : data.subscriptions[0]?.currentPeriodEnd
-                    ? `${ar ? "التجديد" : "Renews"} ${new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", { dateStyle: "medium" }).format(new Date(data.subscriptions[0].currentPeriodEnd))}`
-                    : ar
-                      ? "بانتظار مزامنة Stripe"
-                      : "Awaiting Stripe sync"}
-              </small>
-            </Card>
-            <Card className="dashboard-card dashboard-card--metric">
-              <span className="dashboard-card__label">{ar ? "حالة التجربة" : "TRIAL"}</span>
-              <span className="dashboard-card__value">
-                {data.authoritativeState.trialStart
-                  ? ar
-                    ? "بدأت"
-                    : "Started"
-                  : ar
-                    ? "لم تبدأ"
-                    : "Not started"}
-              </span>
-              <small>
-                {data.authoritativeState.trialEnd
-                  ? `${ar ? "تنتهي" : "Ends"} ${new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", { dateStyle: "medium" }).format(new Date(data.authoritativeState.trialEnd))}`
-                  : ar
-                    ? "تبدأ عند أول نشر"
-                    : "Starts at first publication"}
-              </small>
-            </Card>
-            <Card className="dashboard-card dashboard-card--metric dashboard-payment-card">
-              <span className="dashboard-card__label">{ar ? "طريقة الدفع" : "PAYMENT METHOD"}</span>
-              {data.paymentMethod.status === "saved" ? (
-                <>
-                  <span className="dashboard-payment-card__brand">
-                    <CreditCard size={20} />
-                    {data.paymentMethod.brand.toLocaleUpperCase("en-US")} ••••{" "}
-                    {data.paymentMethod.last4}
-                  </span>
-                  <small>
-                    {ar ? "تنتهي" : "Expires"}{" "}
-                    {String(data.paymentMethod.expMonth).padStart(2, "0")}/
-                    {data.paymentMethod.expYear}
-                    {data.paymentMethod.isDefault ? (ar ? " · الافتراضية" : " · Default") : ""}
-                  </small>
-                </>
-              ) : (
-                <>
-                  <span className="dashboard-card__value">{ar ? "غير محفوظة" : "Not saved"}</span>
-                  <small>
-                    {data.paymentMethod.status === "unavailable"
-                      ? ar
-                        ? "تعذر التحقق من Stripe الآن"
-                        : "Stripe could not be checked right now"
-                      : ar
-                        ? "أضف بطاقة آمنة عبر Stripe"
-                        : "Add one securely through Stripe"}
-                  </small>
-                </>
-              )}
-            </Card>
-          </div>
-          <Card className="dashboard-card dashboard-card--full billing-cadence-card">
+          <section className="billing-cadence-card">
             <div className="dashboard-section-heading">
               <div>
                 <span className="dashboard-card__label">
@@ -1569,15 +1790,21 @@ export function BillingScreen({
                 </span>
                 <h2>{ar ? "اختر موعد الفوترة" : "Choose when you are billed"}</h2>
               </div>
-              <Badge tone="brand">{billingCadenceCatalog[cadence].label}</Badge>
+              <Badge tone="brand">{cadenceLabel(cadence)}</Badge>
             </div>
-            <div className="billing-cadence-options" role="radiogroup" aria-label="Billing cadence">
+            <div
+              className="billing-cadence-options"
+              role="radiogroup"
+              aria-label={ar ? "دورة الفوترة" : "Billing cadence"}
+            >
               {(["monthly", "quarterly", "yearly"] as const).map((option) => {
                 const pricing = cadencePrice(
                   data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
                   option,
                 );
                 const definition = billingCadenceCatalog[option];
+                const savings = pricing.undiscountedAmountUsd - pricing.billedAmountUsd;
+                const discountLabel = option === "quarterly" ? "8.33%" : "16.67%";
                 return (
                   <label
                     className={`billing-cadence-option ${cadence === option ? "billing-cadence-option--selected" : ""}`}
@@ -1592,23 +1819,39 @@ export function BillingScreen({
                       onChange={() => void chooseCadence(option)}
                     />
                     <span>
-                      <strong>{definition.label}</strong>
+                      <strong>{cadenceLabel(option)}</strong>
                       {definition.discountRate ? (
                         <Badge tone="success">
-                          {Math.round(definition.discountRate * 100)}% off
+                          {option === "yearly"
+                            ? ar
+                              ? "شهران مجاناً"
+                              : "2 months free"
+                            : discountLabel}
                         </Badge>
                       ) : null}
                     </span>
-                    <b>${pricing.billedAmountUsd.toFixed(2)}</b>
+                    <b>
+                      <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi>
+                    </b>
                     <small>
-                      {option === "monthly"
-                        ? ar
-                          ? "شهرياً"
-                          : "billed monthly"
-                        : `$${pricing.monthlyEquivalentUsd.toFixed(2)}/${ar ? "شهر" : "mo"} · ${ar ? "دفعة واحدة" : "one charge"}`}
+                      {option === "monthly" ? (
+                        ar ? (
+                          "إجمالي الدفعة · دون خصم"
+                        ) : (
+                          "Total charge · no discount"
+                        )
+                      ) : (
+                        <>
+                          <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>/
+                          {ar ? "شهر" : "mo"}
+                          {" · "}
+                          {ar ? "وفّر" : "Save"} <bdi dir="ltr">${savings.toFixed(2)}</bdi> (
+                          {discountLabel})
+                        </>
+                      )}
                     </small>
                     {!data.cadenceAvailability[option] ? (
-                      <em>{ar ? "يتطلب سعر Stripe" : "Stripe price required"}</em>
+                      <em>{ar ? "غير متاح حالياً" : "Currently unavailable"}</em>
                     ) : cadence === option ? (
                       <CheckCircle2 size={18} />
                     ) : null}
@@ -1616,65 +1859,75 @@ export function BillingScreen({
                 );
               })}
             </div>
-          </Card>
+          </section>
           {!data.stripeConfigured ? (
             <Alert
               tone="warning"
-              title={ar ? "يلزم إعداد Stripe التجريبي" : "Stripe test configuration required"}
+              title={ar ? "إعداد الدفع غير مكتمل" : "Billing configuration is incomplete"}
             >
               {ar
-                ? "يمكنك تغيير الخطة المختارة، لكن لن ندّعي نجاح الدفع من دون مفاتيح اختبار صالحة."
-                : "You can change the selected setup plan, but Waflo will not simulate payment without valid test credentials."}
+                ? "لا يمكن بدء اشتراك جديد الآن. حاول مرة أخرى أو تواصل مع دعم Waflo."
+                : "A new subscription cannot be started right now. Try again or contact Waflo support."}
             </Alert>
           ) : null}
-          <div
-            className="dashboard-section-grid dashboard-section-grid--plans"
-            style={{ marginTop: "1rem" }}
-          >
-            {(["starter", "growth", "scale"] as const).map((plan) => (
-              <PlanCard
-                key={plan}
-                plan={plan}
-                selected={data.selectedPlan.toLocaleLowerCase("en-US") === plan}
-                locale={locale}
-                cadence={cadence}
-                onSelect={(value) => void select(value)}
-              />
-            ))}
-          </div>
+          <section className="billing-plan-comparison">
+            <div className="dashboard-section-heading">
+              <div>
+                <span className="dashboard-card__label">{ar ? "الباقات" : "PLANS"}</span>
+                <h2>{ar ? "قارن الباقات" : "Compare plans"}</h2>
+              </div>
+            </div>
+            <div className="dashboard-section-grid dashboard-section-grid--plans">
+              {(["starter", "growth", "scale"] as const).map((plan) => (
+                <PlanCard
+                  key={plan}
+                  plan={plan}
+                  selected={data.selectedPlan.toLocaleLowerCase("en-US") === plan}
+                  locale={locale}
+                  cadence={cadence}
+                  {...(data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION"
+                    ? { onSelect: (value: PlanCode) => void select(value) }
+                    : {})}
+                />
+              ))}
+            </div>
+          </section>
           <div className="dashboard-actions" style={{ marginTop: "1.5rem" }}>
-            <Button
-              onClick={() => void stripeAction("checkout")}
-              loading={stripeActionInFlight === "checkout"}
-              disabled={!data.stripeConfigured || stripeActionInFlight !== null}
-            >
-              {ar ? "الاشتراك عبر Stripe" : "Continue to Stripe Checkout"}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => void stripeAction("portal")}
-              loading={stripeActionInFlight === "portal"}
-              disabled={
-                !data.stripeConfigured ||
-                !data.customerPortalAvailable ||
-                stripeActionInFlight !== null
-              }
-            >
-              {ar ? "فتح بوابة العميل" : "Open Customer Portal"}
-            </Button>
-            <Button variant="ghost" onClick={() => void reconcile()}>
+            {data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION" ? (
+              <Link
+                className="wf-button wf-button--primary"
+                href={`/${locale}/onboarding/business?organization=${membership.organization.id}`}
+              >
+                {ar ? "إكمال إعداد التجربة" : "Complete trial setup"}
+              </Link>
+            ) : (
+              <Button
+                onClick={() => void replacePaymentMethod()}
+                loading={paymentSetupLoading}
+                disabled={!data.stripeConfigured}
+              >
+                {data.paymentMethod.status === "saved"
+                  ? ar
+                    ? "تغيير طريقة الدفع"
+                    : "Change payment method"
+                  : ar
+                    ? "إضافة طريقة الدفع"
+                    : "Add payment method"}
+              </Button>
+            )}
+            <Button variant="tertiary" onClick={() => void reconcile()}>
               <RefreshCcw size={16} />
-              {ar ? "تحديث حالة Stripe" : "Refresh Stripe state"}
+              {ar ? "تحديث الفوترة" : "Refresh billing"}
             </Button>
           </div>
-          <div className="billing-detail-grid">
-            <Card className="dashboard-card billing-identity-card">
+          <div className="billing-detail-grid billing-detail-grid--single">
+            <section className="billing-identity-card">
               <div className="dashboard-section-heading">
                 <div>
                   <span className="dashboard-card__label">
                     {ar ? "هوية العميل" : "BILLING IDENTITY"}
                   </span>
-                  <h2>{ar ? "بيانات تظهر في Stripe" : "Customer details sent to Stripe"}</h2>
+                  <h2>{ar ? "بيانات الفوترة" : "Billing details"}</h2>
                 </div>
                 <Badge tone={data.billingIdentity.syncedAt ? "success" : "neutral"}>
                   {data.billingIdentity.syncedAt
@@ -1749,36 +2002,15 @@ export function BillingScreen({
                   {ar ? "حفظ هوية الفوترة" : "Save billing identity"}
                 </Button>
               </form>
-            </Card>
-            <Card className="dashboard-card billing-latest-card">
-              <span className="dashboard-card__label">{ar ? "آخر دفعة" : "LATEST PAYMENT"}</span>
-              <strong>
-                {data.authoritativeState.latestPaymentStatus ??
-                  (ar ? "لا توجد دفعة" : "No payment yet")}
-              </strong>
-              <dl>
-                <div>
-                  <dt>{ar ? "التجديد" : "Renewal"}</dt>
-                  <dd>{formatBillingDate(data.authoritativeState.renewalDate)}</dd>
-                </div>
-                <div>
-                  <dt>{ar ? "الحالة" : "Subscription"}</dt>
-                  <dd>{data.authoritativeState.subscriptionStatus}</dd>
-                </div>
-                <div>
-                  <dt>{ar ? "العملة" : "Currency"}</dt>
-                  <dd>{data.authoritativeState.currency ?? "—"}</dd>
-                </div>
-              </dl>
-            </Card>
+            </section>
           </div>
-          <Card className="dashboard-card dashboard-card--full billing-invoice-history">
+          <section className="billing-invoice-history">
             <div className="dashboard-section-heading">
               <div>
                 <span className="dashboard-card__label">
                   {ar ? "السجل المالي" : "INVOICE & RECEIPT HISTORY"}
                 </span>
-                <h2>{ar ? "فواتير Stripe الموثوقة" : "Authoritative Stripe invoices"}</h2>
+                <h2>{ar ? "الفواتير" : "Invoice history"}</h2>
               </div>
               <Badge tone="neutral">{data.invoices.length}</Badge>
             </div>
@@ -1792,7 +2024,6 @@ export function BillingScreen({
                         "التاريخ",
                         "المبلغ",
                         "الحالة",
-                        "حالة الدفع",
                         "طريقة الدفع",
                         "الاسترداد",
                         "المستند",
@@ -1802,7 +2033,6 @@ export function BillingScreen({
                         "Date",
                         "Amount",
                         "Status",
-                        "Payment",
                         "Payment method",
                         "Refund",
                         "Document",
@@ -1819,27 +2049,27 @@ export function BillingScreen({
                       </small>
                     ) : null}
                   </span>,
-                  <span key="amount" className="billing-mono">
+                  <span key="amount" className="billing-mono" dir="ltr">
                     {formatMoney(invoice.amountDue, invoice.currency)}
                   </span>,
-                  <Badge
-                    key="status"
-                    tone={
-                      invoice.status === "paid"
-                        ? "success"
-                        : invoice.amountRemaining > 0
-                          ? "warning"
-                          : "neutral"
-                    }
-                  >
-                    {invoice.status}
-                  </Badge>,
-                  <Badge
-                    key="payment-status"
-                    tone={invoice.paymentStatus === "paid" ? "success" : "warning"}
-                  >
-                    {invoice.paymentStatus}
-                  </Badge>,
+                  <div key="status" className="billing-status-cell">
+                    <Badge
+                      tone={
+                        invoice.status === "paid"
+                          ? "success"
+                          : invoice.amountRemaining > 0
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
+                      {formatBillingStatus(invoice.status)}
+                    </Badge>
+                    {invoice.paymentStatus && invoice.paymentStatus !== invoice.status ? (
+                      <small className="billing-sub-status">
+                        {formatBillingStatus(invoice.paymentStatus)}
+                      </small>
+                    ) : null}
+                  </div>,
                   <span key="method" className="billing-mono" dir="ltr">
                     {invoice.paymentMethod
                       ? `${invoice.paymentMethod.brand.toLocaleUpperCase("en-US")} •••• ${invoice.paymentMethod.last4}`
@@ -1858,7 +2088,7 @@ export function BillingScreen({
                                 : "warning"
                           }
                         >
-                          {invoice.refunds[0].status}
+                          {formatBillingStatus(invoice.refunds[0].status)}
                         </Badge>
                         <small>
                           {formatMoney(
@@ -1915,12 +2145,12 @@ export function BillingScreen({
                 title={ar ? "لا توجد فواتير بعد" : "No invoices yet"}
                 description={
                   ar
-                    ? "ستظهر فواتير Stripe وإيصالات الدفع هنا."
-                    : "Stripe invoices and paid receipt links will appear here."
+                    ? "ستظهر الفواتير والإيصالات هنا بعد بدء الاشتراك."
+                    : "Invoices and receipts will appear here after your subscription begins."
                 }
               />
             )}
-          </Card>
+          </section>
           <div className="billing-policy-link">
             <span>
               {ar
@@ -1928,7 +2158,7 @@ export function BillingScreen({
                 : "Cancellation, downgrade, and refund are different outcomes."}
             </span>
             <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "http://localhost:3000"}/${locale}/refunds`}
+              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${locale}/refunds`}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -1936,7 +2166,7 @@ export function BillingScreen({
             </a>
           </div>
           {data.downgradeOptions.length ? (
-            <Card className="dashboard-card dashboard-card--full billing-downgrade-card">
+            <section className="billing-downgrade-card">
               <div className="dashboard-section-heading">
                 <div>
                   <span className="dashboard-card__label">
@@ -1979,17 +2209,69 @@ export function BillingScreen({
                   </div>
                 ))}
               </div>
-            </Card>
+            </section>
           ) : null}
-          <Alert tone="info" title={ar ? "التجربة لم تبدأ" : "Trial remains pending"}>
-            {ar
-              ? "لا تبدأ التجربة عند اختيار الخطة أو فتح Stripe؛ تبدأ عند نشر أول بطاقة ولاء."
-              : "The trial does not start when you select a plan or open Stripe; it starts when your first loyalty card is published."}
-          </Alert>
+          {data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION" ? (
+            <Alert
+              tone="info"
+              title={ar ? "تجربتك جاهزة للإعداد" : "Your trial is ready to set up"}
+            >
+              {ar
+                ? "اختر الباقة وأضف بيانات الفوترة والبطاقة لبدء 7 أيام مجاناً. لن يتم الخصم اليوم."
+                : "Choose a plan and add billing details and a card to start 7 days free. Nothing is charged today."}
+            </Alert>
+          ) : null}
         </>
       ) : (
         <Skeleton height="20rem" />
       )}
+      <Modal
+        open={Boolean(paymentSetup)}
+        title={
+          data?.paymentMethod.status === "saved"
+            ? ar
+              ? "تغيير طريقة الدفع"
+              : "Change payment method"
+            : ar
+              ? "إضافة طريقة الدفع"
+              : "Add payment method"
+        }
+        onClose={() => setPaymentSetup(null)}
+      >
+        {paymentSetup && paymentStripe ? (
+          <Elements
+            stripe={paymentStripe}
+            options={{
+              clientSecret: paymentSetup.clientSecret,
+              locale: ar ? "ar" : "en",
+              appearance: {
+                theme: "stripe",
+                variables: {
+                  colorPrimary: "#AE3115",
+                  colorText: "#241916",
+                  colorBackground: "#FFFFFF",
+                  colorDanger: "#C93C2B",
+                  fontFamily: ar
+                    ? "Cairo, system-ui, sans-serif"
+                    : "Manrope, system-ui, sans-serif",
+                  borderRadius: "8px",
+                  spacingUnit: "4px",
+                },
+              },
+            }}
+          >
+            <PaymentMethodReplacementForm
+              locale={locale}
+              organizationId={membership.organization.id}
+              commandId={paymentCommandId}
+              onSaved={async () => {
+                setPaymentSetup(null);
+                await load();
+              }}
+            />
+          </Elements>
+        ) : null}
+      </Modal>
       <Modal
         open={Boolean(selectedRefundInvoice)}
         title={ar ? "طلب مراجعة استرداد" : "Request a refund review"}
@@ -2097,72 +2379,6 @@ export function BillingScreen({
   );
 }
 
-export function AuditScreen({
-  locale,
-  membership,
-}: {
-  locale: Locale;
-  membership: MembershipView;
-}) {
-  const ar = locale === "ar";
-  const [items, setItems] = useState<AuditItem[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    void apiFetch<{ items: AuditItem[] }>(`/v1/organizations/${membership.organization.id}/audit`)
-      .then((result) => setItems(result.items))
-      .catch((caught: unknown) =>
-        setError(message(caught, ar ? "تعذر تحميل سجل التدقيق." : "Unable to load audit history.")),
-      );
-  }, [membership.organization.id, ar]);
-  return (
-    <>
-      <PageHeader
-        eyebrow={ar ? "تاريخ غير قابل للتعديل" : "Append-only history"}
-        title={ar ? "سجل التدقيق" : "Audit log"}
-        description={
-          ar
-            ? "الأحداث المعروضة آمنة ومحدودة ولا تشمل رموزاً أو أسراراً."
-            : "Displayed events are redacted and never include tokens or secrets."
-        }
-      />
-      {error ? <Alert tone="danger" title={error} /> : null}
-      <Card className="dashboard-list-card">
-        {items.length ? (
-          <Table
-            caption={ar ? "أحداث التدقيق" : "Audit events"}
-            headers={
-              ar ? ["الإجراء", "المنفذ", "الهدف", "التاريخ"] : ["Action", "Actor", "Target", "Date"]
-            }
-            rows={items.map((item) => [
-              <span className="dashboard-audit-action" key="action">
-                {item.action}
-              </span>,
-              item.actor?.displayName ?? (ar ? "النظام" : "System"),
-              <span className="dashboard-audit-meta" key="target">
-                {item.targetType}
-              </span>,
-              new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(item.createdAt)),
-            ])}
-          />
-        ) : (
-          <EmptyState
-            icon={<CalendarClock />}
-            title={ar ? "لا توجد أحداث بعد" : "No events yet"}
-            description={
-              ar
-                ? "ستظهر تغييرات المؤسسة المصرح بها هنا."
-                : "Authorized organization changes will appear here."
-            }
-          />
-        )}
-      </Card>
-    </>
-  );
-}
-
 export function SettingsScreen({
   locale,
   membership,
@@ -2240,18 +2456,17 @@ export function SettingsScreen({
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "إعدادات المؤسسة" : "Organization settings"}
         title={ar ? "الإعدادات" : "Settings"}
         description={
           ar
-            ? "تُحفظ التغييرات في الخادم وتُسجّل في سجل التدقيق."
-            : "Changes are stored server-side and recorded in the audit log."
+            ? "حدّث معلومات نشاطك واللغة والمنطقة الزمنية."
+            : "Update your business details, language, and timezone."
         }
       />
       {error ? <Alert tone="danger" title={error} /> : null}
       {notice ? <Alert tone="success" title={notice} /> : null}
       {organization ? (
-        <div className="dashboard-section-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="dashboard-settings">
           <Card className="dashboard-form-card">
             <h2>{ar ? "عام" : "General"}</h2>
             <form className="dashboard-form" onSubmit={saveGeneral}>
@@ -2262,13 +2477,14 @@ export function SettingsScreen({
                 <TextInput name="category" defaultValue={organization.businessCategory ?? ""} />
               </FormField>
               <FormField label={ar ? "اللغة الافتراضية" : "Default language"}>
-                <Select
+                <SearchableSelect
                   name="locale"
                   defaultValue={organization.defaultLocale.toLocaleLowerCase("en-US")}
-                >
-                  <option value="en">English</option>
-                  <option value="ar">العربية</option>
-                </Select>
+                  options={[
+                    { value: "en", label: "English" },
+                    { value: "ar", label: "العربية" },
+                  ]}
+                />
               </FormField>
               <FormField label={ar ? "المنطقة الزمنية" : "Timezone"}>
                 <SearchableSelect
@@ -2284,10 +2500,10 @@ export function SettingsScreen({
           </Card>
           <Card className="dashboard-form-card">
             <h2>{ar ? "رابط التاجر" : "Merchant URL"}</h2>
-            <Alert tone="warning" title={ar ? "تغيير حساس" : "Sensitive change"}>
+            <Alert tone="warning" title={ar ? "تأكيد مطلوب" : "Confirmation required"}>
               {ar
-                ? "يتطلب كلمة المرور، ويسجَّل، ويُحجز الرابط السابق لمدة 90 يوماً."
-                : "Requires your password, is audited, and reserves the previous slug for 90 days."}
+                ? "سنطلب كلمة المرور لحماية رابط نشاطك. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
+                : "Your password protects this change. The previous URL stays reserved for 90 days."}
             </Alert>
             <form className="dashboard-form" onSubmit={changeSlug}>
               <FormField label={ar ? "الرابط الجديد" : "New slug"} required>
@@ -2346,7 +2562,15 @@ interface ExternalIdentitySettings {
 
 interface ExternalProviderCapabilities {
   googleSignInAvailable: boolean;
-  appleSignInAvailable: boolean;
+}
+
+function securityEventLabel(value: string, ar: boolean): string {
+  if (value.includes("password")) return ar ? "تم تحديث كلمة المرور" : "Password updated";
+  if (value.includes("session")) return ar ? "تغيير في جهاز مسجّل" : "Signed-in device changed";
+  if (value.includes("external") || value.includes("oauth"))
+    return ar ? "تغيير في طريقة تسجيل الدخول" : "Sign-in method changed";
+  if (value.includes("account")) return ar ? "تغيير في الحساب" : "Account security update";
+  return ar ? "تحديث أمني" : "Security update";
 }
 
 export function SecurityScreen({
@@ -2362,7 +2586,6 @@ export function SecurityScreen({
   const [identitySettings, setIdentitySettings] = useState<ExternalIdentitySettings | null>(null);
   const [providerCapabilities, setProviderCapabilities] = useState<ExternalProviderCapabilities>({
     googleSignInAvailable: false,
-    appleSignInAvailable: false,
   });
   const [identityPassword, setIdentityPassword] = useState("");
   const [dangerConfirmation, setDangerConfirmation] = useState("");
@@ -2439,16 +2662,13 @@ export function SecurityScreen({
       setError(message(caught, ar ? "تعذر تغيير كلمة المرور." : "Unable to change password."));
     }
   }
-  async function linkIdentity(provider: "google" | "apple") {
+  async function linkIdentity() {
     setError("");
     try {
-      const result = await apiFetch<{ authorizationUrl: string }>(
-        `/v1/auth/external/${provider}/link`,
-        {
-          method: "POST",
-          body: JSON.stringify({ currentPassword: identityPassword, locale }),
-        },
-      );
+      const result = await apiFetch<{ authorizationUrl: string }>("/v1/auth/external/google/link", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword: identityPassword, locale }),
+      });
       window.location.assign(result.authorizationUrl);
     } catch (caught) {
       setError(
@@ -2459,10 +2679,10 @@ export function SecurityScreen({
       );
     }
   }
-  async function unlinkIdentity(provider: "google" | "apple") {
+  async function unlinkIdentity() {
     setError("");
     try {
-      await apiFetch(`/v1/auth/external/${provider}`, {
+      await apiFetch("/v1/auth/external/google", {
         method: "DELETE",
         body: JSON.stringify({ currentPassword: identityPassword }),
       });
@@ -2518,11 +2738,12 @@ export function SecurityScreen({
       setError(message(caught, ar ? "تعذر إغلاق المؤسسة." : "Unable to close the organization."));
     }
   }
+  const currentSession = sessions.find((session) => session.current) ?? null;
+  const otherSessions = sessions.filter((session) => !session.current);
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "أمان الحساب" : "Account security"}
-        title={ar ? "الجلسات وكلمة المرور" : "Sessions and password"}
+        title={ar ? "الأمان" : "Security"}
         description={
           ar
             ? "راجع الأجهزة وأنهِ أي جلسة لا تعرفها."
@@ -2531,56 +2752,69 @@ export function SecurityScreen({
       />
       {error ? <Alert tone="danger" title={error} /> : null}
       {notice ? <Alert tone="success" title={notice} /> : null}
-      <div className="dashboard-status-band dashboard-status-band--security">
-        <div>
-          <span>{ar ? "وضع الحساب" : "Account posture"}</span>
-          <strong>{ar ? "مراقبة الوصول مفعّلة" : "Access monitoring active"}</strong>
-        </div>
-        <div className="dashboard-status-band__facts">
-          <span>
-            {sessions.length} {ar ? "جلسات" : "sessions"}
-          </span>
-          <span>
-            {identitySettings?.identities.length ?? 0} {ar ? "طرق خارجية" : "linked providers"}
-          </span>
-          <span>
-            {events.length} {ar ? "أحداث حديثة" : "recent events"}
-          </span>
-        </div>
-      </div>
       <div className="dashboard-section-grid security-layout">
         <Card className="dashboard-form-card">
-          <div className="dashboard-section-heading">
-            <h2>{ar ? "الجلسات النشطة" : "Active sessions"}</h2>
-            <Button variant="secondary" onClick={() => void revokeOthers()}>
-              {ar ? "إنهاء الجلسات الأخرى" : "Revoke others"}
-            </Button>
-          </div>
-          <Table
-            caption={ar ? "الجلسات النشطة" : "Active sessions"}
-            headers={
-              ar
-                ? ["الجهاز", "آخر نشاط", "الحالة", "الإجراء"]
-                : ["Device", "Last active", "Status", "Action"]
-            }
-            rows={sessions.map((session) => [
-              session.deviceLabel ?? (ar ? "جهاز غير معروف" : "Unknown device"),
-              new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(session.lastActiveAt)),
-              session.current ? (
-                <Badge key="current" tone="success">
-                  {ar ? "الحالية" : "Current"}
-                </Badge>
-              ) : (
-                <Badge key="other">{ar ? "نشطة" : "Active"}</Badge>
-              ),
-              <Button key="revoke" variant="ghost" onClick={() => void revoke(session.id)}>
-                {ar ? "إنهاء" : "Revoke"}
-              </Button>,
-            ])}
-          />
+          <h2>{ar ? "الأجهزة المسجّلة" : "Signed-in devices"}</h2>
+          {currentSession ? (
+            <div className="security-current-session">
+              <div>
+                <Badge tone="success">{ar ? "هذا الجهاز" : "This device"}</Badge>
+                <strong>
+                  {currentSession.deviceLabel ?? (ar ? "جهاز غير معروف" : "Unknown device")}
+                </strong>
+                <small>
+                  {ar ? "آخر نشاط " : "Last active "}
+                  {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(currentSession.lastActiveAt))}
+                </small>
+              </div>
+              <Button variant="tertiary" onClick={() => void revoke(currentSession.id)}>
+                {ar ? "تسجيل الخروج" : "Sign out"}
+              </Button>
+            </div>
+          ) : null}
+          <details className="security-other-sessions">
+            <summary>
+              <span>{ar ? "الأجهزة الأخرى" : "Other devices"}</span>
+              <Badge tone="neutral">{otherSessions.length}</Badge>
+            </summary>
+            {otherSessions.length ? (
+              <>
+                <div className="security-other-sessions__actions">
+                  <p>
+                    {ar
+                      ? "أنهِ أي جلسة لا تعرفها، أو سجّل الخروج من جميع الأجهزة الأخرى دفعة واحدة."
+                      : "Revoke anything you do not recognize, or sign out every other device at once."}
+                  </p>
+                  <Button variant="secondary" onClick={() => void revokeOthers()}>
+                    {ar ? "تسجيل الخروج من الأجهزة الأخرى" : "Sign out other devices"}
+                  </Button>
+                </div>
+                <Table
+                  caption={ar ? "الأجهزة الأخرى" : "Other signed-in devices"}
+                  headers={
+                    ar ? ["الجهاز", "آخر نشاط", "الإجراء"] : ["Device", "Last active", "Action"]
+                  }
+                  rows={otherSessions.map((session) => [
+                    session.deviceLabel ?? (ar ? "جهاز غير معروف" : "Unknown device"),
+                    new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(new Date(session.lastActiveAt)),
+                    <Button key="revoke" variant="tertiary" onClick={() => void revoke(session.id)}>
+                      {ar ? "تسجيل الخروج" : "Sign out"}
+                    </Button>,
+                  ])}
+                />
+              </>
+            ) : (
+              <p className="security-other-sessions__empty">
+                {ar ? "لا توجد أجهزة أخرى مسجّلة." : "No other devices are signed in."}
+              </p>
+            )}
+          </details>
         </Card>
         <Card className="dashboard-form-card">
           <h2>{ar ? "تغيير كلمة المرور" : "Change password"}</h2>
@@ -2609,12 +2843,12 @@ export function SecurityScreen({
             <Button type="submit">{ar ? "تغيير كلمة المرور" : "Change password"}</Button>
           </form>
         </Card>
-        <Card className="dashboard-form-card dashboard-card--full">
-          <h2>{ar ? "طرق تسجيل الدخول" : "Sign-in methods"}</h2>
+        <section className="dashboard-form-card dashboard-card--full security-section">
+          <h2>{ar ? "حساب Google" : "Google account"}</h2>
           <p style={{ color: "var(--waflo-muted)", maxWidth: "68ch" }}>
             {ar
-              ? "اربط حساب Google أو Apple بهوية وافلو الحالية. البريد الوارد من المزود هو بيانات وصفية وليس معرّف الحساب."
-              : "Connect Google or Apple to this Waflo identity. Provider email is metadata, never your permanent account identifier."}
+              ? "يمكنك استخدام حساب Google لتسجيل الدخول إلى حساب Waflo الحالي."
+              : "Use Google to sign in to this existing Waflo account."}
           </p>
           {identitySettings?.passwordEnabled ? (
             <FormField label={ar ? "كلمة المرور الحالية للتأكيد" : "Current password to confirm"}>
@@ -2627,73 +2861,44 @@ export function SecurityScreen({
           ) : (
             <p style={{ color: "var(--waflo-muted)" }}>
               {ar
-                ? "للحسابات الخارجية فقط، يلزم تسجيل دخول حديث قبل إضافة طريقة أخرى."
-                : "OAuth-only accounts require a recent sign-in before another method can be connected."}
+                ? "يلزم تسجيل دخول حديث لإجراء هذا التغيير."
+                : "A recent sign-in is required for this change."}
             </p>
           )}
-          <div className="dashboard-form__row">
-            {(["google", "apple"] as const).map((provider) => {
-              const code = provider.toUpperCase() as "GOOGLE" | "APPLE";
-              const linked = identitySettings?.identities.find((item) => item.provider === code);
-              const available =
-                provider === "google"
-                  ? providerCapabilities.googleSignInAvailable
-                  : providerCapabilities.appleSignInAvailable;
-              const label = provider === "google" ? "Google" : "Apple";
-              return (
-                <Card key={provider} style={{ padding: "1rem", flex: "1 1 18rem" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "1rem",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <strong>{label}</strong>
-                      <div style={{ color: "var(--waflo-muted)", marginTop: ".25rem" }}>
-                        {linked
-                          ? (linked.providerEmail ?? (ar ? "مرتبط" : "Connected"))
-                          : available
-                            ? ar
-                              ? "متاح للربط"
-                              : "Available to connect"
-                            : ar
-                              ? "غير مهيأ"
-                              : "Not configured"}
-                      </div>
-                    </div>
-                    {linked ? (
-                      <Button variant="ghost" onClick={() => void unlinkIdentity(provider)}>
-                        {ar ? "فصل" : "Disconnect"}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        disabled={
-                          !available ||
-                          (Boolean(identitySettings?.passwordEnabled) && !identityPassword)
-                        }
-                        onClick={() => void linkIdentity(provider)}
-                      >
-                        {ar ? "ربط" : "Connect"}
-                      </Button>
-                    )}
-                  </div>
-                </Card>
-              );
-            })}
+          <div className="security-provider-row">
+            <div>
+              <strong>Google</strong>
+              <span>
+                {identitySettings?.identities.find((item) => item.provider === "GOOGLE")
+                  ?.providerEmail ?? (ar ? "غير مرتبط" : "Not connected")}
+              </span>
+            </div>
+            {identitySettings?.identities.some((item) => item.provider === "GOOGLE") ? (
+              <Button variant="tertiary" onClick={() => void unlinkIdentity()}>
+                {ar ? "فصل" : "Disconnect"}
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                disabled={
+                  !providerCapabilities.googleSignInAvailable ||
+                  (Boolean(identitySettings?.passwordEnabled) && !identityPassword)
+                }
+                onClick={() => void linkIdentity()}
+              >
+                {ar ? "ربط Google" : "Connect Google"}
+              </Button>
+            )}
           </div>
-        </Card>
+        </section>
         <Card className="dashboard-form-card dashboard-card--full">
-          <h2>{ar ? "أحداث الأمان الحديثة" : "Recent security events"}</h2>
+          <h2>{ar ? "النشاط الأخير" : "Recent activity"}</h2>
           {events.length ? (
             <Table
               caption={ar ? "أحداث الأمان" : "Security events"}
-              headers={ar ? ["الحدث", "الخطورة", "التاريخ"] : ["Event", "Severity", "Date"]}
+              headers={ar ? ["النشاط", "الأهمية", "التاريخ"] : ["Activity", "Importance", "Date"]}
               rows={events.map((event) => [
-                event.eventType,
+                securityEventLabel(event.eventType, ar),
                 <Badge
                   key="severity"
                   tone={
@@ -2704,7 +2909,7 @@ export function SecurityScreen({
                 >
                   {event.severity}
                 </Badge>,
-                new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", {
+                new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
                   dateStyle: "medium",
                   timeStyle: "short",
                 }).format(new Date(event.createdAt)),
@@ -2720,8 +2925,8 @@ export function SecurityScreen({
           <h2>{ar ? "إجراءات حساسة" : "Sensitive account actions"}</h2>
           <p style={{ color: "var(--waflo-muted)", maxWidth: "72ch" }}>
             {ar
-              ? "اكتب DEACTIVATE لتعطيل الحساب، أو REQUEST DELETION لتسجيل طلب حذف ومراجعته وفق السياسة. مالك المؤسسة يمكنه كتابة CLOSE ORGANIZATION لإيقاف العمليات مع الاحتفاظ بسجل التدقيق."
-              : "Type DEACTIVATE to disable your account, REQUEST DELETION to record a policy-reviewed deletion request, or—if you are the owner—CLOSE ORGANIZATION to stop operations while retaining audit history."}
+              ? "تتطلب هذه الإجراءات عبارة تأكيد وكلمة المرور. قد تستغرق طلبات الحذف وقتاً للمراجعة."
+              : "These actions require a confirmation phrase and your password. Deletion requests may take time to review."}
           </p>
           <FormField label={ar ? "عبارة التأكيد" : "Confirmation phrase"}>
             <TextInput
@@ -2732,14 +2937,14 @@ export function SecurityScreen({
           </FormField>
           <div className="dashboard-form__row">
             <Button
-              variant="secondary"
+              variant="destructive"
               disabled={dangerConfirmation !== "DEACTIVATE"}
               onClick={() => void accountLifecycle("deactivate")}
             >
               {ar ? "تعطيل الحساب" : "Deactivate account"}
             </Button>
             <Button
-              variant="secondary"
+              variant="destructive"
               disabled={dangerConfirmation !== "REQUEST DELETION"}
               onClick={() => void accountLifecycle("deletion-request")}
             >
@@ -2747,7 +2952,7 @@ export function SecurityScreen({
             </Button>
             {membership.role === "OWNER" ? (
               <Button
-                variant="secondary"
+                variant="destructive"
                 disabled={dangerConfirmation !== "CLOSE ORGANIZATION"}
                 onClick={() => void closeOrganization()}
               >

@@ -125,12 +125,28 @@ export interface ProgramItem {
     revision: number;
     status: string;
     editingMode: "QUICK" | "PRO";
+    stampRule?: { requiredStampCount: number } | null;
+    translations?: Array<{ locale: "EN" | "AR"; programName: string; rewardSummary: string }>;
+    visualTheme?: {
+      backgroundColor: string;
+      foregroundColor: string;
+      accentColor: string;
+      layoutType: StampLayout;
+    } | null;
   } | null;
   currentPublishedVersion: {
     id: string;
     versionNumber: number;
     status: string;
     publishedAt?: string | null;
+    stampRule?: { requiredStampCount: number } | null;
+    translations?: Array<{ locale: "EN" | "AR"; programName: string; rewardSummary: string }>;
+    visualTheme?: {
+      backgroundColor: string;
+      foregroundColor: string;
+      accentColor: string;
+      layoutType: StampLayout;
+    } | null;
   } | null;
   _count?: { versions: number };
 }
@@ -298,43 +314,6 @@ export interface ValidationResult {
   warnings: ValidationIssue[];
 }
 
-export interface TestEvent {
-  id: string;
-  eventType: string;
-  rewardDefinitionId?: string | null;
-  safeMetadata?: { cycle?: number } | null;
-  createdAt: string;
-}
-
-export interface TestSession {
-  id: string;
-  status: "ACTIVE" | "RESET" | "COMPLETED";
-  currentStampCount: number;
-  cycleCount: number;
-  version: {
-    operationalTimezone: string;
-    staffOwnReversalWindowSeconds: number;
-    managerReversalWindowMinutes: number;
-    managerOverrideAllowed: boolean;
-    stampRule: {
-      requiredStampCount: number;
-      maximumStampsPerOperation: number;
-      maximumStampsPerCustomerPerDay: number | null;
-      minimumPurchaseAmountMinor: number | null;
-      minimumPurchaseCurrency: string | null;
-      resetBehaviorAfterReward: string;
-    } | null;
-    rewards: Array<{
-      id: string;
-      internalName: string;
-      thresholdStampCount: number;
-      requiresManagerApproval: boolean;
-      translations: Array<{ locale: "EN" | "AR"; name: string }>;
-    }>;
-  };
-  events: TestEvent[];
-}
-
 export const studioSections = [
   "overview",
   "earning",
@@ -350,7 +329,6 @@ export const studioSections = [
   "google-preview",
   "policies",
   "validation",
-  "test-mode",
   "versions",
 ] as const;
 

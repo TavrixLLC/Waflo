@@ -244,6 +244,19 @@ export function isLocalPreviewUrl(value: string | null | undefined): boolean {
   }
 }
 
+/** Local QA routes may be local; shareable merchant copy is always canonical. */
+export function canonicalPublicUrlForDisplay(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (!url.hostname.endsWith(".localhost") && !url.hostname.endsWith(".lvh.me")) return value;
+    const merchantSlug = url.hostname.split(".")[0];
+    return `https://${merchantSlug}.waflo.app${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return value;
+  }
+}
+
 export function walletSurfacePresentation(
   provider: WalletHealth | undefined,
   ar: boolean,
@@ -272,8 +285,8 @@ export function walletSurfacePresentation(
       explanation:
         provider.mode === "TEST_ADAPTER"
           ? ar
-            ? "جاهزة في وضع الاختبار؛ لا يمثل ذلك اعتماداً خارجياً للإنتاج."
-            : "Ready in test-adapter mode; this is not external production certification."
+            ? "سيظهر خيار Wallet هنا عندما يصبح متاحاً."
+            : "Wallet options will appear here when available."
           : ar
             ? "إعداد المزود متاح حالياً."
             : "Provider configuration is currently available.",
@@ -331,7 +344,7 @@ export function publicationFailurePresentation(
       {
         title: "Launch checks changed",
         whatHappened:
-          "The saved card changed after its latest checks or test. Review it and run the checks again.",
+          "The saved card changed after its latest checks. Review it and run the checks again.",
         actionLabel: "Run checks again",
         action: "checks",
         retrySafe: false,

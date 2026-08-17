@@ -17,6 +17,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { customerApi, CustomerApiError, customerCommandId } from "../../client-api";
 import type { PublicProgram } from "../../server-api";
 
+function walletReadiness(status: string, ar: boolean): string {
+  if (status === "READY") return ar ? "جاهزة" : "Ready";
+  if (status === "PREPARING") return ar ? "قيد التجهيز" : "Preparing";
+  return ar ? "غير متاحة" : "Unavailable";
+}
+
 export function EnrollmentForm({
   merchant,
   program,
@@ -55,6 +61,30 @@ export function EnrollmentForm({
   const stampPreview = program.stampPreviews[locale] ?? program.stampPreview;
   const emailRequired = program.policy.emailCollectionMode === "REQUIRED";
   const enrollable = program.enrollmentStatus === "OPEN";
+  const unavailableTitle =
+    program.enrollmentStatus === "MERCHANT_UNAVAILABLE"
+      ? ar
+        ? "برنامج الولاء غير متاح مؤقتًا"
+        : "This loyalty program is temporarily unavailable"
+      : program.enrollmentStatus === "PROGRAM_UNAVAILABLE"
+        ? ar
+          ? "بطاقة الولاء غير متاحة مؤقتًا"
+          : "This loyalty card is temporarily unavailable"
+        : ar
+          ? "التسجيل غير متاح الآن"
+          : "Enrollment is not open";
+  const unavailableBody =
+    program.enrollmentStatus === "MERCHANT_UNAVAILABLE"
+      ? ar
+        ? "يمكنك عرض بطاقتك الحالية، لكن لا يمكن إنشاء عضوية جديدة الآن. حاول مرة أخرى لاحقًا."
+        : "Existing members can still view their cards, but new memberships are unavailable right now. Try again later."
+      : program.enrollmentStatus === "PROGRAM_UNAVAILABLE"
+        ? ar
+          ? "حاول مرة أخرى لاحقًا أو تواصل مع التاجر."
+          : "Try again later or contact the merchant."
+        : ar
+          ? "يمكنك العودة لاحقًا أو التواصل مع التاجر."
+          : "Return later or contact the merchant.";
   const canSubmit = useMemo(
     () =>
       displayName.trim().length > 0 &&
@@ -117,7 +147,7 @@ export function EnrollmentForm({
         <h1>{ar ? `أهلًا بك في ${copy?.programName}` : `Welcome to ${copy?.programName}`}</h1>
         <p>
           {ar
-            ? "حُفظت بطاقتك على هذا الجهاز. يمكنك فتحها الآن ومتابعة تجهيز Wallet."
+            ? "حُفظت بطاقتك على هذا الجهاز. يمكنك فتحها الآن ومتابعة تجهيز المحفظة."
             : "Your card is saved on this device. Open it now while Wallet prepares in the background."}
         </p>
         <a
@@ -126,8 +156,8 @@ export function EnrollmentForm({
           <Button>{ar ? "فتح بطاقتي" : "Open my card"}</Button>
         </a>
         <div className="wallet-readiness">
-          <span>Apple Wallet · {completed.providerStates.apple.status}</span>
-          <span>Google Wallet · {completed.providerStates.google.status}</span>
+          <span>Apple Wallet · {walletReadiness(completed.providerStates.apple.status, ar)}</span>
+          <span>Google Wallet · {walletReadiness(completed.providerStates.google.status, ar)}</span>
         </div>
       </section>
     );
@@ -149,7 +179,10 @@ export function EnrollmentForm({
           priority
         />
         <p className="stamp-preview-count">
-          <strong>0 / {program.goal}</strong> {ar ? "أختام عند الانضمام" : "stamps when you join"}
+          <strong dir="ltr" className="numeric-fraction">
+            0 / {program.goal}
+          </strong>{" "}
+          {ar ? "أختام عند الانضمام" : "stamps when you join"}
         </p>
         <Card className="reward-card">
           <span>{program.goal}</span>
@@ -169,10 +202,7 @@ export function EnrollmentForm({
             <MapPin /> {program.locations.length} {ar ? "موقع مشارك" : "participating locations"}
           </li>
           <li>
-            <ShieldCheck />{" "}
-            {ar
-              ? "بياناتك مشفرة ولا تظهر في رمز QR"
-              : "Your data is encrypted and never placed in the QR"}
+            <ShieldCheck /> {ar ? "بطاقتك جاهزة للاستخدام." : "Your card is ready to use."}
           </li>
         </ul>
       </section>
@@ -192,25 +222,8 @@ export function EnrollmentForm({
           ) : null}
         </div>
         {!enrollable ? (
-          <Alert
-            tone="warning"
-            title={
-              program.status === "ARCHIVED"
-                ? ar
-                  ? "تمت أرشفة بطاقة الولاء هذه"
-                  : "This loyalty card is archived"
-                : ar
-                  ? "التسجيل غير متاح الآن"
-                  : "Enrollment is not open"
-            }
-          >
-            {program.status === "ARCHIVED"
-              ? ar
-                ? "لا يمكن إنشاء عضويات جديدة لهذا البرنامج."
-                : "New memberships cannot be created for this program."
-              : ar
-                ? "يمكنك العودة لاحقًا أو التواصل مع التاجر."
-                : "Return later or contact the merchant."}
+          <Alert tone="warning" title={unavailableTitle}>
+            {unavailableBody}
           </Alert>
         ) : (
           <form onSubmit={submit} className="enrollment-form">
@@ -263,11 +276,7 @@ export function EnrollmentForm({
             <Checkbox
               checked={privacy}
               onChange={(event) => setPrivacy(event.target.checked)}
-              label={
-                ar
-                  ? "أوافق على إشعار خصوصية Waflo (تخضع الصياغة للمراجعة القانونية)"
-                  : "I accept the Waflo privacy notice (copy remains subject to legal review)"
-              }
+              label={ar ? "أوافق على إشعار خصوصية Waflo" : "I accept the Waflo privacy notice"}
               required
             />
             {program.policy.marketingConsentVisible && email ? (
