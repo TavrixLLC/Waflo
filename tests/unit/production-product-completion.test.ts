@@ -152,7 +152,7 @@ describe("production environment and provider boundaries", () => {
     const service = new ExternalAuthService({} as never, environment(), {} as never, {} as never);
     expect(service.publicCapabilities()).toEqual({
       googleSignIn: "NOT_CONFIGURED",
-      appleSignIn: "NOT_CONFIGURED",
+      appleSignIn: "REMOVED",
       googleSignInAvailable: false,
       appleSignInAvailable: false,
     });

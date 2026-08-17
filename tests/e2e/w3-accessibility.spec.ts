@@ -20,7 +20,7 @@ test("W3 public enrollment, RTL, privacy, transfer, and unavailable states are a
   const program = await prisma.loyaltyProgram.findFirstOrThrow({
     where: {
       organizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      internalName: { startsWith: "W3 Browser Circle" },
+      internalName: "Today Coffee Rewards",
       currentPublishedVersionId: { not: null },
     },
     orderBy: { createdAt: "desc" },

@@ -119,6 +119,6 @@ test("denies Wallet Engagement and the surrounding Loyalty Studio to ordinary st
   });
   await page.goto("/en/dashboard/programs/created-program-id/engagement");
 
-  await expect(page.getByText("Your role does not allow access to Loyalty Studio.")).toBeVisible();
+  await expect(page.getByText("You do not have permission to open this section.")).toBeVisible();
   await expect(page.getByTestId("wallet-engagement")).toHaveCount(0);
 });

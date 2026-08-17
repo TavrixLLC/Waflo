@@ -40,7 +40,7 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     const program = await prisma.loyaltyProgram.findFirstOrThrow({
       where: {
         organizationId,
-        internalName: { startsWith: "W3 Browser Circle" },
+        internalName: "Today Coffee Rewards",
         currentPublishedVersionId: { not: null },
         latestVersionNumber: 1,
       },

@@ -9,7 +9,10 @@ test("shows disabled Wallet providers without exposing credentials", async ({ pa
   const switcher = page.locator(".wf-org-switcher select");
   await switcher.selectOption({ label: "Today Coffee" });
   await page.goto("http://localhost:3001/en/dashboard/programs");
-  const card = page.locator(".program-list__card").filter({ hasText: "W3 Browser Circle" }).first();
+  const card = page
+    .locator(".program-list__card")
+    .filter({ hasText: "Today Coffee Rewards" })
+    .first();
   await card.getByRole("button", { name: "Open card" }).click();
   await expect(
     page.getByText(

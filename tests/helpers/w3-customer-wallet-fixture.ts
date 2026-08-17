@@ -51,6 +51,8 @@ export async function createW3CustomerWalletFixture(
       merchantSlug,
       timezone: "UTC",
       selectedPlan: "GROWTH",
+      onboardingState: "COMPLETE",
+      onboardingCompletedAt: new Date(),
       members: { create: { userId: owner.id, role: "OWNER" } },
       billingProfile: {
         create: { selectedPlan: "GROWTH", subscriptionStatus: "ACTIVE" },

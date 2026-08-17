@@ -77,6 +77,33 @@ describe("Next.js Content-Security-Policy", () => {
     expectPreservedSecurityDirectives(policy);
   });
 
+  it("allows Stripe.js only when the embedded payment surface opts in", () => {
+    const policy = createNextContentSecurityPolicy("production", { stripeJs: true });
+
+    expect(policy).toContain(
+      "frame-src 'self' https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com",
+    );
+    expect(policy).toContain(
+      "script-src 'self' 'unsafe-inline' https://*.js.stripe.com https://js.stripe.com",
+    );
+    expect(policy).toContain("connect-src 'self' https://api.stripe.com https://api.waflo.app");
+    expect(policy).not.toContain("https://*.stripe.com");
+    expect(policy).not.toContain("https://checkout.stripe.com");
+    expectPreservedSecurityDirectives(policy);
+  });
+
+  it("allows only the Mapbox map/search endpoints and a blob worker when the picker opts in", () => {
+    const policy = createNextContentSecurityPolicy("production", { mapboxGl: true });
+
+    expect(policy).toContain("worker-src 'self' blob:");
+    expect(policy).toContain("https://api.mapbox.com");
+    expect(policy).toContain("https://events.mapbox.com");
+    expect(policy).not.toContain("api.mapbox.cn");
+    expect(policy).not.toContain("*.mapbox.com");
+    expect(policy).not.toContain("'unsafe-eval'");
+    expectPreservedSecurityDirectives(policy);
+  });
+
   it.each(["production", "test", undefined])(
     "keeps the shared policy strict for NODE_ENV=%s",
     (nodeEnvironment) => {
@@ -138,6 +165,17 @@ describe("Next.js Content-Security-Policy", () => {
       } else {
         expect(productionPolicy).toContain("https://fonts.googleapis.com");
         expect(productionPolicy).toContain("https://fonts.gstatic.com");
+      }
+      if (applicationName === "merchant-dashboard") {
+        expect(productionPolicy).toContain("https://js.stripe.com");
+        expect(productionPolicy).toContain("https://hooks.stripe.com");
+        expect(productionPolicy).toContain("https://api.mapbox.com");
+        expect(productionPolicy).toContain("worker-src 'self' blob:");
+        expect(productionPolicy).toContain("https://api.stripe.com");
+      } else {
+        expect(productionPolicy).not.toContain("https://js.stripe.com");
+        expect(productionPolicy).not.toContain("https://hooks.stripe.com");
+        expect(productionPolicy).not.toContain("https://api.stripe.com");
       }
     });
   }

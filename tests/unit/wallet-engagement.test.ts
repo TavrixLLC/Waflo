@@ -515,12 +515,21 @@ describe("Wallet Engagement input safety", () => {
     ).toContain("{merchant}");
   });
 
-  it("requires merchant coordinate updates to set or clear both values together", () => {
+  it("requires merchant coordinate updates to set both values with explicit map confirmation", () => {
     expect(() => locationUpdateSchema.parse({ latitude: 33.3 })).toThrow();
     expect(() => locationUpdateSchema.parse({ latitude: null })).toThrow();
-    expect(locationUpdateSchema.parse({ latitude: null, longitude: null })).toEqual({
-      latitude: null,
-      longitude: null,
+    expect(() => locationUpdateSchema.parse({ latitude: null, longitude: null })).toThrow();
+    expect(() => locationUpdateSchema.parse({ latitude: 33.3, longitude: 44.4 })).toThrow();
+    expect(
+      locationUpdateSchema.parse({
+        latitude: 33.3,
+        longitude: 44.4,
+        coordinatesConfirmed: true,
+      }),
+    ).toEqual({
+      latitude: 33.3,
+      longitude: 44.4,
+      coordinatesConfirmed: true,
     });
   });
 

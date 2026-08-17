@@ -147,7 +147,8 @@ describe("public launch surfaces", () => {
     expect(shell).toContain("/" + "$" + "{alternate}" + "$" + "{path}");
   });
 
-  it("removes obsolete implementation-phase promises from launch-facing copy", () => {
+  it("removes obsolete implementation-phase promises and keeps store availability truthful", () => {
+    const home = readFileSync(resolve(root, "apps/marketing-web/app/[locale]/page.tsx"), "utf8");
     const sources = [
       "apps/marketing-web/app/[locale]/page.tsx",
       "apps/marketing-web/app/[locale]/pricing/page.tsx",
@@ -157,7 +158,11 @@ describe("public launch surfaces", () => {
     ]
       .map((path) => readFileSync(resolve(root, path), "utf8"))
       .join("\n");
-    expect(sources).not.toMatch(/\bW[1-4]\b|coming soon|قريباً/);
+    expect(sources).not.toMatch(/\bW[1-4]\b/);
+    expect(home).toContain("Coming soon — store link not yet available");
+    expect(home).toContain("قريباً — رابط المتجر غير متاح بعد");
+    expect(home).toContain("/brand/google-play-badge-en.png");
+    expect(home).not.toContain("NEXT_PUBLIC_GOOGLE_PLAY");
   });
 
   it("routes unknown localized URLs through the branded 404 boundaries", () => {
@@ -196,7 +201,7 @@ describe("public launch surfaces", () => {
     }
   });
 
-  it("ships valid icon and social-image references without recreating artifacts", () => {
+  it("ships valid icon and social-image references without packaging review artifacts", () => {
     for (const app of ["marketing-web", "customer-web", "merchant-dashboard"]) {
       const publicRoot = resolve(root, "apps", app, "public");
       const manifest = JSON.parse(
@@ -208,6 +213,7 @@ describe("public launch surfaces", () => {
         const image = readFileSync(iconPath);
         expect(`${image.readUInt32BE(16)}x${image.readUInt32BE(20)}`).toBe(icon.sizes);
       }
+      expect(existsSync(resolve(publicRoot, "artifacts"))).toBe(false);
     }
 
     const socialImage = readFileSync(
@@ -215,7 +221,6 @@ describe("public launch surfaces", () => {
     );
     expect(socialImage.readUInt32BE(16)).toBe(1200);
     expect(socialImage.readUInt32BE(20)).toBe(630);
-    expect(existsSync(resolve(root, "artifacts"))).toBe(false);
   });
 
   it("passes the deployment environment into immutable Web builds", () => {

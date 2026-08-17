@@ -120,7 +120,7 @@ describe("external-auth security primitives and configuration", () => {
     expect(setCookie.mock.calls[0]?.[2]).not.toHaveProperty("domain");
   });
 
-  it("fails Apple capability readiness for malformed private keys or missing token keyrings", () => {
+  it("keeps removed Apple authentication unavailable regardless of legacy configuration", () => {
     const withoutTokenKey = new ExternalAuthService(
       {} as never,
       environment({
@@ -137,7 +137,7 @@ describe("external-auth security primitives and configuration", () => {
       {} as never,
       {} as never,
     );
-    expect(withoutTokenKey.providerStatus("apple")).toBe("NOT_CONFIGURED");
+    expect(withoutTokenKey.providerStatus("apple")).toBe("REMOVED");
 
     expect(() =>
       parseEnvironment({

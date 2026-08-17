@@ -60,7 +60,7 @@ test("builds one continuously saved card with combined languages and lazy truthf
     "Languages",
     "Locations",
     "Appearance",
-    "Review & test",
+    "Review & validate",
     "Advanced settings",
   ]) {
     await expect(
@@ -346,9 +346,7 @@ test("surfaces save failure and revision conflict without silently overwriting",
   expect(patchBodies.map((body) => body.revision)).toEqual([1, 1, 2]);
 });
 
-test("turns review into readiness and isolated Test Mode rather than a field dump", async ({
-  page,
-}) => {
+test("turns review into automatic readiness and continues directly to Studio", async ({ page }) => {
   const observedApiPaths: string[] = [];
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
@@ -364,15 +362,10 @@ test("turns review into readiness and isolated Test Mode rather than a field dum
   await page.getByRole("button", { name: "Review card" }).click();
   await expect(page.getByText("Readiness checks passed", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/Publishing remains in Studio/u)).toBeVisible();
-  await page.getByRole("button", { name: "Start Test Mode" }).click();
-  await expect(page.locator(".builder-test-meter strong")).toHaveText("0/8");
-  await page.getByRole("button", { name: "Add one stamp" }).click();
-  await expect(page.locator(".builder-test-meter strong")).toHaveText("1/8");
-
-  expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(true);
-  expect(
-    observedApiPaths.some((path) => /memberships|ledger|reward-entitlements/u.test(path)),
-  ).toBe(false);
+  await expect(page.getByRole("button", { name: "Start Test Mode" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Continue to Studio" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/programs\/created-program-id$/u);
+  expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(false);
 });
 
 test("blocks a Starter merchant at the real card limit before creating an impossible draft", async ({
@@ -475,10 +468,7 @@ test("reserves sticky-footer space and keeps active section navigation visible",
     await expect(activeNavigation).toHaveAttribute("aria-current", "page");
     await activeNavigation.scrollIntoViewIfNeeded();
     await expect(activeNavigation).toBeInViewport();
-    await page
-      .locator(".builder-editor")
-      .getByRole("button", { name: "Start Test Mode" })
-      .scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Continue to Studio" }).scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollBy(0, 1_000));
     const geometry = await page.evaluate(() => {
       const footer = document.querySelector<HTMLElement>(".builder-footer");
@@ -564,6 +554,7 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
   await expect.poll(() => patchBodies.length).toBe(1);
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await expect.poll(() => previewRequests.length).toBe(1);
+  expect(patchBodies).toHaveLength(1);
   expect(previewRequests[0]?.[0]).toBe("CUSTOMER_WEB");
   expect(editingMs).toBeGreaterThanOrEqual(58_000);
   expect(editingMs).toBeLessThan(90_000);
@@ -906,14 +897,14 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   });
 
   await page.setViewportSize({ width: 1024, height: 860 });
-  await page.getByRole("button", { name: "Start Test Mode" }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Continue to Studio" }).scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 1_000));
   await page.screenshot({
     path: `${evidenceDirectory}/09-tablet-no-overlap.png`,
     animations: "disabled",
   });
   await page.setViewportSize({ width: 390, height: 780 });
-  await page.getByRole("button", { name: "Start Test Mode" }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Continue to Studio" }).scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 1_000));
   await page.screenshot({
     path: `${evidenceDirectory}/10-mobile-390-no-overlap.png`,

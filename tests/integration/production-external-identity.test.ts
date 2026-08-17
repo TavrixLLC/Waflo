@@ -21,6 +21,10 @@ import { OperationalWorker } from "../../apps/operational-worker/src/main.js";
 import { WalletWorker } from "../../apps/wallet-worker/src/main.js";
 import { hashPassword } from "../../packages/auth/src/index.js";
 import {
+  createExternalAuthTokenKeyring,
+  encryptExternalAuthToken,
+} from "../../packages/external-auth-security/src/index.js";
+import {
   createW3CustomerWalletFixture,
   w3EnrollmentBase,
 } from "../helpers/w3-customer-wallet-fixture.js";
@@ -152,44 +156,57 @@ describe.sequential("production external identity and lifecycle", () => {
   }
 
   async function createApplePasswordMerchant(label: string) {
-    const flow = await start("apple", true);
     const subject = `${label}-${randomUUID()}`;
     const email = `${randomUUID()}@privaterelay.appleid.com`;
-    returnToken(
-      await idToken({
-        issuer: APPLE_ISSUER,
-        audience: APPLE_CLIENT_ID,
-        subject,
-        nonce: flow.nonce,
+    const password = `Apple lifecycle ${randomUUID()}!`;
+    const user = await prisma.client.user.create({
+      data: {
         email,
-        emailVerified: true,
-      }),
-    );
-    const completed = await external.complete(
-      {
-        provider: "apple",
-        state: flow.state,
-        code: `${label}-code`,
-        browserBinding: flow.browserBinding,
+        normalizedEmail: email,
+        displayName: "Historical Apple merchant",
+        passwordHash: await hashPassword(password),
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
       },
-      request,
-    );
-    const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
-      where: {
-        provider_issuer_providerSubject: {
-          provider: "APPLE",
-          issuer: APPLE_ISSUER,
-          providerSubject: subject,
+    });
+    const identityId = randomUUID();
+    const keyring = createExternalAuthTokenKeyring(1, { 1: Buffer.alloc(32, 9) });
+    const refresh = encryptExternalAuthToken(`refresh-${randomUUID()}`, {
+      contextId: identityId,
+      purpose: "apple-refresh-token",
+      keyring,
+    });
+    const access = encryptExternalAuthToken(`access-${randomUUID()}`, {
+      contextId: identityId,
+      purpose: "apple-access-token",
+      keyring,
+    });
+    const identity = await prisma.client.externalIdentity.create({
+      data: {
+        id: identityId,
+        provider: "APPLE",
+        issuer: APPLE_ISSUER,
+        providerSubject: subject,
+        userId: user.id,
+        providerEmail: email,
+        emailVerified: true,
+        emailForwardingEnabled: true,
+        appleCredential: {
+          create: {
+            refreshTokenEncrypted: refresh.serialized,
+            refreshTokenKeyVersion: refresh.keyVersion,
+            accessTokenEncrypted: access.serialized,
+            accessTokenKeyVersion: access.keyVersion,
+            accessTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          },
         },
       },
       include: { appleCredential: true },
     });
-    const password = `Apple lifecycle ${randomUUID()}!`;
-    await prisma.client.user.update({
-      where: { id: identity.userId },
-      data: { passwordHash: await hashPassword(password) },
-    });
-    return { completed, identity, password };
+    const session = await auth.createSession(user.id, request);
+    return { completed: { session }, identity, password };
   }
 
   it("maps a verified Google subject to a Waflo user and consumes state once", async () => {
@@ -492,128 +509,61 @@ describe.sequential("production external identity and lifecycle", () => {
     expect(identities[0]?.providerEmail).toBe(changedEmail);
   });
 
-  it("preserves Apple stable subject and relay metadata when later authorization omits email", async () => {
-    const first = await start("apple", true);
-    const subject = `apple-${randomUUID()}`;
-    const relay = `${randomUUID()}@privaterelay.appleid.com`;
-    returnToken(
-      await idToken({
-        issuer: APPLE_ISSUER,
-        audience: APPLE_CLIENT_ID,
-        subject,
-        nonce: first.nonce,
-        email: relay,
-        emailVerified: true,
-      }),
-    );
-    await external.complete(
-      {
-        provider: "apple",
-        state: first.state,
-        code: "apple-first-code",
-        browserBinding: first.browserBinding,
-        appleUser: JSON.stringify({
-          email: relay,
-          name: { firstName: "Relay", lastName: "Merchant" },
-        }),
-      },
-      request,
-    );
-    const firstCredential = await prisma.client.appleAuthorizationCredential.findFirstOrThrow({
-      where: { externalIdentity: { providerSubject: subject } },
-    });
-    const second = await start("apple", false);
-    returnToken(
-      await idToken({
-        issuer: APPLE_ISSUER,
-        audience: APPLE_CLIENT_ID,
-        subject,
-        nonce: second.nonce,
-      }),
-      { omitRefreshToken: true },
-    );
-    await external.complete(
-      {
-        provider: "apple",
-        state: second.state,
-        code: "apple-later-code",
-        browserBinding: second.browserBinding,
-      },
-      request,
-    );
-    const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
-      where: {
-        provider_issuer_providerSubject: {
-          provider: "APPLE",
-          issuer: APPLE_ISSUER,
-          providerSubject: subject,
-        },
+  it("rejects every new Apple sign-in, sign-up, and linking start", async () => {
+    await expect(start("apple", false)).rejects.toMatchObject({ code: "APPLE_SIGNIN_REMOVED" });
+    await expect(start("apple", true)).rejects.toMatchObject({ code: "APPLE_SIGNIN_REMOVED" });
+
+    const email = `${randomUUID()}@apple-link-disabled.example`;
+    const password = "Apple linking disabled 2026!";
+    const user = await prisma.client.user.create({
+      data: {
+        email,
+        normalizedEmail: email,
+        displayName: "Apple link disabled",
+        passwordHash: await hashPassword(password),
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
       },
     });
-    expect(identity.providerEmail).toBe(relay);
-    const repeatedCredential = await prisma.client.appleAuthorizationCredential.findUniqueOrThrow({
-      where: { externalIdentityId: identity.id },
-    });
-    expect(repeatedCredential.refreshTokenEncrypted).toBe(firstCredential.refreshTokenEncrypted);
+    const session = await auth.createSession(user.id, request);
+    await expect(
+      external.startLink("apple", user.id, session.sessionId, password, "en"),
+    ).rejects.toMatchObject({ code: "APPLE_SIGNIN_REMOVED" });
   });
 
-  it("rejects Apple audience mismatch and cannot unlink the final authentication method", async () => {
-    const invalid = await start("apple", true);
-    returnToken(
-      await idToken({
-        issuer: APPLE_ISSUER,
-        audience: "wrong.apple.client",
-        subject: randomUUID(),
-        nonce: invalid.nonce,
-        email: `${randomUUID()}@privaterelay.appleid.com`,
-        emailVerified: true,
-      }),
-    );
-    await expect(
-      external.complete(
-        {
-          provider: "apple",
-          state: invalid.state,
-          code: "wrong-aud",
-          browserBinding: invalid.browserBinding,
-        },
-        request,
-      ),
-    ).rejects.toMatchObject({ code: "EXTERNAL_AUTH_FAILED" });
-
-    const valid = await start("apple", true);
-    const subject = `final-method-${randomUUID()}`;
-    returnToken(
-      await idToken({
-        issuer: APPLE_ISSUER,
-        audience: APPLE_CLIENT_ID,
-        subject,
-        nonce: valid.nonce,
-        email: `${randomUUID()}@privaterelay.appleid.com`,
-        emailVerified: true,
-      }),
-    );
-    await external.complete(
-      {
-        provider: "apple",
-        state: valid.state,
-        code: "valid",
-        browserBinding: valid.browserBinding,
+  it("preserves a historical Apple identity and prevents removal of the final auth method", async () => {
+    const email = `${randomUUID()}@privaterelay.appleid.com`;
+    const user = await prisma.client.user.create({
+      data: {
+        email,
+        normalizedEmail: email,
+        displayName: "Historical Apple-only merchant",
+        passwordHash: null,
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
       },
-      request,
-    );
-    const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
-      where: {
-        provider_issuer_providerSubject: {
-          provider: "APPLE",
-          issuer: APPLE_ISSUER,
-          providerSubject: subject,
-        },
+    });
+    const identity = await prisma.client.externalIdentity.create({
+      data: {
+        provider: "APPLE",
+        issuer: APPLE_ISSUER,
+        providerSubject: `historical-${randomUUID()}`,
+        userId: user.id,
+        providerEmail: email,
+        emailVerified: true,
+        emailForwardingEnabled: true,
       },
     });
     await expect(
-      external.unlink("apple", identity.userId, randomUUID(), undefined, request),
+      external.unlink("apple", user.id, randomUUID(), undefined, request),
     ).rejects.toMatchObject({ code: "FINAL_AUTH_METHOD" });
+    await expect(
+      prisma.client.externalIdentity.findUniqueOrThrow({ where: { id: identity.id } }),
+    ).resolves.toMatchObject({ provider: "APPLE", providerEmail: email });
   });
 
   it("encrypts Apple tokens and durably revokes them after explicit unlink", async () => {

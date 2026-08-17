@@ -10,8 +10,10 @@ import {
 
 const screenshots = "test-results/evidence/handoff-w3-round-2/screenshots";
 const evidence = "test-results/evidence/handoff-w3-round-2/evidence";
+const reviewDirectory = "artifacts/merchant-design-review";
 const runId = randomUUID().slice(0, 8);
-const programName = `W3 Browser Circle ${runId}`;
+// The identifier remains unique in the slug; the customer-visible name is intentional.
+const programName = "Today Coffee Rewards";
 const programSlug = `w3-browser-${runId}`;
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 let programId = "";
@@ -33,15 +35,25 @@ async function screenshot(page: Page, name: string) {
   });
 }
 
+async function reviewScreenshot(page: Page, name: string) {
+  await mkdir(reviewDirectory, { recursive: true });
+  await page.screenshot({
+    path: `${reviewDirectory}/${name}`,
+    fullPage: true,
+    animations: "disabled",
+  });
+}
+
 async function login(page: Page) {
   await page.goto("http://localhost:3001/en/login");
   await page.locator('input[name="email"]').fill("owner@waflo.local");
   await page.locator('input[name="password"]').fill("Waflo-Development-2026");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
-  const switcher = page.locator(".wf-org-switcher select");
-  await switcher.selectOption({ label: "Today Coffee" });
-  await expect(switcher).toHaveValue(organizationId);
+  const switcher = page.getByRole("button", { name: "Choose organization" });
+  await switcher.click();
+  await page.getByRole("option", { name: "Today Coffee", exact: true }).click();
+  await expect(switcher).toContainText("Today Coffee");
 }
 
 async function latestMailAction(
@@ -80,7 +92,7 @@ async function latestMailAction(
 }
 
 async function enroll(page: Page, displayName: string, email?: string) {
-  await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today`);
+  await page.goto(`http://today.localhost:3002/join/${programSlug}`);
   await page.getByLabel("Name on card").fill(displayName);
   if (email) await page.getByLabel("Email").fill(email);
   await page.getByLabel(new RegExp(`I accept the ${programName}`)).check();
@@ -373,18 +385,14 @@ test.describe
       });
       await expect(customerAccess).toBeVisible();
       await expect(customerAccess.getByText(new RegExp(programSlug))).toBeVisible();
-      await expect(
-        customerAccess.getByText(
-          "Ready in test-adapter mode; this is not external production certification.",
-          { exact: true },
-        ),
-      ).toHaveCount(2);
+      await expect(page.getByText(/test-adapter mode|production certification/iu)).toHaveCount(0);
       await screenshot(page, "01-merchant-enrollment-settings");
 
       await page
         .getByRole("link", { name: "Download enrollment QR as PNG" })
         .scrollIntoViewIfNeeded();
       await screenshot(page, "02-public-url-and-enrollment-qr");
+      await reviewScreenshot(page, "merchant-business-link-today.png");
     });
 
     test("renders public discovery, English enrollment, Arabic RTL, and consent validation", async ({
@@ -410,13 +418,28 @@ test.describe
       expect(new URL(page.url()).searchParams.get("tenant")).toBe("today");
       await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
 
-      await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today&lang=en`);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto(`http://today.localhost:3002/join/${programSlug}?lang=en`);
       await expect(page.getByRole("heading", { name: programName })).toBeVisible();
       await screenshot(page, "04-english-join-page");
+      await reviewScreenshot(page, "customer-today-desktop-en.png");
+      await reviewScreenshot(page, "customer-enrollment.png");
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      await reviewScreenshot(page, "customer-today-mobile-en.png");
+      for (const width of [360, 430] as const) {
+        await page.setViewportSize({ width, height: 900 });
+        await reviewScreenshot(page, `customer-today-mobile-${width}-en.png`);
+      }
+      await page.setViewportSize({ width: 1440, height: 1000 });
 
       await page.getByLabel("Language").selectOption("ar");
       await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
       await screenshot(page, "05-arabic-rtl-join-page");
+      await reviewScreenshot(page, "customer-today-desktop-ar.png");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await reviewScreenshot(page, "customer-today-mobile-ar.png");
+      await page.setViewportSize({ width: 1440, height: 1000 });
 
       await page.getByLabel("اللغة").selectOption("en");
       await page.getByLabel("Name on card").fill("Consent Check");
@@ -465,6 +488,7 @@ test.describe
       await expect(page.getByText("0 / 8")).toBeVisible();
       await expect(page.getByAltText("Membership card QR")).toBeVisible();
       await screenshot(page, "08-customer-card-0-of-8-membership-qr");
+      await reviewScreenshot(page, "customer-existing-membership.png");
 
       await expect(
         page.getByText("Open this card on iPhone or Android to add it to that device's wallet."),
@@ -501,23 +525,30 @@ test.describe
         await Promise.all([iosContext.close(), androidContext.close()]);
       }
 
-      const pass = await page.request.get(
-        "http://localhost:3002/api/waflo/v1/customer/wallet/apple/pass?tenant=today",
-        { headers: { referer: cardUrl } },
-      );
-      expect(pass.ok()).toBe(true);
-      expect(pass.headers()["content-type"]).toContain("application/vnd.apple.pkpass");
+      const tenantOrigin = new URL(cardUrl).origin;
+      const pass = await page.evaluate(async () => {
+        const response = await fetch("/api/waflo/v1/customer/wallet/apple/pass");
+        return {
+          ok: response.ok,
+          contentType: response.headers.get("content-type"),
+        };
+      });
+      expect(pass.ok).toBe(true);
+      expect(pass.contentType).toContain("application/vnd.apple.pkpass");
 
-      const csrfBootstrap = await page.request.get(
-        "http://localhost:3002/api/waflo/v1/customer/csrf?tenant=today",
-      );
-      expect(csrfBootstrap.ok()).toBe(true);
-      const csrfPayload = (await csrfBootstrap.json()) as { data: { token: string } };
+      const csrfPayload = await page.evaluate(async () => {
+        const response = await fetch("/api/waflo/v1/customer/csrf");
+        if (!response.ok) throw new Error("Customer CSRF bootstrap failed");
+        return (await response.json()) as { data: { token: string } };
+      });
+      const tenantCookies = await page.context().cookies(tenantOrigin);
       const crossMerchant = await page.request.post(
-        "http://localhost:3002/api/waflo/v1/customer/session/rotate?tenant=today",
+        "http://localhost:3002/api/waflo/v1/customer/session/rotate",
         {
           data: {},
           headers: {
+            cookie: tenantCookies.map(({ name, value }) => `${name}=${value}`).join("; "),
+            host: "today.localhost:3002",
             origin: "http://alnahr.lvh.me:3002",
             "x-csrf-token": csrfPayload.data.token,
           },
@@ -606,24 +637,28 @@ test.describe
     test("shows paused, archived, suspended, and provider-disabled truthfully", async ({
       page,
     }) => {
+      const membershipCountBefore = await prisma.membership.count({
+        where: { enrollmentProgramVersionId: versionId },
+      });
       await prisma.loyaltyProgram.update({ where: { id: programId }, data: { status: "PAUSED" } });
-      await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today&evidence=paused`);
-      await expect(page.getByText("Enrollment is not open")).toBeVisible();
+      await page.goto(`http://today.localhost:3002/join/${programSlug}?evidence=paused`);
+      await expect(page.getByText("This loyalty card is temporarily unavailable")).toBeVisible();
       await screenshot(page, "18-paused-program");
+      await reviewScreenshot(page, "customer-program-unavailable.png");
 
       await prisma.loyaltyProgram.update({
         where: { id: programId },
         data: { status: "ARCHIVED" },
       });
-      await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today&evidence=archived`);
-      await expect(page.getByText("This loyalty card is archived", { exact: true })).toBeVisible();
+      await page.goto(`http://today.localhost:3002/join/${programSlug}?evidence=archived`);
+      await expect(page.getByText("This loyalty card is temporarily unavailable")).toBeVisible();
       await screenshot(page, "19-archived-program");
 
       await prisma.organization.update({
         where: { id: organizationId },
         data: { status: "SUSPENDED" },
       });
-      await page.goto(`http://localhost:3002/join/${programSlug}?tenant=today&evidence=suspended`);
+      await page.goto(`http://today.localhost:3002/join/${programSlug}?evidence=suspended`);
       await expect(
         page.getByRole("heading", { name: "This merchant is unavailable" }),
       ).toBeVisible();
@@ -639,6 +674,98 @@ test.describe
       });
       await expect(
         prisma.membership.count({ where: { enrollmentProgramVersionId: versionId } }),
-      ).resolves.toBeGreaterThan(0);
+      ).resolves.toBe(membershipCountBefore);
+
+      await page.goto("http://unknown-merchant.localhost:3002/");
+      await expect(page.locator("main")).toBeVisible();
+      await reviewScreenshot(page, "customer-unknown-subdomain.png");
+    });
+
+    test("captures the customer reward-ready presentation contract", async ({ page }) => {
+      const filledArtwork = `data:image/svg+xml,${encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300">
+          <rect width="640" height="300" rx="28" fill="#f8f4ef"/>
+          ${Array.from({ length: 8 }, (_, index) => {
+            const x = 78 + (index % 4) * 160;
+            const y = index < 4 ? 82 : 218;
+            return `<circle cx="${x}" cy="${y}" r="48" fill="#ff6b4a" stroke="#241916" stroke-width="8"/><path d="M${x - 20} ${y}l14 14 30-34" fill="none" stroke="#241916" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>`;
+          }).join("")}
+        </svg>
+      `)}`;
+      await page.route("**/api/waflo/v1/customer/card/review-reward-ready", async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: {
+              publicMembershipId: "review-reward-ready",
+              customer: {
+                displayName: "Maha Reward Ready",
+                preferredLocale: "en",
+                maskedEmail: "m***@e*****.test",
+              },
+              merchant: { name: "Today Coffee", slug: "today" },
+              program: {
+                name: "Cookie Card",
+                description: "A customer-ready loyalty card.",
+                rewardSummary: "A complimentary signature drink",
+                pausedMessage: null,
+              },
+              membership: {
+                status: "ACTIVE",
+                credentialStatus: "ACTIVE",
+                state: "ACTIVE",
+                enrolledAt: "2026-08-01T09:00:00.000Z",
+              },
+              progress: {
+                currentCycleStampCount: 8,
+                completedCycleCount: 0,
+                rewardReady: true,
+                goal: 8,
+                stamps: Array.from({ length: 8 }, () => "FILLED"),
+                render: {
+                  dataUri: filledArtwork,
+                  contentDigest: "visual-review-content",
+                  configurationDigest: "visual-review-configuration",
+                  width: 640,
+                  height: 300,
+                },
+              },
+              theme: {
+                backgroundColor: "#2c1c18",
+                foregroundColor: "#ffffff",
+                accentColor: "#ff6b4a",
+                secondaryColor: "#fff0ec",
+              },
+              membershipQr: null,
+              wallet: {
+                apple: {
+                  mode: "DISABLED",
+                  status: "UNAVAILABLE",
+                  testAdapter: false,
+                  safeErrorCode: null,
+                },
+                google: {
+                  mode: "DISABLED",
+                  status: "UNAVAILABLE",
+                  testAdapter: false,
+                  safeErrorCode: null,
+                },
+              },
+              transfer: {
+                allowed: false,
+                emailConfirmationRequired: true,
+                transferWithoutEmailAllowed: false,
+              },
+            },
+            requestId: "customer-reward-ready-visual-contract",
+          }),
+        });
+      });
+
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto("http://today.localhost:3002/card/review-reward-ready");
+      await expect(page.getByText("Reward ready", { exact: true })).toBeVisible();
+      await reviewScreenshot(page, "customer-reward-ready.png");
     });
   });

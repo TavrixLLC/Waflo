@@ -1,8 +1,10 @@
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { createWriteStream, existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -17,11 +19,17 @@ for (const [key, value] of Object.entries(localEnvironment)) {
   process.env[key] ??= value;
 }
 const project = process.argv[2] ?? "chromium";
+const isolatedDatabase = process.env.WAFLO_ISOLATED_E2E === "1";
+const databaseRequire = createRequire(
+  new URL("../packages/database/package.json", import.meta.url),
+);
+const { Client } = databaseRequire("pg");
 const playwrightArguments = process.argv.slice(3);
 const runLabel = `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 6)}`;
 const supportedProjects = new Set([
   "chromium",
   "accessibility",
+  "design-review",
   "w3",
   "w3-accessibility",
   "w3-evidence",
@@ -41,12 +49,107 @@ const providerDisabled = project === "w3-provider-disabled";
 // directory, then copy them back after the run so CI can always upload them.
 const runtimeLogDirectory = await mkdtemp(path.join(tmpdir(), "waflo-playwright-"));
 const artifactLogDirectory = path.join(root, "test-results", "waflo-logs");
+const isolatedDatabaseName = isolatedDatabase
+  ? `waflo_test_p0_visual_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`
+      .replaceAll("-", "_")
+      .slice(0, 63)
+  : null;
+let isolatedDatabaseAdminUrl = null;
+
+function isolatedDatabaseUrls(name) {
+  if (!/^waflo_test_[a-z0-9_]+$/.test(name)) throw new Error("Unsafe isolated database name.");
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for isolated E2E.");
+  const admin = new URL(process.env.DATABASE_URL);
+  admin.searchParams.delete("schema");
+  const test = new URL(admin);
+  test.pathname = `/${name}`;
+  test.searchParams.set("schema", "public");
+  return { admin: admin.toString(), test: test.toString() };
+}
+
+async function runCommand(command, args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: root, env, stdio: "inherit", windowsHide: true });
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code ?? 1));
+  });
+}
+
+function pnpmCommand(args) {
+  if (process.platform !== "win32") return { command: "corepack", args: ["pnpm", ...args] };
+  return {
+    command: process.execPath,
+    args: [
+      path.resolve(path.dirname(process.execPath), "node_modules/corepack/dist/corepack.js"),
+      "pnpm",
+      ...args,
+    ],
+  };
+}
+
+async function prepareIsolatedDatabase() {
+  if (!isolatedDatabaseName) return;
+  const urls = isolatedDatabaseUrls(isolatedDatabaseName);
+  isolatedDatabaseAdminUrl = urls.admin;
+  const client = new Client({ connectionString: urls.admin });
+  await client.connect();
+  try {
+    await client.query(
+      `CREATE DATABASE "${isolatedDatabaseName}" TEMPLATE template0 ENCODING 'UTF8'`,
+    );
+  } finally {
+    await client.end();
+  }
+  process.env.DATABASE_URL = urls.test;
+  process.env.WAFLO_TEST_DATABASE_NAME = isolatedDatabaseName;
+  process.env.WAFLO_TEST_RUN_ID = isolatedDatabaseName.slice("waflo_test_".length);
+  const migrateCommand = pnpmCommand(["--filter", "@waflo/database", "migrate:deploy"]);
+  const migrate = await runCommand(migrateCommand.command, migrateCommand.args, process.env);
+  if (migrate !== 0) throw new Error(`Isolated database migration failed (${migrate}).`);
+  const seedCommand = pnpmCommand(["--filter", "@waflo/database", "seed"]);
+  const seed = await runCommand(seedCommand.command, seedCommand.args, process.env);
+  if (seed !== 0) throw new Error(`Isolated database seed failed (${seed}).`);
+}
+
+async function cleanupIsolatedDatabase() {
+  if (!isolatedDatabaseName || !isolatedDatabaseAdminUrl) return;
+  const client = new Client({ connectionString: isolatedDatabaseAdminUrl });
+  await client.connect();
+  try {
+    await client.query(`DROP DATABASE IF EXISTS "${isolatedDatabaseName}" WITH (FORCE)`);
+  } finally {
+    await client.end();
+  }
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => (error ? reject(error) : resolve(address.port)));
+    });
+  });
+}
+
+async function buildIsolatedFrontends() {
+  const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
+  if ((await runCommand(api.command, api.args, process.env)) !== 0)
+    throw new Error("Isolated API build failed.");
+  const build = pnpmCommand(["--filter", "@waflo/merchant-dashboard", "build"]);
+  if ((await runCommand(build.command, build.args, process.env)) !== 0)
+    throw new Error("Isolated Merchant build failed.");
+  const customer = pnpmCommand(["--filter", "@waflo/customer-web", "build"]);
+  if ((await runCommand(customer.command, customer.args, process.env)) !== 0)
+    throw new Error("Isolated Customer build failed.");
+}
 
 const commands = [
   {
     name: "api",
     port: 4000,
-    readyUrl: "http://127.0.0.1:4000/ready",
+    readyUrl: "http://127.0.0.1:4000/health",
     cwd: path.join(root, "apps", "api"),
     entry: path.join(root, "apps", "api", "dist", "main.js"),
     args: [],
@@ -252,6 +355,30 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 let exitCode = 1;
 try {
+  await prepareIsolatedDatabase();
+  if (isolatedDatabase) {
+    const [apiPort, marketingPort, merchantPort, customerPort] = await Promise.all([
+      freePort(),
+      freePort(),
+      freePort(),
+      freePort(),
+    ]);
+    process.env.API_PORT = String(apiPort);
+    process.env.NEXT_PUBLIC_API_URL = `http://127.0.0.1:${apiPort}`;
+    process.env.WAFLO_API_DB_PROBE_FILE = path.join(runtimeLogDirectory, "api-db-probe.json");
+    commands[0].port = apiPort;
+    commands[0].readyUrl = `http://127.0.0.1:${apiPort}/ready`;
+    commands[1].port = marketingPort;
+    commands[1].readyUrl = `http://127.0.0.1:${marketingPort}/en`;
+    commands[1].args = ["start", "-p", String(marketingPort)];
+    commands[2].port = merchantPort;
+    commands[2].readyUrl = `http://127.0.0.1:${merchantPort}/en/login`;
+    commands[2].args = ["start", "-p", String(merchantPort)];
+    commands[3].port = customerPort;
+    commands[3].readyUrl = `http://127.0.0.1:${customerPort}/privacy`;
+    commands[3].args = ["start", "-p", String(customerPort)];
+    await buildIsolatedFrontends();
+  }
   for (const command of commands) {
     if (command.port !== null && (await portIsOpen(command.port))) {
       throw new Error(
@@ -290,6 +417,7 @@ try {
 } finally {
   await cleanup();
   await preserveLogs();
+  await cleanupIsolatedDatabase();
 }
 
 process.exitCode = exitCode;

@@ -51,7 +51,7 @@ async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {
   await continueToStudio.click();
 }
 
-test("continues from Builder into a seven-area merchant Studio without duplicate design editors", async ({
+test("continues from Builder into a six-area merchant Studio without duplicate design editors", async ({
   page,
 }) => {
   await mockTemplateGalleryApi(page);
@@ -59,13 +59,12 @@ test("continues from Builder into a seven-area merchant Studio without duplicate
   await enterStudio(page, "en");
 
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
-  await expect(navigation.getByRole("button")).toHaveCount(7);
+  await expect(navigation.getByRole("button")).toHaveCount(6);
   for (const label of [
     "Overview",
     "How it works",
     "Customers & locations",
     "Wallet Engagement",
-    "Test",
     "Review & launch",
     "Settings",
   ]) {
@@ -88,9 +87,7 @@ test("continues from Builder into a seven-area merchant Studio without duplicate
   await expect(page.getByLabel("Valid for (days)").first()).toBeVisible();
   await expect(page.getByLabel("Require manager approval to redeem").first()).toBeVisible();
 
-  await navigation.getByRole("button", { name: /^Test/u }).click();
-  await expect(page.getByText("Test safely with a demo customer", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start demo customer" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 
   await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page.getByRole("heading", { name: "Not ready to launch" })).toBeVisible();
@@ -126,20 +123,18 @@ test("uses a discoverable mobile menu and complete Arabic RTL navigation", async
 
   const navigation = page.getByRole("navigation", { name: "أقسام الاستوديو" });
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole("button")).toHaveCount(7);
+  await expect(navigation.getByRole("button")).toHaveCount(6);
   for (const label of [
     "نظرة عامة",
     "طريقة العمل",
     "العملاء والمواقع",
     "تفاعل Wallet",
-    "الاختبار",
     "الإطلاق",
     "الإعدادات",
   ]) {
     await expect(navigation.getByRole("button", { name: new RegExp(label, "u") })).toBeVisible();
   }
-  await navigation.getByRole("button", { name: /^الاختبار/u }).click();
-  await expect(page.getByText("اختبر بأمان مع عميل تجريبي", { exact: true })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: /^الاختبار/u })).toHaveCount(0);
   await expect(mobileTrigger).toBeFocused();
 
   const noOverflow = await page.evaluate(
@@ -230,19 +225,19 @@ const lifecycleScenarios = [
   ],
   [
     "CHECKED",
-    "Draft",
-    "Not visible to real customers until it is launched.",
-    "Automated checks passed",
-    "Pending",
-    "Start test",
-    "Not ready to launch",
-    "Go to Test",
+    "Ready to launch",
+    "Required checks are complete. The card is not live yet.",
+    "Ready to launch",
+    "Next required",
+    "Review launch",
+    "Ready to launch",
+    "Launch loyalty card",
     "Archive card",
   ],
   [
     "READY",
     "Ready to launch",
-    "Required checks and testing are complete. The card is not live yet.",
+    "Required checks are complete. The card is not live yet.",
     "Ready to launch",
     "Next required",
     "Review launch",
@@ -389,24 +384,14 @@ test("shows complete customer access controls and truthful optional Wallet avail
   ).toHaveCount(2);
 });
 
-test("uses spaced Test stats, one primary progression action, and a truthful reset label", async ({
-  page,
-}) => {
+test("removes Test navigation and keeps automatic launch checks actionable", async ({ page }) => {
   await mockTemplateGalleryApi(page);
   await enterStudio(page, "en");
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
-  await navigation.getByRole("button", { name: /^Test/u }).click();
-  await page.getByRole("button", { name: "Start demo customer" }).click();
-
-  await expect(page.getByText("Current progress", { exact: true })).toBeVisible();
-  await expect(page.getByText("0 / 8", { exact: true })).toBeVisible();
-  await expect(page.getByText("Completed cycles", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add a stamp" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "+5 stamps" })).toHaveAttribute(
-    "class",
-    /secondary/u,
-  );
-  await expect(page.getByRole("button", { name: "Reset demo customer" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Launch" })).toBeVisible();
+  await expect(page.getByText(/Automated checks/u).first()).toBeVisible();
 });
 
 test("separates the current Studio location from the next required journey stage in LTR and RTL", async ({

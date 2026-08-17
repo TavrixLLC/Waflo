@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type BrowserContext, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
@@ -272,7 +272,7 @@ async function createEndToEndContactSheet(): Promise<void> {
     "05-studio-draft.png",
     "06-studio-live.png",
     "07-launch-review.png",
-    "08-test-mode.png",
+    "08-automatic-checks.png",
     "09-mobile-gallery-390.png",
     "10-mobile-builder-390.png",
     "11-mobile-studio-360.png",
@@ -473,14 +473,15 @@ test("captures exactly the focused P5 visual QA set", async ({ context }) => {
   await capture(launch, "07-launch-review.png");
   await launch.close();
 
-  const testMode = await context.newPage();
-  await openStudio(testMode);
-  await openStudioArea(testMode, /^Test/u);
-  await testMode.getByRole("button", { name: "Start demo customer" }).click();
-  await testMode.getByRole("button", { name: "Add a stamp" }).click();
-  await expect(testMode.getByText("1 / 8", { exact: true })).toBeVisible();
-  await capture(testMode, "08-test-mode.png");
-  await testMode.close();
+  const automaticChecks = await context.newPage();
+  await openStudio(automaticChecks);
+  await openStudioArea(automaticChecks, /^(?:Review & launch|Launch)/u);
+  await expect(
+    automaticChecks.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }),
+  ).toBeVisible();
+  await expect(automaticChecks.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  await capture(automaticChecks, "08-automatic-checks.png");
+  await automaticChecks.close();
 
   const mobileGallery = await context.newPage();
   await openGallery(mobileGallery, "en", { width: 390, height: 844 });

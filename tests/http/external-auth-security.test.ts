@@ -2,11 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import {
   createLocalJWKSet,
-  decodeProtectedHeader,
   exportJWK,
   exportPKCS8,
   generateKeyPair,
-  jwtVerify,
   type KeyLike,
   SignJWT,
 } from "jose";
@@ -16,6 +14,7 @@ import { AuthService } from "../../apps/api/src/auth/auth.service.js";
 import { ExternalAuthService } from "../../apps/api/src/auth/external-auth.service.js";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
+import { hashOpaqueToken } from "../../packages/auth/src/index.js";
 
 const GOOGLE_CLIENT_ID = "google-http-security-client";
 const APPLE_CLIENT_ID = "app.waflo.http-security";
@@ -61,13 +60,11 @@ describe.sequential("external-auth HTTP security boundary", () => {
   let environment: EnvironmentService;
   let providerPrivateKey: KeyLike;
   let invalidProviderPrivateKey: KeyLike;
-  let appleClientPublicKey: KeyLike;
   let nextProviderTokenResponse: Record<string, unknown> | null = null;
   const providerCalls: Array<{ url: string; body: URLSearchParams }> = [];
 
   beforeAll(async () => {
     const appleClientKeys = await generateKeyPair("ES256", { extractable: true });
-    appleClientPublicKey = appleClientKeys.publicKey;
     process.env.NODE_ENV = "test";
     process.env.DEPLOYMENT_ENVIRONMENT = "development";
     process.env.API_PUBLIC_URL = "http://localhost:4000";
@@ -119,20 +116,54 @@ describe.sequential("external-auth HTTP security boundary", () => {
 
   afterAll(async () => app?.close());
 
+  async function csrfState() {
+    const response = await app.inject({ method: "GET", url: "/v1/auth/csrf" });
+    return {
+      cookie: bareCookie(
+        setCookies(response).find((value) => value.startsWith("waflo_csrf=")) ?? "",
+      ),
+      token: envelope<{ csrfToken: string }>(response).csrfToken,
+    };
+  }
+
   async function start(provider: Provider, registration = true): Promise<StartedFlow> {
-    const response = await app.inject({
-      method: "GET",
-      url: `/v1/auth/external/${provider}/start?locale=en&registration=${registration}&termsAccepted=true&privacyAccepted=true`,
-      remoteAddress: testRemoteAddress(),
-    });
-    expect(response.statusCode).toBe(302);
-    const authorizationUrl = new URL(response.headers.location ?? "");
+    if (provider === "apple") throw new Error("Apple authentication starts are removed.");
+    const response = registration
+      ? await (async () => {
+          const csrf = await csrfState();
+          return app.inject({
+            method: "POST",
+            url: "/v1/auth/external/google/signup",
+            remoteAddress: testRemoteAddress(),
+            headers: {
+              cookie: csrf.cookie,
+              origin: "http://localhost:3001",
+              "x-csrf-token": csrf.token,
+            },
+            payload: {
+              locale: "en",
+              termsAccepted: true,
+              privacyAccepted: true,
+            },
+          });
+        })()
+      : await app.inject({
+          method: "GET",
+          url: "/v1/auth/external/google/start?locale=en",
+          remoteAddress: testRemoteAddress(),
+        });
+    expect(response.statusCode).toBe(registration ? 201 : 302);
+    const authorizationUrl = new URL(
+      registration
+        ? envelope<{ authorizationUrl: string }>(response).authorizationUrl
+        : (response.headers.location ?? ""),
+    );
     const state = authorizationUrl.searchParams.get("state") ?? "";
     const nonce = authorizationUrl.searchParams.get("nonce") ?? "";
     const correlation = setCookies(response).find((value) => value.includes("waflo_oauth_"));
     expect(correlation).toBeTruthy();
     expect(correlation).toContain("HttpOnly");
-    expect(correlation).toContain(`Path=/v1/auth/external/${provider}/callback`);
+    expect(correlation).toContain("Path=/v1/auth/external/google/callback");
     expect(correlation).toContain("SameSite=Lax");
     const correlationCookie = bareCookie(correlation ?? "");
     return {
@@ -253,7 +284,89 @@ describe.sequential("external-auth HTTP security boundary", () => {
     }
   }
 
-  it.each(["google", "apple"] as const)(
+  it("requires both legal acceptances before creating a Google signup intent", async () => {
+    for (const payload of [
+      { locale: "en", termsAccepted: false, privacyAccepted: true },
+      { locale: "en", termsAccepted: true, privacyAccepted: false },
+    ]) {
+      const csrf = await csrfState();
+      const before = await prisma.client.oAuthAuthorizationRequest.count();
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/auth/external/google/signup",
+        remoteAddress: testRemoteAddress(),
+        headers: {
+          cookie: csrf.cookie,
+          origin: "http://localhost:3001",
+          "x-csrf-token": csrf.token,
+        },
+        payload,
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toMatchObject({ error: { code: "VALIDATION_FAILED" } });
+      expect(await prisma.client.oAuthAuthorizationRequest.count()).toBe(before);
+    }
+  });
+
+  it("persists a short-lived server-authoritative Google signup intent", async () => {
+    const flow = await start("google", true);
+    const stored = await prisma.client.oAuthAuthorizationRequest.findUniqueOrThrow({
+      where: { stateHash: hashOpaqueToken(flow.state) },
+    });
+    expect(stored).toMatchObject({
+      provider: "GOOGLE",
+      intent: "SIGN_UP",
+      allowRegistration: true,
+      termsVersion: environment.values.LEGAL_TERMS_VERSION,
+      privacyVersion: environment.values.LEGAL_PRIVACY_VERSION,
+      consumedAt: null,
+    });
+    expect(stored.legalAcceptedAt).toBeInstanceOf(Date);
+    expect(stored.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("rejects Google login for an unlinked identity and never auto-provisions or email-links", async () => {
+    const email = `${randomUUID()}@existing-unlinked.example`;
+    const existing = await prisma.client.user.create({
+      data: {
+        email,
+        normalizedEmail: email,
+        displayName: "Existing password merchant",
+        passwordHash: "existing-password-hash",
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
+      },
+    });
+    const flow = await start("google", false);
+    const subject = `unlinked-${randomUUID()}`;
+    await prepareProviderResponse({
+      provider: "google",
+      subject,
+      nonce: flow.nonce,
+      email,
+      emailVerified: true,
+    });
+    const response = await callback(flow, { cookie: flow.correlationCookie });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toContain("result=no_account");
+    expect(
+      setCookies(response).some((value) => value.startsWith(`${environment.values.COOKIE_NAME}=`)),
+    ).toBe(false);
+    expect(
+      await prisma.client.externalIdentity.count({ where: { providerSubject: subject } }),
+    ).toBe(0);
+    expect(await prisma.client.user.count({ where: { normalizedEmail: email } })).toBe(1);
+    expect(
+      await prisma.client.user.findUniqueOrThrow({ where: { id: existing.id } }),
+    ).toMatchObject({
+      id: existing.id,
+      email,
+    });
+  });
+
+  it.each(["google"] as const)(
     "rejects a %s callback transferred to another browser without consuming Browser A's flow",
     async (provider) => {
       const flow = await start(provider);
@@ -317,7 +430,7 @@ describe.sequential("external-auth HTTP security boundary", () => {
     },
   );
 
-  it.each(["google", "apple"] as const)(
+  it.each(["google"] as const)(
     "keeps parallel %s flows independently valid and rejects expired/reused flows",
     async (provider) => {
       const first = await start(provider);
@@ -364,7 +477,7 @@ describe.sequential("external-auth HTTP security boundary", () => {
     },
   );
 
-  it.each(["google", "apple"] as const)(
+  it.each(["google"] as const)(
     "completes a %s flow on a different API replica without sticky sessions",
     async (provider) => {
       const flow = await start(provider);
@@ -410,7 +523,7 @@ describe.sequential("external-auth HTTP security boundary", () => {
     },
   );
 
-  it.each(["google", "apple"] as const)(
+  it.each(["google"] as const)(
     "rejects %s wrong issuer, audience, and nonce at the HTTP callback",
     async (provider) => {
       for (const boundary of ["issuer", "audience", "nonce"] as const) {
@@ -432,7 +545,7 @@ describe.sequential("external-auth HTTP security boundary", () => {
     },
   );
 
-  it.each(["google", "apple"] as const)("rejects an unknown %s state", async (provider) => {
+  it.each(["google"] as const)("rejects an unknown %s state", async (provider) => {
     const flow = await start(provider);
     const unknownState = Buffer.from(randomUUID().repeat(2)).toString("base64url").slice(0, 43);
     expectFailed(
@@ -445,39 +558,28 @@ describe.sequential("external-auth HTTP security boundary", () => {
     );
   });
 
-  it("uses Google PKCE, omits Apple PKCE, and sends Apple's exact documented token form", async () => {
+  it("uses Google PKCE and keeps every Apple authentication route disabled", async () => {
     const google = await start("google");
     expect(google.authorizationUrl.searchParams.get("code_challenge_method")).toBe("S256");
     expect(google.authorizationUrl.searchParams.get("code_challenge")).toBeTruthy();
+    const startResponse = await app.inject({
+      method: "GET",
+      url: "/v1/auth/external/apple/start?locale=en",
+      remoteAddress: testRemoteAddress(),
+    });
+    expect(startResponse.statusCode).toBe(410);
+    expect(startResponse.json()).toMatchObject({ error: { code: "APPLE_SIGNIN_REMOVED" } });
 
-    const apple = await start("apple");
-    expect(apple.authorizationUrl.searchParams.get("response_mode")).toBe("form_post");
-    expect(apple.authorizationUrl.searchParams.has("code_challenge")).toBe(false);
-    expect(apple.authorizationUrl.searchParams.has("code_challenge_method")).toBe(false);
-    await prepareProviderResponse({
-      provider: "apple",
-      subject: `apple-contract-${randomUUID()}`,
-      nonce: apple.nonce,
-      email: `${randomUUID()}@privaterelay.appleid.com`,
-      emailVerified: true,
+    const callbackResponse = await app.inject({
+      method: "POST",
+      url: "/v1/auth/external/apple/callback",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({ state: "removed", code: "removed" }).toString(),
     });
-    expectAuthenticated(
-      await callback(apple, { cookie: apple.correlationCookie, code: "apple-form" }),
-    );
-    const exchange = providerCalls.at(-1);
-    expect(exchange?.url).toBe("https://appleid.apple.com/auth/token");
-    expect([...(exchange?.body.keys() ?? [])].sort()).toEqual(
-      ["client_id", "client_secret", "code", "grant_type", "redirect_uri"].sort(),
-    );
-    expect(exchange?.body.has("code_verifier")).toBe(false);
-    const clientSecret = exchange?.body.get("client_secret") ?? "";
-    expect(decodeProtectedHeader(clientSecret)).toMatchObject({ alg: "ES256", kid: "APPLEKEY1" });
-    const clientClaims = await jwtVerify(clientSecret, appleClientPublicKey, {
-      issuer: "WAFLOTEAM1",
-      audience: APPLE_ISSUER,
-      subject: APPLE_CLIENT_ID,
-    });
-    expect(Number(clientClaims.payload.exp) - Number(clientClaims.payload.iat)).toBe(300);
+    expect(callbackResponse.statusCode).toBe(410);
+
+    const capabilities = await app.inject({ method: "GET", url: "/v1/auth/external/providers" });
+    expect(envelope<{ appleSignIn: string }>(capabilities).appleSignIn).toBe("REMOVED");
   });
 
   it("issues a fresh merchant session cookie on external reauthentication", async () => {
@@ -518,87 +620,6 @@ describe.sequential("external-auth HTTP security boundary", () => {
         where: { userId: identity.userId, revokedAt: null, expiresAt: { gt: new Date() } },
       }),
     ).toBe(2);
-  });
-
-  it("accepts Apple form_post first-login name safely, ignores browser email, and supports repeat login", async () => {
-    const subject = `apple-repeat-${randomUUID()}`;
-    const relay = `${randomUUID()}@privaterelay.appleid.com`;
-    const first = await start("apple");
-    await prepareProviderResponse({
-      provider: "apple",
-      subject,
-      nonce: first.nonce,
-      email: relay,
-      emailVerified: true,
-    });
-    expectAuthenticated(
-      await callback(first, {
-        cookie: first.correlationCookie,
-        user: JSON.stringify({
-          email: "untrusted-browser@example.test",
-          name: { firstName: "  Relay\u0000", lastName: "Merchant  " },
-        }),
-      }),
-    );
-    const identity = await prisma.client.externalIdentity.findUniqueOrThrow({
-      where: {
-        provider_issuer_providerSubject: {
-          provider: "APPLE",
-          issuer: APPLE_ISSUER,
-          providerSubject: subject,
-        },
-      },
-      include: { user: true, appleCredential: true },
-    });
-    expect(identity.providerEmail).toBe(relay);
-    expect(identity.user.displayName).toBe("Relay Merchant");
-    expect(identity.appleCredential?.refreshTokenEncrypted).not.toContain("refresh-");
-
-    const repeat = await start("apple", false);
-    await prepareProviderResponse({ provider: "apple", subject, nonce: repeat.nonce });
-    expectAuthenticated(await callback(repeat, { cookie: repeat.correlationCookie }));
-    expect(
-      await prisma.client.externalIdentity.count({ where: { providerSubject: subject } }),
-    ).toBe(1);
-
-    const malformedUser = await start("apple", false);
-    await prepareProviderResponse({ provider: "apple", subject, nonce: malformedUser.nonce });
-    expectAuthenticated(
-      await callback(malformedUser, {
-        cookie: malformedUser.correlationCookie,
-        user: "{not-valid-json",
-      }),
-    );
-
-    const untrustedOnly = await start("apple");
-    const untrustedSubject = `apple-untrusted-email-${randomUUID()}`;
-    await prepareProviderResponse({
-      provider: "apple",
-      subject: untrustedSubject,
-      nonce: untrustedOnly.nonce,
-    });
-    expectFailed(
-      await callback(untrustedOnly, {
-        cookie: untrustedOnly.correlationCookie,
-        user: JSON.stringify({
-          email: `${randomUUID()}@browser-only.example`,
-          name: { firstName: 42, lastName: ["invalid"] },
-        }),
-      }),
-    );
-    expect(
-      await prisma.client.externalIdentity.count({ where: { providerSubject: untrustedSubject } }),
-    ).toBe(0);
-  });
-
-  it("consumes a correctly correlated Apple cancellation without exposing provider details", async () => {
-    const flow = await start("apple");
-    const canceled = await callback(flow, {
-      cookie: flow.correlationCookie,
-      error: "user_cancelled_authorize",
-    });
-    expectFailed(canceled, "user_cancelled_authorize");
-    expectFailed(await callback(flow, { cookie: flow.correlationCookie, code: "after-cancel" }));
   });
 
   it("verifies and idempotently processes Apple server notifications", async () => {
@@ -726,7 +747,7 @@ describe.sequential("external-auth HTTP security boundary", () => {
     );
   });
 
-  it("fails Apple HTTP start safely when the configured private key is malformed", async () => {
+  it("keeps Apple HTTP start removed even when legacy private-key configuration is malformed", async () => {
     const configuredKey = process.env.APPLE_SIGNIN_PRIVATE_KEY;
     process.env.APPLE_SIGNIN_PRIVATE_KEY = [
       "-----BEGIN",
@@ -742,7 +763,8 @@ describe.sequential("external-auth HTTP security boundary", () => {
         url: "/v1/auth/external/apple/start?locale=en",
         remoteAddress: testRemoteAddress(),
       });
-      expect(response.statusCode).toBe(503);
+      expect(response.statusCode).toBe(410);
+      expect(response.json()).toMatchObject({ error: { code: "APPLE_SIGNIN_REMOVED" } });
       expect(response.body).not.toContain("malformed");
       expect(response.body).not.toContain("PRIVATE KEY");
     } finally {

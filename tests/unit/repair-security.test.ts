@@ -105,6 +105,49 @@ describe("repair-round security boundaries", () => {
     ).toContain("https://app.waflo.app/");
   });
 
+  it("renders production-quality localized email verification content", () => {
+    const localOrigin = "http://localhost:3001";
+    const english = renderNotificationHtml(
+      {
+        to: "owner@example.com",
+        locale: "en",
+        kind: "email_verification",
+        actionUrl: `${localOrigin}/en/verify-email#token=test-only-verification-token`,
+        expiresAt: new Date("2026-08-14T12:00:00.000Z"),
+      },
+      [localOrigin],
+    );
+    expect(english).toContain('<html lang="en" dir="ltr">');
+    expect(english).toContain("Verify your Waflo email");
+    expect(english).toContain("Confirm your email address");
+    expect(english).toContain(">Verify email</a>");
+    expect(english).toContain(`${localOrigin}/en/verify-email#token=`);
+
+    const arabic = renderNotificationHtml(
+      {
+        to: "owner@example.com",
+        locale: "ar",
+        kind: "email_verification",
+        actionUrl: `${localOrigin}/ar/verify-email#token=test-only-verification-token`,
+        expiresAt: new Date("2026-08-14T12:00:00.000Z"),
+      },
+      [localOrigin],
+    );
+    expect(arabic).toContain('<html lang="ar" dir="rtl">');
+    expect(arabic).toContain("تأكيد بريدك الإلكتروني في Waflo");
+    expect(arabic).toContain("أكّد عنوان بريدك الإلكتروني");
+    expect(arabic).toContain(">تأكيد البريد الإلكتروني</a>");
+    expect(arabic).toContain(`${localOrigin}/ar/verify-email#token=`);
+    expect(arabic).not.toMatch(/[٠-٩۰-۹]/u);
+
+    for (const html of [english, arabic]) {
+      expect(html).toContain("Waflo is owned and operated by Tavrix LLC.");
+      expect(html).not.toContain("Mailpit");
+      expect(html).not.toContain("localhost:8025");
+      expect(html).not.toContain("SMTP");
+    }
+  });
+
   it("adds CSP everywhere and HSTS only in production without unsafe-eval", async () => {
     process.env.NODE_ENV = "production";
     for (const config of [marketingConfig, dashboardConfig, customerConfig]) {

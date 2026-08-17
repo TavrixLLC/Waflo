@@ -30,20 +30,20 @@ describe("production-v1 UX and billing repair", () => {
     expect(cadencePrice("starter", "monthly").billedAmountUsd).toBe(29);
     expect(cadencePrice("growth", "monthly").billedAmountUsd).toBe(69);
     expect(cadencePrice("scale", "monthly").billedAmountUsd).toBe(129);
-    expect(cadencePrice("starter", "quarterly").billedAmountUsd).toBe(80.91);
+    expect(cadencePrice("starter", "quarterly").billedAmountUsd).toBe(79.75);
     expect(cadencePrice("growth", "quarterly")).toEqual({
-      monthlyEquivalentUsd: 64.17,
-      billedAmountUsd: 192.51,
+      monthlyEquivalentUsd: 63.25,
+      billedAmountUsd: 189.75,
       undiscountedAmountUsd: 207,
     });
-    expect(cadencePrice("scale", "quarterly").billedAmountUsd).toBe(359.91);
-    expect(cadencePrice("starter", "yearly").billedAmountUsd).toBe(288.84);
+    expect(cadencePrice("scale", "quarterly").billedAmountUsd).toBe(354.75);
+    expect(cadencePrice("starter", "yearly").billedAmountUsd).toBe(290);
     expect(cadencePrice("growth", "yearly")).toEqual({
-      monthlyEquivalentUsd: 57.27,
-      billedAmountUsd: 687.24,
+      monthlyEquivalentUsd: 57.5,
+      billedAmountUsd: 690,
       undiscountedAmountUsd: 828,
     });
-    expect(cadencePrice("scale", "yearly").billedAmountUsd).toBe(1284.84);
+    expect(cadencePrice("scale", "yearly").billedAmountUsd).toBe(1290);
   });
 
   it("keeps monthly bootable without cadence IDs and rejects partial cadence groups", () => {
@@ -364,6 +364,26 @@ describe("production-v1 UX and billing repair", () => {
     ).toBe(false);
   });
 
+  it("keeps verification copy production-safe and auth spacing shared", () => {
+    const forms = readFileSync("apps/merchant-dashboard/components/auth-forms.tsx", "utf8");
+    const layout = readFileSync("apps/merchant-dashboard/components/auth-layout.tsx", "utf8");
+    const styles = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
+    expect(forms).toContain("If the address is eligible, the verification request was accepted.");
+    expect(forms).toContain("Didn’t receive it? Check your spam or junk folder.");
+    expect(forms).toContain("إذا كان العنوان مؤهلاً، فقد قُبل طلب إرسال رسالة تأكيد جديدة.");
+    expect(forms).toContain("لم تصلك الرسالة؟ تحقّق من مجلد الرسائل غير المرغوب فيها.");
+    expect(forms).not.toContain("localhost:8025");
+    expect(forms).not.toContain("open Mailpit");
+    expect(forms).toContain('const [email, setEmail] = useState("")');
+    expect(forms).toContain('setEmail(sessionStorage.getItem("waflo:verification-email") ?? "")');
+    expect(layout).toContain('className="auth-card__body"');
+    expect(styles).toContain("--auth-space-related: 0.5rem");
+    expect(styles).toContain("--auth-space-control: 1rem");
+    expect(styles).toContain("--auth-space-section: 1.5rem");
+    expect(styles).toContain(".auth-card__body > * + *");
+    expect(styles).toContain(".auth-verify__action + .auth-verify__help");
+  });
+
   it("keeps refunds review-based, tenant-scoped, idempotent, and on the original payment path", () => {
     const billing = readFileSync("apps/api/src/billing/billing.service.ts", "utf8");
     const controller = readFileSync("apps/api/src/billing/billing.controller.ts", "utf8");
@@ -380,5 +400,62 @@ describe("production-v1 UX and billing repair", () => {
     expect(billing).toContain('event.type !== "refund.failed"');
     expect(migration).toContain("billing_refund_one_active_request_per_invoice");
     expect(migration).toContain('CREATE TABLE "billing_refund_requests"');
+  });
+
+  it("verifies P1 responsive grid architectures, customer progressive loading, and refined stamp artwork", () => {
+    const tokens = readFileSync("packages/brand/src/tokens.css", "utf8");
+    const tailwindTokens = readFileSync("packages/brand/src/tailwind.css", "utf8");
+    const globals = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
+    const operationsService = readFileSync(
+      "apps/api/src/operations/merchant-operations.service.ts",
+      "utf8",
+    );
+    const operationsScreens = readFileSync(
+      "apps/merchant-dashboard/components/w4-operations-screens.tsx",
+      "utf8",
+    );
+    const dashboardScreens = readFileSync(
+      "apps/merchant-dashboard/components/dashboard-screens.tsx",
+      "utf8",
+    );
+    const stampEngine = readFileSync("packages/stamp-engine/src/index.ts", "utf8");
+
+    // Softened dashboard canvas background token
+    expect(tokens).toContain("--waflo-cloud: #f8f9fb;");
+    expect(tailwindTokens).toContain("--color-waflo-cloud: #f8f9fb;");
+
+    // Loyalty cards responsive 2-column grid
+    expect(globals).toContain(".program-list {");
+    expect(globals).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
+    expect(globals).toContain(".program-list__card {");
+
+    // Locations responsive 2-column grid
+    expect(globals).toContain(".location-grid {");
+    expect(globals).toContain(".location-card {");
+    expect(dashboardScreens).toContain('className="location-grid"');
+    expect(dashboardScreens).toContain('className="location-card"');
+
+    // Customers Team-like list and progressive API loading
+    expect(operationsScreens).toContain("dashboard-team-table dashboard-customers-table");
+    expect(operationsScreens).toContain("dashboard-customer-membership");
+    expect(operationsScreens).toContain("dashboard-load-more");
+    expect(operationsService).toContain("take: limit + 1");
+    expect(operationsService).toContain('orderBy: [{ updatedAt: "desc" }, { id: "desc" }]');
+    expect(operationsService).toContain("archivedAt: null");
+
+    // Stamp engine fallback artwork invariant
+    const filledRender = renderStampSvg({
+      goal: 8,
+      progress: 3,
+      layout: "GRID",
+      filledColor: "#ae3115",
+      emptyColor: "#f4ede8",
+      accentColor: "#ae3115",
+      progressLabelVisible: false,
+      rewardLabelVisible: false,
+    });
+    expect(filledRender.svg).toContain("svg");
+    expect(filledRender.svg).not.toContain("<text");
+    expect(filledRender.svg).not.toContain("✓");
   });
 });

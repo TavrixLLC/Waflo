@@ -10,12 +10,12 @@ import {
 import { describe, expect, it } from "vitest";
 
 describe("W2 Round 4 publication and policy decisions", () => {
-  it.each(["pending_activation", "trialing", "active", "grace_period"] as const)(
+  it.each(["trialing", "active", "grace_period"] as const)(
     "allows publication in billing status %s",
     (status) => expect(canPublishForBillingStatus(status)).toBe(true),
   );
 
-  it.each(["past_due", "suspended", "canceled"] as const)(
+  it.each(["pending_activation", "past_due", "suspended", "canceled"] as const)(
     "blocks publication in billing status %s",
     (status) => expect(canPublishForBillingStatus(status)).toBe(false),
   );

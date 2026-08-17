@@ -23,8 +23,8 @@ describe("merchant loyalty-card presentation boundary", () => {
       programOperationalStatuses.map((status) => merchantProgramStatus(status, "en").label),
     ).toEqual([
       "Draft",
-      "Ready to test",
-      "Testing",
+      "Ready to publish",
+      "Ready to publish",
       "Scheduled",
       "Live",
       "Paused",
@@ -38,8 +38,8 @@ describe("merchant loyalty-card presentation boundary", () => {
       programOperationalStatuses.map((status) => merchantProgramStatus(status, "ar").label),
     ).toEqual([
       "مسودة",
-      "جاهزة للاختبار",
-      "قيد الاختبار",
+      "جاهزة للنشر",
+      "جاهزة للنشر",
       "مجدولة",
       "مباشرة",
       "متوقفة مؤقتًا",

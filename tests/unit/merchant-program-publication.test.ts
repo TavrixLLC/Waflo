@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveProgramSharingPresentation,
+  canonicalPublicUrlForDisplay,
   enrollmentOperationalCopy,
   hasSavedUnpublishedChanges,
   isLocalPreviewUrl,
@@ -11,6 +12,15 @@ import {
 } from "../../apps/merchant-dashboard/components/program-publication-presentation.js";
 
 describe("merchant publication presentation", () => {
+  it("keeps local runtime URLs out of merchant-facing public link copy", () => {
+    expect(canonicalPublicUrlForDisplay("http://today.localhost:3002/join/coffee")).toBe(
+      "https://today.waflo.app/join/coffee",
+    );
+    expect(canonicalPublicUrlForDisplay("https://today.waflo.app/join/coffee")).toBe(
+      "https://today.waflo.app/join/coffee",
+    );
+  });
+
   it("distinguishes a first launch from a published-card update", () => {
     expect(publicationMode(false)).toBe("first-launch");
     expect(publicationMode(true)).toBe("update");

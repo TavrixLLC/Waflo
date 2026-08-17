@@ -1381,6 +1381,33 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     ).toBe("STAFF_LOCATION_ASSIGNMENT_INVALID");
   });
 
+  it("blocks signed Staff loyalty mutations when merchant billing is restricted", async () => {
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: ORGANIZATION_ID },
+      data: { subscriptionStatus: "SUSPENDED", trialEnd: null, gracePeriodEnd: null },
+    });
+    try {
+      const blocked = await signedStaffInject(app, client, {
+        method: "POST",
+        url: "/v1/staff/operations/stamps",
+        idempotencyKey: randomUUID(),
+        payload: {
+          qrPayload: membershipQr,
+          amount: 1,
+          purchaseAmountMinor: 10_000,
+          purchaseCurrency: "IQD",
+        },
+      });
+      expect(blocked.statusCode).toBe(422);
+      expect(responseCode(blocked)).toBe("OPERATION_BILLING_BLOCKED");
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: ORGANIZATION_ID },
+        data: { subscriptionStatus: "ACTIVE" },
+      });
+    }
+  });
+
   it("enforces immediate device revocation", async () => {
     await prisma.client.staffDevice.update({
       where: { publicId: client.devicePublicId },

@@ -10,10 +10,12 @@ import {
   calculateTrialState,
   canCreateLocation,
   canInviteTeamMember,
+  hasMerchantOperationalBillingAccess,
   planCatalog,
 } from "../../packages/billing/src/index";
 import { createErrorEnvelope } from "../../packages/contracts/src/index";
 import { parseEnvironment } from "../../packages/config/src/index";
+import { merchantPublicOrigin } from "../../packages/qr-core/src/index";
 import { directionFor, formatUsd, isLocale, localePath } from "../../packages/i18n/src/index";
 import {
   allowedInvitationRoles,
@@ -32,6 +34,7 @@ import {
   oldSlugReservedUntil,
   validateSlug,
 } from "../../apps/api/src/tenancy/slug";
+import { resolveMerchantOrganizationAccess } from "../../apps/api/src/account/account-access.service";
 
 describe("identity primitives", () => {
   it("normalizes email with Unicode normalization, trimming, and lowercase", () => {
@@ -102,19 +105,146 @@ describe("merchant slug policy", () => {
     },
   );
 
-  it.each(["www", "api", "admin", "waflo", "wallet", "stripe", "localhost"])(
-    "rejects reserved slug %s",
-    (slug) => {
-      expect(validateSlug(slug)).toMatchObject({
-        valid: false,
-        reason: "SLUG_RESERVED",
-      });
-    },
-  );
+  it.each([
+    "www",
+    "api",
+    "card",
+    "app-staging",
+    "api-staging",
+    "card-staging",
+    "admin",
+    "waflo",
+    "wallet",
+    "stripe",
+    "localhost",
+    "smtp",
+    "mobile",
+  ])("rejects reserved slug %s", (slug) => {
+    expect(validateSlug(slug)).toMatchObject({
+      valid: false,
+      reason: "SLUG_RESERVED",
+    });
+  });
 
   it("reserves an old slug for the 90-day cooldown", () => {
     const releasedAt = new Date("2026-07-27T12:00:00.000Z");
     expect(oldSlugReservedUntil(releasedAt).toISOString()).toBe("2026-10-25T12:00:00.000Z");
+  });
+
+  it("rejects punycode labels to keep merchant identities ASCII and non-spoofable", () => {
+    expect(isSlugFormatValid("xn--tday-9za")).toBe(false);
+  });
+});
+
+describe("merchant account access authority", () => {
+  const base = {
+    id: "org-1",
+    onboardingState: "COMPLETE" as const,
+    activeLocationCount: 1,
+    latestBillingCommandStatus: null,
+    outstandingInvoice: null,
+    billingProfile: {
+      subscriptionStatus: "ACTIVE" as const,
+      trialEnd: null,
+      gracePeriodEnd: null,
+      billingName: null,
+      billingEmail: null,
+      billingCountryCode: null,
+      billingAddressLine1: null,
+      billingCity: null,
+    },
+  };
+
+  it("grants full access to an active completed legacy organization", () => {
+    expect(resolveMerchantOrganizationAccess(base)).toMatchObject({
+      onboarding: "complete",
+      billing: "active",
+      access: "full",
+    });
+  });
+
+  it("keeps onboarding completion durable when operational location state later changes", () => {
+    expect(resolveMerchantOrganizationAccess({ ...base, activeLocationCount: 0 })).toMatchObject({
+      onboarding: "complete",
+      billing: "active",
+      access: "full",
+    });
+  });
+
+  it("keeps an active grace window operational and restricts it at the exact boundary", () => {
+    const now = new Date("2026-08-14T12:00:00.000Z");
+    const graceEnd = new Date("2026-08-14T12:01:00.000Z");
+    const inGrace = {
+      ...base,
+      billingProfile: {
+        ...base.billingProfile,
+        subscriptionStatus: "GRACE_PERIOD" as const,
+        gracePeriodEnd: graceEnd,
+      },
+      outstandingInvoice: { failureCategory: "CARD_DECLINED", graceEndsAt: graceEnd },
+    };
+    expect(resolveMerchantOrganizationAccess(inGrace, now).access).toBe("full");
+    expect(resolveMerchantOrganizationAccess(inGrace, graceEnd)).toMatchObject({
+      billing: "restricted",
+      access: "read_only_billing_recovery",
+    });
+  });
+
+  it.each(["PAST_DUE", "SUSPENDED", "CANCELED"] as const)(
+    "restricts completed organizations in %s",
+    (subscriptionStatus) => {
+      expect(
+        resolveMerchantOrganizationAccess({
+          ...base,
+          billingProfile: { ...base.billingProfile, subscriptionStatus },
+        }).access,
+      ).toBe("read_only_billing_recovery");
+    },
+  );
+
+  it("keeps incomplete onboarding out of full access even with active billing", () => {
+    expect(
+      resolveMerchantOrganizationAccess({
+        ...base,
+        onboardingState: "LOCATION",
+        activeLocationCount: 0,
+      }),
+    ).toMatchObject({ onboarding: "location_required", access: "onboarding_only" });
+  });
+});
+
+describe("worker-safe merchant billing entitlement policy", () => {
+  const now = new Date("2026-08-14T12:00:00.000Z");
+
+  it("allows active, live trial, and live grace states", () => {
+    expect(hasMerchantOperationalBillingAccess({ status: "ACTIVE" }, now)).toBe(true);
+    expect(
+      hasMerchantOperationalBillingAccess(
+        { status: "TRIALING", trialEnd: new Date("2026-08-14T12:00:01.000Z") },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      hasMerchantOperationalBillingAccess(
+        { status: "GRACE_PERIOD", gracePeriodEnd: new Date("2026-08-14T12:00:01.000Z") },
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("restricts missing or elapsed trial/grace evidence at the exact boundary", () => {
+    expect(hasMerchantOperationalBillingAccess({ status: "TRIALING", trialEnd: null }, now)).toBe(
+      false,
+    );
+    expect(hasMerchantOperationalBillingAccess({ status: "TRIALING", trialEnd: now }, now)).toBe(
+      false,
+    );
+    expect(
+      hasMerchantOperationalBillingAccess({ status: "GRACE_PERIOD", gracePeriodEnd: now }, now),
+    ).toBe(false);
+    expect(hasMerchantOperationalBillingAccess({ status: "PAST_DUE" }, now)).toBe(false);
+    expect(hasMerchantOperationalBillingAccess({ status: "SUSPENDED" }, now)).toBe(false);
+    expect(hasMerchantOperationalBillingAccess({ status: "CANCELED" }, now)).toBe(false);
   });
 });
 
@@ -241,6 +371,35 @@ describe("merchant hostname parsing and resolution", () => {
     expect(parseMerchantHostname("www.waflo.app", "waflo.app").status).toBe("reserved");
     expect(parseMerchantHostname("a.b.waflo.app", "waflo.app").status).toBe("malformed");
     expect(parseMerchantHostname("evil.example.com", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("xn--tday-9za.waflo.app", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app,evil.example", "waflo.app").status).toBe(
+      "malformed",
+    );
+    expect(parseMerchantHostname("today.waflo.app:evil", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app:70000", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app::443", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app./path", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("TODAY.WAFLO.APP.", "waflo.app")).toMatchObject({
+      status: "merchant",
+      slug: "today",
+    });
+  });
+
+  it("uses the merchant slug as the production customer origin", () => {
+    expect(
+      merchantPublicOrigin({
+        merchantSlug: "today",
+        customerBaseUrl: "https://card.waflo.app",
+        merchantBaseDomain: "waflo.app",
+      }),
+    ).toBe("https://today.waflo.app");
+    expect(
+      merchantPublicOrigin({
+        merchantSlug: "today",
+        customerBaseUrl: "http://localhost:3002",
+        merchantBaseDomain: "waflo.app",
+      }),
+    ).toBe("http://today.localhost:3002");
   });
 
   it.each([

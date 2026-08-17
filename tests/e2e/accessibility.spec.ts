@@ -26,6 +26,13 @@ async function loginAsSeedOwner(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
 }
 
+async function switchOrganization(page: Page, organizationName: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Choose organization" });
+  await trigger.click();
+  await page.getByRole("option", { name: organizationName, exact: true }).click();
+  await expect(trigger).toContainText(organizationName);
+}
+
 async function expectKeyboardFocus(page: Page): Promise<void> {
   await page.keyboard.press("Tab");
   await expect
@@ -48,6 +55,7 @@ test("public, authentication, and form-error screens have no serious accessibili
     "http://localhost:3001/en/signup",
     "http://localhost:3001/ar/signup",
     "http://localhost:3001/en/login",
+    "http://localhost:3001/en/oauth/callback?result=no_account",
     "http://localhost:3001/en/forgot-password",
     "http://localhost:3001/en/reset-password",
     "http://localhost:3001/en/verify-email",
@@ -72,21 +80,60 @@ test("public, authentication, and form-error screens have no serious accessibili
   await expectNoCriticalViolations(page);
 });
 
+test("Verify Email feedback, resend action, RTL, and zoom remain accessible", async ({ page }) => {
+  await page.route("**/v1/auth/resend-verification", async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { status: "accepted" }, requestId: "verify-email-a11y" }),
+    });
+  });
+
+  for (const locale of ["en", "ar"] as const) {
+    await page.goto(`http://localhost:3001/${locale}/verify-email`);
+    await page.evaluate(() => {
+      window.sessionStorage.setItem("waflo:verification-email", "a11y@example.test");
+    });
+    await page.reload();
+    const resend = page.getByRole("button", {
+      name: locale === "ar" ? "إعادة إرسال الرسالة" : "Resend verification email",
+    });
+    await expect(resend).toBeEnabled();
+    await resend.click();
+    await expect(page.getByRole("status")).toHaveCount(1);
+    await expect(page.getByRole("status")).toBeVisible();
+    await resend.focus();
+    await expect(resend).toBeFocused();
+    await expectNoCriticalViolations(page);
+
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = "2";
+    });
+    await expect(
+      page.getByRole("heading", { name: locale === "ar" ? "تحقق من بريدك" : "Check your email" }),
+    ).toBeVisible();
+    await expect(resend).toBeVisible();
+    expect(await page.locator("body").innerText()).not.toMatch(/[٠-٩۰-۹]/u);
+  }
+});
+
 test("authenticated English and Arabic dashboard screens and dialogs are accessible", async ({
   page,
 }) => {
   await loginAsSeedOwner(page);
   await page.goto("http://localhost:3001/en/onboarding/business");
-  await expect(page.getByRole("heading", { name: "Tell us about your business" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Set up your organization" })).toBeVisible();
   await expectNoCriticalViolations(page);
   for (const route of [
     "",
     "/programs",
+    "/customers",
     "/locations",
     "/team",
+    "/analytics",
+    "/exports",
     "/billing",
     "/security",
-    "/audit",
     "/settings",
   ]) {
     await page.goto(`http://localhost:3001/en/dashboard${route}`);
@@ -148,17 +195,15 @@ test("authenticated English and Arabic dashboard screens and dialogs are accessi
   await expectNoCriticalViolations(page);
 });
 
-test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible", async ({
+test("Loyalty Studio lifecycle, automatic checks, launch, conflicts, and RTL are accessible", async ({
   page,
 }) => {
   test.setTimeout(120_000);
   const programName = `A11y Pro ${randomUUID().slice(0, 6)}`;
+  const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   await loginAsSeedOwner(page);
 
-  const organizationSwitcher = page.locator(".wf-org-switcher select");
-  const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-  await organizationSwitcher.selectOption(growthOrganizationId);
-  await expect(organizationSwitcher).toHaveValue(growthOrganizationId);
+  await switchOrganization(page, "مخبز النهر");
   await page.goto("http://localhost:3001/en/dashboard/programs?create=quick");
   await page.getByRole("radio", { name: /Pro Mode/ }).check();
   await expectNoCriticalViolations(page);
@@ -217,20 +262,7 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await expect(page).toHaveTitle(/Customers & locations/u);
   await expectNoCriticalViolations(page);
 
-  await studioNavigation.getByRole("button", { name: /^Test/u }).click();
-  await expect(page).toHaveURL(/\/test$/u);
-  await expectNoCriticalViolations(page);
-  await page.getByRole("button", { name: "Start demo customer" }).click();
-  const currentProgress = page.getByText("Current progress", { exact: true });
-  const safeTestFailure = page.getByText(
-    "Test Mode could not start. No real customer activity was created. Try again.",
-    { exact: true },
-  );
-  await expect(currentProgress.or(safeTestFailure)).toBeVisible();
-  if (await currentProgress.isVisible()) {
-    await page.getByRole("button", { name: "Add a stamp" }).click();
-  }
-  await expectNoCriticalViolations(page);
+  await expect(studioNavigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 
   await studioNavigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page).toHaveURL(/\/launch$/u);

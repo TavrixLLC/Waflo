@@ -161,6 +161,6 @@ describe("W2 stamp visual engine", () => {
     });
     expect(rendered.svg).toContain("ختمان من أربعة");
     expect(rendered.svg).toContain("المكافأة التالية");
-    expect(rendered.svg).toContain("Noto Sans Arabic");
+    expect(rendered.svg).toContain("Cairo");
   });
 });

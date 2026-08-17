@@ -143,7 +143,7 @@ test("launches a ready card once, with real execution and a focused success stat
   await expect(page.getByRole("button", { name: "View customers" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open public card page" })).toBeVisible();
   await page.getByRole("button", { name: "Share loyalty card" }).click();
-  await expect(page.getByText("Local development preview", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preview link", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download enrollment QR as PNG" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download enrollment QR as SVG" })).toBeVisible();
   await page.getByRole("button", { name: "Copy link" }).click();

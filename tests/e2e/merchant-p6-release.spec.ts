@@ -13,7 +13,7 @@ const visualFiles = [
   "02-final-gallery.png",
   "03-final-builder.png",
   "04-final-studio.png",
-  "05-final-test.png",
+  "05-final-automatic-checks.png",
   "06-final-launch.png",
   "07-final-live.png",
   "08-final-mobile-390.png",
@@ -217,11 +217,6 @@ test("completes the final English merchant release journey", async ({ page }) =>
     page.getByRole("heading", { level: 1, name: "P6 release coffee card" }),
   ).toBeVisible();
 
-  await openStudioArea(page, /^Test/u);
-  await expect(page).toHaveURL(`/en/dashboard/programs/${programId}/test`);
-  await page.getByRole("button", { name: "Start demo customer" }).click();
-  await expect(page.getByRole("button", { name: "Reset demo customer" })).toBeVisible();
-
   await openStudioArea(page, /^Review & launch/u);
   await expect(page).toHaveURL(`/en/dashboard/programs/${programId}/launch`);
   await page.getByRole("button", { name: "Launch loyalty card" }).click();
@@ -254,7 +249,6 @@ test("loads Studio deep links, refreshes, and fails safely for inaccessible card
     ["/how-it-works", "How it works"],
     ["/customers-locations", "Customers & locations"],
     ["/engagement", "Wallet Engagement"],
-    ["/test", "Test"],
     ["/launch", "Launch"],
     ["/settings", "Settings"],
   ] as const;
@@ -440,11 +434,12 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
   await capture(studio, "04-final-studio.png");
   await studio.close();
 
-  const testMode = await context.newPage();
-  await openSeededStudio(testMode, { state: "READY", area: "test" });
-  await expect(testMode.getByRole("button", { name: "Start demo customer" })).toBeVisible();
-  await capture(testMode, "05-final-test.png");
-  await testMode.close();
+  const automaticChecks = await context.newPage();
+  await openSeededStudio(automaticChecks, { state: "READY", area: "launch" });
+  await expect(automaticChecks.getByRole("button", { name: "Launch loyalty card" })).toBeVisible();
+  await expect(automaticChecks.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  await capture(automaticChecks, "05-final-automatic-checks.png");
+  await automaticChecks.close();
 
   const launch = await context.newPage();
   await openSeededStudio(launch, { state: "READY", area: "launch" });
