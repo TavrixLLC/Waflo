@@ -275,8 +275,8 @@ test("keeps populated cards and actions responsive across supported widths", asy
     }
 
     const card = page.locator(".program-list__card");
-    await expect(card.getByRole("button", { name: "Open card" })).toBeVisible();
-    await expect(card.locator(".wf-dropdown summary")).toBeVisible();
+    await expect(card.getByRole("button", { name: /Open card/i })).toBeVisible();
+    await expect(card.locator(".program-list__menu-trigger")).toBeVisible();
     const cardBox = await card.boundingBox();
     expect(cardBox).not.toBeNull();
     if (cardBox) {

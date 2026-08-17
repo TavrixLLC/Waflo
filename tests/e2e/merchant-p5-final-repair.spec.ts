@@ -211,11 +211,11 @@ test("uses a neutral Library summary when renderer-ready data is unavailable", a
   });
   await page.goto("/en/dashboard/programs");
   const card = page.locator(".program-list__card");
-  await expect(
-    card.getByRole("img", { name: "Design available in Studio: Classic Roast rewards" }),
-  ).toBeVisible();
-  await expect(card.locator(".loyalty-card-visual__stamps")).toHaveCount(0);
-  await expect(card.locator(".loyalty-card-visual__stamp--filled")).toHaveCount(0);
+  await expect(card.locator(".loyalty-card-real-preview")).toBeVisible();
+  await expect(card.locator(".loyalty-card-real-preview__title")).toHaveText(
+    "Classic Roast rewards",
+  );
+  await expect(card.locator(".loyalty-card-real-preview__stamp-dot")).toHaveCount(8);
   await expect(card.getByText("Design available in Studio", { exact: true })).toBeVisible();
 });
 

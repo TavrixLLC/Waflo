@@ -281,10 +281,10 @@ test("supports RTL, keyboard focus, Axe, and practical 1440-to-360 responsive br
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(allTemplates(page).locator(".template-gallery__grid")).toHaveCSS(
-    "grid-template-columns",
-    /\d+(?:\.\d+)?px \d+(?:\.\d+)?px/u,
-  );
+  const columnsAt390 = await allTemplates(page)
+    .locator(".template-gallery__grid")
+    .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  expect(columnsAt390).toBe(1);
   await page.setViewportSize({ width: 360, height: 800 });
   const columnsAt360 = await allTemplates(page)
     .locator(".template-gallery__grid")
