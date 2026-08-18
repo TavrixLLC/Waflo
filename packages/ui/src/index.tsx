@@ -5,18 +5,25 @@ import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
 import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
 import {
   type ButtonHTMLAttributes,
+  Children,
+  type ChangeEvent,
   type HTMLAttributes,
   type InputHTMLAttributes,
+  isValidElement,
   type KeyboardEvent,
+  type ReactElement,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
+  useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 type ButtonVariant = "primary" | "secondary" | "tertiary" | "ghost" | "destructive" | "danger";
 
@@ -109,16 +116,97 @@ export function TextArea({ className = "", error = false, ...props }: TextAreaPr
   );
 }
 
-interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
+interface SelectProps
+  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "children" | "multiple" | "size"> {
   error?: boolean;
+  children: ReactNode;
 }
 
-export function Select({ className = "", error = false, ...props }: SelectProps) {
+function optionText(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child);
+      if (!isValidElement(child)) return "";
+      const element = child as ReactElement<{ children?: ReactNode }>;
+      return optionText(element.props.children);
+    })
+    .join("")
+    .trim();
+}
+
+function optionsFromChildren(children: ReactNode, group?: string): SearchableSelectOption[] {
+  return Children.toArray(children).flatMap<SearchableSelectOption>((child) => {
+    if (!isValidElement(child)) return [];
+
+    const element = child as ReactElement<{
+      children?: ReactNode;
+      disabled?: boolean;
+      label?: string;
+      value?: string | number;
+    }>;
+    if (element.type === "option") {
+      const label = optionText(element.props.children);
+      return [
+        {
+          value: String(element.props.value ?? label),
+          label,
+          ...(group ? { group } : {}),
+          disabled: Boolean(element.props.disabled),
+        },
+      ];
+    }
+
+    if (element.type === "optgroup") {
+      return optionsFromChildren(element.props.children, element.props.label);
+    }
+
+    return [];
+  });
+}
+
+function selectValue(value: string | number | readonly string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value === undefined ? undefined : String(value);
+}
+
+export function Select({
+  className = "",
+  error = false,
+  children,
+  value,
+  defaultValue,
+  onChange,
+  name,
+  required,
+  disabled,
+  id,
+  "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
+  ...props
+}: SelectProps) {
+  const options = useMemo(() => optionsFromChildren(children), [children]);
+  const selectedValue = selectValue(value);
+  const initialValue =
+    selectValue(defaultValue) ?? options.find((option) => !option.disabled)?.value ?? "";
+
   return (
-    <select
-      className={`wf-input wf-select ${error ? "wf-input--error" : ""} ${className}`}
-      aria-invalid={error || undefined}
+    <SearchableSelect
       {...props}
+      id={id}
+      name={name}
+      options={options}
+      value={selectedValue}
+      defaultValue={initialValue}
+      required={required}
+      disabled={disabled}
+      className={`wf-select ${error ? "wf-input--error" : ""} ${className}`}
+      ariaLabel={ariaLabel}
+      ariaDescribedBy={ariaDescribedBy}
+      invalid={error}
+      onValueChange={(nextValue) => {
+        const target = { value: nextValue, name } as HTMLSelectElement;
+        onChange?.({ target, currentTarget: target } as ChangeEvent<HTMLSelectElement>);
+      }}
     />
   );
 }
@@ -127,6 +215,7 @@ export interface SearchableSelectOption {
   value: string;
   label: string;
   group?: string;
+  disabled?: boolean;
 }
 
 export function SearchableSelect({
@@ -140,20 +229,27 @@ export function SearchableSelect({
   className = "",
   onValueChange,
   ariaLabel,
+  ariaDescribedBy,
+  id,
+  invalid = false,
 }: {
-  name: string;
+  name?: string | undefined;
   options: readonly SearchableSelectOption[];
-  value?: string;
-  defaultValue?: string;
-  placeholder?: string;
-  required?: boolean;
-  disabled?: boolean;
-  className?: string;
-  onValueChange?: (value: string) => void;
-  ariaLabel?: string;
+  value?: string | undefined;
+  defaultValue?: string | undefined;
+  placeholder?: string | undefined;
+  required?: boolean | undefined;
+  disabled?: boolean | undefined;
+  className?: string | undefined;
+  onValueChange?: ((value: string) => void) | undefined;
+  ariaLabel?: string | undefined;
+  ariaDescribedBy?: string | undefined;
+  id?: string | undefined;
+  invalid?: boolean | undefined;
 }) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const hasInteractedRef = useRef(false);
   const controlled = value !== undefined;
   const [selectedValue, setSelectedValue] = useState(value ?? defaultValue);
@@ -162,6 +258,12 @@ export function SearchableSelect({
   const [query, setQuery] = useState(selected?.label ?? "");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [menuPosition, setMenuPosition] = useState<{
+    direction: "ltr" | "rtl";
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!controlled) return;
@@ -188,14 +290,70 @@ export function SearchableSelect({
     );
   }, [options, query]);
 
+  const firstEnabledIndex = useCallback(
+    (from: number, direction: 1 | -1) => {
+      if (!filtered.length) return 0;
+      for (let offset = 0; offset < filtered.length; offset += 1) {
+        const index = (from + direction * offset + filtered.length) % filtered.length;
+        if (!filtered[index]?.disabled) return index;
+      }
+      return 0;
+    },
+    [filtered],
+  );
+
   useEffect(() => {
-    setActiveIndex((index) => Math.min(index, Math.max(0, filtered.length - 1)));
-  }, [filtered.length]);
+    setActiveIndex((index) =>
+      firstEnabledIndex(Math.min(index, Math.max(0, filtered.length - 1)), 1),
+    );
+  }, [filtered.length, firstEnabledIndex]);
+
+  const updateMenuPosition = useCallback(() => {
+    const rect = inputRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const maxMenuHeight = Math.min(352, window.innerHeight * 0.48);
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const openAbove = spaceBelow < Math.min(maxMenuHeight, 180) && rect.top > spaceBelow;
+    const nearestDirection = inputRef.current?.closest("[dir]")?.getAttribute("dir");
+    setMenuPosition({
+      direction: nearestDirection === "rtl" ? "rtl" : "ltr",
+      left: rect.left,
+      top: openAbove ? Math.max(8, rect.top - maxMenuHeight - 6) : rect.bottom + 6,
+      width: rect.width,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (inputRef.current?.contains(target) || listboxRef.current?.contains(target)) return;
+      setOpen(false);
+      setQuery(selected?.label ?? "");
+      setActiveIndex(0);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+  }, [open, selected?.label]);
 
   function choose(option: SearchableSelectOption) {
+    if (option.disabled) return;
     hasInteractedRef.current = true;
-    setSelectedValue(option.value);
-    setQuery(option.label);
+    if (!controlled) {
+      setSelectedValue(option.value);
+      setQuery(option.label);
+    }
     setOpen(false);
     setActiveIndex(0);
     inputRef.current?.setCustomValidity("");
@@ -206,12 +364,25 @@ export function SearchableSelect({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setOpen(true);
-      setActiveIndex((index) => Math.min(index + 1, Math.max(0, filtered.length - 1)));
+      setActiveIndex((index) => firstEnabledIndex(index + 1, 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);
-      setActiveIndex((index) => Math.max(0, index - 1));
-    } else if (event.key === "Enter" && open && filtered[activeIndex]) {
+      setActiveIndex((index) => firstEnabledIndex(index - 1, -1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(firstEnabledIndex(0, 1));
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(firstEnabledIndex(filtered.length - 1, -1));
+    } else if (
+      event.key === "Enter" &&
+      open &&
+      filtered[activeIndex] &&
+      !filtered[activeIndex].disabled
+    ) {
       event.preventDefault();
       choose(filtered[activeIndex]);
     } else if (event.key === "Escape") {
@@ -226,10 +397,13 @@ export function SearchableSelect({
       <input type="hidden" name={name} value={selectedValue} />
       <input
         ref={inputRef}
+        id={id}
         type="search"
-        className="wf-input wf-search-select__input"
+        className={`wf-input wf-search-select__input ${invalid ? "wf-input--error" : ""}`}
         role="combobox"
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={invalid || undefined}
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={listboxId}
@@ -247,12 +421,12 @@ export function SearchableSelect({
           // if the user does not pick a different option.
           setQuery("");
           setOpen(true);
-          setActiveIndex(0);
+          setActiveIndex(firstEnabledIndex(0, 1));
         }}
         onClick={() => {
           setQuery("");
           setOpen(true);
-          setActiveIndex(0);
+          setActiveIndex(firstEnabledIndex(0, 1));
         }}
         onBlur={() => {
           setOpen(false);
@@ -279,40 +453,55 @@ export function SearchableSelect({
           setOpen(true);
         }}
       />
-      {open ? (
-        <div className="wf-search-select__list" id={listboxId} role="listbox">
-          {filtered.length ? (
-            filtered.map((option, index) => {
-              const previousGroup = filtered[index - 1]?.group;
-              return (
-                <div key={option.value}>
-                  {option.group && option.group !== previousGroup ? (
-                    <div className="wf-search-select__group" aria-hidden="true">
-                      {option.group}
+      {open && menuPosition && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={listboxRef}
+              className="wf-search-select__list"
+              id={listboxId}
+              role="listbox"
+              dir={menuPosition.direction}
+              style={{
+                left: menuPosition.left,
+                top: menuPosition.top,
+                width: menuPosition.width,
+              }}
+            >
+              {filtered.length ? (
+                filtered.map((option, index) => {
+                  const previousGroup = filtered[index - 1]?.group;
+                  return (
+                    <div key={option.value}>
+                      {option.group && option.group !== previousGroup ? (
+                        <div className="wf-search-select__group" aria-hidden="true">
+                          {option.group}
+                        </div>
+                      ) : null}
+                      <button
+                        id={`${listboxId}-${index}`}
+                        type="button"
+                        role="option"
+                        aria-selected={option.value === selectedValue}
+                        aria-disabled={option.disabled || undefined}
+                        className="wf-search-select__option"
+                        data-active={index === activeIndex || undefined}
+                        onPointerDown={(event) => event.preventDefault()}
+                        disabled={option.disabled}
+                        onClick={() => choose(option)}
+                        onMouseEnter={() => setActiveIndex(index)}
+                      >
+                        <span>{option.label}</span>
+                      </button>
                     </div>
-                  ) : null}
-                  <button
-                    id={`${listboxId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={option.value === selectedValue}
-                    className="wf-search-select__option"
-                    data-active={index === activeIndex || undefined}
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => choose(option)}
-                    onMouseEnter={() => setActiveIndex(index)}
-                  >
-                    <span>{option.label}</span>
-                    <small dir="ltr">{option.value}</small>
-                  </button>
-                </div>
-              );
-            })
-          ) : (
-            <div className="wf-search-select__empty">No matching option</div>
-          )}
-        </div>
-      ) : null}
+                  );
+                })
+              ) : (
+                <div className="wf-search-select__empty">No matching option</div>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

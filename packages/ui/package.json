@@ -19,13 +19,15 @@
     "@waflo/brand": "workspace:*",
     "@waflo/contracts": "workspace:*",
     "lucide-react": "1.27.0",
-    "react": "19.2.8"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/react": "19.2.17",
     "typescript": "5.9.3"
   },
   "peerDependencies": {
-    "react": "19.2.8"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   }
 }

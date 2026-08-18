@@ -263,6 +263,30 @@ describe("production-v1 UX and billing repair", () => {
     expect(source).not.toContain("Vertical position");
   });
 
+  it("uses the shared accessible listbox instead of browser-native product selects", () => {
+    const primitive = readFileSync("packages/ui/src/index.tsx", "utf8");
+    const styles = readFileSync("packages/ui/src/styles.css", "utf8");
+    const builder = readFileSync(
+      "apps/merchant-dashboard/components/program-card-builder.tsx",
+      "utf8",
+    );
+
+    expect(primitive).not.toContain("<select");
+    expect(primitive).toContain('role="combobox"');
+    expect(primitive).toContain('role="listbox"');
+    expect(primitive).toContain('role="option"');
+    expect(primitive).toContain('event.key === "Home"');
+    expect(primitive).toContain('event.key === "End"');
+    expect(primitive).toContain("createPortal(");
+    expect(primitive).toContain("aria-disabled={option.disabled");
+    expect(styles).toContain("position: fixed;");
+    expect(builder).toContain("value={reward.rewardType}");
+    expect(builder).toContain('value="FREE_ITEM"');
+    expect(builder).toContain('value="DISCOUNT_DESCRIPTION"');
+    expect(builder).toContain('value="TEXT_REWARD"');
+    expect(builder).toContain('value="CUSTOM"');
+  });
+
   it("centers the stamp SVG canvas and emits coherent Arabic Wallet anchors", () => {
     const stamp = renderStampSvg({
       goal: 8,
