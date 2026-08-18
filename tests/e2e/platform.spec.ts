@@ -492,7 +492,7 @@ test.describe
         .getByRole("button", { name: /^How it works/u })
         .click();
       await page.getByRole("button", { name: "Create update" }).click();
-      await expect(page.getByText(/Saved changes .* Not live yet/u).first()).toBeVisible();
+      await expect(page.getByText(/Live .* Unpublished changes/u).first()).toBeVisible();
       await page.getByRole("button", { name: "Edit design" }).click();
       await expect(page.locator(".builder-shell")).toBeVisible();
       await page.getByRole("button", { name: "Review card" }).click();

@@ -777,8 +777,8 @@ export function ProgramStudioEditor({
             <span>
               {savedUnpublishedChanges && saveState === "saved"
                 ? ar
-                  ? "تغييرات محفوظة · ليست مباشرة بعد"
-                  : "Saved changes · Not live yet"
+                  ? "تغييرات غير منشورة محفوظة"
+                  : "Unpublished changes saved"
                 : statusLabel(saveState, ar)}
             </span>
           </div>

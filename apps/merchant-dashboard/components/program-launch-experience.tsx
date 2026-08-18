@@ -971,6 +971,8 @@ export function LiveAccessSummary({
     customerAccessState: access?.enrollmentLinkStatus === "ACTIVE" ? "available" : "unavailable",
     locale: ar ? "ar" : "en",
   });
+  const publishedVersion = detail.currentPublishedVersion;
+  const publishedAt = publishedVersion?.publishedAt ?? null;
   return (
     <section
       className="live-access-summary"
@@ -978,34 +980,62 @@ export function LiveAccessSummary({
       aria-labelledby="live-access-summary-title"
       tabIndex={-1}
     >
+      <div className="live-access-summary__heading">
+        <div>
+          <span className="dashboard-card__label">
+            {ar ? "الإصدار المنشور الحالي" : "CURRENT PUBLISHED VERSION"}
+          </span>
+          <h3 id="live-access-summary-title">
+            <bdi dir="ltr">v{publishedVersion?.versionNumber ?? "—"}</bdi>
+            <span aria-hidden="true"> · </span>
+            {sharing.canShare ? (ar ? "متاحة للعملاء" : "Available to customers") : sharing.label}
+          </h3>
+        </div>
+        <Badge tone={sharing.tone}>{sharing.label}</Badge>
+      </div>
+      <dl className="current-published-version__facts">
+        <div>
+          <dt>{ar ? "الإصدار" : "Version"}</dt>
+          <dd dir="ltr">v{publishedVersion?.versionNumber ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>{ar ? "النشر" : "Published"}</dt>
+          <dd>
+            {publishedAt ? (
+              <time dateTime={publishedAt}>
+                {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
+                  dateStyle: "medium",
+                }).format(new Date(publishedAt))}
+              </time>
+            ) : ar ? (
+              "محفوظ"
+            ) : (
+              "Recorded"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{ar ? "حالة العملاء" : "Customer access"}</dt>
+          <dd>{sharing.label}</dd>
+        </div>
+      </dl>
+      <p>{sharing.description}</p>
       {hasUnpublishedChanges ? (
         <div className="unpublished-change-indicator" role="status">
           <span>
             <RefreshCcw size={18} aria-hidden="true" />
           </span>
           <div>
-            <strong>{ar ? "تغييرات بانتظار النشر" : "Changes waiting to be published"}</strong>
+            <strong>{ar ? "تغييرات غير منشورة" : "Unpublished changes"}</strong>
             <small>
-              {ar ? "البطاقة المباشرة الحالية لم تتغير." : "The current live card is unchanged."}
+              {ar
+                ? "بطاقتك الحالية متاحة للعملاء. راجع التغييرات المحفوظة وانشرها عندما تكون جاهزاً."
+                : "Your current card remains live. Review the saved changes and publish them when you are ready."}
             </small>
           </div>
           <Button onClick={onReviewChanges}>{ar ? "مراجعة التغييرات" : "Review changes"}</Button>
         </div>
       ) : null}
-      <div className="live-access-summary__heading">
-        <div>
-          <span className="dashboard-card__label">{ar ? "الوصول المباشر" : "LIVE ACCESS"}</span>
-          <h3 id="live-access-summary-title">
-            {sharing.canShare
-              ? ar
-                ? "شارك البطاقة وأدر العملاء"
-                : "Share the card and manage customers"
-              : sharing.label}
-          </h3>
-        </div>
-        <Badge tone={sharing.tone}>{sharing.label}</Badge>
-      </div>
-      <p>{sharing.description}</p>
       <ShareLoyaltyCard
         access={access}
         presentation={sharing}

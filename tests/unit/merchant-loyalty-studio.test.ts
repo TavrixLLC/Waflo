@@ -286,9 +286,9 @@ describe("merchant Loyalty Studio lifecycle presentation", () => {
     expect(changes).toMatchObject({
       label: "Live",
       guidance: {
-        title: "Saved changes · Not live yet",
+        title: "Live · Unpublished changes",
         description:
-          "Review the saved changes before publishing them. The current live card is unchanged.",
+          "Your current card is live. You have unpublished changes. Review and publish them when you are ready. Customers continue to see the current live version.",
       },
       primaryAction: { label: "Review changes" },
     });
