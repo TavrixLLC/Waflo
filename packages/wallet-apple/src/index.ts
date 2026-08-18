@@ -535,6 +535,7 @@ export class AppleWalletProvider implements WalletProvider {
       signer: this.options.signer as ApplePassSigner,
       images: {
         "strip.png": await progressStrip(input),
+        ...(input.applePassImages ?? {}),
       },
     });
     return {

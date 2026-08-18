@@ -182,10 +182,13 @@ export class OrganizationsService {
 
   async get(userId: string, organizationId: string) {
     await this.tenant.requireMembership(userId, organizationId, "organization.view");
-    return this.prisma.client.organization.findUniqueOrThrow({
+    const organization = await this.prisma.client.organization.findUniqueOrThrow({
       where: { id: organizationId },
       include: {
         billingProfile: true,
+        brandLogoAsset: {
+          include: { variants: { orderBy: { variantCode: "asc" } } },
+        },
         domains: { where: { isPrimary: true }, take: 1 },
         locations: {
           where: { status: "ACTIVE" },
@@ -200,6 +203,15 @@ export class OrganizationsService {
         },
       },
     });
+    return {
+      ...organization,
+      brandLogoAsset: organization.brandLogoAsset
+        ? {
+            ...organization.brandLogoAsset,
+            contentUrl: `/v1/organizations/${organizationId}/assets/${organization.brandLogoAsset.id}/content?variant=THUMBNAIL_96`,
+          }
+        : null,
+    };
   }
 
   async update(
@@ -210,12 +222,33 @@ export class OrganizationsService {
       businessCategory?: string | null | undefined;
       defaultLocale?: "en" | "ar" | undefined;
       timezone?: string | undefined;
+      brandLogoAssetId?: string | null | undefined;
     },
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "organization.manage");
     const organization = await this.prisma.client.$transaction(
       async (transaction: Prisma.TransactionClient) => {
+        if (input.brandLogoAssetId) {
+          const brandLogo = await transaction.merchantAsset.findFirst({
+            where: {
+              id: input.brandLogoAssetId,
+              organizationId,
+              category: "LOGO",
+              source: "MERCHANT_UPLOAD",
+              processingStatus: "READY",
+              archivedAt: null,
+            },
+            select: { id: true },
+          });
+          if (!brandLogo) {
+            throw new AppError(
+              "BRAND_LOGO_INVALID",
+              "Choose a processed logo uploaded by this organization.",
+              HttpStatus.UNPROCESSABLE_ENTITY,
+            );
+          }
+        }
         const updated = await transaction.organization.update({
           where: { id: organizationId },
           data: {
@@ -230,6 +263,9 @@ export class OrganizationsService {
               : {}),
             ...(input.defaultLocale ? { defaultLocale: localeToDb(input.defaultLocale) } : {}),
             ...(input.timezone ? { timezone: input.timezone } : {}),
+            ...(input.brandLogoAssetId !== undefined
+              ? { brandLogoAssetId: input.brandLogoAssetId }
+              : {}),
           },
         });
         return updated;
@@ -246,32 +282,41 @@ export class OrganizationsService {
       },
       request,
     );
-    if (input.name !== undefined || input.businessCategory !== undefined) {
+    if (
+      input.name !== undefined ||
+      input.businessCategory !== undefined ||
+      input.brandLogoAssetId !== undefined
+    ) {
       const nearbyConfiguration = await this.prisma.client.walletNearbyConfiguration.findUnique({
         where: { organizationId },
         select: { enabled: true },
       });
-      const affectedPrograms = nearbyConfiguration?.enabled
-        ? await this.prisma.client.loyaltyProgram.findMany({
-            where: {
-              organizationId,
-              OR: [
-                { walletBindings: { some: {} } },
-                { memberships: { some: { walletPassInstances: { some: {} } } } },
-              ],
-            },
-            select: { id: true },
-          })
-        : [];
+      const refreshWalletBranding = input.brandLogoAssetId !== undefined;
+      const affectedPrograms =
+        refreshWalletBranding || nearbyConfiguration?.enabled
+          ? await this.prisma.client.loyaltyProgram.findMany({
+              where: {
+                organizationId,
+                OR: [
+                  { walletBindings: { some: {} } },
+                  { memberships: { some: { walletPassInstances: { some: {} } } } },
+                ],
+              },
+              select: { id: true },
+            })
+          : [];
       if (affectedPrograms.length) {
         await this.prisma.client.programWalletSyncJob.createMany({
           data: affectedPrograms.map(({ id: programId }) => ({
             organizationId,
             programId,
             action: "update" as const,
-            reason: "NEARBY_RELEVANCE_CHANGED" as const,
+            reason:
+              input.brandLogoAssetId !== undefined
+                ? ("MERCHANT_BRANDING_CHANGED" as const)
+                : ("NEARBY_RELEVANCE_CHANGED" as const),
             commandType: "UPDATE" as const,
-            idempotencyKey: `program-wallet-nearby-organization:${programId}:${organization.updatedAt.toISOString()}`,
+            idempotencyKey: `program-wallet-${input.brandLogoAssetId !== undefined ? "branding" : "nearby"}-organization:${programId}:${organization.updatedAt.toISOString()}`,
             batchSize: 500,
           })),
           skipDuplicates: true,

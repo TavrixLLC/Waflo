@@ -26,6 +26,29 @@ import { composeProgramPreview } from "../../apps/api/src/programs/preview-compo
 import { walletPlatform } from "../../apps/customer-web/app/wallet-platform.js";
 
 describe("production-v1 UX and billing repair", () => {
+  it("keeps merchant branding additive, tenant-scoped, and asynchronously refreshed for Wallet", () => {
+    const schema = readFileSync("packages/database/prisma/schema.prisma", "utf8");
+    const migration = readFileSync(
+      "packages/database/prisma/migrations/20260818143000_organization_brand_logo/migration.sql",
+      "utf8",
+    );
+    const organizations = readFileSync(
+      "apps/api/src/organizations/organizations.service.ts",
+      "utf8",
+    );
+    const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
+    expect(schema).toContain("brandLogoAssetId      String?");
+    expect(migration).toContain('ADD COLUMN "brand_logo_asset_id" UUID');
+    expect(organizations).toContain('category: "LOGO"');
+    expect(organizations).toContain('source: "MERCHANT_UPLOAD"');
+    expect(organizations).toContain('processingStatus: "READY"');
+    expect(organizations).toContain("MERCHANT_BRANDING_CHANGED");
+    expect(organizations).toContain("batchSize: 500");
+    expect(worker).toContain("ensureGoogleProgramLogo");
+    expect(worker).toContain("merchantApplePassImages");
+    expect(worker).toContain('"logo@2x.png"');
+  });
+
   it("models quarterly and yearly prices with exact advertised discounts", () => {
     expect(cadencePrice("starter", "monthly").billedAmountUsd).toBe(29);
     expect(cadencePrice("growth", "monthly").billedAmountUsd).toBe(69);

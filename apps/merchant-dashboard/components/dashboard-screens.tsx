@@ -50,6 +50,8 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import { billingPriceTruth, canPersistCatalogSelection } from "./billing-presentation";
 import type { DashboardSection, MembershipView } from "./dashboard";
+import { ProgramAssetPicker } from "./program-asset-uploader";
+import type { AssetItem } from "./program-studio-types";
 import {
   LocationAddressFields,
   LocationMapPicker,
@@ -71,6 +73,7 @@ interface OrganizationView {
   selectedPlan: "STARTER" | "GROWTH" | "SCALE";
   onboardingState: "BUSINESS" | "LOCATION" | "COMPLETE";
   onboardingCompletedAt: string | null;
+  brandLogoAsset: AssetItem | null;
   billingProfile: {
     subscriptionStatus:
       | "PENDING_ACTIVATION"
@@ -2459,6 +2462,7 @@ export function SettingsScreen({
   const [organization, setOrganization] = useState<OrganizationView | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [logoSaving, setLogoSaving] = useState(false);
   const timezones = useMemo(
     () =>
       timeZoneOptions(locale).map((option) => ({
@@ -2520,6 +2524,35 @@ export function SettingsScreen({
       setError(message(caught, ar ? "تعذر تغيير الرابط." : "Unable to change URL."));
     }
   }
+  async function updateBrandLogo(brandLogoAssetId: string | null) {
+    setLogoSaving(true);
+    setError("");
+    try {
+      await apiFetch(`/v1/organizations/${membership.organization.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ brandLogoAssetId }),
+      });
+      setNotice(
+        brandLogoAssetId
+          ? ar
+            ? "ØªÙ… Ø­ÙØ¸ Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ. Ø³ÙŠØªÙ… ØªØ­Ø¯ÙŠØ« Ø¨Ø·Ø§Ù‚Ø§Øª Wallet Ø¨Ø´ÙƒÙ„ Ø¢Ù…Ù† ÙÙŠ Ø§Ù„Ø®Ù„ÙÙŠØ©."
+            : "Your merchant logo is saved. Existing Wallet passes will refresh safely in the background."
+          : ar
+            ? "ØªÙ…Øª Ø¥Ø²Ø§Ù„Ø© Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ."
+            : "Your merchant logo has been removed.",
+      );
+      await load();
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar ? "ØªØ¹Ø°Ø± Ø­ÙØ¸ Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ." : "Unable to save your merchant logo.",
+        ),
+      );
+    } finally {
+      setLogoSaving(false);
+    }
+  }
   return (
     <>
       <PageHeader
@@ -2564,6 +2597,43 @@ export function SettingsScreen({
               </FormField>
               <Button type="submit">{ar ? "حفظ التغييرات" : "Save changes"}</Button>
             </form>
+          </Card>
+          <Card className="dashboard-form-card merchant-branding-card">
+            <div className="dashboard-section-heading">
+              <div>
+                <h2>{ar ? "Ø§Ù„Ù‡ÙˆÙŠØ© Ø§Ù„Ø¨ØµØ±ÙŠØ©" : "Branding"}</h2>
+                <p>
+                  {ar
+                    ? "Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ ÙŠØ¸Ù‡Ø± ÙÙŠ ØªØ¬Ø±Ø¨Ø© Ø§Ù„Ø¹Ù…ÙŠÙ„ ÙˆWallet Ø­ÙŠØ«Ù…Ø§ ÙŠØ¯Ø¹Ù… Ø§Ù„Ù…Ø²ÙˆØ¯ Ø°Ù„Ùƒ."
+                    : "Your merchant logo appears in the customer experience and Wallet where the provider supports it."}
+                </p>
+              </div>
+            </div>
+            <ProgramAssetPicker
+              organizationId={membership.organization.id}
+              category="LOGO"
+              label={ar ? "Ø´Ø¹Ø§Ø± Ø§Ù„Ù†Ø´Ø§Ø·" : "Merchant logo"}
+              assets={organization.brandLogoAsset ? [organization.brandLogoAsset] : []}
+              selectedId={organization.brandLogoAsset?.id}
+              onSelected={(assetId) => void updateBrandLogo(assetId)}
+              onUploaded={() => undefined}
+              ar={ar}
+            />
+            <p className="dashboard-form__hint">
+              {ar
+                ? "PNG Ø£Ùˆ JPEG Ø£Ùˆ WebP Ø¨Ø­Ø¬Ù… Ø£Ù‚Ù„ Ù…Ù† 2 MB. Ù†ÙØ­Øµ Ø§Ù„ØµÙˆØ±Ø© ÙˆÙ†Ø¹ÙŠØ¯ ØªØ±Ù…ÙŠØ²Ù‡Ø§ Ø¨Ø£Ù…Ø§Ù†."
+                : "PNG, JPEG, or WebP under 2 MB. Waflo verifies, strips metadata, and safely normalizes every upload."}
+            </p>
+            {organization.brandLogoAsset ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void updateBrandLogo(null)}
+                loading={logoSaving}
+              >
+                {ar ? "Ø¥Ø²Ø§Ù„Ø© Ø§Ù„Ø´Ø¹Ø§Ø±" : "Remove logo"}
+              </Button>
+            ) : null}
           </Card>
           <Card className="dashboard-form-card">
             <h2>{ar ? "رابط التاجر" : "Merchant URL"}</h2>

@@ -93,6 +93,7 @@ const passInclude = {
     include: {
       organization: {
         include: {
+          brandLogoAsset: { include: { variants: true } },
           walletNearbyConfiguration: {
             include: {
               locations: { include: { location: true }, orderBy: { sortOrder: "asc" as const } },
@@ -264,6 +265,7 @@ function mapPass(
   environment: Environment,
   stampRenderInput: PublishedMembershipStampRenderInput,
   progressAssetUrl?: string,
+  applePassImages?: Readonly<Record<string, Uint8Array>>,
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
@@ -313,6 +315,7 @@ function mapPass(
     programStatus: membership.program.status,
     transferred: pass.membershipCredential.status === "TRANSFERRED",
     stampRenderInput,
+    ...(applePassImages ? { applePassImages } : {}),
   };
 }
 
@@ -321,6 +324,7 @@ function mapProgram(
     include: {
       organization: {
         include: {
+          brandLogoAsset: { include: { variants: true } };
           walletNearbyConfiguration: {
             include: {
               locations: { include: { location: true }; orderBy: { sortOrder: "asc" } };
@@ -1105,6 +1109,7 @@ export class WalletWorker {
               include: {
                 organization: {
                   include: {
+                    brandLogoAsset: { include: { variants: true } },
                     walletNearbyConfiguration: {
                       include: {
                         locations: {
@@ -1160,7 +1165,15 @@ export class WalletWorker {
           pass.provider === "GOOGLE"
             ? await this.ensureGoogleProgressAsset(pass, stampRenderInput)
             : undefined;
-        const input = mapPass(pass, this.environment, stampRenderInput, progressAssetUrl);
+        const applePassImages =
+          pass.provider === "APPLE" ? await this.merchantApplePassImages(pass) : undefined;
+        const input = mapPass(
+          pass,
+          this.environment,
+          stampRenderInput,
+          progressAssetUrl,
+          applePassImages,
+        );
         if (command.commandType === "ISSUE") {
           if (pass.membershipCredential.status !== "ACTIVE") {
             await this.deadLetter(command, "CREDENTIAL_NOT_ACTIVE");
@@ -1759,6 +1772,7 @@ export class WalletWorker {
       include: {
         organization: {
           include: {
+            brandLogoAsset: { include: { variants: true } };
             walletNearbyConfiguration: {
               include: {
                 locations: { include: { location: true }; orderBy: { sortOrder: "asc" } };
@@ -1777,14 +1791,27 @@ export class WalletWorker {
       };
     }>,
   ): Promise<string> {
-    const background = binding.programVersion.visualTheme?.accentColor ?? "#E4572E";
-    const foreground = binding.programVersion.visualTheme?.backgroundColor ?? "#F7F4EE";
     const width = 660;
     const height = 660;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 660 660"><rect width="660" height="660" rx="132" fill="${background}"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="${foreground}" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    const bytes = await sharp(Buffer.from(svg, "utf8")).png().toBuffer();
+    const brandLogo = binding.organization.brandLogoAsset;
+    const source = brandLogo ? await this.readBrandLogoBytes(brandLogo) : null;
+    const bytes = source
+      ? await sharp(source)
+          .resize(width, height, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+            withoutEnlargement: false,
+          })
+          .png()
+          .toBuffer()
+      : await this.defaultGoogleProgramLogo(
+          binding.programVersion.visualTheme?.accentColor,
+          binding.programVersion.visualTheme?.backgroundColor,
+        );
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
-    const assetType = `GOOGLE_PROGRAM_LOGO_${binding.configurationFingerprint.slice(0, 24)}`;
+    const assetType = source
+      ? `GOOGLE_MERCHANT_LOGO_${contentDigest.slice(0, 24)}`
+      : `GOOGLE_PROGRAM_LOGO_${binding.configurationFingerprint.slice(0, 24)}`;
     const objectKey = `wallet-public/${binding.organizationId}/${contentDigest}.png`;
     const publicToken = `wpa_${createHmac(
       "sha256",
@@ -1847,6 +1874,81 @@ export class WalletWorker {
       this.environment.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL ||
       this.environment.WALLET_PUBLIC_BASE_URL;
     return `${base.replace(/\/+$/, "")}/${asset.publicToken}`;
+  }
+
+  private async defaultGoogleProgramLogo(accent?: string | null, background?: string | null) {
+    const color = accent ?? "#E4572E";
+    const foreground = background ?? "#F7F4EE";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="0 0 660 660"><rect width="660" height="660" rx="132" fill="${color}"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="${foreground}" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
+  }
+
+  private async merchantApplePassImages(
+    pass: PassRecord,
+  ): Promise<Readonly<Record<string, Uint8Array>> | undefined> {
+    const bytes = await this.readBrandLogoBytes(pass.membership.organization.brandLogoAsset);
+    if (!bytes) return undefined;
+    const [logo, logo2x] = await Promise.all([
+      sharp(bytes)
+        .resize(160, 50, {
+          fit: "contain",
+          background: { r: 255, g: 255, b: 255, alpha: 0 },
+          withoutEnlargement: false,
+        })
+        .png()
+        .toBuffer(),
+      sharp(bytes)
+        .resize(320, 100, {
+          fit: "contain",
+          background: { r: 255, g: 255, b: 255, alpha: 0 },
+          withoutEnlargement: false,
+        })
+        .png()
+        .toBuffer(),
+    ]);
+    return { "logo.png": logo, "logo@2x.png": logo2x };
+  }
+
+  private async readBrandLogoBytes(
+    asset:
+      | {
+          source: string;
+          processingStatus: string;
+          archivedAt: Date | null;
+          variants: Array<{
+            variantCode: string;
+            objectKey: string;
+            digest: string;
+            mimeType: string;
+          }>;
+        }
+      | null
+      | undefined,
+  ): Promise<Buffer | null> {
+    if (
+      !asset ||
+      asset.source !== "MERCHANT_UPLOAD" ||
+      asset.processingStatus !== "READY" ||
+      asset.archivedAt
+    ) {
+      return null;
+    }
+    const variant =
+      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE") ??
+      asset.variants.find((item) => item.variantCode === "STAMP_256");
+    if (!variant?.mimeType.startsWith("image/")) return null;
+    const result = await this.objectStorage.send(
+      new GetObjectCommand({
+        Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+        Key: variant.objectKey,
+      }),
+    );
+    if (!result.Body) throw new Error("Merchant logo object is unavailable.");
+    const bytes = Buffer.from(await result.Body.transformToByteArray());
+    if (createHash("sha256").update(bytes).digest("hex") !== variant.digest) {
+      throw new Error("Merchant logo digest mismatch.");
+    }
+    return bytes;
   }
 
   private async stampRenderInput(

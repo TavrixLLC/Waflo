@@ -806,6 +806,7 @@ model Organization {
   onboardingCompletedAt DateTime?                @map("onboarding_completed_at") @db.Timestamptz(6)
   onboardingCommandId   String?                  @unique @map("onboarding_command_id") @db.Uuid
   onboardingRequestFingerprint String?           @map("onboarding_request_fingerprint") @db.Char(64)
+  brandLogoAssetId      String?                  @map("brand_logo_asset_id") @db.Uuid
   createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
   archivedAt            DateTime?                @map("archived_at") @db.Timestamptz(6)
@@ -826,6 +827,7 @@ model Organization {
   loyaltyPrograms        LoyaltyProgram[]
   loyaltyProgramVersions LoyaltyProgramVersion[]
   merchantAssets         MerchantAsset[]
+  brandLogoAsset         MerchantAsset?          @relation("OrganizationBrandLogo", fields: [brandLogoAssetId], references: [id], onDelete: Restrict)
   generatedPreviews      GeneratedProgramPreview[]
   validationRuns         ProgramValidationRun[]
   testSessions           ProgramTestSession[]
@@ -1483,6 +1485,7 @@ model MerchantAsset {
   emptyThemes     ProgramVisualTheme[]      @relation("ThemeEmptyStamp")
   milestoneThemes ProgramVisualTheme[]      @relation("ThemeMilestone")
   rewardOverrides RewardVisualOverride[]    @relation("RewardStampAsset")
+  brandOrganizations Organization[]         @relation("OrganizationBrandLogo")
 
   @@unique([organizationId, sha256Digest, category])
   @@index([organizationId, category, processingStatus])

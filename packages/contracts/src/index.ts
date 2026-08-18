@@ -151,6 +151,9 @@ export const organizationUpdateSchema = z
     businessCategory: z.string().trim().max(80).nullable().optional(),
     defaultLocale: localeSchema.optional(),
     timezone: timezoneSchema.optional(),
+    // Web branding is deliberately separate from customer-authored program content.
+    // The API verifies that this points to a safe, tenant-owned merchant LOGO asset.
+    brandLogoAssetId: z.uuid().nullable().optional(),
   })
   .strict();
 

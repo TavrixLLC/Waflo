@@ -309,6 +309,8 @@ export interface WalletMembershipInput extends WalletProgramInput {
     | "TEST";
   readonly transferred: boolean;
   readonly stampRenderInput: PublishedMembershipStampRenderInput;
+  /** Provider-correct, generated branding images for an Apple pass package. */
+  readonly applePassImages?: Readonly<Record<string, Uint8Array>>;
 }
 
 export interface WalletProgramTemplateResult {
