@@ -1926,8 +1926,7 @@ export class WalletWorker {
       | undefined,
   ): Promise<Buffer | null> {
     if (
-      !asset ||
-      asset.source !== "MERCHANT_UPLOAD" ||
+      asset?.source !== "MERCHANT_UPLOAD" ||
       asset.processingStatus !== "READY" ||
       asset.archivedAt
     ) {

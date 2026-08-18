@@ -9212,6 +9212,13 @@ body {
   align-items: flex-start;
 }
 
+.wf-plan-card__equivalent {
+  display: block;
+  margin-top: -0.55rem;
+  color: var(--waflo-success);
+  font-weight: 800;
+}
+
 .billing-plan-comparison .wf-plan-card {
   gap: 0.7rem;
   padding: 0.35rem 1.15rem;
@@ -9395,13 +9402,6 @@ body {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.wf-plan-card__equivalent {
-  display: block;
-  margin-top: -0.55rem;
-  color: var(--waflo-success);
-  font-weight: 800;
-}
-
 @media (max-width: 960px) {
   .dashboard-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
