@@ -107,6 +107,7 @@ export function ProgramAssetPicker({
   }
 
   function beginPan(event: PointerEvent<HTMLButtonElement>): void {
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragOrigin.current = {
       pointerX: event.clientX,
@@ -353,6 +354,8 @@ export function ProgramAssetPicker({
                 width={520}
                 height={360}
                 unoptimized
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
                 onLoad={(event) =>
                   setNaturalSize({
                     width: event.currentTarget.naturalWidth,

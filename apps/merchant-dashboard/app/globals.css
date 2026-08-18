@@ -3757,6 +3757,81 @@ body {
   color: var(--waflo-muted);
 }
 
+.studio-loading-skeleton {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.studio-loading-skeleton__header,
+.studio-loading-skeleton__status,
+.studio-loading-skeleton__body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.studio-loading-skeleton__header {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.studio-loading-skeleton__title {
+  width: min(21rem, 58%);
+  height: 2rem;
+}
+
+.studio-loading-skeleton__action {
+  width: 7rem;
+  height: 2.65rem;
+}
+
+.studio-loading-skeleton__status {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.studio-loading-skeleton__status > span {
+  height: 4.75rem;
+}
+
+.studio-loading-skeleton__body {
+  grid-template-columns: minmax(10rem, 0.45fr) minmax(15rem, 1fr) minmax(14rem, 0.8fr);
+  align-items: stretch;
+}
+
+.studio-loading-skeleton__body > aside,
+.studio-loading-skeleton__content {
+  display: grid;
+  gap: 0.65rem;
+  min-height: 22rem;
+  padding: 1rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 22px;
+  background: var(--waflo-surface);
+}
+
+.studio-loading-skeleton__body > aside > span {
+  height: 2.5rem;
+}
+
+.studio-loading-skeleton__line--wide {
+  width: 62%;
+  height: 1.35rem;
+}
+
+.studio-loading-skeleton__line {
+  width: 86%;
+  height: 0.9rem;
+}
+
+.studio-loading-skeleton__surface {
+  min-height: 13rem;
+}
+
+.studio-loading-skeleton__preview {
+  min-height: 22rem;
+  border-radius: 22px;
+}
+
 .studio-lifecycle-actions,
 .studio-form-grid,
 .studio-color-grid,
@@ -3904,6 +3979,9 @@ body {
   height: 100%;
   object-fit: contain;
   transform: translate(-50%, -50%);
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
 }
 
 .studio-crop-safe-area {
@@ -9196,6 +9274,19 @@ body {
   }
 }
 @media (max-width: 620px) {
+  .studio-loading-skeleton__status,
+  .studio-loading-skeleton__body {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-loading-skeleton__body > aside {
+    display: none;
+  }
+
+  .studio-loading-skeleton__preview {
+    min-height: 15rem;
+  }
+
   .dashboard-status-band {
     align-items: flex-start;
     flex-direction: column;
@@ -9692,8 +9783,11 @@ body {
 
 .dashboard-layout > .wf-sidebar {
   z-index: 30;
+  align-self: flex-start;
   width: 264px;
   flex: 0 0 264px;
+  height: 100dvh;
+  min-height: 0;
   padding: 1.5rem 1rem;
   color: var(--waflo-ink);
   border-inline-end: 1px solid var(--waflo-border);
@@ -9726,7 +9820,10 @@ body {
 }
 
 .dashboard-layout > .wf-sidebar .wf-sidebar__nav {
+  min-height: 0;
   margin-top: 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .dashboard-nav-group {

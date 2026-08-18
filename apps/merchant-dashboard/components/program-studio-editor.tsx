@@ -698,11 +698,7 @@ export function ProgramStudioEditor({
         </Card>
       );
     }
-    return (
-      <Card className="studio-loading" role="status">
-        <Clock3 aria-hidden="true" /> {ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}
-      </Card>
-    );
+    return <StudioLoadingSkeleton ar={ar} />;
   }
 
   if (!displayDraft || !displayVersion) {
@@ -992,6 +988,37 @@ export function ProgramStudioEditor({
         }}
       />
     </div>
+  );
+}
+
+function StudioLoadingSkeleton({ ar }: { ar: boolean }) {
+  return (
+    <section className="studio-loading-skeleton" aria-busy="true" aria-live="polite" role="status">
+      <span className="wf-sr-only">{ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}</span>
+      <div className="studio-loading-skeleton__header" aria-hidden="true">
+        <span className="wf-skeleton studio-loading-skeleton__title" />
+        <span className="wf-skeleton studio-loading-skeleton__action" />
+      </div>
+      <div className="studio-loading-skeleton__status" aria-hidden="true">
+        <span className="wf-skeleton" />
+        <span className="wf-skeleton" />
+        <span className="wf-skeleton" />
+      </div>
+      <div className="studio-loading-skeleton__body" aria-hidden="true">
+        <aside>
+          <span className="wf-skeleton" />
+          <span className="wf-skeleton" />
+          <span className="wf-skeleton" />
+          <span className="wf-skeleton" />
+        </aside>
+        <div className="studio-loading-skeleton__content">
+          <span className="wf-skeleton studio-loading-skeleton__line--wide" />
+          <span className="wf-skeleton studio-loading-skeleton__line" />
+          <span className="wf-skeleton studio-loading-skeleton__surface" />
+        </div>
+        <div className="wf-skeleton studio-loading-skeleton__preview" />
+      </div>
+    </section>
   );
 }
 

@@ -67,6 +67,12 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   }
   requestHeaders.set("x-forwarded-proto", "https");
   const directHost = request.headers.get("host") ?? "";
+  // Rebuild forwarding metadata at this BFF boundary. Fastify uses the trusted
+  // forwarded host for tenant resolution, so relaying an upstream chain here
+  // would make compatibility links resolve against the API hostname instead
+  // of the customer hostname.
+  requestHeaders.set("x-forwarded-host", directHost);
+  requestHeaders.delete("x-forwarded-port");
   const normalizedHost = directHost.toLocaleLowerCase("en-US").split(":")[0] ?? "";
   const localSuffix = [".localhost", ".lvh.me"].find((suffix) => normalizedHost.endsWith(suffix));
   const localHostTenant = localSuffix ? normalizedHost.slice(0, -localSuffix.length) : "";

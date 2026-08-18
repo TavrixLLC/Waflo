@@ -7,6 +7,7 @@ source "${script_directory}/common.sh"
 
 release_sha="${RELEASE_SHA:-}"
 registry="${IMAGE_REGISTRY:-}"
+release_scope="${RELEASE_IMAGE_SCOPE:-staging}"
 
 require_release_sha "${release_sha}"
 if [[ "$(git -C "${repository_root}" rev-parse HEAD)" != "${release_sha}" ]]; then
@@ -25,6 +26,10 @@ if [[ ! "${IMAGE_PLATFORM:-linux/amd64}" =~ ^linux/(amd64|arm64)$ ]]; then
   printf 'IMAGE_PLATFORM must be linux/amd64 or linux/arm64.\n' >&2
   exit 2
 fi
+if [[ ! "${release_scope}" =~ ^(staging|production)$ ]]; then
+  printf 'RELEASE_IMAGE_SCOPE must be staging or production.\n' >&2
+  exit 2
+fi
 
 for token_name in MAPBOX_STAGING_PUBLIC_TOKEN MAPBOX_PRODUCTION_PUBLIC_TOKEN; do
   token_value="${!token_name:-}"
@@ -33,6 +38,15 @@ for token_name in MAPBOX_STAGING_PUBLIC_TOKEN MAPBOX_PRODUCTION_PUBLIC_TOKEN; do
     exit 2
   fi
 done
+
+if [[ "${release_scope}" == "staging" && -z "${MAPBOX_STAGING_PUBLIC_TOKEN:-}" ]]; then
+  printf 'MAPBOX_STAGING_PUBLIC_TOKEN is required to publish staging frontend images.\n' >&2
+  exit 2
+fi
+if [[ "${release_scope}" == "production" && -z "${MAPBOX_PRODUCTION_PUBLIC_TOKEN:-}" ]]; then
+  printf 'MAPBOX_PRODUCTION_PUBLIC_TOKEN is required to publish production frontend images.\n' >&2
+  exit 2
+fi
 
 export OCI_CREATED="${OCI_CREATED:-$(git -C "${repository_root}" show -s --format=%cI "${release_sha}")}"
 export OCI_SOURCE="${OCI_SOURCE:-}"
@@ -102,10 +116,19 @@ declare -A target_references=(
   [marketing-production]="${registry}/waflo-marketing:${release_sha}-production"
 )
 
-for target in \
-  migrate api operational-worker wallet-worker \
-  merchant-staging customer-staging marketing-staging \
-  merchant-production customer-production marketing-production; do
+if [[ "${release_scope}" == "staging" ]]; then
+  targets=(
+    migrate api operational-worker wallet-worker
+    merchant-staging customer-staging marketing-staging
+  )
+else
+  targets=(
+    migrate api operational-worker wallet-worker
+    merchant-production customer-production marketing-production
+  )
+fi
+
+for target in "${targets[@]}"; do
   if image_exists "${target_references[${target}]}"; then
     printf 'Reusing existing immutable image for %s.\n' "${target}"
   else
@@ -126,6 +149,7 @@ else
   printf 'All SHA-qualified images already exist; no Docker build is required.\n'
 fi
 
-"${script_directory}/verify-release-images.sh" staging "${release_sha}"
-"${script_directory}/smoke-node-release-images.sh" staging "${release_sha}"
-"${script_directory}/verify-release-images.sh" production "${release_sha}"
+"${script_directory}/verify-release-images.sh" "${release_scope}" "${release_sha}"
+if [[ "${release_scope}" == "staging" ]]; then
+  "${script_directory}/smoke-node-release-images.sh" staging "${release_sha}"
+fi

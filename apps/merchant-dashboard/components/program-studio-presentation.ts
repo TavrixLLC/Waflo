@@ -784,10 +784,10 @@ export function deriveStudioLifecyclePresentation(
     guidance:
       updateInProgress && key === "live"
         ? {
-            title: ar ? "تغييرات محفوظة · ليست مباشرة بعد" : "Saved changes · Not live yet",
+            title: ar ? "البطاقة مباشرة · تغييرات غير منشورة" : "Live · Unpublished changes",
             description: ar
-              ? "راجع التغييرات المحفوظة قبل نشرها. البطاقة المباشرة الحالية لم تتغير."
-              : "Review the saved changes before publishing them. The current live card is unchanged.",
+              ? "بطاقتك الحالية متاحة للعملاء. لديك تغييرات غير منشورة؛ راجعها وانشرها عندما تكون جاهزًا."
+              : "Your current card is live. You have unpublished changes. Review and publish them when you are ready. Customers continue to see the current live version.",
             tone: "brand",
           }
         : guidanceFor(key, input.designComplete, input.locationsReady, locale),

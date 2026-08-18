@@ -674,8 +674,10 @@ select {
   display: flex;
   flex-direction: column;
   width: 232px;
-  min-height: 100dvh;
+  height: 100dvh;
+  min-height: 0;
   padding: 1.15rem 0.9rem;
+  overflow: hidden;
   background: var(--waflo-ink);
   color: white;
 }
@@ -688,8 +690,11 @@ select {
 
 .wf-sidebar__nav {
   display: grid;
+  min-height: 0;
   gap: 0.25rem;
   margin-top: 1.1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .wf-sidebar__footer {

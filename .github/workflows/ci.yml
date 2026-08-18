@@ -262,14 +262,14 @@ jobs:
           registry="ghcr.io/${REPOSITORY_OWNER,,}"
           echo "registry=${registry}" >>"${GITHUB_OUTPUT}"
 
-      - name: Build missing targets once and publish both environment variants
+      - name: Publish staging release images
         env:
           IMAGE_REGISTRY: ${{ steps.coordinates.outputs.registry }}
           RELEASE_SHA: ${{ github.sha }}
           OCI_SOURCE: ${{ github.server_url }}/${{ github.repository }}
           IMAGE_PLATFORM: ${{ vars.RELEASE_IMAGE_PLATFORM || 'linux/amd64' }}
           MAPBOX_STAGING_PUBLIC_TOKEN: ${{ secrets.MAPBOX_STAGING_PUBLIC_TOKEN }}
-          MAPBOX_PRODUCTION_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PRODUCTION_PUBLIC_TOKEN }}
+          RELEASE_IMAGE_SCOPE: staging
         run: deploy/vps/scripts/publish-images.sh
 
   deploy_staging:
@@ -304,7 +304,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: read
+      packages: write
     environment:
       name: production
       url: https://app.waflo.app
@@ -340,6 +340,16 @@ jobs:
         run: |
           registry="ghcr.io/${REPOSITORY_OWNER,,}"
           echo "registry=${registry}" >>"${GITHUB_OUTPUT}"
+
+      - name: Publish protected production release images
+        env:
+          IMAGE_REGISTRY: ${{ steps.coordinates.outputs.registry }}
+          RELEASE_SHA: ${{ github.sha }}
+          OCI_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          IMAGE_PLATFORM: ${{ vars.RELEASE_IMAGE_PLATFORM || 'linux/amd64' }}
+          MAPBOX_PRODUCTION_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PRODUCTION_PUBLIC_TOKEN }}
+          RELEASE_IMAGE_SCOPE: production
+        run: deploy/vps/scripts/publish-images.sh
 
       - name: Verify the exact production image set already exists
         env:
