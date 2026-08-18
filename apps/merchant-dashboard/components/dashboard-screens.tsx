@@ -48,6 +48,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
+import { billingPriceTruth, canPersistCatalogSelection } from "./billing-presentation";
 import type { DashboardSection, MembershipView } from "./dashboard";
 import {
   LocationAddressFields,
@@ -1513,7 +1514,10 @@ export function BillingScreen({
       document.removeEventListener("visibilitychange", visible);
     };
   }, [load]);
-  async function select(plan: PlanCode, selectedCadence: BillingCadence = cadence) {
+  async function select(
+    plan: PlanCode,
+    selectedCadence: BillingCadence = cadence,
+  ): Promise<boolean> {
     setSaving(plan);
     setError("");
     try {
@@ -1522,6 +1526,7 @@ export function BillingScreen({
         body: JSON.stringify({ plan, cadence: selectedCadence }),
       });
       await load();
+      return true;
     } catch (caught) {
       if (caught instanceof ApiClientError && caught.code === "PLAN_DOWNGRADE_BLOCKED") {
         const violations = Array.isArray(caught.details?.violations)
@@ -1538,13 +1543,19 @@ export function BillingScreen({
       } else {
         setError(message(caught, ar ? "تعذر تغيير الخطة." : "Unable to change plan."));
       }
+      return false;
     } finally {
       setSaving(null);
     }
   }
   async function chooseCadence(nextCadence: BillingCadence) {
     setCadence(nextCadence);
-    if (data) await select(data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode, nextCadence);
+    if (!data || !canPersistCatalogSelection(data.authoritativeState.subscriptionStatus)) return;
+    const selected = await select(
+      data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
+      nextCadence,
+    );
+    if (!selected) setCadence(data.selectedCadence);
   }
   async function replacePaymentMethod() {
     if (paymentSetupLoading) return;
@@ -1638,6 +1649,23 @@ export function BillingScreen({
       setRefundSaving(false);
     }
   }
+  const priceTruth = data
+    ? billingPriceTruth({
+        plan: data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
+        cadence: data.selectedCadence,
+        nextExpectedAmount: data.authoritativeState.nextExpectedAmount,
+        currency: data.authoritativeState.currency,
+      })
+    : null;
+  const selectedCatalogPrice = priceTruth?.catalog ?? null;
+  const activeRenewalDiffersFromCatalog = priceTruth?.currentSubscriptionPriceDiffers ?? false;
+  const subscriptionStatus = data?.authoritativeState.subscriptionStatus ?? "PENDING_ACTIVATION";
+  const subscriptionStatusTone =
+    subscriptionStatus === "ACTIVE" || subscriptionStatus === "TRIALING"
+      ? "success"
+      : subscriptionStatus === "PAST_DUE" || subscriptionStatus === "GRACE_PERIOD"
+        ? "warning"
+        : "neutral";
   return (
     <>
       <PageHeader
@@ -1657,114 +1685,143 @@ export function BillingScreen({
       ) : null}
       {data ? (
         <>
-          <div className="billing-summary-grid">
-            <div className="billing-summary-card">
-              <span className="dashboard-card__label">
-                {ar ? "خطة الاشتراك" : "SUBSCRIPTION PLAN"}
-              </span>
-              <dl className="dashboard-metric-grid dashboard-metric-grid--open dashboard-metric-grid--billing-group">
-                <div>
-                  <dt>{ar ? "الباقة الحالية" : "Current plan"}</dt>
-                  <dd>
-                    <bdi dir="ltr">
-                      {data.selectedPlan.charAt(0) +
-                        data.selectedPlan.slice(1).toLocaleLowerCase("en-US")}
-                    </bdi>
-                  </dd>
-                  <dd className="dashboard-metric-detail">
-                    <small>{cadenceLabel(data.selectedCadence)}</small>
-                  </dd>
-                </div>
-                <div>
-                  <dt>{ar ? "حالة الخطة" : "Plan status"}</dt>
-                  <dd>{formatBillingStatus(data.authoritativeState.subscriptionStatus)}</dd>
-                  <dd className="dashboard-metric-detail">
-                    <small>
-                      {data.authoritativeState.subscriptionStatus === "TRIALING"
-                        ? `${ar ? "تنتهي" : "Ends"} ${formatBillingDate(data.authoritativeState.trialEnd)}`
-                        : data.subscriptions[0]?.cancelAtPeriodEnd
-                          ? ar
-                            ? "سيُلغى في نهاية المدة"
-                            : "Cancels at period end"
-                          : data.subscriptions[0]?.currentPeriodEnd
-                            ? `${ar ? "التجديد" : "Renews"} ${formatBillingDate(data.subscriptions[0].currentPeriodEnd)}`
-                            : ar
-                              ? "خطة نشطة لمساحة العمل"
-                              : "Active workspace plan"}
-                    </small>
-                  </dd>
-                </div>
-              </dl>
+          <section
+            className="billing-overview"
+            aria-label={ar ? "ملخص الاشتراك" : "Subscription summary"}
+          >
+            <div className="billing-overview__heading">
+              <div>
+                <span className="dashboard-card__label">
+                  {ar ? "الاشتراك الحالي" : "CURRENT SUBSCRIPTION"}
+                </span>
+                <h2>
+                  <bdi dir="ltr">
+                    {data.selectedPlan.charAt(0) +
+                      data.selectedPlan.slice(1).toLocaleLowerCase("en-US")}
+                  </bdi>
+                  <span aria-hidden="true"> · </span>
+                  {cadenceLabel(data.selectedCadence)}
+                </h2>
+                <p>
+                  {subscriptionStatus === "TRIALING"
+                    ? `${ar ? "تنتهي التجربة" : "Trial ends"} ${formatBillingDate(data.authoritativeState.trialEnd)}`
+                    : data.subscriptions[0]?.cancelAtPeriodEnd
+                      ? ar
+                        ? "سيُلغى الاشتراك عند نهاية الفترة الحالية."
+                        : "This subscription is set to cancel at the end of its current period."
+                      : data.subscriptions[0]?.currentPeriodEnd
+                        ? `${ar ? "يتجدد" : "Renews"} ${formatBillingDate(data.subscriptions[0].currentPeriodEnd)}`
+                        : ar
+                          ? "تُعرض حالة الاشتراك من مصدر الفوترة المعتمد."
+                          : "Subscription status is shown from the authoritative billing source."}
+                </p>
+              </div>
+              <Badge tone={subscriptionStatusTone}>{formatBillingStatus(subscriptionStatus)}</Badge>
             </div>
-            <div className="billing-summary-card">
-              <span className="dashboard-card__label">
-                {ar ? "إعدادات الدفع" : "PAYMENT METHOD & SCHEDULE"}
-              </span>
-              <dl className="dashboard-metric-grid dashboard-metric-grid--open dashboard-metric-grid--billing-group">
-                <div>
-                  <dt>{ar ? "الدفعة القادمة" : "Next payment"}</dt>
-                  <dd>
-                    <bdi dir="ltr">
-                      {formatMoney(
-                        data.authoritativeState.nextExpectedAmount,
-                        data.authoritativeState.currency,
-                      )}
-                    </bdi>
-                  </dd>
-                  <dd className="dashboard-metric-detail">
-                    <small>
-                      {data.authoritativeState.nextExpectedChargeDate
-                        ? formatBillingDate(data.authoritativeState.nextExpectedChargeDate)
-                        : data.paymentMethod.status === "saved"
-                          ? ar
-                            ? "مجدولة تلقائياً"
-                            : "Auto-scheduled"
-                          : ar
-                            ? "بانتظار وسيلة دفع"
-                            : "Awaiting payment method"}
-                    </small>
-                  </dd>
-                </div>
-                <div className="dashboard-payment-card">
-                  <dt>{ar ? "طريقة الدفع" : "Payment method"}</dt>
-                  {data.paymentMethod.status === "saved" ? (
-                    <>
-                      <dd className="dashboard-payment-card__brand" dir="ltr">
-                        <CreditCard size={20} />
-                        {data.paymentMethod.brand.toLocaleUpperCase("en-US")} ••••{" "}
-                        {data.paymentMethod.last4}
-                      </dd>
-                      <dd className="dashboard-metric-detail">
-                        <small>
-                          {ar ? "تنتهي" : "Expires"}{" "}
-                          {String(data.paymentMethod.expMonth).padStart(2, "0")}/
-                          {data.paymentMethod.expYear}
-                        </small>
-                      </dd>
-                    </>
-                  ) : data.paymentMethod.status === "unavailable" ? (
-                    <>
-                      <dd>{ar ? "تعذر تحميلها" : "Unavailable"}</dd>
-                      <dd className="dashboard-metric-detail">
-                        <small>
-                          {ar ? "حدّث الفوترة للمحاولة مرة أخرى" : "Refresh billing to try again"}
-                        </small>
-                      </dd>
-                    </>
-                  ) : (
-                    <>
-                      <dd>{ar ? "غير مضافة" : "Not added"}</dd>
-                      <dd className="dashboard-metric-detail">
-                        <small>
-                          {ar ? "أضف بطاقة لإكمال الإعداد" : "Add a card to complete setup"}
-                        </small>
-                      </dd>
-                    </>
+            <dl className="billing-overview__facts">
+              <div>
+                <dt>{ar ? "الدفعة القادمة" : "Next renewal"}</dt>
+                <dd className="billing-overview__amount" dir="ltr">
+                  {formatMoney(
+                    data.authoritativeState.nextExpectedAmount,
+                    data.authoritativeState.currency,
                   )}
-                </div>
-              </dl>
-            </div>
-          </div>
+                </dd>
+                <dd>
+                  <small>
+                    {data.authoritativeState.nextExpectedChargeDate
+                      ? formatBillingDate(data.authoritativeState.nextExpectedChargeDate)
+                      : data.paymentMethod.status === "saved"
+                        ? ar
+                          ? "مجدولة تلقائياً"
+                          : "Auto-scheduled"
+                        : ar
+                          ? "بانتظار وسيلة دفع"
+                          : "Awaiting payment method"}
+                  </small>
+                  {data.authoritativeState.nextExpectedAmount !== null ? (
+                    <small className="billing-overview__source">
+                      {ar
+                        ? "توقع Stripe للاشتراك الحالي"
+                        : "Stripe forecast for the current subscription"}
+                    </small>
+                  ) : null}
+                </dd>
+              </div>
+              <div>
+                <dt>{ar ? "طريقة الدفع" : "Payment method"}</dt>
+                {data.paymentMethod.status === "saved" ? (
+                  <>
+                    <dd className="dashboard-payment-card__brand" dir="ltr">
+                      <CreditCard size={19} />
+                      {data.paymentMethod.brand.toLocaleUpperCase("en-US")} ••••{" "}
+                      {data.paymentMethod.last4}
+                    </dd>
+                    <dd>
+                      <small>
+                        {ar ? "تنتهي" : "Expires"}{" "}
+                        {String(data.paymentMethod.expMonth).padStart(2, "0")}/
+                        {data.paymentMethod.expYear}
+                      </small>
+                    </dd>
+                  </>
+                ) : (
+                  <>
+                    <dd>
+                      {data.paymentMethod.status === "unavailable"
+                        ? ar
+                          ? "غير متاحة"
+                          : "Unavailable"
+                        : ar
+                          ? "غير مضافة"
+                          : "Not added"}
+                    </dd>
+                    <dd>
+                      <small>
+                        {data.paymentMethod.status === "unavailable"
+                          ? ar
+                            ? "حدّث الفوترة للمحاولة مرة أخرى"
+                            : "Refresh billing to try again"
+                          : ar
+                            ? "أضف بطاقة لإكمال الإعداد"
+                            : "Add a card to complete setup"}
+                      </small>
+                    </dd>
+                  </>
+                )}
+              </div>
+              <div>
+                <dt>{ar ? "السعر المعلن الحالي" : "Current catalog rate"}</dt>
+                <dd className="billing-overview__amount" dir="ltr">
+                  ${selectedCatalogPrice?.monthlyEquivalentUsd.toFixed(2) ?? "—"}/
+                  {ar ? "شهر" : "mo"}
+                </dd>
+                <dd>
+                  <small>
+                    {selectedCatalogPrice
+                      ? `${ar ? "إجمالي" : "Billed"} $${selectedCatalogPrice.billedAmountUsd.toFixed(2)} ${cadenceLabel(data.selectedCadence).toLocaleLowerCase("en-US")}`
+                      : ar
+                        ? "غير متوفر"
+                        : "Not available"}
+                  </small>
+                </dd>
+              </div>
+            </dl>
+          </section>
+          {activeRenewalDiffersFromCatalog ? (
+            <Alert
+              tone="info"
+              title={
+                ar
+                  ? "سعر الاشتراك الحالي يختلف عن السعر المعلن"
+                  : "Your current subscription price differs from the catalog"
+              }
+            >
+              {ar
+                ? "الدفعة أعلاه هي توقع Stripe للاشتراك الحالي. السعر المعلن أدناه يطبق على اختيارات الخطة أو الوتيرة الجديدة ولا يغيّر فاتورتك القادمة تلقائياً."
+                : "The renewal above is Stripe’s current forecast for this active subscription. The catalog below applies to a new plan or cadence selection and does not rewrite your next invoice."}
+            </Alert>
+          ) : null}
           {data.authoritativeState.outstandingInvoice ? (
             <Alert tone="danger" title={ar ? "دفعة تحتاج إجراء" : "A payment needs attention"}>
               {ar ? "الفاتورة" : "Invoice"}{" "}
@@ -1786,11 +1843,16 @@ export function BillingScreen({
             <div className="dashboard-section-heading">
               <div>
                 <span className="dashboard-card__label">
-                  {ar ? "وتيرة الدفع" : "BILLING CADENCE"}
+                  {ar ? "كتالوج وافلو" : "WAFLO CATALOG"}
                 </span>
-                <h2>{ar ? "اختر موعد الفوترة" : "Choose when you are billed"}</h2>
+                <h2>{ar ? "اختر وتيرة السعر الجديد" : "Choose a new catalog cadence"}</h2>
+                <p className="billing-section-description">
+                  {ar
+                    ? "تُظهر هذه الأسعار سعر الكتالوج عند اختيار خطة أو وتيرة جديدة. اشتراكك النشط وفاتورته القادمة يبقيان مستقلين حتى يؤكد Stripe التغيير."
+                    : "These are catalog prices for a new plan or cadence selection. Your active subscription and its next invoice remain authoritative until Stripe confirms a change."}
+                </p>
               </div>
-              <Badge tone="brand">{cadenceLabel(cadence)}</Badge>
+              <Badge tone="brand">{ar ? "معاينة السعر" : "Catalog preview"}</Badge>
             </div>
             <div
               className="billing-cadence-options"
@@ -1873,8 +1935,13 @@ export function BillingScreen({
           <section className="billing-plan-comparison">
             <div className="dashboard-section-heading">
               <div>
-                <span className="dashboard-card__label">{ar ? "الباقات" : "PLANS"}</span>
-                <h2>{ar ? "قارن الباقات" : "Compare plans"}</h2>
+                <span className="dashboard-card__label">{ar ? "الخطط" : "PLANS"}</span>
+                <h2>{ar ? "قارن أسعار الكتالوج" : "Compare catalog plans"}</h2>
+                <p className="billing-section-description">
+                  {ar
+                    ? "تظهر التكلفة الفعالة شهرياً أولاً، بينما يُحصّل إجمالي الوتيرة المختارة وفقاً للكتالوج."
+                    : "Effective monthly cost is shown first; Stripe bills the full selected cadence total from the catalog."}
+                </p>
               </div>
             </div>
             <div className="dashboard-section-grid dashboard-section-grid--plans">

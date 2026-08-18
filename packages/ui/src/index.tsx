@@ -1190,15 +1190,15 @@ export function PlanCard({
         {selected ? <Badge tone="brand">{copy ? "الخطة المختارة" : "Selected"}</Badge> : null}
       </div>
       <p className="wf-plan-card__price">
-        <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi>
-        <span>/{copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}</span>
+        <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>
+        <span>/{copy ? "شهر" : "month"}</span>
       </p>
       <small className="wf-plan-card__cadence">
-        {copy ? "وتيرة الفوترة:" : "Billing cadence:"} {cadenceLabel}
+        <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi> {copy ? "يُحصّل" : "billed"}{" "}
+        {copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}
       </small>
       {cadenceDefinition.discountRate ? (
         <small className="wf-plan-card__equivalent">
-          <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>/{copy ? "شهر" : "month"} ·{" "}
           {cadence === "yearly" ? (copy ? "شهران مجاناً" : "2 months free") : null}
           {cadence === "yearly" ? " · " : null}
           {copy ? "وفّر" : "Save"} <bdi dir="ltr">${savings.toFixed(2)}</bdi> ({discountLabel})
