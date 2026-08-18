@@ -16,7 +16,16 @@ import {
 import { createErrorEnvelope } from "../../packages/contracts/src/index";
 import { parseEnvironment } from "../../packages/config/src/index";
 import { merchantPublicOrigin } from "../../packages/qr-core/src/index";
-import { directionFor, formatUsd, isLocale, localePath } from "../../packages/i18n/src/index";
+import {
+  contentLocaleForInterface,
+  directionFor,
+  directionForInterface,
+  formatUsd,
+  isInterfaceLocale,
+  isLocale,
+  localePath,
+  localeRegistry,
+} from "../../packages/i18n/src/index";
 import {
   allowedInvitationRoles,
   assertRoleAssignment,
@@ -348,6 +357,18 @@ describe("API and localization utilities", () => {
     expect(directionFor("en")).toBe("ltr");
     expect(directionFor("ar")).toBe("rtl");
     expect(localePath("ar", "/pricing")).toBe("/ar/pricing");
+    expect(isInterfaceLocale("ku-badini")).toBe(true);
+    expect(isInterfaceLocale("ku-sorani")).toBe(true);
+    expect(isInterfaceLocale("ku")).toBe(false);
+    expect(directionForInterface("ku-badini")).toBe("rtl");
+    expect(directionForInterface("ku-sorani")).toBe("rtl");
+    expect(localeRegistry["ku-badini"].htmlLang).toBe("kmr-Arab-IQ");
+    expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
+    expect(contentLocaleForInterface("ku-badini")).toBe("ar");
+    expect(contentLocaleForInterface("ku-sorani")).toBe("ar");
+    expect(localeRegistry["ku-badini"].messages.navigation.home).not.toBe(
+      localeRegistry.ar.messages.navigation.home,
+    );
   });
 });
 
