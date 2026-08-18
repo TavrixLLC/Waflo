@@ -4,7 +4,15 @@ import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-
 import { loadStripe } from "@stripe/stripe-js";
 import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
 import { type BillingCadence, countryOptions, type Locale, type PlanCode } from "@waflo/contracts";
-import { Alert, Button, FormField, LanguageSwitcher, SearchableSelect, TextInput } from "@waflo/ui";
+import type { InterfaceLocale } from "@waflo/i18n";
+import {
+  Alert,
+  Button,
+  FormField,
+  InterfaceLanguagePicker,
+  SearchableSelect,
+  TextInput,
+} from "@waflo/ui";
 import { Check, CreditCard, Link2, LockKeyhole } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -153,10 +161,12 @@ function cadenceDiscountLabel(cadence: BillingCadence): string {
 
 function OnboardingShell({
   locale,
+  interfaceLocale,
   step,
   children,
 }: {
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   step: OnboardingStep;
   children: ReactNode;
 }) {
@@ -174,9 +184,11 @@ function OnboardingShell({
           height={40}
           priority
         />
-        <LanguageSwitcher
-          locale={locale}
-          href={`/${locale === "ar" ? "en" : "ar"}/onboarding/business`}
+        <InterfaceLanguagePicker
+          locale={interfaceLocale}
+          hrefForLocale={(target) => `/${target}/onboarding/business`}
+          persistSelection
+          label="Language"
         />
       </header>
       <div className="onboarding-main">
@@ -332,12 +344,14 @@ function PlanStep({
 
 function SecurePaymentForm({
   locale,
+  interfaceLocale,
   organizationId,
   billingIdentity,
   billingCommand,
   onReady,
 }: {
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   organizationId: string;
   billingIdentity: BillingIdentityDraft;
   billingCommand: string;
@@ -392,7 +406,7 @@ function SecurePaymentForm({
     const result = await stripe.confirmSetup({
       elements,
       confirmParams: {
-        return_url: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}`,
+        return_url: `${window.location.origin}/${interfaceLocale}/onboarding/business?organization=${organizationId}`,
         payment_method_data: {
           billing_details: {
             name: billingIdentity.name,
@@ -457,10 +471,12 @@ function SecurePaymentForm({
 
 export function BusinessOnboarding({
   locale,
+  interfaceLocale = locale,
   organizationId: initialOrganizationId,
   resumeState,
 }: {
   locale: Locale;
+  interfaceLocale?: InterfaceLocale;
   organizationId?: string;
   resumeState?: string;
 }) {
@@ -504,7 +520,9 @@ export function BusinessOnboarding({
       });
       window.sessionStorage.setItem(TRIAL_RESULT_KEY, JSON.stringify(result));
       writeWizard({ step: 5 });
-      router.replace(`/${locale}/onboarding/complete?organization=${currentOrganizationId}`);
+      router.replace(
+        `/${interfaceLocale}/onboarding/complete?organization=${currentOrganizationId}`,
+      );
     },
     [locale, router],
   );
@@ -683,7 +701,7 @@ export function BusinessOnboarding({
       window.history.replaceState(
         null,
         "",
-        `/${locale}/onboarding/business?organization=${organization.id}`,
+        `/${interfaceLocale}/onboarding/business?organization=${organization.id}`,
       );
     } catch (caught) {
       setError(localizedError(caught, ar, "Unable to create your organization."));
@@ -738,7 +756,7 @@ export function BusinessOnboarding({
   if (step === 1) {
     const recoveringLocation = Boolean(organizationId && resumeState === "location_required");
     return (
-      <OnboardingShell locale={locale} step={1}>
+      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={1}>
         <div className="onboarding-heading">
           <span>{ar ? "الخطوة 1 من 5" : "Step 1 of 5"}</span>
           <h1>
@@ -846,7 +864,7 @@ export function BusinessOnboarding({
 
   if (step === 2) {
     return (
-      <OnboardingShell locale={locale} step={2}>
+      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={2}>
         <PlanStep
           locale={locale}
           plan={plan}
@@ -864,7 +882,7 @@ export function BusinessOnboarding({
 
   if (step === 3) {
     return (
-      <OnboardingShell locale={locale} step={3}>
+      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={3}>
         <div className="onboarding-heading">
           <span>{ar ? "الخطوة 3 من 5" : "Step 3 of 5"}</span>
           <h1>{ar ? "بيانات الفوترة" : "Billing details"}</h1>
@@ -957,7 +975,7 @@ export function BusinessOnboarding({
   if (step === 4) {
     const clientSecret = setup?.clientSecret ?? null;
     return (
-      <OnboardingShell locale={locale} step={4}>
+      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={4}>
         <div className="onboarding-heading">
           <span>{ar ? "الخطوة 4 من 5" : "Step 4 of 5"}</span>
           <h1>{ar ? "أضف طريقة الدفع" : "Add your payment method"}</h1>
@@ -1003,6 +1021,7 @@ export function BusinessOnboarding({
           >
             <SecurePaymentForm
               locale={locale}
+              interfaceLocale={interfaceLocale}
               organizationId={organizationId}
               billingIdentity={billingIdentity}
               billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
@@ -1019,7 +1038,7 @@ export function BusinessOnboarding({
   }
 
   return (
-    <OnboardingShell locale={locale} step={5}>
+    <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={5}>
       <div className="onboarding-heading">
         <span>{ar ? "الخطوة 5 من 5" : "Step 5 of 5"}</span>
         <h1>{ar ? "راجع تجربتك المجانية" : "Review your free trial"}</h1>
@@ -1115,9 +1134,11 @@ export function BusinessOnboarding({
 
 export function CompletionOnboarding({
   locale,
+  interfaceLocale = locale,
   organizationId,
 }: {
   locale: Locale;
+  interfaceLocale?: InterfaceLocale;
   organizationId?: string;
 }) {
   const ar = locale === "ar";
@@ -1131,7 +1152,7 @@ export function CompletionOnboarding({
     }
   }, []);
   return (
-    <OnboardingShell locale={locale} step={5}>
+    <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={5}>
       <div className="onboarding-success-mark" aria-hidden="true">
         <Check size={30} />
       </div>
@@ -1163,10 +1184,13 @@ export function CompletionOnboarding({
         </div>
       ) : null}
       <div className="onboarding-success-actions">
-        <Link className="wf-button wf-button--primary" href={`/${locale}/dashboard`}>
+        <Link className="wf-button wf-button--primary" href={`/${interfaceLocale}/dashboard`}>
           {ar ? "فتح لوحة التحكم" : "Open dashboard"}
         </Link>
-        <Link className="wf-button wf-button--secondary" href={`/${locale}/dashboard/programs/new`}>
+        <Link
+          className="wf-button wf-button--secondary"
+          href={`/${interfaceLocale}/dashboard/programs/new`}
+        >
           {ar ? "إنشاء بطاقة ولاء" : "Create loyalty card"}
         </Link>
       </div>

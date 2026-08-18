@@ -1,6 +1,7 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { Alert } from "@waflo/ui";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -12,23 +13,26 @@ export default function OAuthCallbackPage() {
   const params = useParams<{ locale: string }>();
   const search = useSearchParams();
   const router = useRouter();
-  const locale: Locale = params.locale === "ar" ? "ar" : "en";
+  const interfaceLocale = isInterfaceLocale(params.locale) ? params.locale : "en";
+  const locale: Locale = interfaceLocale === "ar" ? "ar" : "en";
   const ar = locale === "ar";
   const initialResult = search.get("result");
   const [result, setResult] = useState(initialResult ?? "failed");
 
   useEffect(() => {
     if (search.get("result") !== "authenticated") return;
-    window.history.replaceState(null, "", `/${locale}/oauth/callback`);
+    window.history.replaceState(null, "", `/${interfaceLocale}/oauth/callback`);
     void destinationAfterLogin(locale)
-      .then((destination) => router.replace(destination))
+      .then((destination) =>
+        router.replace(destination.replace(/^\/(?:en|ar)(?=\/|$)/, `/${interfaceLocale}`)),
+      )
       .catch(() => setResult("failed"));
   }, [locale, router, search]);
 
   if (result !== "authenticated") {
     const noAccount = result === "no_account";
     return (
-      <AuthLayout locale={locale}>
+      <AuthLayout locale={locale} interfaceLocale={interfaceLocale} routePath="/oauth/callback">
         <Alert
           tone={noAccount ? "info" : "danger"}
           title={
@@ -51,7 +55,7 @@ export default function OAuthCallbackPage() {
         </Alert>
         <Link
           className="wf-button wf-button--primary auth-oauth-action"
-          href={noAccount ? `/${locale}/signup` : `/${locale}/login`}
+          href={noAccount ? `/${interfaceLocale}/signup` : `/${interfaceLocale}/login`}
         >
           {noAccount
             ? ar
@@ -66,7 +70,7 @@ export default function OAuthCallbackPage() {
   }
 
   return (
-    <AuthLayout locale={locale}>
+    <AuthLayout locale={locale} interfaceLocale={interfaceLocale} routePath="/oauth/callback">
       <h2>{ar ? "جارٍ تأمين جلستك…" : "Securing your session…"}</h2>
       <p className="auth-card__intro">
         {ar ? "لحظة واحدة بينما نفتح مساحة عملك." : "One moment while we open your workspace."}

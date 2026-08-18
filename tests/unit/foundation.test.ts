@@ -6,6 +6,8 @@ import {
   sessionExpiresAt,
   verifyPassword,
 } from "../../packages/auth/src/index";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   calculateTrialState,
   canCreateLocation,
@@ -364,11 +366,36 @@ describe("API and localization utilities", () => {
     expect(directionForInterface("ku-sorani")).toBe("rtl");
     expect(localeRegistry["ku-badini"].htmlLang).toBe("kmr-Arab-IQ");
     expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
-    expect(contentLocaleForInterface("ku-badini")).toBe("ar");
-    expect(contentLocaleForInterface("ku-sorani")).toBe("ar");
+    expect(contentLocaleForInterface("ku-badini")).toBe("en");
+    expect(contentLocaleForInterface("ku-sorani")).toBe("en");
     expect(localeRegistry["ku-badini"].messages.navigation.home).not.toBe(
       localeRegistry.ar.messages.navigation.home,
     );
+  });
+
+  it("keeps the four-language picker metadata-driven, keyboard-operable, and portal-backed", () => {
+    const root = resolve(import.meta.dirname, "../..");
+    const picker = readFileSync(resolve(root, "packages/ui/src/index.tsx"), "utf8");
+    const dashboard = readFileSync(
+      resolve(root, "apps/merchant-dashboard/components/dashboard.tsx"),
+      "utf8",
+    );
+    const layout = readFileSync(
+      resolve(root, "apps/merchant-dashboard/app/[locale]/layout.tsx"),
+      "utf8",
+    );
+
+    expect(picker).toContain('id: "ku-badini"');
+    expect(picker).toContain('id: "ku-sorani"');
+    expect(picker).toContain('role="menuitemradio"');
+    expect(picker).toContain("createPortal(menu, document.body)");
+    expect(picker).toContain('event.key === "Escape"');
+    expect(picker).toContain("focusOption");
+    expect(dashboard).toContain("InterfaceLanguagePicker");
+    expect(dashboard).toContain("waflo_interface_locale");
+    expect(dashboard).toContain("ku-badini|ku-sorani");
+    expect(layout).toContain("definition.htmlLang");
+    expect(layout).toContain("definition.direction");
   });
 });
 

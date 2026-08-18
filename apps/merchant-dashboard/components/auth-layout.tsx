@@ -1,12 +1,23 @@
 import type { Locale } from "@waflo/contracts";
-import { LanguageSwitcher } from "@waflo/ui";
+import type { InterfaceLocale } from "@waflo/i18n";
+import { InterfaceLanguagePicker } from "@waflo/ui";
 import { Gift, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import type { ReactNode } from "react";
 
 const STAMP_IDS = ["stamp-1", "stamp-2", "stamp-3", "stamp-4", "stamp-5", "stamp-6"] as const;
 
-export function AuthLayout({ locale, children }: { locale: Locale; children: ReactNode }) {
+export function AuthLayout({
+  locale,
+  interfaceLocale = locale,
+  routePath = "/login",
+  children,
+}: {
+  locale: Locale;
+  interfaceLocale?: InterfaceLocale;
+  routePath?: string;
+  children: ReactNode;
+}) {
   const ar = locale === "ar";
   return (
     <main className="auth-layout">
@@ -65,7 +76,12 @@ export function AuthLayout({ locale, children }: { locale: Locale; children: Rea
               width={280}
               height={80}
             />
-            <LanguageSwitcher locale={locale} href={`/${locale === "ar" ? "en" : "ar"}/login`} />
+            <InterfaceLanguagePicker
+              locale={interfaceLocale}
+              hrefForLocale={(target) => `/${target}${routePath}`}
+              persistSelection
+              label={ar ? "Language" : "Language"}
+            />
           </div>
           <div className="auth-card__body">{children}</div>
         </div>

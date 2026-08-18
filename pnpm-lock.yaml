@@ -709,6 +709,9 @@ importers:
       '@waflo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@waflo/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       lucide-react:
         specifier: 1.27.0
         version: 1.27.0(react@19.2.8)

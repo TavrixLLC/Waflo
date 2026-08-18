@@ -1,7 +1,16 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
-import { Alert, Avatar, DropdownMenu, Modal, OrganizationSwitcher, Sidebar } from "@waflo/ui";
+import type { InterfaceLocale } from "@waflo/i18n";
+import {
+  Alert,
+  Avatar,
+  DropdownMenu,
+  InterfaceLanguagePicker,
+  Modal,
+  OrganizationSwitcher,
+  Sidebar,
+} from "@waflo/ui";
 import {
   BarChart3,
   CreditCard,
@@ -224,7 +233,7 @@ function allowedSections(role: MembershipView["role"]): DashboardSection[] {
   return [...primarySections, ...accountSections];
 }
 
-function sectionHref(locale: Locale, section: DashboardSection): string {
+function sectionHref(locale: InterfaceLocale, section: DashboardSection): string {
   return `/${locale}/dashboard${section === "overview" ? "" : `/${section}`}`;
 }
 
@@ -264,7 +273,15 @@ function DashboardBoot({ locale, error }: { locale: Locale; error: string }) {
   );
 }
 
-export function DashboardShell({ locale, children }: { locale: Locale; children: ReactNode }) {
+export function DashboardShell({
+  locale,
+  interfaceLocale = locale,
+  children,
+}: {
+  locale: Locale;
+  interfaceLocale?: InterfaceLocale;
+  children: ReactNode;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [me, setMe] = useState<MeView | null>(null);
@@ -272,12 +289,13 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
   const [error, setError] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const copy = labels[locale];
+  const routeLocale = interfaceLocale;
 
   const loadMe = useCallback(async () => {
     try {
       const result = await apiFetch<MeView>("/v1/auth/me");
       if (result.memberships.length === 0) {
-        router.replace(`/${locale}/onboarding/business`);
+        router.replace(`/${routeLocale}/onboarding/business`);
         return;
       }
       if (result.accountState?.access === "onboarding_only") {
@@ -285,7 +303,7 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
         if (result.accountState.organizationId)
           query.set("organization", result.accountState.organizationId);
         query.set("resume", result.accountState.onboarding);
-        router.replace(`/${locale}/onboarding/business?${query.toString()}`);
+        router.replace(`/${routeLocale}/onboarding/business?${query.toString()}`);
         return;
       }
       const nextActiveId = result.memberships.some(
@@ -301,7 +319,7 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
         caught instanceof ApiClientError &&
         (caught.code === "AUTH_REQUIRED" || caught.code === "SESSION_EXPIRED")
       ) {
-        router.replace(`/${locale}/session-expired`);
+        router.replace(`/${routeLocale}/session-expired`);
         return;
       }
       setError(
@@ -312,7 +330,7 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
             : "Unable to load your account. Try again.",
       );
     }
-  }, [locale, router]);
+  }, [locale, routeLocale, router]);
 
   useEffect(() => {
     void loadMe();
@@ -335,23 +353,32 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
   async function logout() {
     await apiFetch("/v1/auth/logout", { method: "POST" });
     resetCsrf();
-    router.replace(`/${locale}/logged-out`);
+    router.replace(`/${routeLocale}/logged-out`);
   }
 
-  async function switchLanguage() {
-    const target = locale === "ar" ? "en" : "ar";
-    await apiFetch("/v1/auth/me", {
-      method: "PATCH",
-      body: JSON.stringify({ preferredLocale: target }),
-    });
-    router.push(pathname.replace(/^\/(en|ar)/, `/${target}`));
+  async function switchLanguage(target: InterfaceLocale) {
+    const suffix = pathname.replace(/^\/(en|ar|ku-badini|ku-sorani)(?=\/|$)/, "");
+    const targetPath = `/${target}${suffix || "/dashboard"}`;
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `waflo_interface_locale=${target}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+    if (target === "en" || target === "ar") {
+      try {
+        await apiFetch("/v1/auth/me", {
+          method: "PATCH",
+          body: JSON.stringify({ preferredLocale: target }),
+        });
+      } catch {
+        // Route and the interface-locale cookie remain authoritative for this browser.
+      }
+    }
+    router.push(targetPath);
   }
 
   if (!me || !membership) return <DashboardBoot locale={locale} error={error} />;
 
   const currentSection =
     sections.find((section) => {
-      const href = sectionHref(locale, section);
+      const href = sectionHref(routeLocale, section);
       return pathname === href || (section !== "overview" && pathname.startsWith(`${href}/`));
     }) ?? "overview";
 
@@ -359,7 +386,7 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
     const Icon = sectionIcons[section];
     return (
       <Link
-        href={sectionHref(locale, section)}
+        href={sectionHref(routeLocale, section)}
         className={`dashboard-nav-link ${currentSection === section ? "dashboard-nav-link--active" : ""}`}
         key={section}
         aria-current={currentSection === section ? "page" : undefined}
@@ -383,7 +410,7 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
         <Sidebar
           logo={
             <Link
-              href={`/${locale}/dashboard`}
+              href={`/${routeLocale}/dashboard`}
               aria-label={locale === "ar" ? "الرئيسية" : "Overview"}
             >
               <Image
@@ -419,7 +446,7 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
             </>
           }
           footer={
-            <Link className="dashboard-sidebar-user" href={`/${locale}/dashboard/security`}>
+            <Link className="dashboard-sidebar-user" href={`/${routeLocale}/dashboard/security`}>
               <Avatar name={me.displayName} />
               <span>
                 <strong>{me.displayName}</strong>
@@ -441,17 +468,29 @@ export function DashboardShell({ locale, children }: { locale: Locale; children:
               <span>{copy[currentSection]}</span>
             </div>
             <div className="dashboard-topbar__actions">
+              <InterfaceLanguagePicker
+                locale={routeLocale}
+                hrefForLocale={(target) => {
+                  const suffix = pathname.replace(/^\/(en|ar|ku-badini|ku-sorani)(?=\/|$)/, "");
+                  return `/${target}${suffix || "/dashboard"}`;
+                }}
+                onLocaleChange={switchLanguage}
+                label="Language"
+                className="dashboard-language"
+              />
               <button
+                hidden
+                style={{ display: "none" }}
                 type="button"
                 className="wf-language-switcher dashboard-language"
-                onClick={() => void switchLanguage()}
+                onClick={() => void switchLanguage("en")}
                 aria-label={locale === "ar" ? "Switch to English" : "التبديل إلى العربية"}
               >
                 <Languages size={17} aria-hidden="true" />
                 <span>{locale === "ar" ? "English" : "العربية"}</span>
               </button>
               <DropdownMenu label={<Avatar name={me.displayName} />}>
-                <Link className="dashboard-menu-link" href={`/${locale}/dashboard/security`}>
+                <Link className="dashboard-menu-link" href={`/${routeLocale}/dashboard/security`}>
                   <LockKeyhole size={17} aria-hidden="true" /> {copy.security}
                 </Link>
                 <button type="button" className="dashboard-menu-link" onClick={() => void logout()}>

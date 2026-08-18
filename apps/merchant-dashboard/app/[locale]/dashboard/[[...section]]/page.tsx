@@ -1,4 +1,3 @@
-import type { Locale } from "@waflo/contracts";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { DashboardRoute, type DashboardSection } from "../../../../components/dashboard";
@@ -60,7 +59,7 @@ function titleForDashboardRoute(section?: string[]): string {
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ locale: Locale; section?: string[] }>;
+  params: Promise<{ locale: string; section?: string[] }>;
 }): Promise<Metadata> {
   const { section } = await params;
   return { title: titleForDashboardRoute(section) };
@@ -70,7 +69,7 @@ export default async function DashboardPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ locale: Locale; section?: string[] }>;
+  params: Promise<{ locale: string; section?: string[] }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale, section } = await params;

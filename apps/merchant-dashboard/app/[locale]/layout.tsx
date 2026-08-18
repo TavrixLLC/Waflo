@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Cairo, Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { directionFor, isLocale } from "@waflo/i18n";
+import { interfaceLocaleFor } from "@waflo/i18n";
 import "../globals.css";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
@@ -34,9 +34,10 @@ export default async function LocaleLayout({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
+  const definition = interfaceLocaleFor(locale);
+  if (!definition) notFound();
   return (
-    <html lang={locale} dir={directionFor(locale)}>
+    <html lang={definition.htmlLang} dir={definition.direction}>
       <body className={`${manrope.variable} ${cairo.variable}`}>{children}</body>
     </html>
   );

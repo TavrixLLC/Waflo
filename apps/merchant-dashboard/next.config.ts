@@ -54,7 +54,8 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/:locale(en|ar)/:sensitive(verify-email|reset-password|invite)",
+        source:
+          "/:locale(en|ar|ku-badini|ku-sorani)/:sensitive(verify-email|reset-password|invite)",
         headers: [
           { key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" },
           { key: "Referrer-Policy", value: "no-referrer" },

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
+import { contentLocaleForInterface, isInterfaceLocale } from "@waflo/i18n";
 import { DashboardShell } from "../../../components/dashboard";
 
 export default async function DashboardLayout({
@@ -10,6 +11,10 @@ export default async function DashboardLayout({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  if (locale !== "en" && locale !== "ar") notFound();
-  return <DashboardShell locale={locale}>{children}</DashboardShell>;
+  if (!isInterfaceLocale(locale)) notFound();
+  return (
+    <DashboardShell locale={contentLocaleForInterface(locale)} interfaceLocale={locale}>
+      {children}
+    </DashboardShell>
+  );
 }

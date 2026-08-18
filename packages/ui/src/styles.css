@@ -751,6 +751,77 @@ select {
   background: var(--waflo-soft);
 }
 
+.wf-language-picker {
+  display: inline-flex;
+}
+
+.wf-language-picker__trigger {
+  gap: 0.45rem;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.wf-language-picker__trigger:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--waflo-primary) 36%, transparent);
+  outline-offset: 2px;
+}
+
+.wf-language-menu {
+  position: fixed;
+  z-index: 120;
+  width: min(16.5rem, calc(100vw - 1rem));
+  max-height: min(25rem, calc(100dvh - 1rem));
+  padding: 0.4rem;
+  overflow-y: auto;
+  color: var(--waflo-ink);
+  background: var(--waflo-surface);
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-md);
+  box-shadow: 0 16px 38px rgb(23 38 34 / 18%);
+}
+
+.wf-language-menu__option {
+  display: flex;
+  min-height: 2.7rem;
+  padding: 0.6rem 0.7rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: inherit;
+  border-radius: calc(var(--waflo-radius-sm) + 2px);
+  font-weight: 700;
+  text-align: start;
+  text-decoration: none;
+}
+
+.wf-language-menu__option:hover,
+.wf-language-menu__option:focus-visible {
+  color: var(--waflo-primary-strong);
+  background: var(--waflo-soft);
+  outline: 0;
+}
+
+.wf-language-menu__group {
+  display: flex;
+  padding: 0.75rem 0.7rem 0.35rem;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--waflo-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wf-language-menu__group small {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .wf-org-switcher {
   position: relative;
   margin-top: 1.25rem;

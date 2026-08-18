@@ -1,14 +1,15 @@
 import { notFound } from "next/navigation";
-import { isLocale } from "@waflo/i18n";
+import { contentLocaleForInterface, isInterfaceLocale } from "@waflo/i18n";
 import { AuthLayout } from "../../../components/auth-layout";
 import { LoggedOutState } from "../../../components/auth-forms";
 
 export default async function LoggedOutPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
+  if (!isInterfaceLocale(locale)) notFound();
+  const contentLocale = contentLocaleForInterface(locale);
   return (
-    <AuthLayout locale={locale}>
-      <LoggedOutState locale={locale} />
+    <AuthLayout locale={contentLocale} interfaceLocale={locale} routePath="/logged-out">
+      <LoggedOutState locale={contentLocale} />
     </AuthLayout>
   );
 }

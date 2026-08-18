@@ -2,11 +2,23 @@
 
 import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
 import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
-import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
+import type { InterfaceLocale } from "@waflo/i18n";
+import {
+  AlertTriangle,
+  Building2,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Languages,
+  Menu,
+  X,
+} from "lucide-react";
 import {
   type ButtonHTMLAttributes,
   Children,
   type ChangeEvent,
+  Fragment,
   type HTMLAttributes,
   type InputHTMLAttributes,
   isValidElement,
@@ -1069,6 +1081,198 @@ export function LanguageSwitcher({ locale, href }: { locale: Locale; href: strin
     <a className="wf-language-switcher" href={href} lang={locale === "ar" ? "en" : "ar"}>
       {locale === "ar" ? "English" : "العربية"}
     </a>
+  );
+}
+
+const interfaceLanguageOptions: readonly {
+  readonly id: InterfaceLocale;
+  readonly label: string;
+  readonly language: string;
+  readonly group?: "kurdish";
+}[] = [
+  { id: "en", label: "English", language: "en" },
+  { id: "ar", label: "العربية", language: "ar" },
+  { id: "ku-badini", label: "کوردی بادینی", language: "kmr-Arab-IQ", group: "kurdish" },
+  { id: "ku-sorani", label: "کوردی سۆرانی", language: "ckb-Arab-IQ", group: "kurdish" },
+];
+
+/**
+ * A route-agnostic, portal-backed language picker. Applications keep route
+ * construction and persistence at their boundary, while this primitive owns
+ * keyboard behavior and the consistent Waflo menu surface.
+ */
+export function InterfaceLanguagePicker({
+  locale,
+  hrefForLocale,
+  onLocaleChange,
+  persistSelection = false,
+  label = "Language",
+  className = "",
+}: {
+  locale: InterfaceLocale;
+  hrefForLocale: (locale: InterfaceLocale) => string;
+  onLocaleChange?: (locale: InterfaceLocale) => void | Promise<void>;
+  persistSelection?: boolean;
+  label?: string;
+  className?: string;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLAnchorElement | null>>([]);
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+
+  const updatePosition = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect || typeof window === "undefined") return;
+    const width = Math.min(264, window.innerWidth - 16);
+    const rightAligned = document.documentElement.dir === "rtl";
+    const left = rightAligned
+      ? Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width))
+      : Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
+    setPosition({ left, top: Math.min(window.innerHeight - 8, rect.bottom + 8) });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (triggerRef.current?.contains(target)) return;
+      if (optionRefs.current.some((option) => option?.contains(target))) return;
+      setOpen(false);
+    };
+    const onResize = () => updatePosition();
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+    };
+  }, [open, updatePosition]);
+
+  const focusOption = useCallback((index: number) => {
+    optionRefs.current[
+      (index + interfaceLanguageOptions.length) % interfaceLanguageOptions.length
+    ]?.focus();
+  }, []);
+
+  function openMenu() {
+    setOpen(true);
+    updatePosition();
+  }
+
+  function onTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape") {
+      setOpen(false);
+      return;
+    }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      openMenu();
+      const selected = Math.max(
+        0,
+        interfaceLanguageOptions.findIndex((option) => option.id === locale),
+      );
+      const target =
+        event.key === "ArrowUp" || event.key === "End"
+          ? interfaceLanguageOptions.length - 1
+          : event.key === "Home"
+            ? 0
+            : selected;
+      window.setTimeout(() => focusOption(target));
+    }
+  }
+
+  function onOptionKeyDown(event: KeyboardEvent<HTMLAnchorElement>, index: number) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      if (event.key === "Home") focusOption(0);
+      else if (event.key === "End") focusOption(interfaceLanguageOptions.length - 1);
+      else focusOption(index + (event.key === "ArrowDown" ? 1 : -1));
+    }
+  }
+
+  const current =
+    interfaceLanguageOptions.find((option) => option.id === locale) ?? interfaceLanguageOptions[0]!;
+  const menu =
+    open && position ? (
+      <div
+        id={menuId}
+        className="wf-language-menu"
+        role="menu"
+        aria-label={label}
+        style={{ left: position.left, top: position.top }}
+      >
+        {interfaceLanguageOptions.map((option, index) => (
+          <Fragment key={option.id}>
+            {option.group === "kurdish" && index === 2 ? (
+              <div className="wf-language-menu__group" role="presentation">
+                <span>Kurdish</span>
+                <small lang="ku" dir="rtl">
+                  کوردی
+                </small>
+              </div>
+            ) : null}
+            <a
+              ref={(element) => {
+                optionRefs.current[index] = element;
+              }}
+              className="wf-language-menu__option"
+              href={hrefForLocale(option.id)}
+              lang={option.language}
+              aria-current={option.id === locale ? "true" : undefined}
+              role="menuitemradio"
+              aria-checked={option.id === locale}
+              onKeyDown={(event) => onOptionKeyDown(event, index)}
+              onClick={(event) => {
+                setOpen(false);
+                if (persistSelection) {
+                  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+                  document.cookie = `waflo_interface_locale=${option.id}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+                }
+                if (onLocaleChange) {
+                  event.preventDefault();
+                  void onLocaleChange(option.id);
+                }
+              }}
+            >
+              <span>{option.label}</span>
+              {option.id === locale ? <Check size={16} strokeWidth={2} aria-hidden="true" /> : null}
+            </a>
+          </Fragment>
+        ))}
+      </div>
+    ) : null;
+
+  return (
+    <div className={`wf-language-picker ${className}`.trim()}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="wf-language-switcher wf-language-picker__trigger"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={onTriggerKeyDown}
+      >
+        <Languages size={17} aria-hidden="true" />
+        <span lang={current.language}>{current.label}</span>
+        <ChevronDown size={15} aria-hidden="true" />
+      </button>
+      {typeof document !== "undefined" ? createPortal(menu, document.body) : null}
+    </div>
   );
 }
 
