@@ -46,6 +46,17 @@ export interface PublicProgram {
   };
 }
 
+export class CustomerPublicApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CustomerPublicApiError";
+  }
+}
+
 export function localeForRequest(
   requested: string | undefined,
   fallback: "en" | "ar" | undefined,
@@ -71,14 +82,18 @@ export async function fetchCustomerApi<T>(path: string, host: string, tenant?: s
     });
     const payload = (await response.json()) as {
       data?: T;
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     };
     if (!response.ok || payload.data === undefined) {
-      throw new Error(payload.error?.message ?? "The customer service is unavailable.");
+      throw new CustomerPublicApiError(
+        response.status,
+        payload.error?.code,
+        payload.error?.message ?? "The customer service is unavailable.",
+      );
     }
     return payload.data;
   } catch (error) {
-    if (error instanceof Error) throw error;
-    throw new Error("The customer service is unavailable.");
+    if (error instanceof CustomerPublicApiError) throw error;
+    throw new CustomerPublicApiError(503, undefined, "The customer service is unavailable.");
   }
 }

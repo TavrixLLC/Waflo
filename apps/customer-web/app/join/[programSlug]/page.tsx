@@ -1,6 +1,12 @@
 import { headers } from "next/headers";
+import { directionFor } from "@waflo/i18n";
 import { CustomerHeader, StateCard } from "../../page";
-import { fetchCustomerApi, localeForRequest, type PublicProgram } from "../../server-api";
+import {
+  CustomerPublicApiError,
+  fetchCustomerApi,
+  localeForRequest,
+  type PublicProgram,
+} from "../../server-api";
 import { EnrollmentForm } from "./enrollment-form";
 
 export const dynamic = "force-dynamic";
@@ -16,45 +22,100 @@ export default async function JoinProgramPage({
   const query = await searchParams;
   const requestHeaders = await headers();
   const directHost = requestHeaders.get("host") ?? "";
-  const host = directHost;
   const localHost =
     directHost.includes("localhost") ||
     directHost.includes("127.0.0.1") ||
     directHost.includes(".lvh.me");
   const sharedStagingHost = directHost.split(":")[0] === "card-staging.waflo.app";
   const tenant = localHost || sharedStagingHost ? query.tenant : undefined;
-  const result = await fetchCustomerApi<{
+  type PublicProgramResponse = {
     status: string;
     merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
     program?: PublicProgram;
-  }>(`/v1/public/programs/${encodeURIComponent(programSlug)}`, host, tenant);
+  };
+  let result: PublicProgramResponse | undefined;
+  let requestFailure: CustomerPublicApiError | undefined;
+  try {
+    result = await fetchCustomerApi<PublicProgramResponse>(
+      `/v1/public/programs/${encodeURIComponent(programSlug)}`,
+      directHost,
+      tenant,
+    );
+  } catch (error) {
+    requestFailure =
+      error instanceof CustomerPublicApiError
+        ? error
+        : new CustomerPublicApiError(503, undefined, "The customer service is unavailable.");
+  }
+
   const locale = localeForRequest(
     query.lang,
-    result.program?.policy.primaryCustomerLocale ?? result.merchant?.defaultLocale,
+    result?.program?.policy.primaryCustomerLocale ?? result?.merchant?.defaultLocale,
   );
-  if (result.status !== "active" || !result.merchant || !result.program) {
+  const ar = locale === "ar";
+  const direction = directionFor(locale);
+  if (requestFailure) {
+    const programMissing =
+      requestFailure.status === 404 && requestFailure.code === "PUBLIC_PROGRAM_NOT_FOUND";
     return (
-      <main
-        className="customer-page customer-centered"
-        lang={locale}
-        dir={locale === "ar" ? "rtl" : "ltr"}
-      >
+      <main className="customer-page customer-centered" lang={locale} dir={direction}>
         <StateCard
-          title={locale === "ar" ? "هذا التاجر غير متاح" : "This merchant is unavailable"}
+          title={
+            programMissing
+              ? ar
+                ? "بطاقة الولاء غير متاحة"
+                : "This loyalty card is unavailable"
+              : ar
+                ? "تعذر فتح صفحة التاجر"
+                : "We could not open this merchant page"
+          }
           body={
-            locale === "ar"
-              ? "تواصل مع التاجر أو حاول مرة أخرى لاحقًا."
-              : "Contact the merchant or try again later."
+            programMissing
+              ? ar
+                ? "قد تكون البطاقة غير منشورة أو لم تعد متاحة. تواصل مع التاجر إذا كنت تتوقع رؤيتها هنا."
+                : "It may not be published or is no longer available. Contact the merchant if you expected to find it here."
+              : ar
+                ? "تحقق من الرابط وحاول مرة أخرى. إذا استمرت المشكلة، حاول لاحقاً."
+                : "Check the link and try again. If the problem continues, try again later."
           }
         />
       </main>
     );
   }
+  if (!result) throw new Error("Customer join result is unexpectedly unavailable.");
+  if (result.status !== "active" || !result.merchant || !result.program) {
+    const merchantUnknown = result.status === "unknown";
+    return (
+      <main className="customer-page customer-centered" lang={locale} dir={direction}>
+        <StateCard
+          title={
+            merchantUnknown
+              ? ar
+                ? "لم يتم العثور على هذا التاجر"
+                : "We could not find this merchant"
+              : ar
+                ? "هذه الصفحة غير متاحة"
+                : "This merchant page is unavailable"
+          }
+          body={
+            merchantUnknown
+              ? ar
+                ? "تحقق من الرابط أو تواصل مع التاجر مباشرةً."
+                : "Check the link or contact the merchant directly."
+              : ar
+                ? "تواصل مع التاجر أو حاول مرة أخرى لاحقاً."
+                : "Contact the merchant or try again later."
+          }
+        />
+      </main>
+    );
+  }
+
   return (
     <main
       className="customer-page join-page"
       lang={locale}
-      dir={locale === "ar" ? "rtl" : "ltr"}
+      dir={direction}
       style={
         {
           "--program-bg": result.program.theme.backgroundColor,
