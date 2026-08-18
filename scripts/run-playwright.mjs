@@ -136,7 +136,14 @@ async function freePort() {
 async function buildIsolatedFrontends() {
   // `next build` must always execute in production mode, even when the local
   // developer .env intentionally sets NODE_ENV=development for the test servers.
-  const isolatedBuildEnvironment = { ...process.env, NODE_ENV: "production" };
+  // Windows cannot reliably execute the pnpm symlink graph emitted in a Next
+  // standalone directory. The isolated browser harness therefore builds the
+  // ordinary production server artifact; release builds remain standalone.
+  const isolatedBuildEnvironment = {
+    ...process.env,
+    NODE_ENV: "production",
+    WAFLO_E2E_NEXT_START: "1",
+  };
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
   if ((await runCommand(api.command, api.args, isolatedBuildEnvironment)) !== 0)
     throw new Error("Isolated API build failed.");
@@ -164,6 +171,7 @@ const commands = [
     cwd: path.join(root, "apps", "marketing-web"),
     entry: path.join(root, "apps", "marketing-web", "node_modules", "next", "dist", "bin", "next"),
     args: ["start", "-p", "3000"],
+    frontend: true,
   },
   {
     name: "dashboard",
@@ -181,6 +189,7 @@ const commands = [
       "next",
     ),
     args: ["start", "-p", "3001"],
+    frontend: true,
   },
   {
     name: "customer",
@@ -189,6 +198,7 @@ const commands = [
     cwd: path.join(root, "apps", "customer-web"),
     entry: path.join(root, "apps", "customer-web", "node_modules", "next", "dist", "bin", "next"),
     args: ["start", "-p", "3002"],
+    frontend: true,
   },
 ];
 if (usesWalletOperations) {
@@ -212,12 +222,6 @@ if (isW4) {
   });
 }
 
-for (const command of commands) {
-  if (!existsSync(command.entry)) {
-    throw new Error(`Missing built server entry: ${command.entry}. Run pnpm build first.`);
-  }
-}
-
 const children = [];
 let cleanupStarted = false;
 
@@ -229,6 +233,8 @@ function spawnServer(command) {
     cwd: command.cwd,
     env: {
       ...process.env,
+      ...(command.port !== null ? { PORT: String(command.port) } : {}),
+      ...(command.frontend ? { NODE_ENV: "production", WAFLO_E2E_NEXT_START: "1" } : {}),
       RATE_LIMIT_NAMESPACE: `playwright-${project}-${randomUUID()}`,
       ...(usesWalletOperations
         ? {
@@ -360,27 +366,21 @@ let exitCode = 1;
 try {
   await prepareIsolatedDatabase();
   if (isolatedDatabase) {
-    const [apiPort, marketingPort, merchantPort, customerPort] = await Promise.all([
-      freePort(),
-      freePort(),
-      freePort(),
-      freePort(),
-    ]);
+    const apiPort = await freePort();
     process.env.API_PORT = String(apiPort);
     process.env.NEXT_PUBLIC_API_URL = `http://127.0.0.1:${apiPort}`;
     process.env.WAFLO_API_DB_PROBE_FILE = path.join(runtimeLogDirectory, "api-db-probe.json");
     commands[0].port = apiPort;
     commands[0].readyUrl = `http://127.0.0.1:${apiPort}/ready`;
-    commands[1].port = marketingPort;
-    commands[1].readyUrl = `http://127.0.0.1:${marketingPort}/en`;
-    commands[1].args = ["start", "-p", String(marketingPort)];
-    commands[2].port = merchantPort;
-    commands[2].readyUrl = `http://127.0.0.1:${merchantPort}/en/login`;
-    commands[2].args = ["start", "-p", String(merchantPort)];
-    commands[3].port = customerPort;
-    commands[3].readyUrl = `http://127.0.0.1:${customerPort}/privacy`;
-    commands[3].args = ["start", "-p", String(customerPort)];
+    // Browser coverage deliberately traverses all three product hosts by their
+    // stable localhost origins. Keep those ports fixed and verify they are free
+    // before starting; only the API endpoint is isolated per test run.
     await buildIsolatedFrontends();
+  }
+  for (const command of commands) {
+    if (!existsSync(command.entry)) {
+      throw new Error(`Missing built server entry: ${command.entry}. Run pnpm build first.`);
+    }
   }
   for (const command of commands) {
     if (command.port !== null && (await portIsOpen(command.port))) {

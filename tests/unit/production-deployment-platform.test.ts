@@ -62,15 +62,19 @@ function deploymentFiles(directory: string): string[] {
 
 describe("production deployment platform", () => {
   it("builds isolated browser-test frontends with Next production mode", () => {
-    expect(playwrightRunner).toContain(
-      'const isolatedBuildEnvironment = { ...process.env, NODE_ENV: "production" }',
-    );
+    expect(playwrightRunner).toContain('NODE_ENV: "production"');
+    expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain(
       "runCommand(build.command, build.args, isolatedBuildEnvironment)",
     );
     expect(playwrightRunner).toContain(
       "runCommand(customer.command, customer.args, isolatedBuildEnvironment)",
     );
+    expect(playwrightRunner).toContain('"start", "-p"');
+    expect(playwrightRunner).toContain("stable localhost origins");
+    expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
+    expect(playwrightRunner).toContain("PORT: String(command.port)");
+    expect(playwrightRunner).not.toContain("await prepareStandaloneFrontends()");
   });
 
   it("keeps every service private at the host boundary", () => {

@@ -3,7 +3,7 @@ import { createNextContentSecurityPolicy } from "@waflo/security";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(process.env.WAFLO_E2E_NEXT_START === "1" ? {} : { output: "standalone" }),
   outputFileTracingRoot: join(import.meta.dirname, "../.."),
   // A routed Merchant document must not render before its title metadata is available.
   htmlLimitedBots: /.*/,
