@@ -21,6 +21,39 @@ const hopByHop = new Set([
   "cf-connecting-ip",
 ]);
 
+const tenantSlug = /^[a-z0-9](?:[a-z0-9-]{0,47}[a-z0-9])?$/;
+
+function hostnameFromHeader(value: string): string {
+  return value.toLocaleLowerCase("en-US").split(":")[0] ?? "";
+}
+
+function compatibilityCustomerHostname(): string {
+  const fallback =
+    process.env.DEPLOYMENT_ENVIRONMENT === "production"
+      ? "https://card.waflo.app"
+      : "https://card-staging.waflo.app";
+  try {
+    return new URL(process.env.CUSTOMER_WEB_URL ?? fallback).hostname.toLocaleLowerCase("en-US");
+  } catch {
+    return "";
+  }
+}
+
+function tenantOverrideError(code: "TENANT_OVERRIDE_HOST_FORBIDDEN" | "TENANT_OVERRIDE_INVALID") {
+  return Response.json(
+    {
+      error: {
+        code,
+        message:
+          code === "TENANT_OVERRIDE_INVALID"
+            ? "The tenant override is invalid."
+            : "Tenant overrides are accepted only on the customer compatibility host.",
+      },
+    },
+    { status: 400 },
+  );
+}
+
 function safeUpstreamPath(path: string[]): string {
   if (path.length === 0) throw new Error("Missing API path");
   for (const segment of path) {
@@ -73,28 +106,20 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   // of the customer hostname.
   requestHeaders.set("x-forwarded-host", directHost);
   requestHeaders.delete("x-forwarded-port");
-  const normalizedHost = directHost.toLocaleLowerCase("en-US").split(":")[0] ?? "";
-  const localSuffix = [".localhost", ".lvh.me"].find((suffix) => normalizedHost.endsWith(suffix));
-  const localHostTenant = localSuffix ? normalizedHost.slice(0, -localSuffix.length) : "";
-  const tenant =
-    request.nextUrl.searchParams.get("tenant") ??
-    (/^[a-z0-9](?:[a-z0-9-]{0,47}[a-z0-9])?$/.test(localHostTenant) ? localHostTenant : null);
+  const normalizedHost = hostnameFromHeader(directHost);
+  const queryTenant = request.nextUrl.searchParams.get("tenant");
+  if (queryTenant && normalizedHost !== compatibilityCustomerHostname()) {
+    return tenantOverrideError("TENANT_OVERRIDE_HOST_FORBIDDEN");
+  }
+  if (queryTenant && !tenantSlug.test(queryTenant))
+    return tenantOverrideError("TENANT_OVERRIDE_INVALID");
+  // The query override exists solely for the exact compatibility host. A
+  // merchant hostname, including local `slug.lvh.me`, is the tenant identity.
+  const tenant = queryTenant || null;
   if (tenant && !upstream.searchParams.has("tenant")) {
     upstream.searchParams.set("tenant", tenant);
   }
-  const localTenantHost =
-    tenant &&
-    /^[a-z0-9](?:[a-z0-9-]{0,47}[a-z0-9])?$/.test(tenant) &&
-    (directHost.startsWith("localhost") || directHost.startsWith("127.0.0.1"))
-      ? `${tenant}.localhost`
-      : null;
-  requestHeaders.set(
-    "host",
-    localTenantHost ??
-      (directHost.includes(".localhost") || directHost.includes(".lvh.me")
-        ? directHost
-        : directHost),
-  );
+  requestHeaders.set("host", directHost);
   const response = await fetch(upstream, {
     method: request.method,
     headers: requestHeaders,

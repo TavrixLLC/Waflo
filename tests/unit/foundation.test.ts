@@ -462,6 +462,52 @@ describe("merchant hostname parsing and resolution", () => {
     });
   });
 
+  it("keeps tenant overrides scoped to the exact staging compatibility hostname", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      id: "org-1",
+      name: "Today Coffee",
+      merchantSlug: "today",
+      defaultLocale: "EN",
+      status: "ACTIVE",
+    });
+    const service = new HostResolutionService(
+      { client: { organization: { findUnique } } } as never,
+      {
+        values: {
+          NODE_ENV: "test",
+          DEPLOYMENT_ENVIRONMENT: "staging",
+          MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+        },
+      } as never,
+    );
+
+    await expect(service.resolve("card-staging.waflo.app")).resolves.toMatchObject({
+      status: "reserved",
+    });
+    await expect(service.resolve("card-staging.waflo.app", "not valid")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_INVALID",
+      status: 400,
+    });
+    await expect(service.resolve("today.waflo.app", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+    await expect(service.resolve("today.waflo.app", "other-merchant")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+    await expect(service.resolve("hostile.example.test", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+    await expect(service.resolve("today.lvh.me")).resolves.toMatchObject({
+      status: "active",
+      merchant: { slug: "today" },
+    });
+    expect(parseMerchantHostname("app.waflo.app", "waflo.app").status).toBe("reserved");
+  });
+
   it("rejects tenant query overrides in production", async () => {
     const service = new HostResolutionService(
       { client: { organization: { findUnique: vi.fn() } } } as never,
