@@ -235,6 +235,9 @@ function spawnServer(command) {
       ...process.env,
       ...(command.port !== null ? { PORT: String(command.port) } : {}),
       ...(command.frontend ? { NODE_ENV: "production", WAFLO_E2E_NEXT_START: "1" } : {}),
+      ...(command.name === "dashboard" && process.env.NEXT_PUBLIC_API_URL
+        ? { WAFLO_E2E_API_URL: process.env.NEXT_PUBLIC_API_URL }
+        : {}),
       RATE_LIMIT_NAMESPACE: `playwright-${project}-${randomUUID()}`,
       ...(usesWalletOperations
         ? {
@@ -368,7 +371,10 @@ try {
   if (isolatedDatabase) {
     const apiPort = await freePort();
     process.env.API_PORT = String(apiPort);
-    process.env.NEXT_PUBLIC_API_URL = `http://127.0.0.1:${apiPort}`;
+    // The dashboard is served from localhost. Keep the browser-facing API
+    // origin on that same site so the strict CSRF cookie is sent; the API
+    // readiness probe remains explicitly loopback-bound.
+    process.env.NEXT_PUBLIC_API_URL = `http://localhost:${apiPort}`;
     process.env.WAFLO_API_DB_PROBE_FILE = path.join(runtimeLogDirectory, "api-db-probe.json");
     commands[0].port = apiPort;
     commands[0].readyUrl = `http://127.0.0.1:${apiPort}/ready`;

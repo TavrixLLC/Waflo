@@ -64,6 +64,7 @@ describe("production deployment platform", () => {
   it("builds isolated browser-test frontends with Next production mode", () => {
     expect(playwrightRunner).toContain('NODE_ENV: "production"');
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
+    expect(playwrightRunner).toContain("WAFLO_E2E_API_URL: process.env.NEXT_PUBLIC_API_URL");
     expect(playwrightRunner).toContain(
       "runCommand(build.command, build.args, isolatedBuildEnvironment)",
     );
@@ -72,6 +73,7 @@ describe("production deployment platform", () => {
     );
     expect(playwrightRunner).toContain('"start", "-p"');
     expect(playwrightRunner).toContain("stable localhost origins");
+    expect(playwrightRunner).toContain("strict CSRF cookie is sent");
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain("PORT: String(command.port)");
     expect(playwrightRunner).not.toContain("await prepareStandaloneFrontends()");
