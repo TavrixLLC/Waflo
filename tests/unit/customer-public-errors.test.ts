@@ -42,5 +42,8 @@ describe("customer public error states", () => {
     expect(joinPage).toContain("PUBLIC_PROGRAM_NOT_FOUND");
     expect(joinPage).toContain("We could not find this merchant");
     expect(joinPage).toContain("We could not open this merchant page");
+    expect(joinPage).toContain('directHostname === "card.waflo.app"');
+    expect(joinPage).toContain("https://${result.merchant.slug}.waflo.app");
+    expect(joinPage).not.toContain('canonical.searchParams.set("tenant"');
   });
 });

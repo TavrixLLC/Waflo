@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { directionFor } from "@waflo/i18n";
 import { CustomerHeader, StateCard } from "../../page";
 import {
@@ -83,6 +84,22 @@ export default async function JoinProgramPage({
     );
   }
   if (!result) throw new Error("Customer join result is unexpectedly unavailable.");
+  const directHostname = directHost.toLocaleLowerCase("en-US").split(":")[0] ?? "";
+  const isProductionCompatibilityHost =
+    process.env.DEPLOYMENT_ENVIRONMENT === "production" && directHostname === "card.waflo.app";
+  if (
+    isProductionCompatibilityHost &&
+    result.status === "active" &&
+    result.merchant &&
+    result.program
+  ) {
+    const canonical = new URL(
+      `/join/${encodeURIComponent(programSlug)}`,
+      `https://${result.merchant.slug}.waflo.app`,
+    );
+    if (query.lang === "en" || query.lang === "ar") canonical.searchParams.set("lang", query.lang);
+    redirect(canonical.toString());
+  }
   if (result.status !== "active" || !result.merchant || !result.program) {
     const merchantUnknown = result.status === "unknown";
     return (
