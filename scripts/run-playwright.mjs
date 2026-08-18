@@ -134,14 +134,17 @@ async function freePort() {
 }
 
 async function buildIsolatedFrontends() {
+  // `next build` must always execute in production mode, even when the local
+  // developer .env intentionally sets NODE_ENV=development for the test servers.
+  const isolatedBuildEnvironment = { ...process.env, NODE_ENV: "production" };
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
-  if ((await runCommand(api.command, api.args, process.env)) !== 0)
+  if ((await runCommand(api.command, api.args, isolatedBuildEnvironment)) !== 0)
     throw new Error("Isolated API build failed.");
   const build = pnpmCommand(["--filter", "@waflo/merchant-dashboard", "build"]);
-  if ((await runCommand(build.command, build.args, process.env)) !== 0)
+  if ((await runCommand(build.command, build.args, isolatedBuildEnvironment)) !== 0)
     throw new Error("Isolated Merchant build failed.");
   const customer = pnpmCommand(["--filter", "@waflo/customer-web", "build"]);
-  if ((await runCommand(customer.command, customer.args, process.env)) !== 0)
+  if ((await runCommand(customer.command, customer.args, isolatedBuildEnvironment)) !== 0)
     throw new Error("Isolated Customer build failed.");
 }
 

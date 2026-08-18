@@ -1110,13 +1110,16 @@ const interfaceLanguageOptions: readonly {
 export function InterfaceLanguagePicker({
   locale,
   hrefForLocale,
+  routePath,
   onLocaleChange,
   persistSelection = false,
   label = "Language",
   className = "",
 }: {
   locale: InterfaceLocale;
-  hrefForLocale: (locale: InterfaceLocale) => string;
+  hrefForLocale?: (locale: InterfaceLocale) => string;
+  /** A serializable path suffix for server-rendered shells, such as `/login`. */
+  routePath?: string;
   onLocaleChange?: (locale: InterfaceLocale) => void | Promise<void>;
   persistSelection?: boolean;
   label?: string;
@@ -1127,6 +1130,15 @@ export function InterfaceLanguagePicker({
   const menuId = useId();
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const resolveHref = useCallback(
+    (target: InterfaceLocale) => {
+      if (routePath !== undefined)
+        return `/${target}${routePath.startsWith("/") ? routePath : `/${routePath}`}`;
+      if (hrefForLocale) return hrefForLocale(target);
+      return `/${target}`;
+    },
+    [hrefForLocale, routePath],
+  );
 
   const updatePosition = useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -1234,7 +1246,7 @@ export function InterfaceLanguagePicker({
                 optionRefs.current[index] = element;
               }}
               className="wf-language-menu__option"
-              href={hrefForLocale(option.id)}
+              href={resolveHref(option.id)}
               lang={option.language}
               aria-current={option.id === locale ? "true" : undefined}
               role="menuitemradio"

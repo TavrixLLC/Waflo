@@ -186,7 +186,7 @@ function OnboardingShell({
         />
         <InterfaceLanguagePicker
           locale={interfaceLocale}
-          hrefForLocale={(target) => `/${target}/onboarding/business`}
+          routePath="/onboarding/business"
           persistSelection
           label="Language"
         />

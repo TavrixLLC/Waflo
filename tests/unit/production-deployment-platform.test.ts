@@ -39,6 +39,7 @@ const releaseEntrypoint = readFileSync(
   resolve(deploymentRoot, "scripts/release-deploy-entrypoint.sh"),
   "utf8",
 );
+const playwrightRunner = readFileSync(resolve(root, "scripts/run-playwright.mjs"), "utf8");
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
 const localReleaseShaVariable = "$" + "{release_sha}";
@@ -60,6 +61,18 @@ function deploymentFiles(directory: string): string[] {
 }
 
 describe("production deployment platform", () => {
+  it("builds isolated browser-test frontends with Next production mode", () => {
+    expect(playwrightRunner).toContain(
+      'const isolatedBuildEnvironment = { ...process.env, NODE_ENV: "production" }',
+    );
+    expect(playwrightRunner).toContain(
+      "runCommand(build.command, build.args, isolatedBuildEnvironment)",
+    );
+    expect(playwrightRunner).toContain(
+      "runCommand(customer.command, customer.args, isolatedBuildEnvironment)",
+    );
+  });
+
   it("keeps every service private at the host boundary", () => {
     expect(compose).not.toMatch(/^\s+ports:/m);
     expect(compose).toContain("internal: true");

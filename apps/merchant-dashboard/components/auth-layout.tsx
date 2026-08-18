@@ -78,7 +78,7 @@ export function AuthLayout({
             />
             <InterfaceLanguagePicker
               locale={interfaceLocale}
-              hrefForLocale={(target) => `/${target}${routePath}`}
+              routePath={routePath}
               persistSelection
               label={ar ? "Language" : "Language"}
             />
