@@ -27,7 +27,7 @@ export default function OAuthCallbackPage() {
         router.replace(destination.replace(/^\/(?:en|ar)(?=\/|$)/, `/${interfaceLocale}`)),
       )
       .catch(() => setResult("failed"));
-  }, [locale, router, search]);
+  }, [interfaceLocale, locale, router, search]);
 
   if (result !== "authenticated") {
     const noAccount = result === "no_account";

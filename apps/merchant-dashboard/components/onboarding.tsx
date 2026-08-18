@@ -524,7 +524,7 @@ export function BusinessOnboarding({
         `/${interfaceLocale}/onboarding/complete?organization=${currentOrganizationId}`,
       );
     },
-    [locale, router],
+    [interfaceLocale, router],
   );
 
   const preparePayment = useCallback(

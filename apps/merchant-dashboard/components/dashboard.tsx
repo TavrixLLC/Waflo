@@ -360,6 +360,8 @@ export function DashboardShell({
     const suffix = pathname.replace(/^\/(en|ar|ku-badini|ku-sorani)(?=\/|$)/, "");
     const targetPath = `/${target}${suffix || "/dashboard"}`;
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    // Cookie Store is not yet available in every supported browser. The value is a closed locale union.
+    // biome-ignore lint/suspicious/noDocumentCookie: Browser-compatible persistence for the selected interface locale.
     document.cookie = `waflo_interface_locale=${target}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
     if (target === "en" || target === "ar") {
       try {

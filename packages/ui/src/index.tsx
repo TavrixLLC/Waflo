@@ -1084,13 +1084,19 @@ export function LanguageSwitcher({ locale, href }: { locale: Locale; href: strin
   );
 }
 
+const englishInterfaceLanguage = {
+  id: "en",
+  label: "English",
+  language: "en",
+} as const;
+
 const interfaceLanguageOptions: readonly {
   readonly id: InterfaceLocale;
   readonly label: string;
   readonly language: string;
   readonly group?: "kurdish";
 }[] = [
-  { id: "en", label: "English", language: "en" },
+  englishInterfaceLanguage,
   { id: "ar", label: "العربية", language: "ar" },
   { id: "ku-badini", label: "کوردی بادینی", language: "kmr-Arab-IQ", group: "kurdish" },
   { id: "ku-sorani", label: "کوردی سۆرانی", language: "ckb-Arab-IQ", group: "kurdish" },
@@ -1203,7 +1209,7 @@ export function InterfaceLanguagePicker({
   }
 
   const current =
-    interfaceLanguageOptions.find((option) => option.id === locale) ?? interfaceLanguageOptions[0]!;
+    interfaceLanguageOptions.find((option) => option.id === locale) ?? englishInterfaceLanguage;
   const menu =
     open && position ? (
       <div
@@ -1238,6 +1244,8 @@ export function InterfaceLanguagePicker({
                 setOpen(false);
                 if (persistSelection) {
                   const secure = window.location.protocol === "https:" ? "; Secure" : "";
+                  // Cookie Store is not yet available in every supported browser. The value is a closed locale union.
+                  // biome-ignore lint/suspicious/noDocumentCookie: Browser-compatible persistence for the selected interface locale.
                   document.cookie = `waflo_interface_locale=${option.id}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
                 }
                 if (onLocaleChange) {
