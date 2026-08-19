@@ -2,7 +2,12 @@
 
 import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
 import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
-import type { InterfaceLocale } from "@waflo/i18n";
+import {
+  interfaceLanguageGroups,
+  interfaceLocales,
+  type InterfaceLocale,
+  type InterfaceLanguageGroup,
+} from "@waflo/i18n";
 import {
   AlertTriangle,
   Building2,
@@ -1094,23 +1099,28 @@ export function LanguageSwitcher({ locale, href }: { locale: Locale; href: strin
   );
 }
 
-const englishInterfaceLanguage = {
-  id: "en",
-  label: "English",
-  language: "en",
-} as const;
-
-const interfaceLanguageOptions: readonly {
+interface InterfaceLanguageOption {
   readonly id: InterfaceLocale;
   readonly label: string;
   readonly language: string;
-  readonly group?: "kurdish";
-}[] = [
-  englishInterfaceLanguage,
-  { id: "ar", label: "العربية", language: "ar" },
-  { id: "ku-badini", label: "کوردی بادینی", language: "kmr-Arab-IQ", group: "kurdish" },
-  { id: "ku-sorani", label: "کوردی سۆرانی", language: "ckb-Arab-IQ", group: "kurdish" },
-];
+  readonly group?: InterfaceLanguageGroup;
+}
+
+/**
+ * The locale registry is the single source for selectable interface locales,
+ * their native labels, script metadata, and group membership. This keeps the
+ * menu from becoming a second locale registry inside the UI package.
+ */
+const interfaceLanguageOptions: readonly InterfaceLanguageOption[] = interfaceLocales.map(
+  (definition) => ({
+    id: definition.id,
+    label: definition.nativeName,
+    language: definition.htmlLang,
+    ...(definition.languageGroup ? { group: definition.languageGroup } : {}),
+  }),
+);
+
+const englishInterfaceLanguage = interfaceLanguageOptions.find((option) => option.id === "en")!;
 
 /**
  * A route-agnostic, portal-backed language picker. Applications keep route
@@ -1243,11 +1253,12 @@ export function InterfaceLanguagePicker({
       >
         {interfaceLanguageOptions.map((option, index) => (
           <Fragment key={option.id}>
-            {option.group === "kurdish" && index === 2 ? (
+            {option.group &&
+            (index === 0 || interfaceLanguageOptions[index - 1]?.group !== option.group) ? (
               <div className="wf-language-menu__group" role="presentation">
-                <span>Kurdish</span>
+                <span>{interfaceLanguageGroups[option.group].englishName}</span>
                 <small lang="ku" dir="rtl">
-                  کوردی
+                  {interfaceLanguageGroups[option.group].nativeName}
                 </small>
               </div>
             ) : null}

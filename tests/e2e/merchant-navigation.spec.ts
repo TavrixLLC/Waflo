@@ -112,6 +112,27 @@ test("keeps desktop navigation viewport-bound while long page content scrolls", 
   );
 });
 
+test("uses registry-defined Kurdish locales in the shared language menu", async ({ page }) => {
+  await page.goto("/en/login");
+  await page.locator('input[name="email"]').fill("owner@waflo.local");
+  await page.locator('input[name="password"]').fill("Waflo-Development-2026");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
+
+  await page.getByRole("button", { name: "Language" }).click();
+  const menu = page.getByRole("menu", { name: "Language" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByText("Kurdish", { exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { name: "کوردی بادینی" })).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { name: "کوردی سۆرانی" })).toBeVisible();
+
+  await menu.getByRole("menuitemradio", { name: "کوردی سۆرانی" }).click();
+  await expect(page).toHaveURL(/\/ku-sorani\/dashboard(?:\/|$)/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "ckb-Arab-IQ");
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  await expect(page.getByRole("button", { name: "زمان" })).toBeVisible();
+});
+
 test("recovers an already completed trial after a browser retry", async ({ page }) => {
   await page.goto("/en/login");
   await page.locator('input[name="email"]').fill("owner@waflo.local");

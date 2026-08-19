@@ -412,8 +412,8 @@ describe("API and localization utilities", () => {
       "utf8",
     );
 
-    expect(picker).toContain('id: "ku-badini"');
-    expect(picker).toContain('id: "ku-sorani"');
+    expect(picker).toContain("interfaceLocales.map");
+    expect(picker).toContain("interfaceLanguageGroups");
     expect(picker).toContain('role="menuitemradio"');
     expect(picker).toContain("createPortal(menu, document.body)");
     expect(picker).toContain('event.key === "Escape"');
@@ -423,6 +423,9 @@ describe("API and localization utilities", () => {
     expect(dashboard).toContain("ku-badini|ku-sorani");
     expect(layout).toContain("definition.htmlLang");
     expect(layout).toContain("definition.direction");
+    expect(localeRegistry["ku-badini"].messages.merchant.shell.programs).not.toBe(
+      localeRegistry["ku-sorani"].messages.merchant.shell.programs,
+    );
   });
 });
 

@@ -1,7 +1,12 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
-import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
+import {
+  directionForInterface,
+  messages,
+  type InterfaceLocale,
+  type InterfaceMessages,
+} from "@waflo/i18n";
 import {
   Alert,
   Avatar,
@@ -16,7 +21,6 @@ import {
   CreditCard,
   Download,
   Gauge,
-  Languages,
   LockKeyhole,
   LogOut,
   MapPin,
@@ -99,53 +103,46 @@ export interface MeView {
   } | null;
 }
 
-function billingAttentionCopy(state: NonNullable<MeView["accountState"]>, locale: Locale) {
-  const ar = locale === "ar";
+type MerchantShellCopy = InterfaceMessages["merchant"]["shell"];
+type BillingAttentionCopy = InterfaceMessages["merchant"]["billingAttention"];
+
+function billingAttentionCopy(
+  state: NonNullable<MeView["accountState"]>,
+  copy: BillingAttentionCopy,
+) {
   if (state.billing === "action_required") {
     return {
-      message: ar
-        ? "تحتاج دفعتك إلى تأكيد إضافي. أكمل الإجراء للحفاظ على خدمات Waflo."
-        : "Your payment needs confirmation. Complete the required action to keep using Waflo.",
-      action: ar ? "إكمال إجراء الدفع" : "Complete payment action",
+      message: copy.actionRequiredMessage,
+      action: copy.actionRequiredAction,
     };
   }
   if (state.billing === "past_due_grace") {
     return {
-      message: ar
-        ? "تعذرت دفعتك، وما زالت حسابك ضمن مهلة الاسترداد. حدّث الفوترة الآن."
-        : "Your payment failed, and your account is in its recovery window. Update billing now.",
-      action: ar ? "تحديث الفوترة" : "Update billing",
+      message: copy.pastDueMessage,
+      action: copy.pastDueAction,
     };
   }
   if (state.billing === "paused") {
     return {
-      message: ar
-        ? "اشتراك Waflo موقوف. استأنفه قبل إجراء التغييرات."
-        : "Your Waflo subscription is paused. Resume it before making changes.",
-      action: ar ? "استئناف الاشتراك" : "Resume subscription",
+      message: copy.pausedMessage,
+      action: copy.pausedAction,
     };
   }
   if (state.billing === "canceled") {
     return {
-      message: ar
-        ? "انتهى اشتراك Waflo. جدده قبل إجراء التغييرات."
-        : "Your Waflo subscription has ended. Renew it before making changes.",
-      action: ar ? "تجديد الاشتراك" : "Renew subscription",
+      message: copy.canceledMessage,
+      action: copy.canceledAction,
     };
   }
   if (state.billing === "none") {
     return {
-      message: ar
-        ? "يلزم إكمال إعداد الفوترة لتفعيل الوصول الكامل إلى Waflo."
-        : "Finish billing setup to activate full Waflo access.",
-      action: ar ? "إكمال إعداد الفوترة" : "Finish billing setup",
+      message: copy.setupMessage,
+      action: copy.setupAction,
     };
   }
   return {
-    message: ar
-      ? "يحتاج اشتراك Waflo إلى التجديد قبل إجراء التغييرات."
-      : "Your Waflo subscription needs to be renewed before you can make changes.",
-    action: ar ? "تجديد الاشتراك" : "Renew subscription",
+    message: copy.renewalMessage,
+    action: copy.renewalAction,
   };
 }
 
@@ -160,39 +157,6 @@ const sectionIcons = {
   billing: CreditCard,
   settings: Settings,
   security: LockKeyhole,
-} as const;
-
-const labels = {
-  en: {
-    overview: "Overview",
-    programs: "Loyalty Cards",
-    customers: "Customers",
-    locations: "Locations",
-    team: "Team",
-    analytics: "Analytics",
-    exports: "Exports",
-    billing: "Billing",
-    settings: "Settings",
-    security: "Security",
-    administration: "Account",
-    more: "More",
-    logout: "Log out",
-  },
-  ar: {
-    overview: "نظرة عامة",
-    programs: "بطاقات الولاء",
-    customers: "العملاء",
-    locations: "الفروع",
-    team: "الفريق",
-    analytics: "التحليلات",
-    exports: "التصدير",
-    billing: "الفوترة والدفع",
-    settings: "الإعدادات",
-    security: "الأمان",
-    administration: "الحساب",
-    more: "المزيد",
-    logout: "تسجيل الخروج",
-  },
 } as const;
 
 export type DashboardSection = keyof typeof sectionIcons;
@@ -240,7 +204,7 @@ function sectionHref(locale: InterfaceLocale, section: DashboardSection): string
   return `/${locale}/dashboard${section === "overview" ? "" : `/${section}`}`;
 }
 
-function DashboardBoot({ locale, error }: { locale: Locale; error: string }) {
+function DashboardBoot({ copy, error }: { copy: MerchantShellCopy; error: string }) {
   return (
     <div className="dashboard-layout dashboard-layout--boot" aria-busy={!error}>
       <aside className="wf-sidebar dashboard-sidebar-placeholder">
@@ -267,7 +231,7 @@ function DashboardBoot({ locale, error }: { locale: Locale; error: string }) {
           ) : (
             <div className="dashboard-route-loading" role="status">
               <span className="wf-spinner" aria-hidden="true" />
-              {locale === "ar" ? "جارٍ تجهيز حسابك…" : "Preparing your account…"}
+              {copy.preparingAccount}
             </div>
           )}
         </div>
@@ -291,7 +255,9 @@ export function DashboardShell({
   const [activeId, setActiveId] = useState("");
   const [error, setError] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const copy = labels[locale];
+  const copy = messages[interfaceLocale].merchant.shell;
+  const attentionCopy = messages[interfaceLocale].merchant.billingAttention;
+  const languageCopy = messages[interfaceLocale].language;
   const routeLocale = interfaceLocale;
   const interfaceDirection = directionForInterface(interfaceLocale);
 
@@ -326,15 +292,9 @@ export function DashboardShell({
         router.replace(`/${routeLocale}/session-expired`);
         return;
       }
-      setError(
-        caught instanceof ApiClientError
-          ? caught.message
-          : locale === "ar"
-            ? "تعذر تحميل الحساب. حاول مرة أخرى."
-            : "Unable to load your account. Try again.",
-      );
+      setError(caught instanceof ApiClientError ? caught.message : copy.accountLoadFailed);
     }
-  }, [locale, routeLocale, router]);
+  }, [copy.accountLoadFailed, routeLocale, router]);
 
   useEffect(() => {
     void loadMe();
@@ -380,7 +340,7 @@ export function DashboardShell({
     router.push(targetPath);
   }
 
-  if (!me || !membership) return <DashboardBoot locale={locale} error={error} />;
+  if (!me || !membership) return <DashboardBoot copy={copy} error={error} />;
 
   const currentSection =
     sections.find((section) => {
@@ -417,10 +377,7 @@ export function DashboardShell({
       <div className="dashboard-layout" dir={interfaceDirection}>
         <Sidebar
           logo={
-            <Link
-              href={`/${routeLocale}/dashboard`}
-              aria-label={locale === "ar" ? "الرئيسية" : "Overview"}
-            >
+            <Link href={`/${routeLocale}/dashboard`} aria-label={copy.overview}>
               <Image
                 src="/brand/waflo-logo-primary-horizontal.svg"
                 alt="Waflo"
@@ -431,7 +388,7 @@ export function DashboardShell({
           }
           organization={
             <OrganizationSwitcher
-              label={locale === "ar" ? "اختيار المؤسسة" : "Choose organization"}
+              label={copy.chooseOrganization}
               organizations={me.memberships.map((item) => ({
                 id: item.organization.id,
                 name: item.organization.name,
@@ -483,20 +440,9 @@ export function DashboardShell({
                   return `/${target}${suffix || "/dashboard"}`;
                 }}
                 onLocaleChange={switchLanguage}
-                label="Language"
+                label={languageCopy.label}
                 className="dashboard-language"
               />
-              <button
-                hidden
-                style={{ display: "none" }}
-                type="button"
-                className="wf-language-switcher dashboard-language"
-                onClick={() => void switchLanguage("en")}
-                aria-label={locale === "ar" ? "Switch to English" : "التبديل إلى العربية"}
-              >
-                <Languages size={17} aria-hidden="true" />
-                <span>{locale === "ar" ? "English" : "العربية"}</span>
-              </button>
               <DropdownMenu label={<Avatar name={me.displayName} />}>
                 <Link className="dashboard-menu-link" href={`/${routeLocale}/dashboard/security`}>
                   <LockKeyhole size={17} aria-hidden="true" /> {copy.security}
@@ -513,19 +459,16 @@ export function DashboardShell({
               className={`billing-attention-banner billing-attention-banner--${me.accountState.access}`}
               role="status"
             >
-              <span>{billingAttentionCopy(me.accountState, locale).message}</span>
-              <Link href={`/${locale}/dashboard/billing`}>
-                {billingAttentionCopy(me.accountState, locale).action}
+              <span>{billingAttentionCopy(me.accountState, attentionCopy).message}</span>
+              <Link href={`/${routeLocale}/dashboard/billing`}>
+                {billingAttentionCopy(me.accountState, attentionCopy).action}
               </Link>
             </div>
           ) : null}
 
           <main className="dashboard-content">{children}</main>
 
-          <nav
-            className="dashboard-mobile-tabs"
-            aria-label={locale === "ar" ? "التنقل الرئيسي" : "Primary navigation"}
-          >
+          <nav className="dashboard-mobile-tabs" aria-label={copy.primaryNavigation}>
             {mobilePrimary.map((item) => navLink(item, true))}
             <button
               type="button"
@@ -543,7 +486,7 @@ export function DashboardShell({
           <Modal
             open={mobileMenuOpen}
             title={copy.more}
-            closeLabel={locale === "ar" ? "إغلاق" : "Close"}
+            closeLabel={copy.close}
             onClose={() => setMobileMenuOpen(false)}
             className="dashboard-mobile-more__dialog"
           >

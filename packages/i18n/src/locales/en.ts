@@ -24,6 +24,44 @@ export const en = {
     back: "Go back",
     unavailable: "This page is temporarily unavailable.",
   },
+  merchant: {
+    shell: {
+      overview: "Overview",
+      programs: "Loyalty Cards",
+      customers: "Customers",
+      locations: "Locations",
+      team: "Team",
+      analytics: "Analytics",
+      exports: "Exports",
+      billing: "Billing",
+      settings: "Settings",
+      security: "Security",
+      administration: "Account",
+      more: "More",
+      logout: "Log out",
+      chooseOrganization: "Choose organization",
+      primaryNavigation: "Primary navigation",
+      close: "Close",
+      preparingAccount: "Preparing your account…",
+      accountLoadFailed: "Unable to load your account. Try again.",
+    },
+    billingAttention: {
+      actionRequiredMessage:
+        "Your payment needs confirmation. Complete the required action to keep using Waflo.",
+      actionRequiredAction: "Complete payment action",
+      pastDueMessage:
+        "Your payment failed, and your account is in its recovery window. Update billing now.",
+      pastDueAction: "Update billing",
+      pausedMessage: "Your Waflo subscription is paused. Resume it before making changes.",
+      pausedAction: "Resume subscription",
+      canceledMessage: "Your Waflo subscription has ended. Renew it before making changes.",
+      canceledAction: "Renew subscription",
+      setupMessage: "Finish billing setup to activate full Waflo access.",
+      setupAction: "Finish billing setup",
+      renewalMessage: "Your Waflo subscription needs to be renewed before you can make changes.",
+      renewalAction: "Renew subscription",
+    },
+  },
 } as const;
 
 export type LocaleMessageShape<T> = {

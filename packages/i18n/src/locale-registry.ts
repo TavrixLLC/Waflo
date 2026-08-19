@@ -6,6 +6,21 @@ import { kuSorani } from "./locales/ku-sorani.js";
 
 export type TextDirection = "ltr" | "rtl";
 export type InterfaceLocale = "en" | "ar" | "ku-badini" | "ku-sorani";
+export type InterfaceLanguageGroup = "kurdish";
+
+/**
+ * Presentation metadata for grouped language choices. Keeping this alongside
+ * locale metadata prevents applications from inventing a generic Kurdish
+ * locale or duplicating labels for its two distinct interface locales.
+ */
+export const interfaceLanguageGroups: Readonly<
+  Record<InterfaceLanguageGroup, { readonly englishName: string; readonly nativeName: string }>
+> = {
+  kurdish: {
+    englishName: "Kurdish",
+    nativeName: "کوردی",
+  },
+};
 
 export interface InterfaceLocaleDefinition {
   readonly id: InterfaceLocale;
@@ -14,7 +29,7 @@ export interface InterfaceLocaleDefinition {
   readonly englishName?: string;
   readonly htmlLang: string;
   readonly direction: TextDirection;
-  readonly languageGroup?: "kurdish";
+  readonly languageGroup?: InterfaceLanguageGroup;
   readonly enabled: true;
   /** Fallback for customer-authored and Wallet content constrained to the existing API locale union. */
   readonly contentFallback: Locale;

@@ -3,6 +3,7 @@ export type { InterfaceMessages } from "./locales/en.js";
 export {
   contentLocaleForInterface,
   directionForInterface,
+  interfaceLanguageGroups,
   interfaceLocaleFor,
   interfaceLocalePath,
   interfaceLocales,
@@ -11,6 +12,7 @@ export {
   localeRegistry,
   type InterfaceLocale,
   type InterfaceLocaleDefinition,
+  type InterfaceLanguageGroup,
   type TextDirection,
 } from "./locale-registry.js";
 import { localeRegistry } from "./locale-registry.js";

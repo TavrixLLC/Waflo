@@ -4,7 +4,7 @@ import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-
 import { loadStripe } from "@stripe/stripe-js";
 import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
 import { type BillingCadence, countryOptions, type Locale, type PlanCode } from "@waflo/contracts";
-import type { InterfaceLocale } from "@waflo/i18n";
+import { messages, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   Button,
@@ -171,6 +171,7 @@ function OnboardingShell({
   children: ReactNode;
 }) {
   const ar = locale === "ar";
+  const languageCopy = messages[interfaceLocale].language;
   const steps = ar
     ? ["المؤسسة", "الباقة", "بيانات الدفع", "البطاقة", "التأكيد"]
     : ["Organization", "Plan", "Billing", "Card", "Confirm"];
@@ -188,7 +189,7 @@ function OnboardingShell({
           locale={interfaceLocale}
           routePath="/onboarding/business"
           persistSelection
-          label="Language"
+          label={languageCopy.label}
         />
       </header>
       <div className="onboarding-main">

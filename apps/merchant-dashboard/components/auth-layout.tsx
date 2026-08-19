@@ -1,5 +1,5 @@
 import type { Locale } from "@waflo/contracts";
-import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
+import { directionForInterface, messages, type InterfaceLocale } from "@waflo/i18n";
 import { InterfaceLanguagePicker } from "@waflo/ui";
 import { Gift, ShieldCheck } from "lucide-react";
 import Image from "next/image";
@@ -20,6 +20,7 @@ export function AuthLayout({
 }) {
   const ar = locale === "ar";
   const interfaceDirection = directionForInterface(interfaceLocale);
+  const languageCopy = messages[interfaceLocale].language;
   return (
     <main className="auth-layout" dir={interfaceDirection}>
       <section className="auth-brand">
@@ -81,7 +82,7 @@ export function AuthLayout({
               locale={interfaceLocale}
               routePath={routePath}
               persistSelection
-              label={ar ? "Language" : "Language"}
+              label={languageCopy.label}
             />
           </div>
           <div className="auth-card__body">{children}</div>
