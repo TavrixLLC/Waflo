@@ -1,5 +1,7 @@
 "use client";
 
+import type { Locale } from "@waflo/contracts";
+import { directionFor } from "@waflo/i18n";
 import {
   Alert,
   Badge,
@@ -25,6 +27,15 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { apiFetch } from "../lib/api-client";
 
 type CapabilityState = "AVAILABLE" | "NOT_CONFIGURED" | "PROVIDER_CONFIRMATION_REQUIRED";
+
+const campaignContentLocales: Readonly<Record<"EN" | "AR", Locale>> = {
+  EN: "en",
+  AR: "ar",
+};
+
+function contentDirection(locale: "EN" | "AR") {
+  return directionFor(campaignContentLocales[locale]);
+}
 
 interface WalletEngagementView {
   program: { id: string; name: string; status: string; templateCode: string | null };
@@ -607,7 +618,7 @@ export function WalletEngagementPanel({
                   maxLength={60}
                   required
                   disabled={!canManage}
-                  dir={messageLocale === "AR" ? "rtl" : "ltr"}
+                  dir={contentDirection(messageLocale)}
                   onChange={(event) => {
                     campaignIdempotencyKey.current = "";
                     setTitle(event.target.value);
@@ -625,7 +636,7 @@ export function WalletEngagementPanel({
                   maxLength={240}
                   required
                   disabled={!canManage}
-                  dir={messageLocale === "AR" ? "rtl" : "ltr"}
+                  dir={contentDirection(messageLocale)}
                   onChange={(event) => {
                     campaignIdempotencyKey.current = "";
                     setBody(event.target.value);
@@ -659,10 +670,10 @@ export function WalletEngagementPanel({
                       ? "محتوى محفوظ في Google Wallet"
                       : "MESSAGE CONTENT STORED IN GOOGLE WALLET"}
                   </span>
-                  <strong dir={messageLocale === "AR" ? "rtl" : "ltr"}>
+                  <strong dir={contentDirection(messageLocale)}>
                     {title || (ar ? "عنوان رسالتك" : "Your message title")}
                   </strong>
-                  <p dir={messageLocale === "AR" ? "rtl" : "ltr"}>
+                  <p dir={contentDirection(messageLocale)}>
                     {body ||
                       (ar
                         ? "ستظهر رسالتك هنا قبل الإرسال."
@@ -731,7 +742,7 @@ export function WalletEngagementPanel({
                         {campaign.status.replaceAll("_", " ")}
                       </Badge>
                     </header>
-                    <p dir={campaign.locale === "AR" ? "rtl" : "ltr"}>{campaign.body}</p>
+                    <p dir={contentDirection(campaign.locale)}>{campaign.body}</p>
                     <footer>
                       <CampaignCount
                         label={ar ? "مؤهل" : "eligible"}
@@ -793,7 +804,7 @@ export function WalletEngagementPanel({
               <dd>Google Wallet</dd>
             </div>
           </dl>
-          <div className="wallet-confirmation-message" dir={messageLocale === "AR" ? "rtl" : "ltr"}>
+          <div className="wallet-confirmation-message" dir={contentDirection(messageLocale)}>
             <strong>{title}</strong>
             <p>{body}</p>
           </div>

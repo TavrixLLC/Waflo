@@ -2,7 +2,7 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale } from "@waflo/contracts";
-import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
+import { directionFor, directionForInterface, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -81,6 +81,7 @@ import {
 } from "./template-gallery-presentation";
 
 const previewProfiles = ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
+const previewContentLocales = { EN: "en", AR: "ar" } as const;
 
 interface PreviewResult {
   svg: string;
@@ -1174,7 +1175,7 @@ function LanguagesSection({
   const ar = locale === "ar";
   const value = draft.translations[language];
   const completeness = language === "en" ? enCompleteness : arCompleteness;
-  const contentDirection = language === "ar" ? "rtl" : "ltr";
+  const contentDirection = directionFor(language);
   const languageOptions = ["en", "ar"] as const;
 
   function selectLanguage(next: "en" | "ar"): void {
@@ -1245,7 +1246,7 @@ function LanguagesSection({
         id={`builder-language-panel-${language}`}
         aria-labelledby={`builder-language-tab-${language}`}
         className="builder-language-panel"
-        dir={language === "ar" ? "rtl" : "ltr"}
+        dir={contentDirection}
         lang={language}
       >
         <Alert
@@ -2092,8 +2093,8 @@ function PreviewPanel({
       <p className="builder-preview-provider-note">{text.walletPreviewNote}</p>
       <div
         id={`${idPrefix}-panel`}
-        dir={previewLocale === "AR" ? "rtl" : "ltr"}
-        lang={previewLocale === "AR" ? "ar" : "en"}
+        dir={directionFor(previewContentLocales[previewLocale])}
+        lang={previewContentLocales[previewLocale]}
         role="tabpanel"
         aria-labelledby={`${idPrefix}-${profile}`}
         aria-busy={previewLoading}
