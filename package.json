@@ -61,6 +61,7 @@
     "db:migrate": "pnpm --filter @waflo/database migrate:dev",
     "db:migrate:deploy": "pnpm --filter @waflo/database migrate:deploy",
     "db:seed": "pnpm --filter @waflo/database seed",
+    "db:rehearse-brand-logo-upgrade": "node scripts/rehearse-merchant-logo-migration-upgrade.mjs",
     "infra:up": "docker compose up -d postgres redis mailpit minio minio-init",
     "infra:down": "docker compose down",
     "infra:reset": "docker compose down -v",
