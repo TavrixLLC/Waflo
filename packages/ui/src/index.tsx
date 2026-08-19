@@ -1120,7 +1120,13 @@ const interfaceLanguageOptions: readonly InterfaceLanguageOption[] = interfaceLo
   }),
 );
 
-const englishInterfaceLanguage = interfaceLanguageOptions.find((option) => option.id === "en")!;
+const englishInterfaceLanguage: InterfaceLanguageOption = interfaceLanguageOptions.find(
+  (option) => option.id === "en",
+) ?? {
+  id: "en",
+  label: "English",
+  language: "en",
+};
 
 /**
  * A route-agnostic, portal-backed language picker. Applications keep route
