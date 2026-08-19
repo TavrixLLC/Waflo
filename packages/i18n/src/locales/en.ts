@@ -1,4 +1,5 @@
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const en = {
   brandTagline: "Loyalty that flows.",
@@ -334,6 +335,7 @@ export const en = {
           paused: "Paused",
           archived: "Archived",
         },
+        ui: studioInterfaceCopy.en.ui,
       },
     },
   },

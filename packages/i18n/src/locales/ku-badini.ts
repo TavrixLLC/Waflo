@@ -1,5 +1,6 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const kuBadini: InterfaceMessages = {
   brandTagline: "دڵسۆزی بە ئاسانی ڕەوانە دەبێت.",
@@ -327,6 +328,7 @@ export const kuBadini: InterfaceMessages = {
           paused: "راگیراو",
           archived: "ئارشیڤکراو",
         },
+        ui: studioInterfaceCopy.kuBadini.ui,
       },
     },
   },

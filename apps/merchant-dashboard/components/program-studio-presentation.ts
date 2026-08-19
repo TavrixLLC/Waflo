@@ -178,18 +178,17 @@ function presentationAction(
   locationsReady: boolean,
   locale: InterfaceLocale,
 ): { primary: StudioPresentationAction; secondary?: StudioPresentationAction } {
-  const ar = locale === "ar";
   if (key === "live")
     return {
       primary: {
         kind: "navigate",
         area: "customers-locations",
-        label: ar ? "عرض العملاء والمواقع" : "View customers",
+        label: studioText(locale).ui.viewCustomers,
       },
       secondary: {
         kind: "lifecycle",
         action: "pause",
-        label: ar ? "إيقاف البطاقة مؤقتاً" : "Pause card",
+        label: studioText(locale).ui.pauseCard,
       },
     };
   if (key === "paused")
@@ -197,12 +196,12 @@ function presentationAction(
       primary: {
         kind: "lifecycle",
         action: "resume",
-        label: ar ? "استئناف البطاقة" : "Resume card",
+        label: studioText(locale).ui.resumeCard,
       },
       secondary: {
         kind: "navigate",
         area: "settings",
-        label: ar ? "مراجعة الإعدادات" : "Review settings",
+        label: studioText(locale).ui.reviewSettings,
       },
     };
   if (key === "archived")
@@ -210,12 +209,12 @@ function presentationAction(
       primary: {
         kind: "lifecycle",
         action: "restore",
-        label: ar ? "استعادة البطاقة" : "Restore card",
+        label: studioText(locale).ui.restoreCard,
       },
       secondary: {
         kind: "navigate",
         area: "settings",
-        label: ar ? "عرض سجل التغييرات" : "View change history",
+        label: studioText(locale).ui.viewChangeHistory,
       },
     };
   if (key === "scheduled")
@@ -223,7 +222,7 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "launch",
-        label: ar ? "عرض جدول الإطلاق" : "View launch schedule",
+        label: studioText(locale).ui.viewLaunchSchedule,
       },
     };
   if (key === "suspended")
@@ -231,7 +230,7 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "settings",
-        label: ar ? "عرض حالة البطاقة" : "View card status",
+        label: studioText(locale).ui.viewCardStatus,
       },
     };
   if (!designComplete)
@@ -239,7 +238,7 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "overview",
-        label: ar ? "مراجعة تصميم البطاقة" : "Review card design",
+        label: studioText(locale).ui.reviewCardDesign,
       },
     };
   if (!locationsReady)
@@ -247,21 +246,21 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "customers-locations",
-        label: ar ? "اختيار المواقع" : "Choose locations",
+        label: studioText(locale).ui.chooseLocations,
       },
     };
   if (!checksComplete)
     return {
       primary: {
         kind: "run-checks",
-        label: ar ? "تشغيل فحوصات الجاهزية" : "Run readiness checks",
+        label: studioText(locale).ui.runReadinessChecks,
       },
     };
   return {
     primary: {
       kind: "navigate",
       area: "launch",
-      label: ar ? "مراجعة الإطلاق" : "Review launch",
+      label: studioText(locale).ui.reviewLaunch,
     },
   };
 }
@@ -272,68 +271,57 @@ function guidanceFor(
   locationsReady: boolean,
   locale: InterfaceLocale,
 ): StudioLifecyclePresentation["guidance"] {
-  const ar = locale === "ar";
   if (key === "live")
     return {
-      title: ar ? "بطاقة الولاء مباشرة" : "Your loyalty card is live",
-      description: ar
-        ? "يمكن للعملاء استخدام هذه البطاقة حالياً في المواقع المشاركة."
-        : "Customers can currently use this card at participating locations.",
+      title: studioText(locale).ui.yourLoyaltyCardIsLive,
+      description: studioText(locale).ui.customersCanCurrentlyUseThisCardAtParticipatingLocations,
       tone: "success",
     };
   if (key === "paused")
     return {
-      title: ar ? "بطاقة الولاء متوقفة مؤقتاً" : "Your loyalty card is paused",
-      description: ar
-        ? "استأنفها عندما تكون مستعداً لإتاحتها مرة أخرى."
-        : "Resume it when you are ready to make it available again.",
+      title: studioText(locale).ui.yourLoyaltyCardIsPaused,
+      description: studioText(locale).ui.resumeItWhenYouAreReadyToMakeItAvailableAgain,
       tone: "warning",
     };
   if (key === "archived")
     return {
-      title: ar ? "بطاقة الولاء مؤرشفة" : "This loyalty card is archived",
-      description: ar
-        ? "استعدها لمتابعة إدارة إعداد البطاقة المحفوظ أو استخدامه."
-        : "Restore it to continue managing or using the saved card setup.",
+      title: studioText(locale).ui.thisLoyaltyCardIsArchived,
+      description: studioText(locale).ui.restoreItToContinueManagingOrUsingTheSavedCardSetup,
       tone: "neutral",
     };
   if (key === "scheduled")
     return {
-      title: ar ? "البطاقة مجدولة للإطلاق" : "Your loyalty card is scheduled",
-      description: ar
-        ? "راجع حالة الإطلاق المجدول الحالية."
-        : "Review the existing scheduled launch status.",
+      title: studioText(locale).ui.yourLoyaltyCardIsScheduled,
+      description: studioText(locale).ui.reviewTheExistingScheduledLaunchStatus,
       tone: "brand",
     };
   if (key === "suspended")
     return {
-      title: ar ? "البطاقة غير متاحة مؤقتاً" : "Your loyalty card is temporarily unavailable",
-      description: ar
-        ? "راجع الحالة الحالية؛ لا تنشئ هذه الشاشة انتقالاً جديداً للحالة."
-        : "Review the current status; this screen does not create a new lifecycle transition.",
+      title: studioText(locale).ui.yourLoyaltyCardIsTemporarilyUnavailable,
+      description: studioText(locale).ui.reviewTheCurrentStatusThisScreenDoesNotCreateANewLifecycleTransition,
       tone: "danger",
     };
   if (key === "ready")
     return {
-      title: ar ? "جاهزة للإطلاق" : "Ready to launch",
-      description: ar ? "راجع بطاقة الولاء وانشرها." : "Review and publish your loyalty card.",
+      title: studioText(locale).ui.readyToLaunch,
+      description: studioText(locale).ui.reviewAndPublishYourLoyaltyCard,
       tone: "brand",
     };
   if (!designComplete)
     return {
-      title: ar ? "يحتاج إعداد البطاقة إلى متابعة" : "Card setup needs attention",
-      description: ar ? "التالي: راجع تصميم البطاقة" : "Next: Review card design",
+      title: studioText(locale).ui.cardSetupNeedsAttention,
+      description: studioText(locale).ui.nextReviewCardDesign,
       tone: "brand",
     };
   if (!locationsReady)
     return {
-      title: ar ? "مطلوب موقع مشارك" : "A participating location is required",
-      description: ar ? "التالي: اختر موقعاً نشطاً" : "Next: Choose an active location",
+      title: studioText(locale).ui.aParticipatingLocationIsRequired,
+      description: studioText(locale).ui.nextChooseAnActiveLocation,
       tone: "brand",
     };
   return {
-    title: ar ? "اكتمل تصميم البطاقة" : "Card design complete",
-    description: ar ? "التالي: شغّل فحوصات الجاهزية" : "Next: Run readiness checks",
+    title: studioText(locale).ui.cardDesignComplete,
+    description: studioText(locale).ui.nextRunReadinessChecks,
     tone: "brand",
   };
 }
@@ -342,7 +330,6 @@ function launchRequirements(
   input: StudioLifecyclePresentationInput,
   checksComplete: boolean,
 ): { requirements: StudioLaunchRequirementPresentation[]; planBlocked: boolean } {
-  const ar = input.locale === "ar";
   const planBlocked = (input.validationIssues ?? []).some((issue) =>
     /PLAN|LIMIT|STARTER|GROWTH|SCALE/iu.test(`${issue.code} ${issue.path}`),
   );
@@ -352,48 +339,30 @@ function launchRequirements(
     requirements: [
       {
         key: "automated",
-        label: ar ? "الفحوصات الآلية" : "Automated checks",
+        label: studioText(input.locale).ui.automatedChecks,
         status: checksComplete
-          ? ar
-            ? "ناجحة"
-            : "Passed"
-          : ar
-            ? "تحتاج متابعة"
-            : "Needs attention",
+          ? studioText(input.locale).ui.passed
+          : studioText(input.locale).ui.needsAttention,
         description: checksComplete
-          ? ar
-            ? "اكتملت فحوصات الإعداد والأصول والمعاينات."
-            : "Setup, asset, and preview checks passed."
+          ? studioText(input.locale).ui.setupAssetAndPreviewChecksPassed
           : automatedBlocked
-            ? ar
-              ? "توجد عناصر تمنع الإطلاق. افتح التفاصيل لإصلاحها."
-              : "Launch blockers need to be fixed in the check details."
-            : ar
-              ? "شغّل الفحوصات الآلية قبل النشر."
-              : "Run the automated checks before publishing.",
+            ? studioText(input.locale).ui.launchBlockersNeedToBeFixedInTheCheckDetails
+            : studioText(input.locale).ui.runTheAutomatedChecksBeforePublishing,
         complete: checksComplete,
         blocking: !checksComplete,
         action: checksComplete
           ? undefined
-          : { kind: "run-checks", label: ar ? "تشغيل الفحوصات" : "Run checks" },
+          : { kind: "run-checks", label: studioText(input.locale).ui.runChecks },
       },
       {
         key: "locations",
-        label: ar ? "المواقع المشاركة" : "Participating locations",
+        label: studioText(input.locale).ui.participatingLocations,
         status: input.locationsReady
-          ? ar
-            ? "جاهزة"
-            : "Ready"
-          : ar
-            ? "تمنع الإطلاق"
-            : "Blocks launch",
+          ? studioText(input.locale).ui.ready
+          : studioText(input.locale).ui.blocksLaunch,
         description: input.locationsReady
-          ? ar
-            ? "تم اختيار موقع نشط واحد على الأقل."
-            : "At least one active location is selected."
-          : ar
-            ? "اختر موقعاً نشطاً واحداً على الأقل."
-            : "Choose at least one active participating location.",
+          ? studioText(input.locale).ui.atLeastOneActiveLocationIsSelected
+          : studioText(input.locale).ui.chooseAtLeastOneActiveParticipatingLocation,
         complete: input.locationsReady,
         blocking: !input.locationsReady,
         action: input.locationsReady
@@ -401,40 +370,28 @@ function launchRequirements(
           : {
               kind: "navigate",
               area: "customers-locations",
-              label: ar ? "اختيار المواقع" : "Choose locations",
+              label: studioText(input.locale).ui.chooseLocations,
             },
       },
       {
         key: "plan",
-        label: ar ? "حدود الخطة" : "Plan limits",
+        label: studioText(input.locale).ui.planLimits,
         status: planBlocked
-          ? ar
-            ? "تمنع الإطلاق"
-            : "Blocks launch"
+          ? studioText(input.locale).ui.blocksLaunch
           : checksComplete
-            ? ar
-              ? "جاهزة"
-              : "Ready"
-            : ar
-              ? "بانتظار الفحوصات"
-              : "Pending checks",
+            ? studioText(input.locale).ui.ready
+            : studioText(input.locale).ui.pendingChecks,
         description: planBlocked
-          ? ar
-            ? `يتطلب إعداد البطاقة مراجعة حدود خطة ${input.planName}.`
-            : `This card setup exceeds a ${input.planName} plan limit.`
+          ? studioText(input.locale).ui.planLimitExceeded.replace("{planName}", input.planName)
           : checksComplete
-            ? ar
-              ? `اجتاز الإعداد حدود خطة ${input.planName} الحالية.`
-              : `The setup passed the current ${input.planName} plan checks.`
-            : ar
-              ? `تُراجع حدود خطة ${input.planName} ضمن الفحوصات الآلية وعند النشر.`
-              : `${input.planName} limits are checked automatically and again at publish.`,
+            ? studioText(input.locale).ui.planChecksPassed.replace("{planName}", input.planName)
+            : studioText(input.locale).ui.planLimitsCheckedAutomatically.replace("{planName}", input.planName),
         complete: !planBlocked && checksComplete,
         blocking: planBlocked,
         action: planBlocked
           ? {
               kind: "run-checks",
-              label: ar ? "مراجعة عائق الخطة" : "Review plan blocker",
+              label: studioText(input.locale).ui.reviewPlanBlocker,
             }
           : undefined,
       },
@@ -446,7 +403,6 @@ export function deriveStudioLifecyclePresentation(
   input: StudioLifecyclePresentationInput,
 ): StudioLifecyclePresentation {
   const { programStatus, draftVersionStatus, locale } = input;
-  const ar = locale === "ar";
   const domainKey = lifecycleKey(programStatus, draftVersionStatus);
   const operationallyCompleted = ["live", "paused", "scheduled", "suspended"].includes(domainKey);
   const updateInProgress = Boolean(input.hasUnpublishedChanges);
@@ -488,12 +444,12 @@ export function deriveStudioLifecyclePresentation(
           ? ({
               kind: "navigate",
               area: "launch",
-              label: ar ? "مراجعة التغييرات" : "Review changes",
+              label: studioText(locale).ui.reviewChanges,
             } as const)
           : ({
               kind: "navigate",
               area: "launch",
-              label: ar ? "مراجعة التغييرات" : "Review changes",
+              label: studioText(locale).ui.reviewChanges,
             } as const),
         secondary: baseActions.secondary,
       }
@@ -550,29 +506,19 @@ export function deriveStudioLifecyclePresentation(
     };
   };
   const journeyStages = [
-    makeStage("design", ar ? "أساسيات البطاقة" : "Card essentials", "overview"),
-    makeStage("checks", ar ? "الفحوصات الآلية" : "Automated checks", "launch"),
+    makeStage("design", studioText(locale).ui.cardEssentials, "overview"),
+    makeStage("checks", studioText(locale).ui.automatedChecks, "launch"),
     makeStage(
       "live",
       key === "paused"
-        ? ar
-          ? "متوقفة مؤقتاً"
-          : "Temporarily paused"
+        ? studioText(locale).ui.temporarilyPaused
         : key === "archived"
-          ? ar
-            ? "البطاقة مؤرشفة"
-            : "Card archived"
+          ? studioText(locale).ui.cardArchived
           : key === "suspended"
-            ? ar
-              ? "غير متاحة مؤقتاً"
-              : "Temporarily unavailable"
+            ? studioText(locale).ui.temporarilyUnavailable
             : key === "ready"
-              ? ar
-                ? "انشرها لإتاحتها"
-                : "Publish to make available"
-              : ar
-                ? "متاحة للعملاء"
-                : "Available to customers",
+              ? studioText(locale).ui.publishToMakeAvailable
+              : studioText(locale).ui.availableToCustomers,
       "launch",
     ),
   ];
@@ -597,80 +543,48 @@ export function deriveStudioLifecyclePresentation(
       ? {
           kind: "publish",
           label: updateInProgress
-            ? ar
-              ? "نشر التغييرات"
-              : "Publish changes"
-            : ar
-              ? "إطلاق بطاقة الولاء"
-              : "Launch loyalty card",
+            ? studioText(locale).ui.publishChanges
+            : studioText(locale).ui.launchLoyaltyCard,
         }
       : (firstBlocker?.action ?? actions.primary);
   const launchLabel =
     updateInProgress && (key === "live" || key === "paused")
       ? launchReady
-        ? ar
-          ? "جاهزة لنشر التغييرات"
-          : "Ready to publish changes"
-        : ar
-          ? "تغييرات بانتظار النشر"
-          : "Changes waiting to be published"
+        ? studioText(locale).ui.readyToPublishChanges
+        : studioText(locale).ui.changesWaitingToBePublished
       : key === "live"
-        ? ar
-          ? "البطاقة مباشرة"
-          : "Card is live"
+        ? studioText(locale).ui.cardIsLive
         : key === "paused"
-          ? ar
-            ? "البطاقة متوقفة مؤقتاً"
-            : "Card is paused"
+          ? studioText(locale).ui.cardIsPaused
           : key === "archived"
-            ? ar
-              ? "البطاقة مؤرشفة"
-              : "Card is archived"
+            ? studioText(locale).ui.cardIsArchived
             : key === "scheduled"
-              ? ar
-                ? "مجدولة للإطلاق"
-                : "Scheduled to go live"
+              ? studioText(locale).ui.scheduledToGoLive
               : key === "suspended"
-                ? ar
-                  ? "الإطلاق غير متاح"
-                  : "Launch unavailable"
+                ? studioText(locale).ui.launchUnavailable
                 : launchReady
-                  ? ar
-                    ? "جاهزة للإطلاق"
-                    : "Ready to launch"
-                  : ar
-                    ? "غير جاهزة للإطلاق"
-                    : "Not ready to launch";
+                  ? studioText(locale).ui.readyToLaunch
+                  : studioText(locale).ui.notReadyToLaunch;
   const launchDescription =
     updateInProgress && (key === "live" || key === "paused")
       ? launchReady
-        ? ar
-          ? "اكتملت فحوصات التحديث. البطاقة الحالية لم تتغير بعد."
-          : "The update has passed its checks. The current live card is unchanged."
+        ? studioText(locale).ui.theUpdateHasPassedItsChecksTheCurrentLiveCardIsUnchanged
         : (firstBlocker?.description ??
-          (ar
-            ? "أكمل فحوصات التحديث قبل النشر. البطاقة الحالية لم تتغير."
-            : "Complete the update checks before publishing. The current live card is unchanged."))
+          (studioText(locale).ui.completeTheUpdateChecksBeforePublishingTheCurrentLiveCardIsUnchanged))
       : lifecycleOwnsLaunch
         ? lifecycle.description
         : launchReady
-          ? ar
-            ? "اكتملت جميع المتطلبات المطلوبة. أكد النشر لإتاحتها للعملاء."
-            : "Every required step is complete. Confirm publishing to make it available to customers."
+          ? studioText(locale).ui.everyRequiredStepIsCompleteConfirmPublishingToMakeItAvailableToCustomers
           : (firstBlocker?.description ??
-            (ar
-              ? "أكمل المتطلبات المطلوبة قبل النشر."
-              : "Complete the required steps before publishing."));
+            (studioText(locale).ui.completeTheRequiredStepsBeforePublishing));
 
   return {
     ...lifecycle,
     guidance:
       updateInProgress && key === "live"
         ? {
-            title: ar ? "البطاقة مباشرة · تغييرات غير منشورة" : "Live · Unpublished changes",
-            description: ar
-              ? "بطاقتك الحالية متاحة للعملاء. لديك تغييرات غير منشورة؛ راجعها وانشرها عندما تكون جاهزًا."
-              : "Your current card is live. You have unpublished changes. Review and publish them when you are ready. Customers continue to see the current live version.",
+            title: studioText(locale).ui.liveUnpublishedChanges,
+            description: studioText(locale).ui.yourCurrentCardIsLiveYouHaveUnpublishedChangesReviewAndPublishThemWhenYouAreReadyCustomersContinueToSeeTheCurrentLiveVersion,
             tone: "brand",
           }
         : guidanceFor(key, input.designComplete, input.locationsReady, locale),

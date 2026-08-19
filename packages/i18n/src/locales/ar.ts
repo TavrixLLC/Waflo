@@ -1,5 +1,6 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const ar: InterfaceMessages = {
   brandTagline: "الولاء أصبح أسهل.",
@@ -322,6 +323,7 @@ export const ar: InterfaceMessages = {
           paused: "متوقفة مؤقتاً",
           archived: "مؤرشفة",
         },
+        ui: studioInterfaceCopy.ar.ui,
       },
     },
   },

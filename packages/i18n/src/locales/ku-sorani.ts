@@ -1,5 +1,6 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const kuSorani: InterfaceMessages = {
   brandTagline: "دڵسۆزی بە ئاسانی ڕەوانە دەبێت.",
@@ -338,6 +339,7 @@ export const kuSorani: InterfaceMessages = {
           paused: "وەستاو",
           archived: "ئارشیفکراو",
         },
+        ui: studioInterfaceCopy.kuSorani.ui,
       },
     },
   },
