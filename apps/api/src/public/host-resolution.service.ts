@@ -144,7 +144,10 @@ export class HostResolutionService {
     }
     const organization = await this.prisma.client.organization.findUnique({
       where: { merchantSlug: parsed.slug ?? "" },
-      include: { billingProfile: true },
+      include: {
+        billingProfile: true,
+        brandLogoAsset: { include: { variants: true } },
+      },
     });
     if (!organization || organization.status === "ARCHIVED") {
       return { status: "unknown" as const };

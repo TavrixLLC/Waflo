@@ -6,6 +6,7 @@ import {
   CustomerPublicApiError,
   fetchCustomerApi,
   localeForRequest,
+  type PublicMerchant,
   type PublicProgram,
 } from "../../server-api";
 import { EnrollmentForm } from "./enrollment-form";
@@ -31,7 +32,7 @@ export default async function JoinProgramPage({
   const tenant = localHost || sharedStagingHost ? query.tenant : undefined;
   type PublicProgramResponse = {
     status: string;
-    merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
+    merchant?: PublicMerchant;
     program?: PublicProgram;
   };
   let result: PublicProgramResponse | undefined;
@@ -144,6 +145,7 @@ export default async function JoinProgramPage({
       <CustomerHeader
         locale={locale}
         merchantName={result.merchant.name}
+        merchantLogoDataUri={result.merchant.brandLogoDataUri}
         {...(tenant ? { tenant } : {})}
       />
       <EnrollmentForm

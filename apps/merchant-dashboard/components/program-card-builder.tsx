@@ -1467,21 +1467,6 @@ function AppearanceSection({
           </FormField>
         ))}
       </div>
-      <ProgramAssetPicker
-        organizationId={organizationId}
-        category="LOGO"
-        label={ar ? "الشعار" : "Logo"}
-        assets={assets}
-        selectedId={draft.visualTheme.logoAssetId}
-        onSelected={(assetId) =>
-          update((current) => ({
-            ...current,
-            visualTheme: { ...current.visualTheme, logoAssetId: assetId },
-          }))
-        }
-        onUploaded={onAssetUploaded}
-        ar={ar}
-      />
       <div className="builder-artwork-grid">
         <ProgramAssetPicker
           organizationId={organizationId}

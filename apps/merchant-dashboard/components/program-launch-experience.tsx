@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { apiUrl } from "../lib/api-client";
+import { MerchantBrandMark } from "./merchant-brand-mark";
 import type {
   EnrollmentPolicy,
   EnrollmentSettings,
@@ -50,6 +51,7 @@ export interface OrganizationPublicationContext {
     trialStart: string | null;
     trialEnd: string | null;
   } | null;
+  brandLogoAsset?: { contentUrl: string } | null;
 }
 
 export interface PublicationCommandResult {
@@ -436,10 +438,12 @@ function PublicationCardAnchor({
   draft,
   locations,
   ar,
+  brandLogoUrl,
 }: {
   draft: ProgramDraftInput;
   locations: LocationItem[];
   ar: boolean;
+  brandLogoUrl?: string | undefined;
 }) {
   const content = draft.translations[ar ? "ar" : "en"];
   const reward = [...draft.rewards].sort(
@@ -464,7 +468,13 @@ function PublicationCardAnchor({
           borderRadius: `${Math.max(14, draft.visualTheme.borderRadius)}px`,
         }}
       >
-        <span>{ar ? "ملخص الإطلاق" : "LAUNCH SUMMARY"}</span>
+        <div className="publication-card-anchor__issuer">
+          <MerchantBrandMark
+            className="publication-card-anchor__issuer-mark"
+            contentUrl={brandLogoUrl}
+          />
+          <span>{ar ? "ملخص الإطلاق" : "LAUNCH SUMMARY"}</span>
+        </div>
         <h4>{content.programName}</h4>
         <p>{rewardName}</p>
         <div className="publication-card-anchor__stamps" aria-hidden="true">
@@ -527,7 +537,12 @@ function LaunchReview({
 
   return (
     <div className="publication-review">
-      <PublicationCardAnchor draft={draft} locations={locations} ar={ar} />
+      <PublicationCardAnchor
+        ar={ar}
+        brandLogoUrl={organization?.brandLogoAsset?.contentUrl}
+        draft={draft}
+        locations={locations}
+      />
       <div className="publication-review__docket">
         <section>
           <div className="publication-section-heading">

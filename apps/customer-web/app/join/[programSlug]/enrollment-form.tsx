@@ -14,8 +14,9 @@ import {
 import { Check, MapPin, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
 import { customerApi, CustomerApiError, customerCommandId } from "../../client-api";
-import type { PublicProgram } from "../../server-api";
+import type { PublicMerchant, PublicProgram } from "../../server-api";
 
 function walletReadiness(status: string, ar: boolean): string {
   if (status === "READY") return ar ? "جاهزة" : "Ready";
@@ -29,7 +30,7 @@ export function EnrollmentForm({
   initialLocale,
   tenant,
 }: {
-  merchant: { name: string; slug: string };
+  merchant: PublicMerchant;
   program: PublicProgram;
   initialLocale: "en" | "ar";
   tenant?: string;
@@ -166,6 +167,12 @@ export function EnrollmentForm({
   return (
     <div className="join-layout">
       <section className="program-story">
+        <CustomerMerchantIdentity
+          className="program-story__merchant"
+          locale={locale}
+          logoDataUri={merchant.brandLogoDataUri}
+          name={merchant.name}
+        />
         <Badge tone="brand">{merchant.name}</Badge>
         <h1>{copy?.programName}</h1>
         <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>

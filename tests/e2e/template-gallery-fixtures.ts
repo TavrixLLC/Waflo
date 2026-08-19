@@ -107,6 +107,7 @@ export async function mockTemplateGalleryApi(
     seededProgram = false,
     arabicEarningCopy = "present",
     memberRole = "OWNER",
+    merchantBrandLogoDataUri,
   }: {
     businessCategory?: string | null;
     onCreate?: (body: Record<string, unknown>) => void;
@@ -154,6 +155,7 @@ export async function mockTemplateGalleryApi(
     seededProgram?: boolean;
     arabicEarningCopy?: "present" | "missing";
     memberRole?: "OWNER" | "MANAGER" | "STAFF";
+    merchantBrandLogoDataUri?: string;
   } = {},
 ): Promise<void> {
   await page.route("https://fonts.googleapis.com/**", async (route) => {
@@ -164,6 +166,7 @@ export async function mockTemplateGalleryApi(
   });
   const filledAssetId = "55555555-5555-4555-8555-555555555555";
   const emptyAssetId = "66666666-6666-4666-8666-666666666666";
+  const merchantBrandLogoAssetId = "77777777-5555-4555-8555-555555555555";
   const seededTemplate = templateGalleryFixtures()[0];
   let storedDraft: Record<string, unknown> | null =
     seededProgram && seededTemplate
@@ -219,6 +222,18 @@ export async function mockTemplateGalleryApi(
     const artwork = currentArtwork();
     if (!artwork) return [];
     return [
+      ...(merchantBrandLogoDataUri
+        ? [
+            {
+              id: merchantBrandLogoAssetId,
+              category: "LOGO",
+              source: "MERCHANT_UPLOAD",
+              originalFilename: "gallery-merchant-brand.svg",
+              processingStatus: "READY",
+              contentUrl: `/v1/organizations/${templateGalleryOrganizationId}/assets/${merchantBrandLogoAssetId}/content?variant=THUMBNAIL_96`,
+            },
+          ]
+        : []),
       {
         id: filledAssetId,
         category: "STAMP_FILLED",
@@ -454,6 +469,7 @@ export async function mockTemplateGalleryApi(
       accentColor,
       secondaryColor,
       identityDataUri: artworkPreviewUrl(filled.content),
+      ...(merchantBrandLogoDataUri ? { merchantBrandLogoDataUri } : {}),
       customerWebVariant: visual.customerWebVariant as "CARD" | "MINIMAL" | "HERO",
       ...(blank
         ? {
@@ -545,6 +561,16 @@ export async function mockTemplateGalleryApi(
       await fulfill(route, {
         id: templateGalleryOrganizationId,
         businessCategory,
+        brandLogoAsset: merchantBrandLogoDataUri
+          ? {
+              id: merchantBrandLogoAssetId,
+              category: "LOGO",
+              source: "MERCHANT_UPLOAD",
+              originalFilename: "gallery-merchant-brand.svg",
+              processingStatus: "READY",
+              contentUrl: `/v1/organizations/${templateGalleryOrganizationId}/assets/${merchantBrandLogoAssetId}/content?variant=THUMBNAIL_96`,
+            }
+          : null,
         billingProfile: {
           subscriptionStatus: billingStatus,
           trialStart: null,
@@ -919,8 +945,26 @@ export async function mockTemplateGalleryApi(
     const assetContentMatch = path.match(/\/assets\/([^/]+)\/content$/u);
     if (assetContentMatch) {
       const artwork = currentArtwork();
+      const assetId = assetContentMatch[1];
       const content =
-        assetContentMatch[1] === filledAssetId ? artwork?.filled.content : artwork?.empty.content;
+        assetId === filledAssetId
+          ? artwork?.filled.content
+          : assetId === emptyAssetId
+            ? artwork?.empty.content
+            : undefined;
+      if (assetId === merchantBrandLogoAssetId && merchantBrandLogoDataUri) {
+        const [metadata, encoded] = merchantBrandLogoDataUri.split(",", 2);
+        await route.fulfill({
+          status: 200,
+          contentType: metadata?.includes("image/svg+xml") ? "image/svg+xml" : "image/png",
+          headers: {
+            "access-control-allow-origin": request.headers().origin ?? "http://localhost:3001",
+            "access-control-allow-credentials": "true",
+          },
+          body: Buffer.from(encoded ?? "", "base64"),
+        });
+        return;
+      }
       if (!content) {
         await route.fulfill({ status: 404, contentType: "text/plain", body: "Not found" });
         return;

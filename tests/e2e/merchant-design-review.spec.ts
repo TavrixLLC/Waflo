@@ -157,7 +157,20 @@ async function createReviewOrganization(page: Page, id: string): Promise<string>
   return ((await response.json()) as { data: { id: string } }).data.id;
 }
 
-async function installBillingFixture(page: Page): Promise<void> {
+async function installBillingFixture(
+  page: Page,
+  options: {
+    plan?: "STARTER" | "GROWTH" | "SCALE";
+    cadence?: "monthly" | "quarterly" | "yearly";
+    nextExpectedAmount?: number | null;
+    paymentMethodAvailable?: boolean;
+  } = {},
+): Promise<void> {
+  const plan = options.plan ?? "GROWTH";
+  const cadence = options.cadence ?? "quarterly";
+  const nextExpectedAmount =
+    options.nextExpectedAmount === undefined ? 18_975 : options.nextExpectedAmount;
+  const paymentMethodAvailable = options.paymentMethodAvailable ?? true;
   await page.route("**/v1/organizations/*/billing", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     await route.fulfill({
@@ -165,9 +178,9 @@ async function installBillingFixture(page: Page): Promise<void> {
       contentType: "application/json",
       body: JSON.stringify({
         data: {
-          selectedPlan: "GROWTH",
+          selectedPlan: plan,
           canManageBilling: true,
-          selectedCadence: "quarterly",
+          selectedCadence: cadence,
           profile: {
             subscriptionStatus: "ACTIVE",
             trialStart: "2026-07-01T09:00:00.000Z",
@@ -178,8 +191,8 @@ async function installBillingFixture(page: Page): Promise<void> {
             {
               id: "review-subscription",
               status: "ACTIVE",
-              planCode: "GROWTH",
-              cadence: "QUARTERLY",
+              planCode: plan,
+              cadence: cadence.toLocaleUpperCase("en-US"),
               currentPeriodEnd: "2026-10-01T09:00:00.000Z",
               cancelAtPeriodEnd: false,
               createdAt: "2026-07-01T09:00:00.000Z",
@@ -187,14 +200,16 @@ async function installBillingFixture(page: Page): Promise<void> {
           ],
           stripeConfigured: false,
           cadenceAvailability: { monthly: true, quarterly: true, yearly: true },
-          paymentMethod: {
-            status: "saved",
-            brand: "visa",
-            last4: "4242",
-            expMonth: 8,
-            expYear: 2029,
-            isDefault: true,
-          },
+          paymentMethod: paymentMethodAvailable
+            ? {
+                status: "saved",
+                brand: "visa",
+                last4: "4242",
+                expMonth: 8,
+                expYear: 2029,
+                isDefault: true,
+              }
+            : { status: "unavailable" },
           billingIdentity: {
             name: "Cedar Coffee",
             email: "billing@cedar.example",
@@ -214,7 +229,7 @@ async function installBillingFixture(page: Page): Promise<void> {
             trialEnd: "2026-07-08T09:00:00.000Z",
             renewalDate: "2026-10-01T09:00:00.000Z",
             nextExpectedChargeDate: "2026-10-01T09:00:00.000Z",
-            nextExpectedAmount: 18975,
+            nextExpectedAmount,
             currency: "USD",
             latestPaymentStatus: "paid",
             gracePeriodEnd: null,
@@ -250,6 +265,66 @@ async function installBillingFixture(page: Page): Promise<void> {
     });
   });
 }
+
+test("keeps Arabic Billing values aligned to the logical start edge without breaking mixed bidi", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await loginSeedOwner(page);
+  await installBillingFixture(page, {
+    plan: "SCALE",
+    cadence: "monthly",
+    nextExpectedAmount: null,
+    paymentMethodAvailable: false,
+  });
+
+  await openDashboard(page, "ar", "billing");
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+
+  for (const summary of ["next-renewal", "current-catalog-rate"] as const) {
+    const cell = page.locator(`[data-billing-summary="${summary}"]`);
+    const label = cell.locator("dt");
+    const value = cell.locator("dd").first();
+    const [labelBox, valueBox] = await Promise.all([label.boundingBox(), value.boundingBox()]);
+    expect(labelBox).not.toBeNull();
+    expect(valueBox).not.toBeNull();
+    expect(Math.abs((labelBox?.x ?? 0) - (valueBox?.x ?? 0))).toBeLessThanOrEqual(2);
+    await expect(value).toHaveCSS("text-align", "start");
+  }
+
+  const nextRenewal = page.locator('[data-billing-summary="next-renewal"] dd').first();
+  const catalogRate = page.locator('[data-billing-summary="current-catalog-rate"] dd').first();
+  await expect(nextRenewal).toHaveText("غير متوفر");
+  await expect(nextRenewal).toHaveCSS("direction", "rtl");
+  await expect(catalogRate.locator("bdi")).toHaveText("$129.00");
+  await expect(catalogRate).toContainText("/شهر");
+  await expect(catalogRate.locator("bdi")).toHaveAttribute("dir", "ltr");
+
+  const paymentMethod = page.locator(".billing-overview__facts > div").filter({
+    has: page.getByText("طريقة الدفع", { exact: true }),
+  });
+  await expect(paymentMethod.locator("dd").first()).toHaveText("غير متاحة");
+  await expect(paymentMethod.locator("dd").first()).toHaveCSS("direction", "rtl");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    ),
+  ).toBe(true);
+
+  await openDashboard(page, "en", "billing");
+  await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+  await expect(page.locator('[data-billing-summary="next-renewal"] dd').first()).toHaveText(
+    "Not available",
+  );
+  await expect(page.locator('[data-billing-summary="current-catalog-rate"] dd bdi')).toHaveText(
+    "$129.00",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    ),
+  ).toBe(true);
+});
 
 async function installSecurityFixture(page: Page): Promise<void> {
   await page.route("**/v1/auth/sessions", async (route) => {

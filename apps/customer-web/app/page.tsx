@@ -4,7 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { fetchCustomerApi, localeForRequest, type PublicProgram } from "./server-api";
+import { CustomerMerchantIdentity } from "./customer-merchant-identity";
+import {
+  fetchCustomerApi,
+  localeForRequest,
+  type PublicMerchant,
+  type PublicProgram,
+} from "./server-api";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +31,7 @@ export default async function MerchantProgramsPage({
   const tenant = localHost || sharedStagingHost ? query.tenant : undefined;
   const result = await fetchCustomerApi<{
     status: string;
-    merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
+    merchant?: PublicMerchant;
     programs: PublicProgram[];
   }>("/v1/public/merchant-programs", host, tenant);
   const locale = localeForRequest(query.lang, result.merchant?.defaultLocale);
@@ -64,13 +70,18 @@ export default async function MerchantProgramsPage({
       <CustomerHeader
         locale={locale}
         merchantName={result.merchant.name}
+        merchantLogoDataUri={result.merchant.brandLogoDataUri}
         {...(tenant ? { tenant } : {})}
       />
       <section className="customer-hero customer-hero--compact">
         <Badge tone="brand">{ar ? "مدعوم من Waflo" : "Powered by Waflo"}</Badge>
-        <span className="customer-merchant-mark" aria-hidden="true">
-          {result.merchant.name.slice(0, 1).toLocaleUpperCase(locale)}
-        </span>
+        <CustomerMerchantIdentity
+          className="customer-merchant-mark"
+          locale={locale}
+          logoDataUri={result.merchant.brandLogoDataUri}
+          name={result.merchant.name}
+          showName={false}
+        />
         <p className="customer-kicker">{result.merchant.name}</p>
         <h1>{ar ? "اختر بطاقة الولاء" : "Choose your loyalty card"}</h1>
         <p className="customer-lead">
@@ -132,11 +143,13 @@ export function CustomerHeader({
   tenant,
   languagePath = "/",
   merchantName,
+  merchantLogoDataUri,
 }: {
   locale: "en" | "ar";
   tenant?: string;
   languagePath?: string;
   merchantName?: string;
+  merchantLogoDataUri?: string | null | undefined;
 }) {
   const nextLocale = locale === "ar" ? "en" : "ar";
   const homeParams = new URLSearchParams({ lang: locale });
@@ -149,10 +162,11 @@ export function CustomerHeader({
     <header className="customer-header">
       <Link href={`/?${homeParams.toString()}`}>
         {merchantName ? (
-          <span className="customer-merchant-identity">
-            <i aria-hidden="true">{merchantName.slice(0, 1).toLocaleUpperCase(locale)}</i>
-            <strong>{merchantName}</strong>
-          </span>
+          <CustomerMerchantIdentity
+            locale={locale}
+            logoDataUri={merchantLogoDataUri}
+            name={merchantName}
+          />
         ) : (
           <Image
             className="customer-logo"

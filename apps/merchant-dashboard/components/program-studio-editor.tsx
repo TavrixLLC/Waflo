@@ -7,7 +7,7 @@ import {
   programPlatformCapabilities,
   timeZoneOptions,
 } from "@waflo/contracts";
-import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
+import { directionForInterface, localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -63,6 +63,7 @@ import {
   type MerchantProgramLifecycleAction,
   merchantProgramLifecycleLabel,
 } from "./loyalty-card-presentation";
+import { MerchantBrandMark } from "./merchant-brand-mark";
 import { ProgramAssetPicker } from "./program-asset-uploader";
 import {
   type EnrollmentSettings,
@@ -893,6 +894,7 @@ export function ProgramStudioEditor({
 
           <StudioAreaContent
             area={activeArea}
+            interfaceLocale={interfaceLocale}
             displayDraft={displayDraft}
             editableDraft={draft}
             setDraft={setDraft}
@@ -1204,6 +1206,7 @@ function StudioNavigation({
 
 function StudioAreaContent({
   area,
+  interfaceLocale,
   displayDraft,
   editableDraft,
   setDraft,
@@ -1249,6 +1252,7 @@ function StudioAreaContent({
   onLoadMoreVersions,
 }: {
   area: StudioArea;
+  interfaceLocale: InterfaceLocale;
   displayDraft: ProgramDraftInput;
   editableDraft: ProgramDraftInput | null;
   setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
@@ -1320,6 +1324,7 @@ function StudioAreaContent({
   if (area === "overview")
     return (
       <StudioOverview
+        interfaceLocale={interfaceLocale}
         displayDraft={displayDraft}
         displayVersion={displayVersion}
         detail={detail}
@@ -1342,6 +1347,7 @@ function StudioAreaContent({
         onOpenCustomers={onOpenCustomers}
         onArea={onArea}
         onLifecycle={onLifecycle}
+        organization={organization}
       />
     );
 
@@ -1440,6 +1446,7 @@ function StudioAreaContent({
 }
 
 function StudioOverview({
+  interfaceLocale,
   displayDraft,
   displayVersion,
   detail,
@@ -1462,7 +1469,9 @@ function StudioOverview({
   onOpenCustomers,
   onArea,
   onLifecycle,
+  organization,
 }: {
+  interfaceLocale: InterfaceLocale;
   displayDraft: ProgramDraftInput;
   displayVersion: ProgramVersion;
   detail: ProgramDetail;
@@ -1485,6 +1494,7 @@ function StudioOverview({
   onOpenCustomers: () => void;
   onArea: (area: StudioArea) => void;
   onLifecycle: (action: LifecycleAction) => void;
+  organization: OrganizationPublicationContext | null;
 }) {
   const finalReward = [...displayDraft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
@@ -1509,7 +1519,6 @@ function StudioOverview({
     draftPreviewSupported: lifecycleState.key !== "archived",
   });
   const customerPreviewDraft = customerPreview.preview ?? displayDraft;
-  const publishedPreviewContext = Boolean(detail.currentPublishedVersion);
   const publishedPolicy = enrollmentAccess?.publishedVersion?.policy ?? null;
   const sharing = deriveProgramSharingPresentation({
     lifecycle: detail.status,
@@ -1560,13 +1569,19 @@ function StudioOverview({
       <div className="studio-overview__hero">
         <StudioPreview
           draft={customerPreviewDraft}
+          savedDraft={hasUnpublishedChanges ? displayDraft : null}
           ar={ar}
+          interfaceLocale={interfaceLocale}
           selectedProfile={selectedProfile}
-          preview={customerPreview.source === "draft" ? selectedPreview : undefined}
+          preview={
+            customerPreview.source === "draft" || hasUnpublishedChanges
+              ? selectedPreview
+              : undefined
+          }
           loadState={previewLoadState}
           source={customerPreview.source}
-          publishedPreviewContext={publishedPreviewContext}
           publishedStatus={detail.status}
+          brandLogoUrl={organization?.brandLogoAsset?.contentUrl}
           progress={progress}
           onProgress={onProgress}
           onProfile={onProfile}
@@ -1708,30 +1723,43 @@ function StudioOverview({
 
 function StudioPreview({
   draft,
+  savedDraft,
   ar,
+  interfaceLocale,
   selectedProfile,
   preview,
   loadState,
   source,
-  publishedPreviewContext,
   publishedStatus,
   progress,
   onProgress,
   onProfile,
+  brandLogoUrl,
 }: {
   draft: ProgramDraftInput;
+  savedDraft?: ProgramDraftInput | null | undefined;
   ar: boolean;
+  interfaceLocale: InterfaceLocale;
   selectedProfile: PreviewProfile;
   preview: PreviewResult | undefined;
   loadState: PreviewLoadState;
   source: "published" | "draft" | "unavailable";
-  publishedPreviewContext: boolean;
   publishedStatus: ProgramOperationalStatus;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
+  brandLogoUrl?: string | undefined;
 }) {
-  const profileLabel = publishedPreviewContext
+  const [selectedVersion, setSelectedVersion] = useState<"published" | "draft">(
+    source === "published" ? "published" : "draft",
+  );
+  const previewCopy = localeRegistry[interfaceLocale].messages.merchant.studio;
+  const canPreviewSavedChanges = source === "published" && Boolean(savedDraft);
+  const showingSavedChanges = canPreviewSavedChanges && selectedVersion === "draft";
+  const activeSource = showingSavedChanges ? "draft" : source;
+  const activeDraft = showingSavedChanges ? (savedDraft ?? draft) : draft;
+  const showingPublishedVersion = activeSource === "published";
+  const profileLabel = showingPublishedVersion
     ? ar
       ? "ملخص البطاقة المنشورة"
       : "Published card summary"
@@ -1766,7 +1794,7 @@ function StudioPreview({
               label: ar ? "منشورة" : "Published",
               tone: "neutral" as const,
             };
-  const loading = source === "draft" && (loadState === "idle" || loadState === "loading");
+  const loading = activeSource === "draft" && (loadState === "idle" || loadState === "loading");
   return (
     <section
       className="studio-preview-panel studio-preview-panel--overview"
@@ -1775,7 +1803,7 @@ function StudioPreview({
       <div className="studio-preview-header">
         <div>
           <span className="dashboard-card__label">
-            {publishedPreviewContext
+            {showingPublishedVersion
               ? publishedState.eyebrow
               : ar
                 ? "ما يراه العميل"
@@ -1783,13 +1811,39 @@ function StudioPreview({
           </span>
           <h3>{profileLabel}</h3>
         </div>
-        {publishedPreviewContext ? (
+        {showingPublishedVersion ? (
           <Badge tone={publishedState.tone}>{publishedState.label}</Badge>
+        ) : showingSavedChanges ? (
+          <Badge tone="brand">{previewCopy.savedChanges}</Badge>
         ) : (
           <Eye size={20} aria-hidden="true" />
         )}
       </div>
-      {source === "draft" ? (
+      {canPreviewSavedChanges ? (
+        <div
+          className="studio-preview-version-toggle"
+          role="tablist"
+          aria-label={previewCopy.previewVersions}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!showingSavedChanges}
+            onClick={() => setSelectedVersion("published")}
+          >
+            {previewCopy.currentLive}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={showingSavedChanges}
+            onClick={() => setSelectedVersion("draft")}
+          >
+            {previewCopy.savedChanges}
+          </button>
+        </div>
+      ) : null}
+      {activeSource === "draft" ? (
         <div
           className="studio-preview-tabs"
           role="tablist"
@@ -1815,13 +1869,18 @@ function StudioPreview({
         </div>
       ) : null}
       <div
-        dir={ar ? "rtl" : "ltr"}
-        lang={ar ? "ar" : "en"}
-        className={`studio-device-frame studio-device-frame--${publishedPreviewContext ? "published" : selectedProfile.toLowerCase()}`}
+        dir={directionForInterface(interfaceLocale)}
+        lang={localeRegistry[interfaceLocale].htmlLang}
+        className={`studio-device-frame studio-device-frame--${showingPublishedVersion ? "published" : selectedProfile.toLowerCase()}`}
       >
-        {source === "published" ? (
-          <PublishedCardSummary draft={draft} progress={progress} ar={ar} />
-        ) : source === "draft" && preview ? (
+        {activeSource === "published" ? (
+          <PublishedCardSummary
+            ar={ar}
+            brandLogoUrl={brandLogoUrl}
+            draft={activeDraft}
+            progress={progress}
+          />
+        ) : activeSource === "draft" && preview ? (
           <Image
             src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview.svg)}`}
             alt={ar ? `معاينة ${profileLabel}` : `${profileLabel} preview`}
@@ -1848,23 +1907,23 @@ function StudioPreview({
           </div>
         )}
       </div>
-      {source !== "unavailable" ? (
+      {activeSource !== "unavailable" ? (
         <FormField label={ar ? "تقدم العميل" : "Customer progress"}>
           <div className="studio-preview-progress">
             <input
               type="range"
               min={0}
-              max={draft.requiredStampCount}
+              max={activeDraft.requiredStampCount}
               value={progress}
               onChange={(event) => onProgress(Number(event.target.value))}
             />
             <output dir="ltr">
-              {progress}/{draft.requiredStampCount}
+              {progress}/{activeDraft.requiredStampCount}
             </output>
           </div>
         </FormField>
       ) : null}
-      {source === "draft" &&
+      {activeSource === "draft" &&
         preview?.warnings.map((warning) => (
           <Alert key={warning.code} tone="warning" title={warning.message} />
         ))}
@@ -1876,10 +1935,12 @@ function PublishedCardSummary({
   draft,
   progress,
   ar,
+  brandLogoUrl,
 }: {
   draft: ProgramDraftInput;
   progress: number;
   ar: boolean;
+  brandLogoUrl?: string | undefined;
 }) {
   const content = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
   const reward = [...draft.rewards].sort(
@@ -1903,7 +1964,13 @@ function PublishedCardSummary({
       role="img"
       aria-label={ar ? "ملخص البطاقة المنشورة حاليًا" : "Current published card summary"}
     >
-      <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
+      <div className="studio-published-customer-preview__issuer">
+        <MerchantBrandMark
+          className="studio-published-customer-preview__issuer-mark"
+          contentUrl={brandLogoUrl}
+        />
+        <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
+      </div>
       <h4>{content.programName}</h4>
       <p>{content.shortDescription}</p>
       <div className="studio-published-customer-preview__stamps" aria-hidden="true">
@@ -2576,7 +2643,6 @@ function StudioSectionContent({
       <div className="studio-section-content">
         {(
           [
-            ["LOGO", "logoAssetId", ar ? "الشعار" : "Logo"],
             ["HERO", "heroAssetId", ar ? "صورة البطل" : "Hero"],
             ["BACKGROUND", "backgroundAssetId", ar ? "الخلفية" : "Background"],
             ["STAMP_FILLED", "filledStampAssetId", ar ? "الختم الممتلئ" : "Filled stamp"],

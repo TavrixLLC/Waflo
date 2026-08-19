@@ -5,6 +5,7 @@ import { ArrowRightLeft, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide
 import Image from "next/image";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
+import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
 import { CustomerApiError, customerApi } from "../../client-api";
 import { type WalletPlatform, walletPlatform } from "../../wallet-platform";
 
@@ -15,7 +16,7 @@ interface CardView {
     preferredLocale: "en" | "ar";
     maskedEmail: string | null;
   };
-  merchant: { name: string; slug: string };
+  merchant: { name: string; slug: string; brandLogoDataUri?: string | null | undefined };
   program: {
     name: string;
     description: string;
@@ -162,12 +163,11 @@ export function CustomerCard({
   return (
     <main className="customer-page card-page" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
       <header className="customer-header card-header">
-        <span className="customer-merchant-identity">
-          <i aria-hidden="true">
-            {card.merchant.name.slice(0, 1).toLocaleUpperCase(ar ? "ar" : "en")}
-          </i>
-          <strong>{card.merchant.name}</strong>
-        </span>
+        <CustomerMerchantIdentity
+          locale={ar ? "ar" : "en"}
+          logoDataUri={card.merchant.brandLogoDataUri}
+          name={card.merchant.name}
+        />
         <button type="button" className="customer-language" onClick={() => void logout()}>
           <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
         </button>
@@ -183,9 +183,17 @@ export function CustomerCard({
         }
       >
         <div className="digital-card__brand">
-          <div>
-            <small>{card.merchant.name}</small>
-            <h1>{card.program.name}</h1>
+          <div className="digital-card__issuer">
+            <CustomerMerchantIdentity
+              locale={ar ? "ar" : "en"}
+              logoDataUri={card.merchant.brandLogoDataUri}
+              name={card.merchant.name}
+              showName={false}
+            />
+            <div>
+              <small>{card.merchant.name}</small>
+              <h1>{card.program.name}</h1>
+            </div>
           </div>
           <Badge tone={active ? "success" : "warning"}>
             {membershipStateLabel(card.membership.state, ar)}

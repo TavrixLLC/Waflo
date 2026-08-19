@@ -46,6 +46,13 @@ export interface PublicProgram {
   };
 }
 
+export interface PublicMerchant {
+  name: string;
+  slug: string;
+  defaultLocale: "en" | "ar";
+  brandLogoDataUri?: string | null | undefined;
+}
+
 export class CustomerPublicApiError extends Error {
   constructor(
     readonly status: number,

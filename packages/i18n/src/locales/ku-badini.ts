@@ -62,5 +62,10 @@ export const kuBadini: InterfaceMessages = {
       renewalMessage: "ئابوونەیا Waflo پێدڤی ب نووکرنێ هەیە بەرێ تو گۆهارتن بکەی.",
       renewalAction: "ئابوونەیێ نوو بکە",
     },
+    studio: {
+      currentLive: "کارتا ژیانێ یا ئێستا",
+      savedChanges: "گۆڕانکارییێن هەڵگیراو",
+      previewVersions: "پێشبینیا وەشانێن کارتێ",
+    },
   },
 };

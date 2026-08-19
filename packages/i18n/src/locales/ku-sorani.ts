@@ -63,5 +63,10 @@ export const kuSorani: InterfaceMessages = {
       renewalMessage: "بەشداربوونی Waflo پێویستی بە نوێکردنەوە هەیە پێش ئەوەی گۆڕانکاری بکەیت.",
       renewalAction: "بەشداربوون نوێ بکە",
     },
+    studio: {
+      currentLive: "کارتی زیندووی ئێستا",
+      savedChanges: "گۆڕانکارییە پاشەکەوتکراوەکان",
+      previewVersions: "پێشبینینی وەشانەکانی کارت",
+    },
   },
 };

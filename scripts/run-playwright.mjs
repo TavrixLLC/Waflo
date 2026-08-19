@@ -151,6 +151,13 @@ async function buildBrowserFrontends() {
     NODE_ENV: "production",
     WAFLO_E2E_NEXT_START: "1",
   };
+  // Browser runs create a fresh database and apply every migration. Generate
+  // the Prisma client from that same schema before compiling the API; otherwise
+  // a newly added column can be present in the database but absent from the
+  // previously built client used by the isolated server.
+  const database = pnpmCommand(["--filter", "@waflo/database", "build"]);
+  if ((await runCommand(database.command, database.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser database client build failed.");
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
   if ((await runCommand(api.command, api.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser API build failed.");

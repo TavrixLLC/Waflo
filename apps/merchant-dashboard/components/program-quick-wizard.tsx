@@ -426,21 +426,6 @@ export function ProgramQuickWizard({
           </div>
           <ProgramAssetPicker
             organizationId={organizationId}
-            category="LOGO"
-            label={ar ? "الشعار" : "Logo"}
-            assets={assets}
-            selectedId={draft.visualTheme.logoAssetId}
-            onSelected={(assetId) =>
-              editDraft((current) => ({
-                ...current,
-                visualTheme: { ...current.visualTheme, logoAssetId: assetId },
-              }))
-            }
-            onUploaded={onAssetUploaded}
-            ar={ar}
-          />
-          <ProgramAssetPicker
-            organizationId={organizationId}
             category="STAMP_FILLED"
             label={ar ? "الختم الممتلئ" : "Filled stamp"}
             assets={assets}

@@ -11,12 +11,13 @@ import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
+import { resolvePreviewAssetContent, type PreviewAsset } from "../programs/preview-assets.js";
 import { CustomerSecurityService } from "./customer-security.service.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import { WalletProviderRegistry } from "../wallet/wallet-provider.registry.js";
 
 const customerCardMembershipInclude = {
-  organization: true,
+  organization: { include: { brandLogoAsset: { include: { variants: true } } } },
   customer: {
     include: {
       contacts: {
@@ -147,6 +148,7 @@ export class CustomerCardService {
       theme: membership.enrollmentProgramVersion.visualTheme,
       outputProfile: "CUSTOMER_WEB",
     });
+    const brandLogoDataUri = await this.brandLogoDataUri(membership.organization.brandLogoAsset);
     await this.touch(context.session.id, context.session.lastActiveAt);
     return {
       publicMembershipId: membership.publicMembershipId,
@@ -159,6 +161,7 @@ export class CustomerCardService {
       merchant: {
         name: membership.organization.name,
         slug: membership.organization.merchantSlug,
+        brandLogoDataUri,
       },
       program: {
         slug: membership.program.publicSlug,
@@ -252,6 +255,22 @@ export class CustomerCardService {
   async walletStatus(request: WafloRequest, developmentOverride?: string) {
     const card = await this.card(request, undefined, developmentOverride);
     return { wallet: card.wallet, credentialStatus: card.membership.credentialStatus };
+  }
+
+  private async brandLogoDataUri(asset: PreviewAsset | null): Promise<string | null> {
+    try {
+      const resolved = await resolvePreviewAssetContent(
+        this.objectStorage,
+        asset,
+        "THUMBNAIL_96",
+        "merchant brand logo",
+      );
+      return resolved?.dataUri ?? null;
+    } catch {
+      // Customer cards have a Waflo issuer fallback; a historical object-loss
+      // must not replace a usable card with a broken image.
+      return null;
+    }
   }
 
   async rotate(request: WafloRequest, developmentOverride?: string) {

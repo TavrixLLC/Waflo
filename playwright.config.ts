@@ -36,7 +36,8 @@ export default defineConfig({
     },
     {
       name: "design-review",
-      testMatch: /(?:^|[/\\])merchant-design-review\.spec\.ts$/,
+      testMatch:
+        /(?:^|[/\\])(?:merchant-design-review|merchant-targeted-branding-visual)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {

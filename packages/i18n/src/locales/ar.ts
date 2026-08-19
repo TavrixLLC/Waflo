@@ -61,5 +61,10 @@ export const ar: InterfaceMessages = {
       renewalMessage: "يحتاج اشتراك Waflo إلى التجديد قبل أن تتمكن من إجراء التغييرات.",
       renewalAction: "تجديد الاشتراك",
     },
+    studio: {
+      currentLive: "البطاقة المباشرة الحالية",
+      savedChanges: "التغييرات المحفوظة",
+      previewVersions: "معاينة إصدارات البطاقة",
+    },
   },
 };

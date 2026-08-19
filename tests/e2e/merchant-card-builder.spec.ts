@@ -35,6 +35,57 @@ async function enterBuilder(page: Page, templateName = "Classic Roast"): Promise
   ).toBeVisible();
 }
 
+test("uses the organization brand as the unmirrored issuer mark in every Builder preview", async ({
+  page,
+}) => {
+  const merchantBrandLogoDataUri = `data:image/svg+xml;base64,${Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" rx="20" fill="#125B72"/><path d="M26 28h44L48 70z" fill="#F8E3B1"/></svg>',
+    "utf8",
+  ).toString("base64")}`;
+  const previews: Array<{ profile: string; locale: string; svg: string }> = [];
+  await mockTemplateGalleryApi(page, {
+    merchantBrandLogoDataUri,
+    onBuilderPreview: (profile, locale, preview) => previews.push({ ...preview, profile, locale }),
+  });
+  await enterBuilder(page);
+
+  for (const [tab, profile] of [
+    ["Customer", "CUSTOMER_WEB"],
+    ["Apple Wallet", "APPLE_WALLET"],
+    ["Google Wallet", "GOOGLE_WALLET"],
+  ] as const) {
+    await page.getByRole("tab", { name: tab }).click();
+    await expect
+      .poll(() => previews.findLast((preview) => preview.profile === profile)?.svg ?? "")
+      .toContain(merchantBrandLogoDataUri);
+  }
+
+  await page.goto("/ar/dashboard/programs/created-program-id/edit");
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  await page.getByRole("tab", { name: /Apple Wallet/u }).click();
+  await expect
+    .poll(
+      () =>
+        previews.findLast(
+          (preview) => preview.profile === "APPLE_WALLET" && preview.locale === "AR",
+        )?.svg ?? "",
+    )
+    .toContain(merchantBrandLogoDataUri);
+
+  for (const preview of previews) {
+    if (!preview.svg.includes(merchantBrandLogoDataUri)) continue;
+    expect(preview.svg).toContain('data-issuer-brand="organization"');
+    expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
+  }
+  expect(
+    await page
+      .locator(".builder-preview-canvas img")
+      .evaluateAll((images) =>
+        images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
+      ),
+  ).toBe(true);
+});
+
 test("builds one continuously saved card with combined languages and lazy truthful previews", async ({
   page,
 }) => {

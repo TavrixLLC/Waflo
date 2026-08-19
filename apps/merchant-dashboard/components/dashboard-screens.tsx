@@ -1722,12 +1722,22 @@ export function BillingScreen({
               <Badge tone={subscriptionStatusTone}>{formatBillingStatus(subscriptionStatus)}</Badge>
             </div>
             <dl className="billing-overview__facts">
-              <div>
+              <div data-billing-summary="next-renewal">
                 <dt>{ar ? "الدفعة القادمة" : "Next renewal"}</dt>
-                <dd className="billing-overview__amount" dir="ltr">
-                  {formatMoney(
-                    data.authoritativeState.nextExpectedAmount,
-                    data.authoritativeState.currency,
+                <dd className="billing-overview__amount">
+                  {data.authoritativeState.nextExpectedAmount !== null &&
+                  data.authoritativeState.currency ? (
+                    <bdi dir="ltr">
+                      {formatMoney(
+                        data.authoritativeState.nextExpectedAmount,
+                        data.authoritativeState.currency,
+                      )}
+                    </bdi>
+                  ) : (
+                    formatMoney(
+                      data.authoritativeState.nextExpectedAmount,
+                      data.authoritativeState.currency,
+                    )
                   )}
                 </dd>
                 <dd>
@@ -1793,11 +1803,13 @@ export function BillingScreen({
                   </>
                 )}
               </div>
-              <div>
+              <div data-billing-summary="current-catalog-rate">
                 <dt>{ar ? "السعر المعلن الحالي" : "Current catalog rate"}</dt>
-                <dd className="billing-overview__amount" dir="ltr">
-                  ${selectedCatalogPrice?.monthlyEquivalentUsd.toFixed(2) ?? "—"}/
-                  {ar ? "شهر" : "mo"}
+                <dd className="billing-overview__amount billing-overview__catalog-rate">
+                  <bdi dir="ltr">
+                    ${selectedCatalogPrice?.monthlyEquivalentUsd.toFixed(2) ?? "—"}
+                  </bdi>
+                  <span>{ar ? "/شهر" : "/mo"}</span>
                 </dd>
                 <dd>
                   <small>
@@ -2542,6 +2554,7 @@ export function SettingsScreen({
             : "Your merchant logo has been removed.",
       );
       await load();
+      await onOrganizationChanged();
     } catch (caught) {
       setError(
         message(

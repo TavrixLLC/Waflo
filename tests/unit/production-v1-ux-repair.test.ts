@@ -37,6 +37,32 @@ describe("production-v1 UX and billing repair", () => {
       "utf8",
     );
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
+    const previews = readFileSync("apps/api/src/programs/preview-composer.ts", "utf8");
+    const publicEnrollment = readFileSync(
+      "apps/api/src/enrollment/public-enrollment.service.ts",
+      "utf8",
+    );
+    const customerCard = readFileSync("apps/api/src/customer/customer-card.service.ts", "utf8");
+    const builder = readFileSync(
+      "apps/merchant-dashboard/components/program-card-builder.tsx",
+      "utf8",
+    );
+    const quickWizard = readFileSync(
+      "apps/merchant-dashboard/components/program-quick-wizard.tsx",
+      "utf8",
+    );
+    const studio = readFileSync(
+      "apps/merchant-dashboard/components/program-studio-editor.tsx",
+      "utf8",
+    );
+    const launch = readFileSync(
+      "apps/merchant-dashboard/components/program-launch-experience.tsx",
+      "utf8",
+    );
+    const brandMark = readFileSync(
+      "apps/merchant-dashboard/components/merchant-brand-mark.tsx",
+      "utf8",
+    );
     expect(schema).toContain("brandLogoAssetId      String?");
     expect(migration).toContain('ADD COLUMN "brand_logo_asset_id" UUID');
     expect(organizations).toContain('category: "LOGO"');
@@ -47,6 +73,17 @@ describe("production-v1 UX and billing repair", () => {
     expect(worker).toContain("ensureGoogleProgramLogo");
     expect(worker).toContain("merchantApplePassImages");
     expect(worker).toContain('"logo@2x.png"');
+    expect(previews).toContain("merchantBrandLogoDataUri");
+    expect(previews).toContain('data-issuer-brand="organization"');
+    expect(publicEnrollment).toContain("brandLogoDataUri");
+    expect(customerCard).toContain("brandLogoDataUri");
+    expect(builder).not.toContain('category="LOGO"');
+    expect(quickWizard).not.toContain('category="LOGO"');
+    expect(studio).toContain("MerchantBrandMark");
+    expect(studio).toContain("savedDraft={hasUnpublishedChanges ? displayDraft : null}");
+    expect(launch).toContain("MerchantBrandMark");
+    expect(brandMark).toContain('credentials: "include"');
+    expect(brandMark).toContain("URL.createObjectURL");
     const capabilities = readFileSync("packages/contracts/src/platform-capabilities.ts", "utf8");
     expect(capabilities).toContain('support: "SUPPORTED"');
     expect(capabilities).toContain(
@@ -367,6 +404,62 @@ describe("production-v1 UX and billing repair", () => {
     expect(preview.digest).toBe(createHash("sha256").update(preview.svg).digest("hex"));
   });
 
+  it("uses the organization logo as the visible issuer mark across every card preview", () => {
+    const stamp = renderStampSvg({
+      goal: 8,
+      progress: 0,
+      layout: "GRID",
+      filledColor: "#6B3F2A",
+      emptyColor: "#F5E5D2",
+      accentColor: "#6B3F2A",
+      backgroundColor: "#F5E5D2",
+      foregroundColor: "#2A1710",
+    });
+    const merchantBrandLogoDataUri =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+9R/5VQAAAABJRU5ErkJggg==";
+    const base = {
+      locale: "AR" as const,
+      organizationName: "مقهى وافلو",
+      programName: "بطاقة القهوة",
+      shortDescription: "اجمع الأختام",
+      rewardSummary: "قهوة مجانية",
+      terms: "ختم واحد لكل زيارة",
+      progress: 2,
+      goal: 8,
+      stampSvg: stamp.svg,
+      stampLayout: "GRID" as const,
+      backgroundColor: "#F5E5D2",
+      foregroundColor: "#2A1710",
+      accentColor: "#6B3F2A",
+      secondaryColor: "#E7B56B",
+      merchantBrandLogoDataUri,
+      customerWebVariant: "CARD" as const,
+      apple: {
+        headerLabel: "الأختام",
+        headerValue: "2/8",
+        secondaryLabel: "الحالة",
+        barcodeLabel: "العضوية",
+        showBackContent: true,
+      },
+      google: {
+        title: "بطاقة القهوة",
+        subtitle: "مقهى وافلو",
+        detailsLabel: "المكافأة",
+        barcodeLabel: "العضوية",
+      },
+    };
+    for (const profile of ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const) {
+      const preview = composeProgramPreview({ ...base, profile });
+      expect(preview.svg).toContain(merchantBrandLogoDataUri);
+      expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
+      expect(preview.svg).toContain('data-issuer-brand="organization"');
+    }
+    const { merchantBrandLogoDataUri: _merchantBrandLogoDataUri, ...fallbackBase } = base;
+    const fallback = composeProgramPreview({ ...fallbackBase, profile: "APPLE_WALLET" });
+    expect(fallback.svg).not.toContain(merchantBrandLogoDataUri);
+    expect(fallback.svg).toContain('fill="#E4572E"');
+  });
+
   it("styles native selects and wraps the accessible color input", () => {
     const styles = readFileSync("packages/ui/src/styles.css", "utf8");
     const controls = readFileSync("packages/ui/src/index.tsx", "utf8");
@@ -473,8 +566,6 @@ describe("production-v1 UX and billing repair", () => {
       "apps/merchant-dashboard/components/dashboard-screens.tsx",
       "utf8",
     );
-    const stampEngine = readFileSync("packages/stamp-engine/src/index.ts", "utf8");
-
     // Softened dashboard canvas background token
     expect(tokens).toContain("--waflo-cloud: #f8f9fb;");
     expect(tailwindTokens).toContain("--color-waflo-cloud: #f8f9fb;");

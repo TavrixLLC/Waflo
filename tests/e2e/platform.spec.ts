@@ -1220,9 +1220,9 @@ test.describe
         .getByRole("button", { name: /^Appearance/u })
         .first()
         .click();
-      const uploadToPicker = async (label: "Logo" | "Stamped icon", expectProgramSave = true) => {
+      const uploadStampToPicker = async (expectProgramSave = true) => {
         const picker = page.locator(".studio-asset-picker").filter({
-          has: page.getByRole("heading", { name: label }),
+          has: page.getByRole("heading", { name: "Stamped icon" }),
         });
         await picker.locator('input[type="file"]').setInputFiles({
           name: "round4-same-image.png",
@@ -1270,10 +1270,42 @@ test.describe
         };
         return envelope.data;
       };
-      const logoAsset = await uploadToPicker("Logo");
-      const stampAsset = await uploadToPicker("Stamped icon");
-      expect(logoAsset.id).not.toBe(stampAsset.id);
-      await screenshot(page, "55-r4-identical-image-two-visual-categories");
+      const stampAsset = await uploadStampToPicker();
+      const builderPath = new URL(page.url()).pathname;
+      await expect(
+        page.locator(".studio-asset-picker").filter({
+          has: page.getByRole("heading", { name: "Logo" }),
+        }),
+      ).toHaveCount(0);
+
+      await page.goto("/en/dashboard/settings");
+      const merchantBrandPicker = page.locator(".studio-asset-picker").filter({
+        has: page.getByRole("heading", { name: "Merchant logo" }),
+      });
+      await merchantBrandPicker.locator('input[type="file"]').setInputFiles({
+        name: "round4-same-image.png",
+        mimeType: "image/png",
+        buffer: sameImage,
+      });
+      const merchantCropDialog = page.getByRole("dialog", { name: "Crop image safely" });
+      await expect(merchantCropDialog).toBeVisible();
+      const merchantLogoUploaded = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().includes("/assets") &&
+          response.status() === 201,
+      );
+      await merchantCropDialog.getByRole("button", { name: "Process and upload" }).click();
+      await merchantLogoUploaded;
+      await expect(
+        page.getByText(/Your merchant logo is saved\. Existing Wallet passes will refresh safely/u),
+      ).toBeVisible();
+      await page.goto(builderPath);
+      await page
+        .getByRole("button", { name: /^Appearance/u })
+        .first()
+        .click();
+      await screenshot(page, "55-r4-merchant-brand-and-stamp-identity");
 
       const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
       const database = createPrismaClient(
@@ -1281,11 +1313,16 @@ test.describe
           "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
       );
       try {
+        const storedOrganization = await database.organization.findUniqueOrThrow({
+          where: { id: round4OrganizationId as string },
+        });
+        expect(storedOrganization.brandLogoAssetId).toBeTruthy();
+        expect(storedOrganization.brandLogoAssetId).not.toBe(stampAsset.id);
         await database.merchantAsset.update({
           where: { id: stampAsset.id },
           data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
         });
-        const restoredStamp = await uploadToPicker("Stamped icon", false);
+        const restoredStamp = await uploadStampToPicker(false);
         expect(restoredStamp).toMatchObject({
           id: stampAsset.id,
           uploadDisposition: "RESTORED",

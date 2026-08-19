@@ -61,6 +61,11 @@ export const en = {
       renewalMessage: "Your Waflo subscription needs to be renewed before you can make changes.",
       renewalAction: "Renew subscription",
     },
+    studio: {
+      currentLive: "Current live",
+      savedChanges: "Saved changes",
+      previewVersions: "Card version preview",
+    },
   },
 } as const;
 

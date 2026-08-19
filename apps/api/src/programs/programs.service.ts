@@ -394,7 +394,12 @@ export class ProgramsService {
       const program = await transaction.loyaltyProgram.findFirst({
         where: { id: programId, organizationId },
         include: {
-          organization: { select: { name: true } },
+          organization: {
+            select: {
+              name: true,
+              brandLogoAsset: { include: { variants: true } },
+            },
+          },
           currentDraftVersion: {
             include: {
               translations: true,
@@ -518,6 +523,10 @@ export class ProgramsService {
           empty: previewAssetCacheIdentity(visual?.emptyStampAsset, "STAMP_256"),
           milestone: previewAssetCacheIdentity(visual?.defaultMilestoneAsset, "STAMP_256"),
           logo: previewAssetCacheIdentity(visual?.logoAsset, "ORIGINAL_SAFE"),
+          merchantBrand: previewAssetCacheIdentity(
+            program.organization.brandLogoAsset,
+            "THUMBNAIL_96",
+          ),
           hero: previewAssetCacheIdentity(visual?.heroAsset, "ORIGINAL_SAFE"),
           background: previewAssetCacheIdentity(visual?.backgroundAsset, "ORIGINAL_SAFE"),
         },
@@ -572,7 +581,7 @@ export class ProgramsService {
       }
       const assetData = (
         asset: PreviewAsset | null | undefined,
-        preferredVariant: "STAMP_256" | "ORIGINAL_SAFE",
+        preferredVariant: "STAMP_256" | "ORIGINAL_SAFE" | "THUMBNAIL_96",
         role: string,
         required = false,
       ) => resolvePreviewAssetContent(this.objectStorage, asset, preferredVariant, role, required);
@@ -581,6 +590,7 @@ export class ProgramsService {
         emptyAsset,
         defaultMilestoneAsset,
         logoAsset,
+        merchantBrandLogoAsset,
         heroAsset,
         backgroundAsset,
       ] = await Promise.all([
@@ -588,6 +598,7 @@ export class ProgramsService {
         assetData(visual?.emptyStampAsset, "STAMP_256", "empty stamp", true),
         assetData(visual?.defaultMilestoneAsset, "STAMP_256", "default milestone"),
         assetData(visual?.logoAsset, "ORIGINAL_SAFE", "logo"),
+        assetData(program.organization.brandLogoAsset, "THUMBNAIL_96", "merchant brand logo"),
         assetData(visual?.heroAsset, "ORIGINAL_SAFE", "hero"),
         assetData(visual?.backgroundAsset, "ORIGINAL_SAFE", "background"),
       ]);
@@ -689,6 +700,9 @@ export class ProgramsService {
         foregroundColor: visualInput.foregroundColor,
         accentColor: visualInput.accentColor,
         secondaryColor: visualInput.secondaryColor,
+        ...(merchantBrandLogoAsset
+          ? { merchantBrandLogoDataUri: merchantBrandLogoAsset.dataUri }
+          : {}),
         ...(logoAsset ? { logoDataUri: logoAsset.dataUri } : {}),
         ...(filledAsset ? { identityDataUri: filledAsset.dataUri } : {}),
         ...(heroAsset ? { heroDataUri: heroAsset.dataUri } : {}),

@@ -512,6 +512,13 @@ a {
   align-items: start;
 }
 
+.digital-card__issuer {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+
 .digital-card__brand small,
 .digital-card__member span {
   color: color-mix(in srgb, var(--card-ink) 64%, transparent);
@@ -971,6 +978,17 @@ body {
   font-weight: 800;
 }
 
+.customer-merchant-identity__logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  padding: 0.18rem;
+  border: 1px solid color-mix(in srgb, var(--waflo-ink) 12%, transparent);
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, #fff 88%, transparent);
+  object-fit: contain;
+}
+
 .customer-merchant-identity strong {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1005,6 +1023,34 @@ body {
   background: var(--waflo-ink);
   box-shadow: var(--waflo-shadow-card);
   font-size: 1.2rem;
+}
+
+.customer-merchant-mark.customer-merchant-identity {
+  display: inline-flex;
+}
+
+.customer-merchant-mark .customer-merchant-identity__logo,
+.customer-merchant-mark i {
+  width: 3.5rem;
+  height: 3.5rem;
+  flex-basis: 3.5rem;
+  border-radius: 18px;
+}
+
+.digital-card__issuer .customer-merchant-identity {
+  flex: 0 0 auto;
+}
+
+.digital-card__issuer .customer-merchant-identity i,
+.digital-card__issuer .customer-merchant-identity__logo {
+  width: 2.6rem;
+  height: 2.6rem;
+  flex-basis: 2.6rem;
+  border-radius: 0.82rem;
+}
+
+.program-story__merchant {
+  margin-block-end: 0.85rem;
 }
 
 .customer-kicker {

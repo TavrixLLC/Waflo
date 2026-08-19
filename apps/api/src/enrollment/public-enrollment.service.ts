@@ -23,7 +23,7 @@ import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
-import type { PreviewAsset } from "../programs/preview-assets.js";
+import { resolvePreviewAssetContent, type PreviewAsset } from "../programs/preview-assets.js";
 
 const visibleProgramStates = ["PUBLISHED", "PAUSED", "ARCHIVED", "SUSPENDED"] as const;
 
@@ -91,6 +91,7 @@ export class PublicEnrollmentService {
         name: organization.name,
         slug: organization.merchantSlug,
         defaultLocale: organization.defaultLocale === "AR" ? "ar" : "en",
+        brandLogoDataUri: await this.publicBrandLogoDataUri(organization.brandLogoAsset),
       },
       // A broken historical asset must not take the entire merchant discovery root
       // offline. The affected program remains unavailable (and its direct route
@@ -125,6 +126,7 @@ export class PublicEnrollmentService {
         name: resolved.organization.name,
         slug: resolved.organization.merchantSlug,
         defaultLocale: resolved.organization.defaultLocale === "AR" ? "ar" : "en",
+        brandLogoDataUri: await this.publicBrandLogoDataUri(resolved.organization.brandLogoAsset),
       },
       program: await this.publicProgram(program, resolved.organization),
     };
@@ -715,6 +717,7 @@ export class PublicEnrollmentService {
     organization: {
       id: string;
       billingProfile: { subscriptionStatus: string; trialEnd: Date | null } | null;
+      brandLogoAsset: PreviewAsset | null;
     },
   ) {
     const version = program.currentPublishedVersion;
@@ -830,5 +833,21 @@ export class PublicEnrollmentService {
         transferWithoutEmailAllowed: policy?.transferWithoutEmailAllowed ?? true,
       },
     };
+  }
+
+  private async publicBrandLogoDataUri(asset: PreviewAsset | null): Promise<string | null> {
+    try {
+      const resolved = await resolvePreviewAssetContent(
+        this.objectStorage,
+        asset,
+        "THUMBNAIL_96",
+        "merchant brand logo",
+      );
+      return resolved?.dataUri ?? null;
+    } catch {
+      // Public card discovery must retain the intentional Waflo issuer fallback
+      // when a historical logo object is no longer readable.
+      return null;
+    }
   }
 }
