@@ -19,7 +19,6 @@ for (const [key, value] of Object.entries(localEnvironment)) {
   process.env[key] ??= value;
 }
 const project = process.argv[2] ?? "chromium";
-const isolatedDatabase = process.env.WAFLO_ISOLATED_E2E === "1";
 const databaseRequire = createRequire(
   new URL("../packages/database/package.json", import.meta.url),
 );
@@ -40,6 +39,14 @@ const supportedProjects = new Set([
 if (!supportedProjects.has(project)) {
   throw new Error(`Unsupported Playwright project: ${project}`);
 }
+/**
+ * The primary browser gates own an isolated database and API by default. A
+ * developer can explicitly opt out for a manual shared-environment smoke run,
+ * while specialised provider projects retain their existing invocation model.
+ */
+const isolatedDatabase =
+  process.env.WAFLO_ISOLATED_E2E === "1" ||
+  (process.env.WAFLO_ISOLATED_E2E !== "0" && ["chromium", "accessibility"].includes(project));
 const isW3 = project.startsWith("w3");
 const isW4 = project.startsWith("w4");
 const usesWalletOperations = isW3 || isW4;
@@ -133,37 +140,37 @@ async function freePort() {
   });
 }
 
-async function buildIsolatedFrontends() {
+async function buildBrowserFrontends() {
   // `next build` must always execute in production mode, even when the local
   // developer .env intentionally sets NODE_ENV=development for the test servers.
   // Windows cannot reliably execute the pnpm symlink graph emitted in a Next
   // standalone directory. The isolated browser harness therefore builds the
   // ordinary production server artifact; release builds remain standalone.
-  const isolatedBuildEnvironment = {
+  const browserBuildEnvironment = {
     ...process.env,
     NODE_ENV: "production",
     WAFLO_E2E_NEXT_START: "1",
   };
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
-  if ((await runCommand(api.command, api.args, isolatedBuildEnvironment)) !== 0)
-    throw new Error("Isolated API build failed.");
+  if ((await runCommand(api.command, api.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser API build failed.");
   // Workspace packages export compiled JavaScript to Next. Build the shared
   // interface registry before its browser consumers so an isolated run never
   // uses stale locale metadata from dist/.
   const i18n = pnpmCommand(["--filter", "@waflo/i18n", "build"]);
-  if ((await runCommand(i18n.command, i18n.args, isolatedBuildEnvironment)) !== 0)
-    throw new Error("Isolated i18n build failed.");
+  if ((await runCommand(i18n.command, i18n.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser i18n build failed.");
   // The shared control system is also consumed through its compiled export.
   // Rebuild it here so browser assertions exercise the current UI primitive.
   const ui = pnpmCommand(["--filter", "@waflo/ui", "build"]);
-  if ((await runCommand(ui.command, ui.args, isolatedBuildEnvironment)) !== 0)
-    throw new Error("Isolated UI build failed.");
+  if ((await runCommand(ui.command, ui.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser UI build failed.");
   const build = pnpmCommand(["--filter", "@waflo/merchant-dashboard", "build"]);
-  if ((await runCommand(build.command, build.args, isolatedBuildEnvironment)) !== 0)
-    throw new Error("Isolated Merchant build failed.");
+  if ((await runCommand(build.command, build.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser Merchant build failed.");
   const customer = pnpmCommand(["--filter", "@waflo/customer-web", "build"]);
-  if ((await runCommand(customer.command, customer.args, isolatedBuildEnvironment)) !== 0)
-    throw new Error("Isolated Customer build failed.");
+  if ((await runCommand(customer.command, customer.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser Customer build failed.");
 }
 
 const commands = [
@@ -396,8 +403,11 @@ try {
     // Browser coverage deliberately traverses all three product hosts by their
     // stable localhost origins. Keep those ports fixed and verify they are free
     // before starting; only the API endpoint is isolated per test run.
-    await buildIsolatedFrontends();
   }
+  // NEXT_PUBLIC_API_URL is compiled into client bundles. Rebuilding for every
+  // run prevents a prior isolated random API port from leaking into a later
+  // browser run that starts a different API target.
+  await buildBrowserFrontends();
   for (const command of commands) {
     if (!existsSync(command.entry)) {
       throw new Error(`Missing built server entry: ${command.entry}. Run pnpm build first.`);

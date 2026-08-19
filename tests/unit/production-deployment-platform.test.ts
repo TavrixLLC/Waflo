@@ -65,15 +65,15 @@ function deploymentFiles(directory: string): string[] {
 }
 
 describe("production deployment platform", () => {
-  it("builds isolated browser-test frontends with Next production mode", () => {
+  it("builds browser-test frontends with their active API target in Next production mode", () => {
     expect(playwrightRunner).toContain('NODE_ENV: "production"');
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain("WAFLO_E2E_API_URL: process.env.NEXT_PUBLIC_API_URL");
     expect(playwrightRunner).toContain(
-      "runCommand(build.command, build.args, isolatedBuildEnvironment)",
+      "runCommand(build.command, build.args, browserBuildEnvironment)",
     );
     expect(playwrightRunner).toContain(
-      "runCommand(customer.command, customer.args, isolatedBuildEnvironment)",
+      "runCommand(customer.command, customer.args, browserBuildEnvironment)",
     );
     expect(playwrightRunner).toContain('"start", "-p"');
     expect(playwrightRunner).toContain("stable localhost origins");
@@ -84,6 +84,9 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain('"@waflo/i18n", "build"');
     expect(playwrightRunner).toContain('"@waflo/ui", "build"');
     expect(playwrightRunner).toContain("process.env.API_INTERNAL_URL");
+    expect(playwrightRunner).toContain("await buildBrowserFrontends()");
+    expect(playwrightRunner).toContain("prior isolated random API port");
+    expect(playwrightRunner).toContain('["chromium", "accessibility"].includes(project)');
   });
 
   it("keeps browser fixtures bound to every isolated loopback API port", () => {
