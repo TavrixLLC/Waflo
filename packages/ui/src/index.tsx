@@ -364,8 +364,11 @@ export function SearchableSelect({
     hasInteractedRef.current = true;
     if (!controlled) {
       setSelectedValue(option.value);
-      setQuery(option.label);
     }
+    // Keep the visible label intact when a controlled field re-selects its
+    // existing value. Its parent may legitimately keep the same value, so the
+    // controlled-value effect will not run to restore a query cleared on open.
+    setQuery(option.label);
     setOpen(false);
     setActiveIndex(0);
     inputRef.current?.setCustomValidity("");
@@ -403,6 +406,15 @@ export function SearchableSelect({
       setActiveIndex(0);
     }
   }
+
+  // Native modal dialogs render in the browser top layer. A listbox portalled
+  // to document.body would sit underneath that layer even with a large z-index,
+  // so keep modal-owned lists inside their dialog while ordinary lists still
+  // portal to the document body to avoid clipping.
+  const portalRoot =
+    typeof document === "undefined"
+      ? null
+      : (inputRef.current?.closest("dialog") ?? document.body);
 
   return (
     <div className={`wf-search-select ${open ? "wf-search-select--open" : ""} ${className}`}>
@@ -465,7 +477,7 @@ export function SearchableSelect({
           setOpen(true);
         }}
       />
-      {open && menuPosition && typeof document !== "undefined"
+      {open && menuPosition && portalRoot
         ? createPortal(
             <div
               ref={listboxRef}
@@ -511,7 +523,7 @@ export function SearchableSelect({
                 <div className="wf-search-select__empty">No matching option</div>
               )}
             </div>,
-            document.body,
+            portalRoot,
           )
         : null}
     </div>
