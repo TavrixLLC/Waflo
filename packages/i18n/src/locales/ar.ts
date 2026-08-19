@@ -238,7 +238,7 @@ export const ar: InterfaceMessages = {
         filtersLabel: "تصفية القوالب حسب الفئة",
         preview: "معاينة",
         useTemplate: "استخدام القالب",
-        useThisTemplate: "استخدم هذا القالب",
+        useThisTemplate: "استخدام هذا القالب",
         stampGoal: "هدف الأختام",
         stamps: "أختام",
         reward: "المكافأة",
