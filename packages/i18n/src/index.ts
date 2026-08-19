@@ -13,6 +13,7 @@ export {
   type InterfaceLocale,
   type InterfaceLocaleDefinition,
   type InterfaceLanguageGroup,
+  type InterfaceTypography,
   type TextDirection,
 } from "./locale-registry.js";
 import { localeRegistry } from "./locale-registry.js";

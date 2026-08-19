@@ -37,7 +37,11 @@ export default async function LocaleLayout({
   const definition = interfaceLocaleFor(locale);
   if (!definition) notFound();
   return (
-    <html lang={definition.htmlLang} dir={definition.direction}>
+    <html
+      lang={definition.htmlLang}
+      dir={definition.direction}
+      data-interface-typography={definition.typography}
+    >
       <body className={`${manrope.variable} ${cairo.variable}`}>{children}</body>
     </html>
   );

@@ -7,6 +7,7 @@ import { kuSorani } from "./locales/ku-sorani.js";
 export type TextDirection = "ltr" | "rtl";
 export type InterfaceLocale = "en" | "ar" | "ku-badini" | "ku-sorani";
 export type InterfaceLanguageGroup = "kurdish";
+export type InterfaceTypography = "default" | "cairo" | "kurdistan24";
 
 /**
  * Presentation metadata for grouped language choices. Keeping this alongside
@@ -29,11 +30,20 @@ export interface InterfaceLocaleDefinition {
   readonly englishName?: string;
   readonly htmlLang: string;
   readonly direction: TextDirection;
+  /**
+   * Presentation typography is locale metadata, never a component-level
+   * language conditional. `kurdistan24` is intentionally declarative until
+   * the approved local Kurdistan 24 Light webfont is supplied.
+   */
+  readonly typography: InterfaceTypography;
   readonly languageGroup?: InterfaceLanguageGroup;
   readonly enabled: true;
   /** Fallback for customer-authored and Wallet content constrained to the existing API locale union. */
   readonly contentFallback: Locale;
-  /** Transitional text catalog for legacy UI components while they move to locale messages directly. */
+  /**
+   * Transitional selection for routes whose interface copy has not yet moved
+   * to `messages`. Loyalty surfaces must not use this fallback.
+   */
   readonly interfaceTextLocale: Locale;
   readonly dateFormattingLocale: string;
   readonly numberFormattingLocale: string;
@@ -47,6 +57,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     nativeName: "English",
     htmlLang: "en",
     direction: "ltr",
+    typography: "default",
     enabled: true,
     contentFallback: "en",
     interfaceTextLocale: "en",
@@ -61,6 +72,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     englishName: "Arabic",
     htmlLang: "ar",
     direction: "rtl",
+    typography: "cairo",
     enabled: true,
     contentFallback: "en",
     interfaceTextLocale: "ar",
@@ -75,6 +87,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     englishName: "Kurdish Badini",
     htmlLang: "kmr-Arab-IQ",
     direction: "rtl",
+    typography: "kurdistan24",
     languageGroup: "kurdish",
     enabled: true,
     contentFallback: "en",
@@ -90,6 +103,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     englishName: "Kurdish Sorani",
     htmlLang: "ckb-Arab-IQ",
     direction: "rtl",
+    typography: "kurdistan24",
     languageGroup: "kurdish",
     enabled: true,
     contentFallback: "en",
@@ -117,8 +131,8 @@ export function directionForInterface(locale: InterfaceLocale): TextDirection {
 }
 
 /**
- * The dashboard still has a small two-language component copy surface. This
- * resolves that surface without changing the customer-content fallback.
+ * Transitional selection for legacy routes only. New interface text must use
+ * `localeRegistry[interfaceLocale].messages` directly.
  */
 export function interfaceTextLocaleFor(locale: InterfaceLocale): Locale {
   return localeRegistry[locale].interfaceTextLocale;

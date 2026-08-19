@@ -366,6 +366,10 @@ describe("API and localization utilities", () => {
     expect(isInterfaceLocale("ku")).toBe(false);
     expect(directionForInterface("ku-badini")).toBe("rtl");
     expect(directionForInterface("ku-sorani")).toBe("rtl");
+    expect(localeRegistry.en.typography).toBe("default");
+    expect(localeRegistry.ar.typography).toBe("cairo");
+    expect(localeRegistry["ku-badini"].typography).toBe("kurdistan24");
+    expect(localeRegistry["ku-sorani"].typography).toBe("kurdistan24");
     expect(localeRegistry["ku-badini"].htmlLang).toBe("kmr-Arab-IQ");
     expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
     expect(contentLocaleForInterface("ku-badini")).toBe("en");
