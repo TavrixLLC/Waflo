@@ -1,4 +1,5 @@
 import type { InterfaceMessages } from "./en.js";
+import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 
 export const ar: InterfaceMessages = {
   brandTagline: "الولاء أصبح أسهل.",
@@ -152,6 +153,7 @@ export const ar: InterfaceMessages = {
         languageSummary: "محتوى العميل بالإنجليزية والعربية",
         locationSummary: "المواقع النشطة المشاركة",
         appearanceSummary: "القالب والألوان والشعار ورسومات الأختام",
+        ui: loyaltyInterfaceCopy.ar.builder.ui,
       },
       programs: {
         eyebrow: "بطاقات الولاء",

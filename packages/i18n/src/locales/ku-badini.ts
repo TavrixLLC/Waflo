@@ -1,4 +1,5 @@
 import type { InterfaceMessages } from "./en.js";
+import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 
 export const kuBadini: InterfaceMessages = {
   brandTagline: "دڵسۆزی بە ئاسانی ڕەوانە دەبێت.",
@@ -153,6 +154,7 @@ export const kuBadini: InterfaceMessages = {
         languageSummary: "ناڤەڕۆکا کڕیار ب ئینگلیزی و عەرەبی",
         locationSummary: "شوێنێن چالاک یێن بەشدار",
         appearanceSummary: "قالب، ڕەنگ، لۆگۆ و وێنێن مۆران",
+        ui: loyaltyInterfaceCopy.kuBadini.builder.ui,
       },
       programs: {
         eyebrow: "کارتێن دڵسۆزیێ",

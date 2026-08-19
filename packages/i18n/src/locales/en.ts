@@ -1,3 +1,5 @@
+import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+
 export const en = {
   brandTagline: "Loyalty that flows.",
   navigation: {
@@ -152,6 +154,7 @@ export const en = {
         languageSummary: "English and Arabic customer content",
         locationSummary: "Participating active locations",
         appearanceSummary: "Template, colors, logo, and stamp artwork",
+        ui: loyaltyInterfaceCopy.en.builder.ui,
       },
       programs: {
         eyebrow: "LOYALTY CARDS",

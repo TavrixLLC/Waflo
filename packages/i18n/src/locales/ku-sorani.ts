@@ -1,4 +1,5 @@
 import type { InterfaceMessages } from "./en.js";
+import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 
 export const kuSorani: InterfaceMessages = {
   brandTagline: "دڵسۆزی بە ئاسانی ڕەوانە دەبێت.",
@@ -155,6 +156,7 @@ export const kuSorani: InterfaceMessages = {
         languageSummary: "ناوەڕۆکی کڕیار بە ئینگلیزی و عەرەبی",
         locationSummary: "شوێنە چالاکە بەشدارەکان",
         appearanceSummary: "قاڵب، ڕەنگ، لۆگۆ و هونەری مۆرەکان",
+        ui: loyaltyInterfaceCopy.kuSorani.builder.ui,
       },
       programs: {
         eyebrow: "کارتەکانی دڵسۆزی",
