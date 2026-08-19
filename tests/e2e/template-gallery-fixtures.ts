@@ -88,6 +88,7 @@ export async function mockTemplateGalleryApi(
     onPreviewRequest,
     patchDelayMs = 0,
     previewDelayMs = 0,
+    studioLoadDelayMs = 0,
     publishedPreviewAvailable = true,
     patchFailures = 0,
     patchConflicts = 0,
@@ -118,6 +119,7 @@ export async function mockTemplateGalleryApi(
     onPreviewRequest?: (templateCode: string, presentation: string) => void;
     patchDelayMs?: number;
     previewDelayMs?: number;
+    studioLoadDelayMs?: number;
     publishedPreviewAvailable?: boolean;
     patchFailures?: number;
     patchConflicts?: number;
@@ -753,6 +755,8 @@ export async function mockTemplateGalleryApi(
         await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
         return;
       }
+      if (studioLoadDelayMs > 0)
+        await new Promise((resolve) => setTimeout(resolve, studioLoadDelayMs));
       await fulfill(route, detail);
       return;
     }

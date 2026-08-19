@@ -60,6 +60,58 @@ test("keeps the authenticated Merchant shell stable across primary routes", asyn
   expect(browserErrors).toEqual([]);
 });
 
+test("keeps desktop navigation viewport-bound while long page content scrolls", async ({
+  page,
+}) => {
+  await page.goto("/en/login");
+  await page.locator('input[name="email"]').fill("owner@waflo.local");
+  await page.locator('input[name="password"]').fill("Waflo-Development-2026");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
+
+  for (const width of [1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/en/dashboard/settings");
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+    const geometry = await page.evaluate(() => {
+      const sidebar = document.querySelector<HTMLElement>(".wf-sidebar");
+      const footer = document.querySelector<HTMLElement>(".wf-sidebar__footer");
+      const main = document.querySelector<HTMLElement>("main.dashboard-content");
+      if (!sidebar || !footer || !main)
+        throw new Error("Dashboard shell structure is unavailable.");
+
+      const extension = document.createElement("div");
+      extension.setAttribute("data-e2e-long-page", "true");
+      extension.style.height = "2600px";
+      main.append(extension);
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+
+      const sidebarBox = sidebar.getBoundingClientRect();
+      const footerBox = footer.getBoundingClientRect();
+      return {
+        viewportHeight: window.innerHeight,
+        sidebarHeight: sidebar.clientHeight,
+        sidebarTop: sidebarBox.top,
+        footerBottom: footerBox.bottom,
+        documentScrollable: document.documentElement.scrollHeight > window.innerHeight,
+      };
+    });
+
+    expect(geometry.documentScrollable).toBe(true);
+    expect(Math.abs(geometry.sidebarHeight - geometry.viewportHeight)).toBeLessThanOrEqual(1);
+    expect(Math.abs(geometry.sidebarTop)).toBeLessThanOrEqual(1);
+    expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  }
+
+  await page.setViewportSize({ width: 768, height: 900 });
+  await expect(page.locator(".wf-sidebar")).toBeHidden();
+  await expect(page.locator(".dashboard-mobile-tabs")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+});
+
 test("recovers an already completed trial after a browser retry", async ({ page }) => {
   await page.goto("/en/login");
   await page.locator('input[name="email"]').fill("owner@waflo.local");

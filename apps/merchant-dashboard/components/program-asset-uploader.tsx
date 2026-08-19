@@ -130,6 +130,13 @@ export function ProgramAssetPicker({
     }));
   }
 
+  function endPan(event: PointerEvent<HTMLButtonElement>): void {
+    dragOrigin.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   function keyboardPan(event: KeyboardEvent<HTMLButtonElement>): void {
     const movement = event.shiftKey ? 0.05 : 0.01;
     const delta = {
@@ -336,10 +343,9 @@ export function ProgramAssetPicker({
               }
               onPointerDown={beginPan}
               onPointerMove={pan}
-              onPointerUp={() => {
-                dragOrigin.current = null;
-              }}
-              onPointerCancel={() => {
+              onPointerUp={endPan}
+              onPointerCancel={endPan}
+              onLostPointerCapture={() => {
                 dragOrigin.current = null;
               }}
               onKeyDown={keyboardPan}

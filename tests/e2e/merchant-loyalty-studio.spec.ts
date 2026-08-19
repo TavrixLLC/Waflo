@@ -51,6 +51,26 @@ async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {
   await continueToStudio.click();
 }
 
+test("keeps the dashboard shell visible while a slow Studio route renders its destination skeleton", async ({
+  page,
+}) => {
+  await mockTemplateGalleryApi(page, { studioLoadDelayMs: 900 });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await enterStudio(page, "en");
+
+  const sidebar = page.locator(".wf-sidebar");
+  const skeleton = page.locator(".studio-loading-skeleton");
+  await expect(sidebar).toBeVisible();
+  await expect(skeleton).toBeVisible();
+  await expect(skeleton.locator(".studio-loading-skeleton__header")).toBeVisible();
+  await expect(skeleton.locator(".studio-loading-skeleton__status")).toBeVisible();
+  await expect(skeleton.locator(".studio-loading-skeleton__body")).toBeVisible();
+  await expect(page.locator(".dashboard-route-loading")).toHaveCount(0);
+
+  await expect(page.locator(".studio-shell--p4")).toBeVisible();
+  await expect(skeleton).toHaveCount(0);
+});
+
 test("continues from Builder into a six-area merchant Studio without duplicate design editors", async ({
   page,
 }) => {

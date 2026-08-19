@@ -280,6 +280,9 @@ describe("production-v1 UX and billing repair", () => {
       "utf8",
     );
     expect(source).toContain("onPointerDown={beginPan}");
+    expect(source).toContain("setPointerCapture(event.pointerId)");
+    expect(source).toContain("releasePointerCapture(event.pointerId)");
+    expect(source).toContain("onLostPointerCapture");
     expect(source).toContain("onWheel=");
     expect(source).toContain("onKeyDown={keyboardPan}");
     expect(source).not.toContain("Horizontal position");
