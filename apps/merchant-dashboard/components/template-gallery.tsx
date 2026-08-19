@@ -278,9 +278,7 @@ function TemplatePreviewDialog({
           onClick={() => onUseTemplate(template, { blank })}
         >
           {selectionPending
-            ? locale === "ar"
-              ? "جارٍ تجهيز المسودة…"
-              : "Preparing draft…"
+            ? copy.preparingDraft
             : blank
               ? copy.blankName
               : copy.useThisTemplate}

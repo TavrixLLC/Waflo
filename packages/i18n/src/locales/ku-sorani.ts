@@ -1,7 +1,9 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
 import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
 import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
+import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const kuSorani: InterfaceMessages = {
@@ -159,9 +161,10 @@ export const kuSorani: InterfaceMessages = {
         languageSummary: "ناوەڕۆکی کڕیار بە ئینگلیزی و عەرەبی",
         locationSummary: "شوێنە چالاکە بەشدارەکان",
         appearanceSummary: "قاڵب، ڕەنگ، لۆگۆ و هونەری مۆرەکان",
-        ui: loyaltyInterfaceCopy.kuSorani.builder.ui,
+        ui: { ...loyaltyInterfaceCopy.kuSorani.builder.ui, ...loyaltyProgramsExtractedCopy.kuSorani.builder },
       },
       programs: {
+        ...loyaltyProgramsExtractedCopy.kuSorani.programs,
         eyebrow: "کارتەکانی دڵسۆزی",
         title: "کارتەکانی دڵسۆزی",
         description:
@@ -231,6 +234,7 @@ export const kuSorani: InterfaceMessages = {
         },
       },
       templates: {
+        ...loyaltyProgramsExtractedCopy.kuSorani.templates,
         eyebrow: "کارتەی دڵسۆزی دروست بکە",
         title: "دیزاینێک بۆ دەستپێکردن هەڵبژێرە",
         description: "بە دیزاینێکی ئامادە دەست پێ بکە یان کارتەی دڵسۆزی لە سەرەتا دروست بکە.",
@@ -345,6 +349,7 @@ export const kuSorani: InterfaceMessages = {
           ...studioInterfaceCopy.kuSorani.ui,
           ...studioEditorInterfaceCopy.kuSorani,
           ...studioEditorRuntimeCopy.kuSorani,
+          ...studioContentExtractedCopy.kuSorani,
         },
       },
     },

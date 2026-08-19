@@ -713,7 +713,6 @@ export function ProgramCardBuilder({
           <PreviewPanel
             idPrefix="builder-desktop"
             draft={draft}
-            locale={locale}
             interfaceLocale={interfaceLocale}
             previewLocale={previewLocale}
             setPreviewLocale={setPreviewLocale}
@@ -774,11 +773,10 @@ export function ProgramCardBuilder({
         closeLabel={text.closePreview}
         className="builder-preview-modal"
       >
-        <PreviewPanel
-          idPrefix="builder-mobile"
-          draft={draft}
-          locale={locale}
-          interfaceLocale={interfaceLocale}
+          <PreviewPanel
+            idPrefix="builder-mobile"
+            draft={draft}
+            interfaceLocale={interfaceLocale}
           previewLocale={previewLocale}
           setPreviewLocale={setPreviewLocale}
           profile={profile}
@@ -1797,7 +1795,6 @@ function ReviewSection({
 function PreviewPanel({
   idPrefix,
   draft,
-  locale,
   interfaceLocale,
   previewLocale,
   setPreviewLocale,
@@ -1813,7 +1810,6 @@ function PreviewPanel({
 }: {
   idPrefix: string;
   draft: ProgramDraftInput;
-  locale: Locale;
   interfaceLocale: InterfaceLocale;
   previewLocale: "EN" | "AR";
   setPreviewLocale: Dispatch<SetStateAction<"EN" | "AR">>;
@@ -1836,9 +1832,7 @@ function PreviewPanel({
           <h2>{text.preview}</h2>
         </div>
         <fieldset className="builder-preview-language">
-          <legend className="wf-sr-only">
-            {locale === "ar" ? "لغة المعاينة" : "Preview language"}
-          </legend>
+          <legend className="wf-sr-only">{text.ui.previewLanguage}</legend>
           <button
             type="button"
             aria-pressed={previewLocale === "EN"}

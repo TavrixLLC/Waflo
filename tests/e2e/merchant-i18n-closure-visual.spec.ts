@@ -33,6 +33,17 @@ async function enterBuilder(page: Page): Promise<void> {
   await expect(page.locator(".builder-shell")).toBeVisible();
 }
 
+async function assertKurdishStudioSurface(page: Page, surface: ".builder-shell" | ".studio-shell") {
+  const container = page.locator(surface);
+  await expect(container).not.toContainText("Card name in your dashboard");
+  await expect(container).not.toContainText("Customers do not see this internal name");
+  await expect(container).not.toContainText("Stamp goal");
+  await expect(container).not.toContainText("Saved changes");
+  await expect(container).not.toContainText("Run automated checks");
+  const fontFamily = await container.evaluate((element) => getComputedStyle(element).fontFamily);
+  expect(fontFamily.toLowerCase()).toContain("kurdistan24");
+}
+
 test("captures the centralized loyalty interface catalog across all four locales", async ({
   page,
 }) => {
@@ -53,6 +64,7 @@ test("captures the centralized loyalty interface catalog across all four locales
   ] as const) {
     await page.goto("/" + locale + "/dashboard/programs/created-program-id/edit");
     await expect(page.locator(".builder-shell")).toBeVisible();
+    if (locale.startsWith("ku-")) await assertKurdishStudioSurface(page, ".builder-shell");
     await capture(page, name);
   }
 
@@ -64,17 +76,37 @@ test("captures the centralized loyalty interface catalog across all four locales
   ] as const) {
     await page.goto("/" + locale + "/dashboard/programs/created-program-id");
     await expect(page.locator(".studio-shell")).toBeVisible();
+    if (locale.startsWith("ku-")) await assertKurdishStudioSurface(page, ".studio-shell");
     await capture(page, name);
   }
 
-  await page.goto("/ku-badini/dashboard/programs/created-program-id/edit");
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator(".builder-shell")).toBeVisible();
-  await capture(page, "i18n-builder-mobile-ku-badini.png");
+  for (const locale of ["ku-badini", "ku-sorani"] as const) {
+    await page.goto("/" + locale + "/dashboard/programs/created-program-id/edit");
+    await expect(page.locator(".builder-shell")).toBeVisible();
+    await assertKurdishStudioSurface(page, ".builder-shell");
+    await capture(page, `i18n-builder-mobile-${locale}.png`);
 
-  await page.goto("/ku-sorani/dashboard/programs/created-program-id");
+    await page.goto("/" + locale + "/dashboard/programs/created-program-id");
+    await expect(page.locator(".studio-shell")).toBeVisible();
+    await assertKurdishStudioSurface(page, ".studio-shell");
+    await capture(page, `i18n-studio-mobile-${locale}.png`);
+
+    await page.goto("/" + locale + "/dashboard/programs");
+    await expect(page.locator(".programs-home")).toBeVisible();
+    await capture(page, `i18n-programs-${locale}.png`);
+
+    await page.goto("/" + locale + "/dashboard/programs/new");
+    await expect(page.locator(".template-gallery")).toBeVisible();
+    await capture(page, `i18n-template-gallery-${locale}.png`);
+  }
+
+  await page.goto("/ar/dashboard/programs/created-program-id");
   await expect(page.locator(".studio-shell")).toBeVisible();
-  await capture(page, "i18n-studio-mobile-ku-sorani.png");
+  const arabicFontFamily = await page
+    .locator(".studio-shell")
+    .evaluate((element) => getComputedStyle(element).fontFamily);
+  expect(arabicFontFamily.toLowerCase()).toContain("cairo");
 
   await page.getByRole("button", { name: /Language|زمان|لغة/u }).click();
   await expect(page.getByRole("menu")).toBeVisible();

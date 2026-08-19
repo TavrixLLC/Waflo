@@ -1,6 +1,8 @@
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
 import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
 import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
+import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const en = {
@@ -157,9 +159,10 @@ export const en = {
         languageSummary: "English and Arabic customer content",
         locationSummary: "Participating active locations",
         appearanceSummary: "Template, colors, logo, and stamp artwork",
-        ui: loyaltyInterfaceCopy.en.builder.ui,
+        ui: { ...loyaltyInterfaceCopy.en.builder.ui, ...loyaltyProgramsExtractedCopy.en.builder },
       },
       programs: {
+        ...loyaltyProgramsExtractedCopy.en.programs,
         eyebrow: "LOYALTY CARDS",
         title: "Loyalty cards",
         description:
@@ -230,6 +233,7 @@ export const en = {
         },
       },
       templates: {
+        ...loyaltyProgramsExtractedCopy.en.templates,
         eyebrow: "CREATE LOYALTY CARD",
         title: "Choose a starting design",
         description: "Start with a ready-made design or build your loyalty card from scratch.",
@@ -337,7 +341,7 @@ export const en = {
           paused: "Paused",
           archived: "Archived",
         },
-        ui: { ...studioInterfaceCopy.en.ui, ...studioEditorInterfaceCopy.en, ...studioEditorRuntimeCopy.en },
+        ui: { ...studioInterfaceCopy.en.ui, ...studioEditorInterfaceCopy.en, ...studioEditorRuntimeCopy.en, ...studioContentExtractedCopy.en },
       },
     },
   },

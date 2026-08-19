@@ -1,7 +1,9 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
 import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
 import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
+import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const ar: InterfaceMessages = {
@@ -156,9 +158,10 @@ export const ar: InterfaceMessages = {
         languageSummary: "محتوى العميل بالإنجليزية والعربية",
         locationSummary: "المواقع النشطة المشاركة",
         appearanceSummary: "القالب والألوان والشعار ورسومات الأختام",
-        ui: loyaltyInterfaceCopy.ar.builder.ui,
+        ui: { ...loyaltyInterfaceCopy.ar.builder.ui, ...loyaltyProgramsExtractedCopy.ar.builder },
       },
       programs: {
+        ...loyaltyProgramsExtractedCopy.ar.programs,
         eyebrow: "بطاقات الولاء",
         title: "بطاقات الولاء",
         description:
@@ -226,6 +229,7 @@ export const ar: InterfaceMessages = {
         },
       },
       templates: {
+        ...loyaltyProgramsExtractedCopy.ar.templates,
         eyebrow: "إنشاء بطاقة ولاء",
         title: "اختر تصميمًا للبدء",
         description: "ابدأ بتصميم جاهز، أو أنشئ بطاقة الولاء من نقطة بداية مرنة.",
@@ -325,7 +329,7 @@ export const ar: InterfaceMessages = {
           paused: "متوقفة مؤقتاً",
           archived: "مؤرشفة",
         },
-        ui: { ...studioInterfaceCopy.ar.ui, ...studioEditorInterfaceCopy.ar, ...studioEditorRuntimeCopy.ar },
+        ui: { ...studioInterfaceCopy.ar.ui, ...studioEditorInterfaceCopy.ar, ...studioEditorRuntimeCopy.ar, ...studioContentExtractedCopy.ar },
       },
     },
   },

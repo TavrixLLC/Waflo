@@ -60,32 +60,16 @@ function programsText(locale: InterfaceLocale) {
 }
 
 function builderFlowError(error: unknown, interfaceLocale: InterfaceLocale): string {
-  const ar = interfaceLocale === "ar";
-  if (!(error instanceof ApiClientError))
-    return ar
-      ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
-      : "Waflo could not start this loyalty card. Try again.";
-  if (error.code === "PROGRAM_LIMIT_REACHED")
-    return ar
-      ? "وصلت إلى حد بطاقات الولاء النشطة في خطتك. أرشف بطاقة حالية أو غيّر الخطة للمتابعة."
-      : "You have reached your plan's active loyalty-card limit. Archive a card or change plan to continue.";
-  if (error.code === "PROGRAM_LOCATION_INVALID")
-    return ar
-      ? "أضف موقعًا نشطًا قبل إنشاء بطاقة ولاء."
-      : "Add an active location before creating a loyalty card.";
-  if (error.code === "PROGRAM_PRO_MODE_UNAVAILABLE" || error.code.includes("LAYOUT_UNAVAILABLE"))
-    return ar
-      ? "يتطلب هذا التصميم خطة Growth أو Scale. اختر تصميمًا آخر أو غيّر الخطة."
-      : "This design requires Growth or Scale. Choose another design or change plan.";
-  if (error.code.includes("TEMPLATE"))
-    return ar
-      ? "لم يعد هذا التصميم متاحًا. اختر تصميمًا آخر."
-      : "That design is no longer available. Choose another design.";
-  return ar
-    ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
-    : "Waflo could not start this loyalty card. Try again.";
+  const copy = programsText(interfaceLocale);
+  if (!(error instanceof ApiClientError)) return copy.couldNotStart;
+  if (error.code === "PROGRAM_LIMIT_REACHED") return copy.limitReached;
+  if (error.code === "PROGRAM_LOCATION_INVALID") return copy.locationRequired;
+  if (error.code === "PROGRAM_PRO_MODE_UNAVAILABLE" || error.code.includes("LAYOUT_UNAVAILABLE")) {
+    return copy.planRequired;
+  }
+  if (error.code.includes("TEMPLATE")) return copy.templateUnavailable;
+  return copy.couldNotStart;
 }
-
 function cardStateDescription(program: ProgramItem, interfaceLocale: InterfaceLocale): string {
   const copy = programsText(interfaceLocale);
 

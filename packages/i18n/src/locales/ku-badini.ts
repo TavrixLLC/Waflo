@@ -1,7 +1,9 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
 import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
 import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
+import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const kuBadini: InterfaceMessages = {
@@ -157,9 +159,10 @@ export const kuBadini: InterfaceMessages = {
         languageSummary: "ناڤەڕۆکا کڕیار ب ئینگلیزی و عەرەبی",
         locationSummary: "شوێنێن چالاک یێن بەشدار",
         appearanceSummary: "قالب، ڕەنگ، لۆگۆ و وێنێن مۆران",
-        ui: loyaltyInterfaceCopy.kuBadini.builder.ui,
+        ui: { ...loyaltyInterfaceCopy.kuBadini.builder.ui, ...loyaltyProgramsExtractedCopy.kuBadini.builder },
       },
       programs: {
+        ...loyaltyProgramsExtractedCopy.kuBadini.programs,
         eyebrow: "کارتێن دڵسۆزیێ",
         title: "کارتێن دڵسۆزیێ",
         description:
@@ -228,6 +231,7 @@ export const kuBadini: InterfaceMessages = {
         },
       },
       templates: {
+        ...loyaltyProgramsExtractedCopy.kuBadini.templates,
         eyebrow: "کارتا دڵسۆزیێ دروست بکە",
         title: "دیزاینێ بۆ دەستپێکێ هەلبژێرە",
         description: "ب دیزاینەکێ ئامادە دەست پێ بکە یان کارتا دڵسۆزیێ ژ سفرێ دروست بکە.",
@@ -334,6 +338,7 @@ export const kuBadini: InterfaceMessages = {
           ...studioInterfaceCopy.kuBadini.ui,
           ...studioEditorInterfaceCopy.kuBadini,
           ...studioEditorRuntimeCopy.kuBadini,
+          ...studioContentExtractedCopy.kuBadini,
         },
       },
     },

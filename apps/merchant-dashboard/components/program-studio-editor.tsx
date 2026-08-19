@@ -666,9 +666,7 @@ function ProgramStudioEditorContent({
           <div>
             <strong>{ui.loyaltyStudioCouldNotOpen}</strong>
             <p>
-              {ar
-                ? "لم تتغير أي بيانات. ارجع إلى بطاقات الولاء وتحقق من البطاقة أو صلاحية الوصول."
-                : "No card data was changed. Return to Loyalty cards and check the card or your access."}
+              {ui.noCardDataWasChangedReturnToLoyaltyCardsAndCheckTheCardOrYourAccess}
             </p>
           </div>
           <Button variant="secondary" onClick={onClose}>
@@ -692,9 +690,7 @@ function ProgramStudioEditorContent({
           <CircleAlert size={32} aria-hidden="true" />
           <h1>{ui.thisCardHasNoSavedSetup}</h1>
           <p>
-            {ar
-              ? "ارجع إلى بطاقات الولاء واختر بطاقة أخرى."
-              : "Return to Loyalty cards and choose another card."}
+            {ui.returnToLoyaltyCardsAndChooseAnotherCard}
           </p>
         </Card>
       </div>
@@ -755,9 +751,7 @@ function ProgramStudioEditorContent({
             )}
             <span>
               {savedUnpublishedChanges && saveState === "saved"
-                ? ar
-                  ? "تغييرات غير منشورة محفوظة"
-                  : "Unpublished changes saved"
+                ? ui.unpublishedChangesSaved
                 : statusLabel(saveState, interfaceLocale)}
             </span>
           </div>
@@ -794,7 +788,6 @@ function ProgramStudioEditorContent({
       <StudioJourney
         activeArea={activeArea}
         presentation={lifecycleState}
-        ar={ar}
         onArea={selectArea}
       />
 
@@ -844,7 +837,6 @@ function ProgramStudioEditorContent({
       <div className="studio-workspace">
         <StudioNavigation
           activeArea={activeArea}
-          ar={ar}
           interfaceLocale={interfaceLocale}
           disabled={working}
           mobileOpen={mobileNavigationOpen}
@@ -919,7 +911,6 @@ function ProgramStudioEditorContent({
 
       <ConflictModal
         conflict={conflict}
-        ar={ar}
         onCopy={() => void copyLocal()}
         onExport={exportLocal}
         onReload={() => void reloadLatest()}
@@ -1018,12 +1009,10 @@ function StudioAreaIcon({ area }: { area: StudioArea }) {
 function StudioJourney({
   activeArea,
   presentation,
-  ar,
   onArea,
 }: {
   activeArea: StudioArea;
   presentation: StudioLifecyclePresentation;
-  ar: boolean;
   onArea: (area: StudioArea) => void;
 }) {
   const ui = useStudioUi();
@@ -1114,9 +1103,7 @@ function StudioJourney({
         ))}
       </section>
       <small className="studio-journey-hint">
-        {ar
-          ? "مرّر أو استخدم مفاتيح الأسهم لعرض جميع المراحل"
-          : "Swipe or use the arrow keys to see every stage"}
+        {ui.swipeOrUseTheArrowKeysToSeeEveryStage}
       </small>
     </div>
   );
@@ -1124,14 +1111,12 @@ function StudioJourney({
 
 function StudioNavigation({
   activeArea,
-  ar,
   interfaceLocale,
   disabled,
   mobileOpen,
   onArea,
 }: {
   activeArea: StudioArea;
-  ar: boolean;
   interfaceLocale: InterfaceLocale;
   disabled: boolean;
   mobileOpen: boolean;
@@ -1148,17 +1133,11 @@ function StudioNavigation({
         const copy = studioArea(interfaceLocale, area);
         const group =
           area === "overview"
-            ? ar
-              ? "البناء"
-              : "Build"
+            ? ui.build
             : area === "launch"
-              ? ar
-                ? "الإطلاق"
-                : "Go live"
+              ? ui.goLive
               : area === "engagement"
-                ? ar
-                  ? "الإدارة"
-                  : "Manage"
+                ? ui.manage
                 : null;
         return (
           <Fragment key={area}>
@@ -1574,9 +1553,7 @@ function StudioOverview({
           <h3 id="studio-next-action-title">{primaryAction.label}</h3>
           <p>
             {hasUnpublishedChanges
-              ? ar
-                ? "راجع التغييرات المحفوظة قبل نشرها. البطاقة المباشرة الحالية لم تتغير."
-                : "Review the saved changes before publishing them. The current live card is unchanged."
+              ? ui.reviewTheSavedChangesBeforePublishingThemTheCurrentLiveCardIsUnchanged
               : lifecycleState.key === "draft" || lifecycleState.key === "ready"
                 ? lifecycleState.launch.description
                 : lifecycleState.guidance.description}
@@ -1628,9 +1605,7 @@ function StudioOverview({
             <p>
               {activeLocations.length
                 ? activeLocations.map((location) => location.name).join(" · ")
-                : ar
-                  ? "لم يتم اختيار موقع بعد"
-                  : "No location selected yet"}
+                : ui.noLocationSelectedYet}
             </p>
           </div>
           <button type="button" onClick={() => onArea("customers-locations")}>
@@ -1684,9 +1659,7 @@ function StudioOverview({
           <span>
             <strong>{ui.designAndCustomerContent}</strong>
             <small>
-              {ar
-                ? "تُدار في منشئ البطاقة وتظهر هنا كملخص فقط."
-                : "Managed in the Card Builder and shown here as a read-only summary."}
+              {ui.managedInTheCardBuilderAndShownHereAsAReadOnlySummary}
             </small>
           </span>
         </div>
@@ -1740,13 +1713,9 @@ function StudioPreview({
   const activeDraft = showingSavedChanges ? (savedDraft ?? draft) : draft;
   const showingPublishedVersion = activeSource === "published";
   const profileLabel = showingPublishedVersion
-    ? ar
-      ? "ملخص البطاقة المنشورة"
-      : "Published card summary"
+    ? ui.publishedCardSummary
     : selectedProfile === "CUSTOMER_WEB"
-      ? ar
-        ? "بطاقة العميل"
-        : "Customer card"
+      ? ui.customerCard
       : selectedProfile === "APPLE_WALLET"
         ? "Apple Wallet"
         : "Google Wallet";
@@ -1785,9 +1754,7 @@ function StudioPreview({
           <span className="dashboard-card__label">
             {showingPublishedVersion
               ? publishedState.eyebrow
-              : ar
-                ? "ما يراه العميل"
-                : "CUSTOMER VIEW"}
+              : ui.customerView}
           </span>
           <h3>{profileLabel}</h3>
         </div>
@@ -1838,9 +1805,7 @@ function StudioPreview({
               onClick={() => onProfile(profile)}
             >
               {profile === "CUSTOMER_WEB"
-                ? ar
-                  ? "العميل"
-                  : "Customer"
+                ? ui.customer
                 : profile === "APPLE_WALLET"
                   ? "Apple"
                   : "Google"}
@@ -1877,12 +1842,8 @@ function StudioPreview({
             )}
             <span>
               {loading
-                ? ar
-                  ? "جارٍ تحميل المعاينة…"
-                  : "Loading preview…"
-                : ar
-                  ? "المعاينة غير متاحة"
-                  : "Preview unavailable"}
+                ? ui.loadingPreview
+                : ui.previewUnavailable}
             </span>
           </div>
         )}
@@ -2026,12 +1987,8 @@ function HowItWorksPanel({
             <h3>{rewardName}</h3>
             <p>
               {reward?.requiresManagerApproval
-                ? ar
-                  ? "تتطلب موافقة المدير عند الاسترداد."
-                  : "Manager approval is required at redemption."
-                : ar
-                  ? "يمكن استردادها دون موافقة المدير."
-                  : "Can be redeemed without manager approval."}
+                ? ui.managerApprovalIsRequiredAtRedemption
+                : ui.canBeRedeemedWithoutManagerApproval}
             </p>
           </div>
         </section>
@@ -2043,9 +2000,7 @@ function HowItWorksPanel({
           <span>
             <strong>{ui.rewardNameAndCardAppearance}</strong>
             <small>
-              {ar
-                ? "يُعدّلان في منشئ البطاقة حتى يبقى لكل حقل مكان واحد."
-                : "Edit these in the Card Builder so every field has one clear home."}
+              {ui.editTheseInTheCardBuilderSoEveryFieldHasOneClearHome}
             </small>
           </span>
         </div>
@@ -2073,7 +2028,7 @@ function HowItWorksPanel({
           </div>
         </details>
       ) : (
-        <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} compact />
+        <CreateUpdatePrompt onCreate={onCreateDraft} compact />
       )}
     </div>
   );
@@ -2124,12 +2079,8 @@ function RewardOperationsPanel({
                 tone={reward.thresholdStampCount === draft.requiredStampCount ? "success" : "brand"}
               >
                 {reward.thresholdStampCount === draft.requiredStampCount
-                  ? ar
-                    ? "نهائية"
-                    : "Final"
-                  : ar
-                    ? "مرحلية"
-                    : "Milestone"}
+                  ? ui.final
+                  : ui.milestone}
               </Badge>
             </div>
             <div className="studio-form-grid">
@@ -2210,9 +2161,7 @@ function CustomersLocationsPanel({
             </span>
             <h3>{ui.participatingLocations}</h3>
             <p>
-              {ar
-                ? "يمكن للعملاء كسب الأختام في المواقع النشطة المحددة هنا."
-                : "Customers can earn stamps at the active locations selected here."}
+              {ui.customersCanEarnStampsAtTheActiveLocationsSelectedHere}
             </p>
           </div>
           <Badge tone={participating.length ? "success" : "warning"}>
@@ -2232,7 +2181,7 @@ function CustomersLocationsPanel({
         )}
       </section>
 
-      {!editable ? <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} compact /> : null}
+      {!editable ? <CreateUpdatePrompt onCreate={onCreateDraft} compact /> : null}
 
       <ProgramEnrollmentSettings
         organizationId={organizationId}
@@ -2245,11 +2194,9 @@ function CustomersLocationsPanel({
 }
 
 function CreateUpdatePrompt({
-  ar,
   onCreate,
   compact = false,
 }: {
-  ar: boolean;
   onCreate: () => void;
   compact?: boolean;
 }) {
@@ -2260,9 +2207,7 @@ function CreateUpdatePrompt({
       <div>
         <h3>{ui.createAnUpdateToMakeChanges}</h3>
         <p>
-          {ar
-            ? "ستبقى البطاقة المباشرة كما هي حتى تختبر التحديث وتنشره."
-            : "The live card stays unchanged until you review and publish the update."}
+          {ui.theLiveCardStaysUnchangedUntilYouReviewAndPublishTheUpdate}
         </p>
       </div>
       <Button onClick={onCreate}>{ui.createUpdate}</Button>
@@ -2300,9 +2245,7 @@ function StudioSettingsPanel({
             <span className="dashboard-card__label">{ui.fieldOwnership}</span>
             <h3>{ui.designAndCustomerContent}</h3>
             <p>
-              {ar
-                ? "تظهر هذه القيم هنا كملخص. يعدّلها منشئ البطاقة فقط."
-                : "These values are summarized here. The Card Builder is their only editor."}
+              {ui.theseValuesAreSummarizedHereTheCardBuilderIsTheirOnlyEditor}
             </p>
           </div>
           {editable ? (
@@ -2365,7 +2308,7 @@ function StudioSettingsPanel({
       </section>
 
       {!editable && lifecycleState.key === "live" ? (
-        <CreateUpdatePrompt ar={ar} onCreate={onCreateDraft} compact />
+        <CreateUpdatePrompt onCreate={onCreateDraft} compact />
       ) : null}
 
       {history ?? (
@@ -2450,9 +2393,7 @@ function StudioSectionContent({
               ui.starterRestrictionsAreEnforcedByTheApi
             }
           >
-            {ar
-              ? "يتطلب Pro والمكافآت المتعددة وتخطيطات Path/Ring خطة Growth أو Scale."
-              : "Pro, multiple rewards, milestones, Path, and Ring require Growth or Scale."}
+            {ui.proMultipleRewardsMilestonesPathAndRingRequireGrowthOrScale}
           </Alert>
         ) : null}
         <FormField label={ui.changeSummary}>
@@ -2502,9 +2443,7 @@ function StudioSectionContent({
           />
         </FormField>
         <Alert tone="info" title={ui.operationsPolicy}>
-          {ar
-            ? "تُطبّق حدود العملية واليوم وسياسة الشراء من إصدار البرنامج المثبت للعضوية."
-            : "Operation limits, daily caps, purchase policy, and reset behavior follow the setup each customer joined under."}
+          {ui.operationLimitsDailyCapsPurchasePolicyAndResetBehaviorFollowTheSetupEachCustomerJoinedUnder}
         </Alert>
       </div>
     );
@@ -2526,9 +2465,7 @@ function StudioSectionContent({
     return (
       <div className="studio-section-content">
         <p>
-          {ar
-            ? "اختر موقعاً نشطاً واحداً أو أكثر."
-            : "Select one or more active locations explicitly."}
+          {ui.selectOneOrMoreActiveLocationsExplicitly}
         </p>
         <div className="studio-check-grid">
           {locations.map((location) => (
@@ -2678,7 +2615,7 @@ function StudioSectionContent({
     return <LayoutEditor draft={draft} update={update} plan={plan} />;
 
   if (["customer-preview", "apple-preview", "google-preview"].includes(section))
-    return <PreviewSettings section={section} draft={draft} update={update} ar={ar} />;
+    return <PreviewSettings section={section} draft={draft} update={update} />;
 
   if (section === "policies")
     return <OperationsPolicyEditor draft={draft} update={update} ar={ar} />;
@@ -2709,9 +2646,7 @@ function StudioSectionContent({
         </Button>
       ) : (
         <Alert tone="info" title={ui.initialDraftIsPreserved}>
-          {ar
-            ? "استخدم إجراء الأرشفة الآمن لإخفاء البطاقة غير المنشورة مع الاحتفاظ بالمسودة وسجل الإصدارات."
-            : "Use Archive to hide this unpublished card while preserving its draft and change history."}
+          {ui.useArchiveToHideThisUnpublishedCardWhilePreservingItsDraftAndChangeHistory}
         </Alert>
       )}
     </div>
@@ -2727,71 +2662,44 @@ function TranslationEditor({
   value: ProgramDraftInput["translations"]["en"];
   update: (key: keyof ProgramDraftInput["translations"]["en"], value: string) => void;
 }) {
+  const ui = useStudioUi();
   const rtl = locale === "ar";
   return (
     <div className="studio-section-content" dir={rtl ? "rtl" : "ltr"}>
       <div className="studio-form-grid">
-        <FormField label={rtl ? "اسم البطاقة" : "Card name"}>
-          <TextInput
-            value={value.programName}
-            onChange={(event) => update("programName", event.target.value)}
-          />
+        <FormField label={ui.cardName}>
+          <TextInput value={value.programName} onChange={(event) => update("programName", event.target.value)} />
         </FormField>
-        <FormField label={rtl ? "ملخص المكافأة" : "Reward summary"}>
-          <TextInput
-            value={value.rewardSummary}
-            onChange={(event) => update("rewardSummary", event.target.value)}
-          />
+        <FormField label={ui.rewardSummary}>
+          <TextInput value={value.rewardSummary} onChange={(event) => update("rewardSummary", event.target.value)} />
         </FormField>
       </div>
-      <FormField label={rtl ? "الوصف القصير" : "Short description"}>
-        <TextInput
-          value={value.shortDescription}
-          onChange={(event) => update("shortDescription", event.target.value)}
-        />
+      <FormField label={ui.shortDescription}>
+        <TextInput value={value.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} />
       </FormField>
-      <FormField label={rtl ? "الوصف الكامل" : "Full description"}>
-        <TextArea
-          value={value.fullDescription ?? ""}
-          onChange={(event) => update("fullDescription", event.target.value)}
-        />
+      <FormField label={ui.fullDescription}>
+        <TextArea value={value.fullDescription ?? ""} onChange={(event) => update("fullDescription", event.target.value)} />
       </FormField>
-      <FormField label={rtl ? "تعليمات الانضمام" : "Join instructions"}>
-        <TextArea
-          value={value.joinInstructions ?? ""}
-          onChange={(event) => update("joinInstructions", event.target.value)}
-        />
+      <FormField label={ui.joinInstructions}>
+        <TextArea value={value.joinInstructions ?? ""} onChange={(event) => update("joinInstructions", event.target.value)} />
       </FormField>
-      <FormField label={rtl ? "الشروط والأحكام" : "Terms and conditions"}>
-        <TextArea
-          value={value.termsAndConditions}
-          onChange={(event) => update("termsAndConditions", event.target.value)}
-        />
+      <FormField label={ui.termsAndConditions}>
+        <TextArea value={value.termsAndConditions} onChange={(event) => update("termsAndConditions", event.target.value)} />
       </FormField>
       <div className="studio-form-grid">
-        <FormField label={rtl ? "رسالة الإكمال" : "Completion message"}>
-          <TextInput
-            value={value.completionMessage}
-            onChange={(event) => update("completionMessage", event.target.value)}
-          />
+        <FormField label={ui.completionMessage}>
+          <TextInput value={value.completionMessage} onChange={(event) => update("completionMessage", event.target.value)} />
         </FormField>
-        <FormField label={rtl ? "رسالة فتح المكافأة" : "Reward unlocked message"}>
-          <TextInput
-            value={value.rewardUnlockedMessage}
-            onChange={(event) => update("rewardUnlockedMessage", event.target.value)}
-          />
+        <FormField label={ui.rewardUnlockedMessage}>
+          <TextInput value={value.rewardUnlockedMessage} onChange={(event) => update("rewardUnlockedMessage", event.target.value)} />
         </FormField>
       </div>
-      <FormField label={rtl ? "رسالة الإيقاف" : "Paused message"}>
-        <TextInput
-          value={value.pausedMessage ?? ""}
-          onChange={(event) => update("pausedMessage", event.target.value)}
-        />
+      <FormField label={ui.pausedMessage}>
+        <TextInput value={value.pausedMessage ?? ""} onChange={(event) => update("pausedMessage", event.target.value)} />
       </FormField>
     </div>
   );
 }
-
 function RewardsEditor({
   draft,
   update,
@@ -2847,9 +2755,7 @@ function RewardsEditor({
         <div>
           <h3>{ui.descriptiveRewardsAndMilestones}</h3>
           <p>
-            {ar
-              ? "يجب أن تكون العتبات فريدة وأن توجد مكافأة نهائية عند الهدف."
-              : "Thresholds must be unique and one final reward must sit at the goal."}
+            {ui.thresholdsMustBeUniqueAndOneFinalRewardMustSitAtTheGoal}
           </p>
         </div>
         <Button
@@ -3073,9 +2979,7 @@ function OperationsPolicyEditor({
   return (
     <div className="studio-section-content">
       <Alert tone="info" title={ui.howRuleChangesTakeEffect}>
-        {ar
-          ? "تطبّق التغييرات الجديدة على العملاء الذين ينضمون بعد نشر التحديث، بينما تبقى شروط العملاء الحاليين كما هي."
-          : "New rules apply to customers who join after this update is published. Existing customers keep their current terms."}
+        {ui.newRulesApplyToCustomersWhoJoinAfterThisUpdateIsPublishedExistingCustomersKeepTheirCurrentTerms}
       </Alert>
       <FormField label={ui.businessTimezone} required>
         <SearchableSelect
@@ -3089,9 +2993,7 @@ function OperationsPolicyEditor({
           required
         />
         <span className="field-help">
-          {ar
-            ? "تحدد حدود اليوم والتقارير وتواريخ انتهاء المكافآت."
-            : "Controls daily limits, reporting days, and reward expiry dates."}
+          {ui.controlsDailyLimitsReportingDaysAndRewardExpiryDates}
         </span>
       </FormField>
       <FormField label={ui.mostStampsPerPurchase}>
@@ -3135,9 +3037,7 @@ function OperationsPolicyEditor({
             }
           />
           <span className="field-help">
-            {ar
-              ? "يُحسب كل ختم تمت إضافته خلال اليوم، حتى عند تصحيح عملية لاحقًا."
-              : "Every stamp added that day counts, even if a purchase is corrected later."}
+            {ui.everyStampAddedThatDayCountsEvenIfAPurchaseIsCorrectedLater}
           </span>
         </FormField>
       ) : null}
@@ -3222,9 +3122,7 @@ function OperationsPolicyEditor({
           }))
         }
         label={
-          ar
-            ? "السماح للمدير بإجراء استثناء مع توضيح السبب"
-            : "Allow manager exceptions with a required reason"
+          ui.allowManagerExceptionsWithARequiredReason
         }
       />
       <FormField label={ui.afterTheFinalRewardIsUsed}>
@@ -3233,9 +3131,7 @@ function OperationsPolicyEditor({
           disabled
         />
         <span className="field-help">
-          {ar
-            ? "تبقى الأختام ممتلئة حتى يتم استخدام المكافأة بنجاح."
-            : "Stamps stay filled until the reward is successfully used."}
+          {ui.stampsStayFilledUntilTheRewardIsSuccessfullyUsed}
         </span>
       </FormField>
     </div>
@@ -3390,21 +3286,17 @@ function PreviewSettings({
   section,
   draft,
   update,
-  ar,
 }: {
   section: StudioSection;
   draft: ProgramDraftInput;
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
-  ar: boolean;
 }) {
   const ui = useStudioUi();
   if (section === "apple-preview")
     return (
       <div className="studio-section-content">
         <Alert tone="info" title="Preview only">
-          {ar
-            ? "لا يؤدي تعديل هذه المعاينة إلى إصدار بطاقة Apple Wallet."
-            : "Editing this preview does not issue an Apple Wallet pass."}
+          {ui.editingThisPreviewDoesNotIssueAnAppleWalletPass}
         </Alert>
         <CapabilitySummary platform="APPLE_WALLET" />
         {(
@@ -3455,9 +3347,7 @@ function PreviewSettings({
     return (
       <div className="studio-section-content">
         <Alert tone="info" title="Preview only">
-          {ar
-            ? "لا يؤدي تعديل هذه المعاينة إلى إنشاء كائن Google Wallet."
-            : "Editing this preview does not create a Google Wallet object."}
+          {ui.editingThisPreviewDoesNotCreateAGoogleWalletObject}
         </Alert>
         <CapabilitySummary platform="GOOGLE_WALLET" />
         {(
@@ -3493,9 +3383,7 @@ function PreviewSettings({
       <CapabilitySummary platform="CUSTOMER_WEB" />
       <h3>{ui.customerFacingCardComposition}</h3>
       <p>
-        {ar
-          ? "تتضمن المعاينة الهوية والمحتوى المحلي والأختام والمكافأة والشروط."
-          : "The preview includes identity, localized content, stamps, reward, and terms."}
+        {ui.thePreviewIncludesIdentityLocalizedContentStampsRewardAndTerms}
       </p>
       <FormField label={ui.cardStyle}>
         <Select
@@ -3560,27 +3448,19 @@ function ValidationPanel({
         <div>
           <h3>{ui.automatedChecks}</h3>
           <p>
-            {ar
-              ? "تأكد من اكتمال البطاقة والمواقع وتجارب العرض قبل الإطلاق."
-              : "Check the card, locations, and preview surfaces before launch."}
+            {ui.checkTheCardLocationsAndPreviewSurfacesBeforeLaunch}
           </p>
         </div>
         <Button onClick={onValidate} loading={validating}>
           <ShieldCheck size={16} />{" "}
           {result
-            ? ar
-              ? "تشغيل الفحوصات الآلية مجدداً"
-              : "Run automated checks again"
-            : ar
-              ? "تشغيل الفحوصات الآلية"
-              : "Run automated checks"}
+            ? ui.runAutomatedChecksAgain
+            : ui.runAutomatedChecks}
         </Button>
       </div>
       {!result ? (
         <Alert tone="info" title={ui.checksHaveNotRunYet}>
-          {ar
-            ? "شغّل الفحوصات لرؤية أي خطوة تحتاج إلى إصلاح."
-            : "Run the checks to see whether anything needs attention."}
+          {ui.runTheChecksToSeeWhetherAnythingNeedsAttention}
         </Alert>
       ) : (
         <>
@@ -3595,18 +3475,12 @@ function ValidationPanel({
                   ? ar
                     ? `اجتازت الفحوصات مع ${result.warnings.length} ملاحظات`
                     : `Checks passed with ${result.warnings.length} notes`
-                  : ar
-                    ? "اجتازت الفحوصات الآلية"
-                    : "Automated checks passed"
+                  : ui.automatedChecksPassed
             }
           >
             {result.errors.length === 0
-              ? ar
-                ? "اجتازت الفحوصات الآلية. يمكنك المراجعة والنشر."
-                : "Automated checks passed. You can review and publish."
-              : ar
-                ? "افتح كل عنصر لإصلاحه في مكانه الصحيح."
-                : "Open each item to fix it in the right place."}
+              ? ui.automatedChecksPassedYouCanReviewAndPublish
+              : ui.openEachItemToFixItInTheRightPlace}
           </Alert>
           <div className="studio-validation-list">
             {[...result.errors, ...result.warnings].map((item) => (
@@ -3694,9 +3568,7 @@ function VersionHistory({
         </div>
       ) : (
         <p className="studio-audit-timeline__empty">
-          {ar
-            ? "ستظهر إجراءات النشر ودورة الحياة هنا."
-            : "Publication and lifecycle actions will appear here."}
+          {ui.publicationAndLifecycleActionsWillAppearHere}
         </p>
       )}
       <h4 className="studio-version-history__subheading">
@@ -3716,12 +3588,8 @@ function VersionHistory({
               ? "منشور"
               : "Published"
             : version.status === "SUPERSEDED"
-              ? ar
-                ? "إصدار منشور سابق"
-                : "Previous publication"
-              : ar
-                ? "غير منشور"
-                : "Unpublished";
+              ? ui.previousPublication
+              : ui.unpublished;
         const saveLabel =
           version.status === "ABANDONED" ? (ui.abandoned) : ui.saved;
         return (
@@ -3805,9 +3673,7 @@ function HistoricalModal({
                 ? ar
                   ? "منشور"
                   : "Published"
-                : ar
-                  ? "محفوظ"
-                  : "Saved"}
+                : ui.saved}
             </Badge>
           </div>
           <dl className="quick-review-list">
@@ -3839,14 +3705,12 @@ function HistoricalModal({
 
 function ConflictModal({
   conflict,
-  ar,
   onCopy,
   onExport,
   onReload,
   onReapply,
 }: {
   conflict: ConflictState | null;
-  ar: boolean;
   onCopy: () => void;
   onExport: () => void;
   onReload: () => void;
@@ -3865,14 +3729,10 @@ function ConflictModal({
             tone="warning"
             title={ui.yourLocalEditsArePreserved}
           >
-            {ar
-              ? "تم حفظ تغيير أحدث في مكان آخر. لن يستبدل Waflo أي تعديل تلقائيًا."
-              : "A newer change was saved elsewhere. Waflo will not overwrite either set of edits automatically."}
+            {ui.aNewerChangeWasSavedElsewhereWafloWillNotOverwriteEitherSetOfEditsAutomatically}
           </Alert>
           <p>
-            {ar
-              ? "احتفظ بنسخة من تعديلاتك، ثم حمّل الأحدث أو أعد تطبيق تعديلاتك بوضوح."
-              : "Keep a copy of your edits, then load the latest card or deliberately reapply yours."}
+            {ui.keepACopyOfYourEditsThenLoadTheLatestCardOrDeliberatelyReapplyYours}
           </p>
           <details>
             <summary>{ui.showYourEditBackup}</summary>
