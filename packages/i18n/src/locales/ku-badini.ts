@@ -249,6 +249,7 @@ export const kuBadini: InterfaceMessages = {
         blankName: "ژ سفرێ دەست پێ بکە",
         blankDescription:
           "ب کارتەکێ بێلایەن دەست پێ بکە، پاشی دیزاین و خەلەت ل دەستکاریکەرێ هەلبژێرە.",
+        blankSearchAliases: "کارتا بەتاڵ",
         blankCategory: "کارتا دڵسۆزیێ",
         blankStyle: "بێلایەن",
         blankReward: "خەلەتا تە",

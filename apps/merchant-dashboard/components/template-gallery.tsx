@@ -339,7 +339,7 @@ export function TemplateGallery({
   const blankSearchTerms = Object.values(localeRegistry)
     .map((item) => {
       const text = item.messages.merchant.loyalty.templates;
-      return `${text.blankName} ${text.blankDescription}`;
+      return `${text.blankName} ${text.blankSearchAliases} ${text.blankDescription}`;
     })
     .join(" ")
     .toLocaleLowerCase("en-US");

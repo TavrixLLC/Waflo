@@ -170,8 +170,8 @@ export const en = {
         currentPlan: "Current workspace plan",
         emptyTitle: "Create your first loyalty card",
         emptyDescription:
-          "Choose a design, customize your reward, review the customer experience, and publish when you are ready.",
-        loading: "Loading loyalty cards...",
+          "Choose a design, customize your reward, review the customer experience, and publish when you’re ready.",
+        loading: "Loading loyalty cards…",
         loadError:
           "Loyalty cards could not be loaded. Your cards were not changed. Reload and try again.",
         libraryTitle: "Your loyalty cards",
@@ -184,7 +184,7 @@ export const en = {
         loadMoreAssets: "Load more design assets",
         draftOnly: "Finish setup, review the customer experience, then publish this card.",
         unpublishedChanges: "Unpublished changes are safely separate from the live card.",
-        live: "Live for customers. Create a draft when you are ready to make changes.",
+        live: "Live for customers. Create a draft when you’re ready to make changes.",
         paused: "This card is paused and is not currently live for customers.",
         archived: "This card is archived. Its setup and history remain preserved.",
         suspended: "This card is suspended. Contact support before publishing changes.",
@@ -194,7 +194,7 @@ export const en = {
         moreActions: "More actions",
         confirm: "Confirm",
         cancel: "Cancel",
-        working: "Working...",
+        working: "Working…",
         lifecycleError:
           "The loyalty card status could not be updated. Its current status is unchanged. Try again.",
         lifecycleDescriptions: {
@@ -229,7 +229,7 @@ export const en = {
         description: "Start with a ready-made design or build your loyalty card from scratch.",
         back: "Back to loyalty cards",
         backToTemplates: "Back to templates",
-        loading: "Preparing your template gallery...",
+        loading: "Preparing your template gallery…",
         recommended: "Recommended for you",
         recommendedForBusiness: "Recommended for your business",
         recommendedDescription: "Three relevant starting points based on your business profile.",
@@ -250,6 +250,7 @@ export const en = {
         blankName: "Start from scratch",
         blankDescription:
           "Begin with a neutral loyalty card, then choose the design and reward in the existing editor.",
+        blankSearchAliases: "blank card",
         blankCategory: "Loyalty card",
         blankStyle: "Neutral",
         blankReward: "Your reward",
@@ -257,7 +258,7 @@ export const en = {
         noResultsDescription: "Try another name, style, or category.",
         resetFilters: "Show all templates",
         previewDescription: "Review the real customer and wallet rendering before you continue.",
-        previewLoading: "Rendering the three preview surfaces...",
+        previewLoading: "Rendering the three preview surfaces…",
         previewLoadError: "The detailed preview could not be loaded.",
         retryPreview: "Try again",
         customer: "Customer",

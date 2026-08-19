@@ -252,6 +252,7 @@ export const kuSorani: InterfaceMessages = {
         blankName: "لە سەرەتا دەست پێ بکە",
         blankDescription:
           "بە کارتێکی بێلایەن دەست پێ بکە، پاشان دیزاین و خەڵات لە دەستکاریکەر هەڵبژێرە.",
+        blankSearchAliases: "کارتی بەتاڵ",
         blankCategory: "کارتەی دڵسۆزی",
         blankStyle: "بێلایەن",
         blankReward: "خەڵاتەکەت",
