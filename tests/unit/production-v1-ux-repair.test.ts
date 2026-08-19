@@ -47,6 +47,11 @@ describe("production-v1 UX and billing repair", () => {
     expect(worker).toContain("ensureGoogleProgramLogo");
     expect(worker).toContain("merchantApplePassImages");
     expect(worker).toContain('"logo@2x.png"');
+    const capabilities = readFileSync("packages/contracts/src/platform-capabilities.ts", "utf8");
+    expect(capabilities).toContain('support: "SUPPORTED"');
+    expect(capabilities).toContain(
+      "normalized merchant logo is packaged in the Apple pass logo slot",
+    );
   });
 
   it("models quarterly and yearly prices with exact advertised discounts", () => {

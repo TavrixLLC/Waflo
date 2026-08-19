@@ -54,9 +54,9 @@ export const programPlatformCapabilities: Record<
   },
   APPLE_WALLET: {
     logo: {
-      support: "MAPPED",
+      support: "SUPPORTED",
       explanation:
-        "The generated pass uses Waflo package artwork with the organization name; a custom merchant logo is not currently mapped to Apple Wallet.",
+        "A normalized merchant logo is packaged in the Apple pass logo slot; Waflo artwork remains the fallback when no merchant logo is set.",
     },
     heroArtwork: {
       support: "UNSUPPORTED",
