@@ -7,6 +7,7 @@ import {
   programPlatformCapabilities,
   timeZoneOptions,
 } from "@waflo/contracts";
+import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -248,6 +249,7 @@ function publicationStateGuidance(status: ProgramOperationalStatus, ar: boolean)
 }
 
 export function ProgramStudioEditor({
+  interfaceLocale,
   organizationId,
   programId,
   plan,
@@ -264,6 +266,7 @@ export function ProgramStudioEditor({
   onOpenBilling,
   onChanged,
 }: {
+  interfaceLocale: InterfaceLocale;
   organizationId: string;
   programId: string;
   plan: "STARTER" | "GROWTH" | "SCALE";
@@ -281,6 +284,7 @@ export function ProgramStudioEditor({
   onOpenBilling: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const interfaceDirection = directionForInterface(interfaceLocale);
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [revision, setRevision] = useState(1);
@@ -703,7 +707,7 @@ export function ProgramStudioEditor({
 
   if (!displayDraft || !displayVersion) {
     return (
-      <div className="studio-shell" dir={ar ? "rtl" : "ltr"}>
+      <div className="studio-shell" dir={interfaceDirection}>
         <Button variant="secondary" onClick={onClose}>
           <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
           {ar ? "بطاقات الولاء" : "Loyalty cards"}
@@ -747,7 +751,7 @@ export function ProgramStudioEditor({
   });
 
   return (
-    <div className="studio-shell studio-shell--p4" dir={ar ? "rtl" : "ltr"}>
+    <div className="studio-shell studio-shell--p4" dir={interfaceDirection}>
       <div className="studio-toolbar">
         <Button variant="secondary" onClick={onClose}>
           <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />

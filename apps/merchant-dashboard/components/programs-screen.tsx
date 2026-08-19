@@ -2,7 +2,7 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
-import { formatDate } from "@waflo/i18n";
+import { directionForInterface, formatDate, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, AlertDialog, Badge, Button, DropdownMenu, PageHeader } from "@waflo/ui";
 import { Archive, ArrowRight, Ellipsis, Layers3, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -206,6 +206,7 @@ function cardLifecycleActions(status: ProgramOperationalStatus): CardLifecycleAc
 }
 
 export function ProgramsScreen({
+  interfaceLocale,
   locale,
   membership,
   view = "library",
@@ -215,6 +216,7 @@ export function ProgramsScreen({
   studioArea = "overview",
   changeProgramId,
 }: {
+  interfaceLocale: InterfaceLocale;
   locale: Locale;
   membership: MembershipView;
   view?: "library" | "gallery" | "builder" | "studio";
@@ -225,6 +227,7 @@ export function ProgramsScreen({
   changeProgramId?: string;
 }) {
   const router = useRouter();
+  const interfaceDirection = directionForInterface(interfaceLocale);
   const ar = locale === "ar";
   const copy = loyaltyCardCopy[locale];
   const organizationId = membership.organization.id;
@@ -393,7 +396,7 @@ export function ProgramsScreen({
           },
         );
         await load();
-        router.push(`/${locale}/dashboard/programs/${changeProgramId}/edit`);
+        router.push(`/${interfaceLocale}/dashboard/programs/${changeProgramId}/edit`);
         return;
       }
 
@@ -416,7 +419,7 @@ export function ProgramsScreen({
         body: JSON.stringify(apiDraft(draft)),
       });
       await load();
-      router.push(`/${locale}/dashboard/programs/${created.id}/edit`);
+      router.push(`/${interfaceLocale}/dashboard/programs/${created.id}/edit`);
     } catch (caught) {
       setBuilderError(builderFlowError(caught, locale));
     } finally {
@@ -428,6 +431,7 @@ export function ProgramsScreen({
   if (studioProgramId) {
     return (
       <ProgramStudioEditor
+        interfaceLocale={interfaceLocale}
         organizationId={organizationId}
         programId={studioProgramId}
         plan={membership.organization.selectedPlan}
@@ -440,7 +444,7 @@ export function ProgramsScreen({
         canManageEngagement={membership.role !== "STAFF"}
         initialArea={studioArea}
         onAreaChange={(area, options) => {
-          const targetPath = `/${locale}/dashboard/programs/${studioProgramId}${
+          const targetPath = `/${interfaceLocale}/dashboard/programs/${studioProgramId}${
             area === "overview" ? "" : `/${area}`
           }`;
           router.push(targetPath);
@@ -463,15 +467,15 @@ export function ProgramsScreen({
         builderHandoff={view === "builder" && studioProgramId === builderProgramId}
         onClose={() => {
           setStudioProgramId(null);
-          router.push(`/${locale}/dashboard/programs`);
+          router.push(`/${interfaceLocale}/dashboard/programs`);
         }}
         onEditDesign={() => {
           const programId = studioProgramId;
           setStudioProgramId(null);
-          router.push(`/${locale}/dashboard/programs/${programId}/edit`);
+          router.push(`/${interfaceLocale}/dashboard/programs/${programId}/edit`);
         }}
-        onOpenCustomers={() => router.push(`/${locale}/dashboard/customers`)}
-        onOpenBilling={() => router.push(`/${locale}/dashboard/billing`)}
+        onOpenCustomers={() => router.push(`/${interfaceLocale}/dashboard/customers`)}
+        onOpenBilling={() => router.push(`/${interfaceLocale}/dashboard/billing`)}
         onChanged={load}
       />
     );
@@ -480,6 +484,7 @@ export function ProgramsScreen({
   if (view === "builder" && builderProgramId) {
     return (
       <ProgramCardBuilder
+        interfaceLocale={interfaceLocale}
         organizationId={organizationId}
         programId={builderProgramId}
         plan={membership.organization.selectedPlan}
@@ -490,11 +495,13 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         locale={locale}
-        onBack={() => router.push(`/${locale}/dashboard/programs`)}
+        onBack={() => router.push(`/${interfaceLocale}/dashboard/programs`)}
         onChangeDesign={() =>
-          router.push(`/${locale}/dashboard/programs/new?changeFor=${builderProgramId}`)
+          router.push(`/${interfaceLocale}/dashboard/programs/new?changeFor=${builderProgramId}`)
         }
-        onOpenStudio={() => router.push(`/${locale}/dashboard/programs/${builderProgramId}`)}
+        onOpenStudio={() =>
+          router.push(`/${interfaceLocale}/dashboard/programs/${builderProgramId}`)
+        }
         onChanged={load}
       />
     );
@@ -544,7 +551,7 @@ export function ProgramsScreen({
       onCreated={(programId) => {
         setWizardOpen(false);
         setSelectedTemplate(null);
-        router.push(`/${locale}/dashboard/programs/${programId}`);
+        router.push(`/${interfaceLocale}/dashboard/programs/${programId}`);
         void load();
       }}
       ar={ar}
@@ -554,6 +561,7 @@ export function ProgramsScreen({
   if (view === "gallery") {
     return (
       <TemplateGallery
+        interfaceLocale={interfaceLocale}
         locale={locale}
         templates={templates}
         businessCategory={businessCategory}
@@ -563,8 +571,8 @@ export function ProgramsScreen({
         onBack={() =>
           router.push(
             changeProgramId
-              ? `/${locale}/dashboard/programs/${changeProgramId}/edit`
-              : `/${locale}/dashboard/programs`,
+              ? `/${interfaceLocale}/dashboard/programs/${changeProgramId}/edit`
+              : `/${interfaceLocale}/dashboard/programs`,
           )
         }
         onLoadPreviews={(template, presentation) =>
@@ -580,7 +588,7 @@ export function ProgramsScreen({
   return (
     <div
       className={`programs-home ${empty ? "programs-home--empty" : ""}`}
-      dir={ar ? "rtl" : "ltr"}
+      dir={interfaceDirection}
     >
       <PageHeader
         title={copy.title}
@@ -589,7 +597,7 @@ export function ProgramsScreen({
           <Button
             type="button"
             className="programs-home__header-action"
-            onClick={() => router.push(`/${locale}/dashboard/programs/new`)}
+            onClick={() => router.push(`/${interfaceLocale}/dashboard/programs/new`)}
           >
             <Plus size={17} aria-hidden="true" />
             {copy.create}
@@ -628,7 +636,7 @@ export function ProgramsScreen({
             <Button
               type="button"
               className="loyalty-card-empty__mobile-action"
-              onClick={() => router.push(`/${locale}/dashboard/programs/new`)}
+              onClick={() => router.push(`/${interfaceLocale}/dashboard/programs/new`)}
             >
               <Plus size={17} aria-hidden="true" />
               {copy.create}
@@ -726,7 +734,9 @@ export function ProgramsScreen({
                         <Button
                           type="button"
                           aria-label={`${copy.open}: ${program.internalName}`}
-                          onClick={() => router.push(`/${locale}/dashboard/programs/${program.id}`)}
+                          onClick={() =>
+                            router.push(`/${interfaceLocale}/dashboard/programs/${program.id}`)
+                          }
                         >
                           {copy.open}
                           <ArrowRight

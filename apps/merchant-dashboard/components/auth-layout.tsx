@@ -1,5 +1,5 @@
 import type { Locale } from "@waflo/contracts";
-import type { InterfaceLocale } from "@waflo/i18n";
+import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
 import { InterfaceLanguagePicker } from "@waflo/ui";
 import { Gift, ShieldCheck } from "lucide-react";
 import Image from "next/image";
@@ -19,8 +19,9 @@ export function AuthLayout({
   children: ReactNode;
 }) {
   const ar = locale === "ar";
+  const interfaceDirection = directionForInterface(interfaceLocale);
   return (
-    <main className="auth-layout">
+    <main className="auth-layout" dir={interfaceDirection}>
       <section className="auth-brand">
         <a href={process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}>
           <Image

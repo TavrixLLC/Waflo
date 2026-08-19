@@ -1,7 +1,7 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
-import type { InterfaceLocale } from "@waflo/i18n";
+import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   Avatar,
@@ -211,6 +211,9 @@ const accountSections: DashboardSection[] = ["settings", "security"];
 const mobilePrimarySections: DashboardSection[] = ["overview", "programs", "customers", "team"];
 
 interface DashboardContextValue {
+  /** Route-selected display locale. Structural direction always derives from this metadata. */
+  interfaceLocale: InterfaceLocale;
+  /** Legacy two-language UI text selection; never use this for structural direction. */
   locale: Locale;
   me: MeView;
   membership: MembershipView;
@@ -290,6 +293,7 @@ export function DashboardShell({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const copy = labels[locale];
   const routeLocale = interfaceLocale;
+  const interfaceDirection = directionForInterface(interfaceLocale);
 
   const loadMe = useCallback(async () => {
     try {
@@ -407,8 +411,10 @@ export function DashboardShell({
   const mobileMore = sections.filter((section) => !mobilePrimary.includes(section));
 
   return (
-    <DashboardContext.Provider value={{ locale, me, membership, reloadMemberships: loadMe }}>
-      <div className="dashboard-layout">
+    <DashboardContext.Provider
+      value={{ interfaceLocale, locale, me, membership, reloadMemberships: loadMe }}
+    >
+      <div className="dashboard-layout" dir={interfaceDirection}>
         <Sidebar
           logo={
             <Link
@@ -568,7 +574,7 @@ export function DashboardRoute({
   studioArea?: StudioArea;
   changeProgramId?: string;
 }) {
-  const { locale, me, membership, reloadMemberships } = useDashboard();
+  const { interfaceLocale, locale, me, membership, reloadMemberships } = useDashboard();
   if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
   if (
     me.accountState?.access === "read_only_billing_recovery" &&
@@ -581,6 +587,7 @@ export function DashboardRoute({
       <MerchantOperationsDenied locale={locale} />
     ) : (
       <ProgramsScreen
+        interfaceLocale={interfaceLocale}
         locale={locale}
         membership={membership}
         view={programsView}

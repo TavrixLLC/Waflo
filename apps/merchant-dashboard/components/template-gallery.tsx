@@ -1,6 +1,7 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
+import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Button, Modal, PageHeader, TextInput } from "@waflo/ui";
 import { ArrowLeft, ArrowRight, Search, Sparkles, X } from "lucide-react";
 import Image from "next/image";
@@ -367,6 +368,7 @@ function TemplatePreviewDialog({
 }
 
 export function TemplateGallery({
+  interfaceLocale,
   locale,
   templates,
   businessCategory,
@@ -377,6 +379,7 @@ export function TemplateGallery({
   onLoadPreviews,
   onUseTemplate,
 }: {
+  interfaceLocale: InterfaceLocale;
   locale: Locale;
   templates: TemplateItem[];
   businessCategory: string | null;
@@ -390,6 +393,7 @@ export function TemplateGallery({
   ) => Promise<TemplatePreviewSet>;
   onUseTemplate: (template: TemplateItem, options: { blank: boolean }) => void;
 }) {
+  const interfaceDirection = directionForInterface(interfaceLocale);
   const copy = galleryCopy[locale];
   const [selectedCategory, setSelectedCategory] = useState<TemplateGalleryCategory>("all");
   const [query, setQuery] = useState("");
@@ -458,7 +462,7 @@ export function TemplateGallery({
   return (
     <div
       className={`template-gallery${loading ? " template-gallery--loading" : ""}${error ? " template-gallery--error" : ""}`}
-      dir={locale === "ar" ? "rtl" : "ltr"}
+      dir={interfaceDirection}
     >
       <PageHeader
         eyebrow={copy.eyebrow}

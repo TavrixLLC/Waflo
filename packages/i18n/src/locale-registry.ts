@@ -16,7 +16,10 @@ export interface InterfaceLocaleDefinition {
   readonly direction: TextDirection;
   readonly languageGroup?: "kurdish";
   readonly enabled: true;
-  readonly fallback: "en" | "ar";
+  /** Fallback for customer-authored and Wallet content constrained to the existing API locale union. */
+  readonly contentFallback: Locale;
+  /** Transitional text catalog for legacy UI components while they move to locale messages directly. */
+  readonly interfaceTextLocale: Locale;
   readonly dateFormattingLocale: string;
   readonly numberFormattingLocale: string;
   readonly messages: InterfaceMessages;
@@ -30,7 +33,8 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     htmlLang: "en",
     direction: "ltr",
     enabled: true,
-    fallback: "en",
+    contentFallback: "en",
+    interfaceTextLocale: "en",
     dateFormattingLocale: "en-US-u-nu-latn",
     numberFormattingLocale: "en-US-u-nu-latn",
     messages: en,
@@ -43,7 +47,8 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     htmlLang: "ar",
     direction: "rtl",
     enabled: true,
-    fallback: "en",
+    contentFallback: "en",
+    interfaceTextLocale: "ar",
     dateFormattingLocale: "ar-IQ-u-nu-latn",
     numberFormattingLocale: "ar-IQ-u-nu-latn",
     messages: ar,
@@ -57,7 +62,8 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     direction: "rtl",
     languageGroup: "kurdish",
     enabled: true,
-    fallback: "en",
+    contentFallback: "en",
+    interfaceTextLocale: "en",
     dateFormattingLocale: "ckb-IQ-u-nu-latn",
     numberFormattingLocale: "ckb-IQ-u-nu-latn",
     messages: kuBadini,
@@ -71,7 +77,8 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     direction: "rtl",
     languageGroup: "kurdish",
     enabled: true,
-    fallback: "en",
+    contentFallback: "en",
+    interfaceTextLocale: "en",
     dateFormattingLocale: "ckb-IQ-u-nu-latn",
     numberFormattingLocale: "ckb-IQ-u-nu-latn",
     messages: kuSorani,
@@ -94,6 +101,14 @@ export function directionForInterface(locale: InterfaceLocale): TextDirection {
   return localeRegistry[locale].direction;
 }
 
+/**
+ * The dashboard still has a small two-language component copy surface. This
+ * resolves that surface without changing the customer-content fallback.
+ */
+export function interfaceTextLocaleFor(locale: InterfaceLocale): Locale {
+  return localeRegistry[locale].interfaceTextLocale;
+}
+
 export function interfaceLocalePath(locale: InterfaceLocale, path = ""): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `/${locale}${normalizedPath === "/" ? "" : normalizedPath}`;
@@ -104,5 +119,5 @@ export function interfaceLocalePath(locale: InterfaceLocale, path = ""): string 
  * the two-value API contract. Dashboard interface locale must not widen it.
  */
 export function contentLocaleForInterface(locale: InterfaceLocale): Locale {
-  return localeRegistry[locale].fallback;
+  return localeRegistry[locale].contentFallback;
 }

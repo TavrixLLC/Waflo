@@ -2,6 +2,7 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale } from "@waflo/contracts";
+import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -325,6 +326,7 @@ function finalRewardIndex(draft: ProgramDraftInput): number {
 }
 
 export function ProgramCardBuilder({
+  interfaceLocale,
   organizationId,
   programId,
   plan,
@@ -338,6 +340,7 @@ export function ProgramCardBuilder({
   onOpenStudio,
   onChanged,
 }: {
+  interfaceLocale: InterfaceLocale;
   organizationId: string;
   programId: string;
   plan: "STARTER" | "GROWTH" | "SCALE";
@@ -351,6 +354,7 @@ export function ProgramCardBuilder({
   onOpenStudio: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const interfaceDirection = directionForInterface(interfaceLocale);
   const ar = locale === "ar";
   const text = copy[locale];
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
@@ -691,7 +695,7 @@ export function ProgramCardBuilder({
   } as CSSProperties;
 
   return (
-    <div className="builder-shell" dir={ar ? "rtl" : "ltr"} style={accentStyle}>
+    <div className="builder-shell" dir={interfaceDirection} style={accentStyle}>
       <header className="builder-toolbar">
         <Button type="button" variant="secondary" onClick={() => void leaveBuilder("back")}>
           <ArrowLeft className="builder-logical-back" size={16} aria-hidden="true" />

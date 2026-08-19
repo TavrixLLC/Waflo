@@ -6,6 +6,7 @@ export {
   interfaceLocaleFor,
   interfaceLocalePath,
   interfaceLocales,
+  interfaceTextLocaleFor,
   isInterfaceLocale,
   localeRegistry,
   type InterfaceLocale,

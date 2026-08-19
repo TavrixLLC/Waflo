@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { contentLocaleForInterface, isInterfaceLocale } from "@waflo/i18n";
+import { interfaceTextLocaleFor, isInterfaceLocale } from "@waflo/i18n";
 import { BusinessOnboarding } from "../../../../components/onboarding";
 
 export default async function BusinessPage({
@@ -21,7 +21,7 @@ export default async function BusinessPage({
   const resume = Array.isArray(query.resume) ? query.resume[0] : query.resume;
   return (
     <BusinessOnboarding
-      locale={contentLocaleForInterface(locale)}
+      locale={interfaceTextLocaleFor(locale)}
       interfaceLocale={locale}
       {...(organization ? { organizationId: organization } : {})}
       {...(resume ? { resumeState: resume } : {})}

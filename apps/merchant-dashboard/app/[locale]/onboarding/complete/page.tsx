@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { contentLocaleForInterface, isInterfaceLocale } from "@waflo/i18n";
+import { interfaceTextLocaleFor, isInterfaceLocale } from "@waflo/i18n";
 import { CompletionOnboarding } from "../../../../components/onboarding";
 
 export default async function CompletionPage({
@@ -17,7 +17,7 @@ export default async function CompletionPage({
     : query.organization;
   return (
     <CompletionOnboarding
-      locale={contentLocaleForInterface(locale)}
+      locale={interfaceTextLocaleFor(locale)}
       interfaceLocale={locale}
       {...(organization ? { organizationId: organization } : {})}
     />

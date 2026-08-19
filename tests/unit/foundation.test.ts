@@ -25,6 +25,7 @@ import {
   formatUsd,
   isInterfaceLocale,
   isLocale,
+  interfaceTextLocaleFor,
   localePath,
   localeRegistry,
 } from "../../packages/i18n/src/index";
@@ -358,6 +359,7 @@ describe("API and localization utilities", () => {
     expect(isLocale("fr")).toBe(false);
     expect(directionFor("en")).toBe("ltr");
     expect(directionFor("ar")).toBe("rtl");
+    expect(directionForInterface("ar")).toBe("rtl");
     expect(localePath("ar", "/pricing")).toBe("/ar/pricing");
     expect(isInterfaceLocale("ku-badini")).toBe(true);
     expect(isInterfaceLocale("ku-sorani")).toBe(true);
@@ -368,9 +370,34 @@ describe("API and localization utilities", () => {
     expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
     expect(contentLocaleForInterface("ku-badini")).toBe("en");
     expect(contentLocaleForInterface("ku-sorani")).toBe("en");
+    expect(contentLocaleForInterface("ar")).toBe("en");
+    expect(interfaceTextLocaleFor("ar")).toBe("ar");
+    expect(interfaceTextLocaleFor("ku-badini")).toBe("en");
+    expect(interfaceTextLocaleFor("ku-sorani")).toBe("en");
     expect(localeRegistry["ku-badini"].messages.navigation.home).not.toBe(
       localeRegistry.ar.messages.navigation.home,
     );
+  });
+
+  it("keeps Builder and Studio structural direction tied to interface-locale metadata", () => {
+    const root = resolve(import.meta.dirname, "../..");
+    const files = [
+      "apps/merchant-dashboard/components/program-card-builder.tsx",
+      "apps/merchant-dashboard/components/program-studio-editor.tsx",
+      "apps/merchant-dashboard/components/programs-screen.tsx",
+      "apps/merchant-dashboard/components/template-gallery.tsx",
+    ];
+
+    for (const relativePath of files) {
+      const source = readFileSync(resolve(root, relativePath), "utf8");
+      expect(source).toContain("directionForInterface");
+      expect(source).toContain("interfaceLocale");
+    }
+
+    const builder = readFileSync(resolve(root, files[0]), "utf8");
+    const studio = readFileSync(resolve(root, files[1]), "utf8");
+    expect(builder).toContain('className="builder-shell" dir={interfaceDirection}');
+    expect(studio).toContain('className="studio-shell studio-shell--p4" dir={interfaceDirection}');
   });
 
   it("keeps the four-language picker metadata-driven, keyboard-operable, and portal-backed", () => {
