@@ -11,7 +11,8 @@ body {
   min-height: 100dvh;
 }
 
-html[data-interface-typography="kurdistan24"] body {
+html[data-interface-typography="kurdistan24"] body,
+html[data-interface-typography="kurdistan24"] [dir="rtl"] {
   font-family: var(--font-kurdistan-24), var(--font-cairo), sans-serif;
   font-synthesis: none;
 }
