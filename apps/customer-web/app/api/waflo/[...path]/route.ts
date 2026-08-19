@@ -22,6 +22,16 @@ const hopByHop = new Set([
 ]);
 
 const tenantSlug = /^[a-z0-9](?:[a-z0-9-]{0,47}[a-z0-9])?$/;
+const reservedMerchantHosts = new Set([
+  "www",
+  "app",
+  "api",
+  "card",
+  "app-staging",
+  "api-staging",
+  "card-staging",
+  "staging",
+]);
 
 function hostnameFromHeader(value: string): string {
   return value.toLocaleLowerCase("en-US").split(":")[0] ?? "";
@@ -37,6 +47,22 @@ function compatibilityCustomerHostname(): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * A tenant query may be redundant on a canonical merchant host, but it must
+ * never change that host's identity. This narrow parser is only for deciding
+ * whether to discard a redundant query before forwarding to the API; the API
+ * remains the authoritative host and tenant resolver.
+ */
+function merchantSlugForHostname(hostname: string): string | null {
+  const suffix = [".waflo.app", ".localhost", ".lvh.me"].find((candidate) =>
+    hostname.endsWith(candidate),
+  );
+  if (!suffix) return null;
+  const slug = hostname.slice(0, -suffix.length);
+  if (!tenantSlug.test(slug) || reservedMerchantHosts.has(slug)) return null;
+  return slug;
 }
 
 function tenantOverrideError(code: "TENANT_OVERRIDE_HOST_FORBIDDEN" | "TENANT_OVERRIDE_INVALID") {
@@ -108,14 +134,21 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   requestHeaders.delete("x-forwarded-port");
   const normalizedHost = hostnameFromHeader(directHost);
   const queryTenant = request.nextUrl.searchParams.get("tenant");
-  if (queryTenant && normalizedHost !== compatibilityCustomerHostname()) {
-    return tenantOverrideError("TENANT_OVERRIDE_HOST_FORBIDDEN");
-  }
   if (queryTenant && !tenantSlug.test(queryTenant))
     return tenantOverrideError("TENANT_OVERRIDE_INVALID");
+  const compatibilityHost = normalizedHost === compatibilityCustomerHostname();
+  const hostTenant = merchantSlugForHostname(normalizedHost);
+  if (queryTenant && !compatibilityHost) {
+    // The canonical hostname is authoritative. A matching query is harmless
+    // legacy noise, so drop it; anything else is a tenant-spoofing attempt.
+    if (!hostTenant || hostTenant !== queryTenant) {
+      return tenantOverrideError("TENANT_OVERRIDE_HOST_FORBIDDEN");
+    }
+    upstream.searchParams.delete("tenant");
+  }
   // The query override exists solely for the exact compatibility host. A
   // merchant hostname, including local `slug.lvh.me`, is the tenant identity.
-  const tenant = queryTenant || null;
+  const tenant = compatibilityHost ? queryTenant : null;
   if (tenant && !upstream.searchParams.has("tenant")) {
     upstream.searchParams.set("tenant", tenant);
   }

@@ -48,15 +48,41 @@ describe("Customer Web tenant forwarding", () => {
     expect(headers.get("x-forwarded-proto")).toBe("https");
   });
 
-  it("rejects an explicit tenant override outside the compatibility hostname", async () => {
+  it("forwards a missing compatibility tenant unchanged so the public API can return its safe state", async () => {
+    vi.stubEnv("API_INTERNAL_URL", "http://api.internal:4000");
     vi.stubEnv("CUSTOMER_WEB_URL", "https://card-staging.waflo.app");
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { status: "unknown" } }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
+    const response = await GET(customerRequest("card-staging.waflo.app"), context);
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.searchParams.has("tenant")).toBe(false);
+  });
+
+  it("keeps a matching canonical-host tenant query harmless while rejecting mismatches", async () => {
+    vi.stubEnv("CUSTOMER_WEB_URL", "https://card-staging.waflo.app");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { status: "active" } }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const matching = await GET(customerRequest("hamzacafe.waflo.app", "hamzacafe"), context);
+    expect(matching.status).toBe(200);
+    const [matchingUrl, matchingInit] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(matchingUrl.searchParams.has("tenant")).toBe(false);
+    expect(new Headers(matchingInit.headers).get("x-forwarded-host")).toBe("hamzacafe.waflo.app");
+
     for (const [host, tenant] of [
-      ["hamzacafe.waflo.app", "hamzacafe"],
       ["hamzacafe.waflo.app", "other-merchant"],
       ["hostile.example.test", "hamzacafe"],
+      ["app.waflo.app", "app"],
     ]) {
       const response = await GET(customerRequest(host, tenant), context);
       expect(response.status).toBe(400);
@@ -64,7 +90,7 @@ describe("Customer Web tenant forwarding", () => {
         error: { code: "TENANT_OVERRIDE_HOST_FORBIDDEN" },
       });
     }
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects malformed compatibility-host tenants and leaves local tenant hosts authoritative", async () => {
@@ -88,5 +114,13 @@ describe("Customer Web tenant forwarding", () => {
     const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(url.searchParams.has("tenant")).toBe(false);
     expect(new Headers(init.headers).get("x-forwarded-host")).toBe("hamzacafe.lvh.me:3002");
+
+    const localWithMatchingLegacyQuery = await GET(
+      customerRequest("hamzacafe.lvh.me:3002", "hamzacafe"),
+      context,
+    );
+    expect(localWithMatchingLegacyQuery.status).toBe(200);
+    const [localUrl] = fetchMock.mock.calls[1] as [URL, RequestInit];
+    expect(localUrl.searchParams.has("tenant")).toBe(false);
   });
 });
