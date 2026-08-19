@@ -157,9 +157,10 @@ test("publishes an update while preserving the existing customer contract", asyn
   });
   await enterStudio(page);
 
-  await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unpublished changes saved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live · Unpublished changes", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("The current live card is unchanged.", { exact: true }),
+    page.getByText(/Customers continue to see the current live version\./u),
   ).toBeVisible();
   await openLaunch(page);
   await expect(page.getByRole("heading", { name: "Ready to publish changes" })).toBeVisible();
@@ -314,7 +315,8 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(pendingPreview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(pendingPreview.getByText("Currently live", { exact: true })).toBeVisible();
   await expect(pendingPreview.getByRole("tab", { name: "Customer" })).toHaveCount(0);
-  await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unpublished changes saved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live · Unpublished changes", { exact: true })).toBeVisible();
   await expect(
     page
       .locator(".studio-next-action")

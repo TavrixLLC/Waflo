@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type BrowserContext, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
@@ -378,7 +378,7 @@ test("keeps routed Studio dialogs centered and contained across the release view
   }
 });
 
-test("captures exactly the ten final P6 release visuals", async ({ context }) => {
+async function captureFinalReleaseVisuals(context: BrowserContext): Promise<void> {
   const library = await context.newPage();
   await mockTemplateGalleryApi(library, {
     existingPrograms: [
@@ -476,7 +476,10 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
   );
   await capture(arabic, "09-final-arabic-rtl.png");
   await arabic.close();
+}
 
+test("captures exactly the ten final P6 release visuals", async ({ context }) => {
+  await captureFinalReleaseVisuals(context);
   await makeContactSheet();
   expect(
     await Promise.all(
@@ -488,8 +491,10 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
 });
 
 test("updates only the repaired Arabic RTL and release contact-sheet evidence", async ({
+  context,
   page,
 }) => {
+  await captureFinalReleaseVisuals(context);
   await openSeededStudio(page, {
     locale: "ar",
     state: "LIVE",

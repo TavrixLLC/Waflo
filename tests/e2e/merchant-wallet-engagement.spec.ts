@@ -39,7 +39,11 @@ test("configures provider-native nearby relevance and confirms a consented Googl
   await expect(page.locator(".wallet-nearby-preview")).toContainText("next coffee visit");
 
   await expect(page.locator(".wallet-audience-strip")).toContainText("12");
-  await page.getByLabel("Message language").selectOption("EN");
+  const messageLanguage = page.getByLabel("Message language");
+  await expect(messageLanguage).toHaveAttribute("role", "combobox");
+  await messageLanguage.click();
+  await page.getByRole("option", { name: "English", exact: true }).click();
+  await expect(messageLanguage).toHaveValue("English");
   await page.getByLabel("Title").fill("A new visit message");
   await page
     .getByRole("textbox", { name: /^Message /u })

@@ -249,7 +249,8 @@ test("captures the final published customer preview repair evidence", async ({ p
   const previousPreview = await livePreview.screenshot({ animations: "disabled" });
 
   await openScenario(page, { studioState: "LIVE_WITH_CHANGES", billingStatus: "ACTIVE" });
-  await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unpublished changes saved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live · Unpublished changes", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: "Current published card summary" })).toBeVisible();
   await page.screenshot({
     path: path.join(finalPreviewEvidenceDirectory, "02-live-with-pending-changes-preview.png"),

@@ -12,6 +12,7 @@ const changedPassword = "Browser Waflo Changed 2026!";
 const resetPassword = "Browser Waflo Reset 2026!";
 const initialSlug = `browser-${runId}`;
 const changedSlug = `flow-${runId}`;
+const apiOrigin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 let browserOrganizationId = "";
 
 interface MailpitAddress {
@@ -109,7 +110,7 @@ async function login(page: Page, email: string, password: string): Promise<void>
 }
 
 async function csrfToken(page: Page): Promise<string> {
-  const response = await page.request.get("http://localhost:4000/v1/auth/csrf");
+  const response = await page.request.get(`${apiOrigin}/v1/auth/csrf`);
   expect(response.ok()).toBe(true);
   return ((await response.json()) as { data: { csrfToken: string } }).data.csrfToken;
 }
@@ -121,7 +122,7 @@ async function postOrganizationWithExactLocation(
   locationName: string,
 ): Promise<string> {
   const token = await csrfToken(page);
-  const response = await page.request.post("http://localhost:4000/v1/organizations", {
+  const response = await page.request.post(`${apiOrigin}/v1/organizations`, {
     headers: { origin: "http://localhost:3001", "x-csrf-token": token },
     data: {
       name,
@@ -225,9 +226,14 @@ test.describe
 
       await page.goto("http://localhost:3000/en/pricing");
       await expect(page.locator(".wf-plan-card__price")).toHaveText([
-        /\$290\.00/u,
-        /\$690\.00/u,
-        /\$1290\.00/u,
+        /\$24\.17\/month/u,
+        /\$57\.50\/month/u,
+        /\$107\.50\/month/u,
+      ]);
+      await expect(page.locator(".wf-plan-card__cadence")).toHaveText([
+        /\$290\.00 billed yearly/u,
+        /\$690\.00 billed yearly/u,
+        /\$1290\.00 billed yearly/u,
       ]);
       await expect(page.getByText(/Save 8\.33%/u).first()).toBeVisible();
       await expect(page.getByText(/2 months free · Save 16\.67%/u).first()).toBeVisible();
@@ -312,7 +318,7 @@ test.describe
       await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
       expect(browserOrganizationId).toBeTruthy();
       const organizationResponse = await page.request.get(
-        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
+        `${apiOrigin}/v1/organizations/${browserOrganizationId}`,
       );
       const organizationEnvelope = (await organizationResponse.json()) as {
         data: {
@@ -343,7 +349,7 @@ test.describe
         ),
       ).toBeVisible();
       const paymentGatedOrganizationResponse = await page.request.get(
-        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
+        `${apiOrigin}/v1/organizations/${browserOrganizationId}`,
       );
       const paymentGatedOrganizationEnvelope = (await paymentGatedOrganizationResponse.json()) as {
         data: {
@@ -471,7 +477,7 @@ test.describe
       await expect(page.getByRole("button", { name: "Share loyalty card" })).toBeVisible();
 
       const billingResponse = await page.request.get(
-        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
+        `${apiOrigin}/v1/organizations/${browserOrganizationId}`,
       );
       expect(billingResponse.ok()).toBe(true);
       const billingEnvelope = (await billingResponse.json()) as {
@@ -844,7 +850,10 @@ test.describe
       const refundDialog = page.getByRole("dialog", { name: "Request a refund review" });
       await expect(refundDialog.getByText("Originally paid")).toBeVisible();
       await expect(refundDialog.getByText("Remaining refundable")).toBeVisible();
-      await refundDialog.getByRole("combobox", { name: "Reason" }).selectOption("incorrect_charge");
+      const refundReason = refundDialog.getByRole("combobox", { name: "Reason" });
+      await refundReason.click();
+      await page.getByRole("option", { name: "Incorrect charge", exact: true }).click();
+      await expect(refundReason).toHaveValue("Incorrect charge");
       await refundDialog.getByRole("spinbutton", { name: "Amount (USD)" }).fill("17.00");
       await refundDialog
         .getByRole("textbox", { name: "Optional explanation" })
@@ -994,7 +1003,8 @@ test.describe
       await switchOrganization(page, "مخبز النهر");
       await expect(page.getByRole("heading", { name: "Welcome, مخبز النهر" })).toBeVisible();
 
-      await page.getByRole("button", { name: "العربية" }).click();
+      await page.getByRole("button", { name: "Language" }).click();
+      await page.getByRole("menuitemradio", { name: "العربية" }).click();
       await expect(page).toHaveURL(/\/ar\/dashboard/);
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       await expect(page.locator(".wf-sidebar")).toBeVisible();

@@ -412,9 +412,7 @@ export function SearchableSelect({
   // so keep modal-owned lists inside their dialog while ordinary lists still
   // portal to the document body to avoid clipping.
   const portalRoot =
-    typeof document === "undefined"
-      ? null
-      : (inputRef.current?.closest("dialog") ?? document.body);
+    typeof document === "undefined" ? null : (inputRef.current?.closest("dialog") ?? document.body);
 
   return (
     <div className={`wf-search-select ${open ? "wf-search-select--open" : ""} ${className}`}>

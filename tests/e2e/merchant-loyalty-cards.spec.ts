@@ -61,118 +61,121 @@ async function mockMerchantApi(
   },
 ): Promise<void> {
   const statusByProgramId = new Map(programs.map((program) => [program.id, program.status]));
-  await page.route(/https?:\/\/(?:localhost:4000|api\.waflo\.app)\/v1\/.*/u, async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path === "/v1/auth/csrf") {
-      await fulfill(route, { csrfToken: "merchant-loyalty-card-csrf" });
-      return;
-    }
-    if (path === "/v1/auth/me") {
-      await fulfill(route, {
-        id: "merchant-owner-fixture",
-        displayName: "Merchant Owner",
-        email: "merchant@example.test",
-        preferredLocale: "EN",
-        lastSelectedOrganizationId: organizationId,
-        memberships: [
-          {
-            id: "merchant-membership-fixture",
-            role: "OWNER",
-            organization: {
-              id: organizationId,
-              name: "Fixture Coffee",
-              merchantSlug: "fixture-coffee",
-              defaultLocale: "EN",
-              selectedPlan: plan,
-              onboardingState: "COMPLETE",
+  await page.route(
+    /https?:\/\/(?:(?:localhost|127\.0\.0\.1)(?::\d+)?|api\.waflo\.app)\/v1\/.*/u,
+    async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/v1/auth/csrf") {
+        await fulfill(route, { csrfToken: "merchant-loyalty-card-csrf" });
+        return;
+      }
+      if (path === "/v1/auth/me") {
+        await fulfill(route, {
+          id: "merchant-owner-fixture",
+          displayName: "Merchant Owner",
+          email: "merchant@example.test",
+          preferredLocale: "EN",
+          lastSelectedOrganizationId: organizationId,
+          memberships: [
+            {
+              id: "merchant-membership-fixture",
+              role: "OWNER",
+              organization: {
+                id: organizationId,
+                name: "Fixture Coffee",
+                merchantSlug: "fixture-coffee",
+                defaultLocale: "EN",
+                selectedPlan: plan,
+                onboardingState: "COMPLETE",
+              },
             },
-          },
-        ],
-      });
-      return;
-    }
-    if (path === `/v1/organizations/${organizationId}`) {
-      await fulfill(route, { id: organizationId, businessCategory: "Cafe" });
-      return;
-    }
-    if (path.endsWith("/programs/templates")) {
-      const locale = new URL(route.request().url()).searchParams.get("locale");
-      await fulfill(route, templateGalleryFixtures(locale === "AR" ? "AR" : "EN"));
-      return;
-    }
-    if (path.endsWith("/programs")) {
-      await fulfill(route, {
-        items: programs.map((program) => ({
-          ...program,
-          status: statusByProgramId.get(program.id),
-        })),
-        nextCursor: null,
-      });
-      return;
-    }
-    if (path.endsWith("/locations")) {
-      await fulfill(route, { items: [] });
-      return;
-    }
-    if (path.endsWith("/assets")) {
-      await fulfill(route, { items: [], nextCursor: null });
-      return;
-    }
-    if (path.endsWith("/wallet/providers")) {
-      await fulfill(route, []);
-      return;
-    }
-    for (const program of programs) {
-      const base = `/v1/organizations/${organizationId}/programs/${program.id}`;
-      if (path === `${base}/versions`) {
+          ],
+        });
+        return;
+      }
+      if (path === `/v1/organizations/${organizationId}`) {
+        await fulfill(route, { id: organizationId, businessCategory: "Cafe" });
+        return;
+      }
+      if (path.endsWith("/programs/templates")) {
+        const locale = new URL(route.request().url()).searchParams.get("locale");
+        await fulfill(route, templateGalleryFixtures(locale === "AR" ? "AR" : "EN"));
+        return;
+      }
+      if (path.endsWith("/programs")) {
+        await fulfill(route, {
+          items: programs.map((program) => ({
+            ...program,
+            status: statusByProgramId.get(program.id),
+          })),
+          nextCursor: null,
+        });
+        return;
+      }
+      if (path.endsWith("/locations")) {
+        await fulfill(route, { items: [] });
+        return;
+      }
+      if (path.endsWith("/assets")) {
         await fulfill(route, { items: [], nextCursor: null });
         return;
       }
-      if (path === `${base}/enrollment`) {
-        await fulfill(route, {
-          programId: program.id,
-          status: statusByProgramId.get(program.id),
-          publicSlug: null,
-          publicUrl: null,
-          enrollmentLinkStatus: "ACTIVE",
-          editableVersion: null,
-          publishedVersion: null,
-        });
+      if (path.endsWith("/wallet/providers")) {
+        await fulfill(route, []);
         return;
       }
-      if (path === base) {
-        await fulfill(route, {
-          ...program,
-          status: statusByProgramId.get(program.id),
-          currentPublishedVersion: program.currentPublishedVersion
-            ? {
-                ...program.currentPublishedVersion,
-                editingMode: "QUICK",
-                revision: 1,
-                operationalTimezone: "Asia/Baghdad",
-                staffOwnReversalWindowSeconds: 120,
-                managerReversalWindowMinutes: 1440,
-                managerOverrideAllowed: true,
-                translations: [],
-                stampRule: null,
-                rewards: [],
-                locations: [],
-                visualTheme: null,
-              }
-            : null,
-          versions: [],
-        });
-        return;
+      for (const program of programs) {
+        const base = `/v1/organizations/${organizationId}/programs/${program.id}`;
+        if (path === `${base}/versions`) {
+          await fulfill(route, { items: [], nextCursor: null });
+          return;
+        }
+        if (path === `${base}/enrollment`) {
+          await fulfill(route, {
+            programId: program.id,
+            status: statusByProgramId.get(program.id),
+            publicSlug: null,
+            publicUrl: null,
+            enrollmentLinkStatus: "ACTIVE",
+            editableVersion: null,
+            publishedVersion: null,
+          });
+          return;
+        }
+        if (path === base) {
+          await fulfill(route, {
+            ...program,
+            status: statusByProgramId.get(program.id),
+            currentPublishedVersion: program.currentPublishedVersion
+              ? {
+                  ...program.currentPublishedVersion,
+                  editingMode: "QUICK",
+                  revision: 1,
+                  operationalTimezone: "Asia/Baghdad",
+                  staffOwnReversalWindowSeconds: 120,
+                  managerReversalWindowMinutes: 1440,
+                  managerOverrideAllowed: true,
+                  translations: [],
+                  stampRule: null,
+                  rewards: [],
+                  locations: [],
+                  visualTheme: null,
+                }
+              : null,
+            versions: [],
+          });
+          return;
+        }
+        if (path === `${base}/pause` && route.request().method() === "POST") {
+          onLifecycleRequest?.(path);
+          statusByProgramId.set(program.id, "PAUSED");
+          await fulfill(route, {});
+          return;
+        }
       }
-      if (path === `${base}/pause` && route.request().method() === "POST") {
-        onLifecycleRequest?.(path);
-        statusByProgramId.set(program.id, "PAUSED");
-        await fulfill(route, {});
-        return;
-      }
-    }
-    await route.fulfill({ status: 404, body: "{}" });
-  });
+      await route.fulfill({ status: 404, body: "{}" });
+    },
+  );
 }
 
 test("keeps the Programs route while presenting an English loyalty-card empty state", async ({

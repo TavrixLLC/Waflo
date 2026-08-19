@@ -147,6 +147,17 @@ async function buildIsolatedFrontends() {
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
   if ((await runCommand(api.command, api.args, isolatedBuildEnvironment)) !== 0)
     throw new Error("Isolated API build failed.");
+  // Workspace packages export compiled JavaScript to Next. Build the shared
+  // interface registry before its browser consumers so an isolated run never
+  // uses stale locale metadata from dist/.
+  const i18n = pnpmCommand(["--filter", "@waflo/i18n", "build"]);
+  if ((await runCommand(i18n.command, i18n.args, isolatedBuildEnvironment)) !== 0)
+    throw new Error("Isolated i18n build failed.");
+  // The shared control system is also consumed through its compiled export.
+  // Rebuild it here so browser assertions exercise the current UI primitive.
+  const ui = pnpmCommand(["--filter", "@waflo/ui", "build"]);
+  if ((await runCommand(ui.command, ui.args, isolatedBuildEnvironment)) !== 0)
+    throw new Error("Isolated UI build failed.");
   const build = pnpmCommand(["--filter", "@waflo/merchant-dashboard", "build"]);
   if ((await runCommand(build.command, build.args, isolatedBuildEnvironment)) !== 0)
     throw new Error("Isolated Merchant build failed.");
@@ -375,6 +386,10 @@ try {
     // origin on that same site so the strict CSRF cookie is sent; the API
     // readiness probe remains explicitly loopback-bound.
     process.env.NEXT_PUBLIC_API_URL = `http://localhost:${apiPort}`;
+    // Customer Web server components call the API directly. Keep that internal
+    // hop on this run's isolated loopback port while browser requests retain
+    // the same-site localhost origin above for cookie and CSRF coverage.
+    process.env.API_INTERNAL_URL = `http://127.0.0.1:${apiPort}`;
     process.env.WAFLO_API_DB_PROBE_FILE = path.join(runtimeLogDirectory, "api-db-probe.json");
     commands[0].port = apiPort;
     commands[0].readyUrl = `http://127.0.0.1:${apiPort}/ready`;

@@ -370,7 +370,9 @@ test("shows complete customer access controls and truthful optional Wallet avail
   await expect(page.getByRole("heading", { name: "How customers join" })).toBeVisible();
   await expect(page.getByLabel("Card link name")).toHaveValue("gallery-coffee-rewards");
   await expect(page.getByRole("button", { name: "Download enrollment QR as PNG" })).toBeVisible();
-  await expect(page.getByLabel("Primary customer language")).toHaveValue("en");
+  const primaryCustomerLanguage = page.getByLabel("Primary customer language");
+  await expect(primaryCustomerLanguage).toHaveAttribute("role", "combobox");
+  await expect(primaryCustomerLanguage).toHaveValue("English");
   await expect(page.getByLabel("Show separate marketing consent")).toBeChecked();
 
   await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();

@@ -81,6 +81,9 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain("PORT: String(command.port)");
     expect(playwrightRunner).not.toContain("await prepareStandaloneFrontends()");
+    expect(playwrightRunner).toContain('"@waflo/i18n", "build"');
+    expect(playwrightRunner).toContain('"@waflo/ui", "build"');
+    expect(playwrightRunner).toContain("process.env.API_INTERNAL_URL");
   });
 
   it("keeps browser fixtures bound to every isolated loopback API port", () => {
