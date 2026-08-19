@@ -238,7 +238,7 @@ export function ProgramCardBuilder({
     setDraft(next);
     setSaveState("saved");
     initializedRef.current = true;
-  }, [ar, organizationId, programId]);
+  }, [interfaceLocale, organizationId, programId]);
 
   useEffect(() => {
     const key = `${organizationId}:${programId}:${locale}`;

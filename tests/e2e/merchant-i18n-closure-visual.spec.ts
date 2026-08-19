@@ -62,7 +62,7 @@ test("captures the centralized loyalty interface catalog across all four locales
     ["ku-badini", "i18n-builder-desktop-ku-badini.png"],
     ["ku-sorani", "i18n-builder-desktop-ku-sorani.png"],
   ] as const) {
-    await page.goto("/" + locale + "/dashboard/programs/created-program-id/edit");
+    await page.goto(`/${locale}/dashboard/programs/created-program-id/edit`);
     await expect(page.locator(".builder-shell")).toBeVisible();
     if (locale.startsWith("ku-")) await assertKurdishStudioSurface(page, ".builder-shell");
     await capture(page, name);
@@ -74,7 +74,7 @@ test("captures the centralized loyalty interface catalog across all four locales
     ["ku-badini", "i18n-studio-desktop-ku-badini.png"],
     ["ku-sorani", "i18n-studio-desktop-ku-sorani.png"],
   ] as const) {
-    await page.goto("/" + locale + "/dashboard/programs/created-program-id");
+    await page.goto(`/${locale}/dashboard/programs/created-program-id`);
     await expect(page.locator(".studio-shell")).toBeVisible();
     if (locale.startsWith("ku-")) await assertKurdishStudioSurface(page, ".studio-shell");
     await capture(page, name);
@@ -82,21 +82,21 @@ test("captures the centralized loyalty interface catalog across all four locales
 
   await page.setViewportSize({ width: 390, height: 844 });
   for (const locale of ["ku-badini", "ku-sorani"] as const) {
-    await page.goto("/" + locale + "/dashboard/programs/created-program-id/edit");
+    await page.goto(`/${locale}/dashboard/programs/created-program-id/edit`);
     await expect(page.locator(".builder-shell")).toBeVisible();
     await assertKurdishStudioSurface(page, ".builder-shell");
     await capture(page, `i18n-builder-mobile-${locale}.png`);
 
-    await page.goto("/" + locale + "/dashboard/programs/created-program-id");
+    await page.goto(`/${locale}/dashboard/programs/created-program-id`);
     await expect(page.locator(".studio-shell")).toBeVisible();
     await assertKurdishStudioSurface(page, ".studio-shell");
     await capture(page, `i18n-studio-mobile-${locale}.png`);
 
-    await page.goto("/" + locale + "/dashboard/programs");
+    await page.goto(`/${locale}/dashboard/programs`);
     await expect(page.locator(".programs-home")).toBeVisible();
     await capture(page, `i18n-programs-${locale}.png`);
 
-    await page.goto("/" + locale + "/dashboard/programs/new");
+    await page.goto(`/${locale}/dashboard/programs/new`);
     await expect(page.locator(".template-gallery")).toBeVisible();
     await capture(page, `i18n-template-gallery-${locale}.png`);
   }
