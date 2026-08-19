@@ -277,11 +277,7 @@ function TemplatePreviewDialog({
           disabled={selectionPending}
           onClick={() => onUseTemplate(template, { blank })}
         >
-          {selectionPending
-            ? copy.preparingDraft
-            : blank
-              ? copy.blankName
-              : copy.useThisTemplate}
+          {selectionPending ? copy.preparingDraft : blank ? copy.blankName : copy.useThisTemplate}
           <ArrowRight className="template-gallery__logical-arrow" size={16} aria-hidden="true" />
         </Button>
       </div>

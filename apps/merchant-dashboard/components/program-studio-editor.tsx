@@ -57,7 +57,16 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import {
   type MerchantProgramLifecycleAction,
@@ -204,7 +213,8 @@ function lifecycleActionDescription(
       ? ui.theNewChangesWillBePublishedButTheCardWillRemainPausedResumeItSeparatelyWhenYouAreReadyToMakeItLive
       : ui.theReviewedChangesBecomeLiveForCustomersAfterAutomaticValidationIsComplete;
   }
-  if (action === "abandon") return ui.theEditableDraftWillBeMarkedAbandonedThePublishedCardRemainsLive;
+  if (action === "abandon")
+    return ui.theEditableDraftWillBeMarkedAbandonedThePublishedCardRemainsLive;
   if (action === "archive" && !options.hasPublishedVersion) {
     return ui.archiveThisUnpublishedCardSafelyItsCurrentDraftAndChangeHistoryWillBePreservedForRestoration;
   }
@@ -216,7 +226,10 @@ function lifecycleActionDescription(
   if (action === "archive") return ui.archiveDescription;
   return ui.restoreDescription;
 }
-function publicationStateGuidance(status: ProgramOperationalStatus, interfaceLocale: InterfaceLocale) {
+function publicationStateGuidance(
+  status: ProgramOperationalStatus,
+  interfaceLocale: InterfaceLocale,
+) {
   const ui = studioUi(interfaceLocale);
   if (status === "ARCHIVED") {
     return {
@@ -609,8 +622,10 @@ function ProgramStudioEditorContent({
         typeof caught.details?.programStatus === "string"
       )
         setError(
-          publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, interfaceLocale)
-            .message,
+          publicationStateGuidance(
+            caught.details.programStatus as ProgramOperationalStatus,
+            interfaceLocale,
+          ).message,
         );
       else setError(studioOperationError("lifecycle", interfaceLocale));
     } finally {
@@ -665,9 +680,7 @@ function ProgramStudioEditorContent({
           <CircleAlert aria-hidden="true" />
           <div>
             <strong>{ui.loyaltyStudioCouldNotOpen}</strong>
-            <p>
-              {ui.noCardDataWasChangedReturnToLoyaltyCardsAndCheckTheCardOrYourAccess}
-            </p>
+            <p>{ui.noCardDataWasChangedReturnToLoyaltyCardsAndCheckTheCardOrYourAccess}</p>
           </div>
           <Button variant="secondary" onClick={onClose}>
             <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
@@ -689,9 +702,7 @@ function ProgramStudioEditorContent({
         <Card className="studio-live-only" role="status">
           <CircleAlert size={32} aria-hidden="true" />
           <h1>{ui.thisCardHasNoSavedSetup}</h1>
-          <p>
-            {ui.returnToLoyaltyCardsAndChooseAnotherCard}
-          </p>
+          <p>{ui.returnToLoyaltyCardsAndChooseAnotherCard}</p>
         </Card>
       </div>
     );
@@ -785,11 +796,7 @@ function ProgramStudioEditorContent({
         <ChevronRight className="studio-logical-next" size={18} aria-hidden="true" />
       </div>
 
-      <StudioJourney
-        activeArea={activeArea}
-        presentation={lifecycleState}
-        onArea={selectArea}
-      />
+      <StudioJourney activeArea={activeArea} presentation={lifecycleState} onArea={selectArea} />
 
       {error ? <Alert tone="danger" title={error} /> : null}
       {lifecycleNotice ? (
@@ -797,9 +804,7 @@ function ProgramStudioEditorContent({
           {lifecycleNotice.message}
           {lifecycleNotice.action === "archive" ? (
             <div className="studio-lifecycle-notice__actions">
-              <Button onClick={onClose}>
-                {ui.returnToLoyaltyCards}
-              </Button>
+              <Button onClick={onClose}>{ui.returnToLoyaltyCards}</Button>
               <Button
                 variant="secondary"
                 onClick={() => {
@@ -846,9 +851,7 @@ function ProgramStudioEditorContent({
         <main className="studio-editor-panel" id="studio-area-content" tabIndex={-1}>
           <div className="studio-panel-heading">
             <div>
-              <span className="dashboard-card__label">
-                {ui.manageLoyaltyCard}
-              </span>
+              <span className="dashboard-card__label">{ui.manageLoyaltyCard}</span>
               <h2>{areaCopy.label}</h2>
               <p>{areaCopy.description}</p>
             </div>
@@ -1049,10 +1052,7 @@ function StudioJourney({
 
   return (
     <div className="studio-journey-shell">
-      <section
-        className="studio-journey"
-        aria-label={ui.cardLaunchJourney}
-      >
+      <section className="studio-journey" aria-label={ui.cardLaunchJourney}>
         {presentation.journeyStages.map((stage, index) => (
           <button
             ref={(node) => {
@@ -1102,9 +1102,7 @@ function StudioJourney({
           </button>
         ))}
       </section>
-      <small className="studio-journey-hint">
-        {ui.swipeOrUseTheArrowKeysToSeeEveryStage}
-      </small>
+      <small className="studio-journey-hint">{ui.swipeOrUseTheArrowKeysToSeeEveryStage}</small>
     </div>
   );
 }
@@ -1626,11 +1624,11 @@ function StudioOverview({
                     dateStyle: "medium",
                   }).format(new Date(changedAt))}
                 </time>
-              ) : ui.saved}
+              ) : (
+                ui.saved
+              )}
             </strong>
-            <p>
-              {displayVersion.changeSummary || (ui.noChangeSummary)}
-            </p>
+            <p>{displayVersion.changeSummary || ui.noChangeSummary}</p>
           </div>
           <button type="button" onClick={() => onArea("settings")}>
             {ui.history}
@@ -1658,9 +1656,7 @@ function StudioOverview({
           <Eye size={19} aria-hidden="true" />
           <span>
             <strong>{ui.designAndCustomerContent}</strong>
-            <small>
-              {ui.managedInTheCardBuilderAndShownHereAsAReadOnlySummary}
-            </small>
+            <small>{ui.managedInTheCardBuilderAndShownHereAsAReadOnlySummary}</small>
           </span>
         </div>
         {editable ? (
@@ -1752,9 +1748,7 @@ function StudioPreview({
       <div className="studio-preview-header">
         <div>
           <span className="dashboard-card__label">
-            {showingPublishedVersion
-              ? publishedState.eyebrow
-              : ui.customerView}
+            {showingPublishedVersion ? publishedState.eyebrow : ui.customerView}
           </span>
           <h3>{profileLabel}</h3>
         </div>
@@ -1791,11 +1785,7 @@ function StudioPreview({
         </div>
       ) : null}
       {activeSource === "draft" ? (
-        <div
-          className="studio-preview-tabs"
-          role="tablist"
-          aria-label={ui.previewSurfaces}
-        >
+        <div className="studio-preview-tabs" role="tablist" aria-label={ui.previewSurfaces}>
           {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
             <button
               type="button"
@@ -1840,11 +1830,7 @@ function StudioPreview({
             ) : (
               <CircleAlert aria-hidden="true" />
             )}
-            <span>
-              {loading
-                ? ui.loadingPreview
-                : ui.previewUnavailable}
-            </span>
+            <span>{loading ? ui.loadingPreview : ui.previewUnavailable}</span>
           </div>
         )}
       </div>
@@ -1999,9 +1985,7 @@ function HowItWorksPanel({
           <Eye size={19} aria-hidden="true" />
           <span>
             <strong>{ui.rewardNameAndCardAppearance}</strong>
-            <small>
-              {ui.editTheseInTheCardBuilderSoEveryFieldHasOneClearHome}
-            </small>
+            <small>{ui.editTheseInTheCardBuilderSoEveryFieldHasOneClearHome}</small>
           </span>
         </div>
         {editable ? (
@@ -2016,9 +2000,7 @@ function HowItWorksPanel({
           <summary>
             <span>
               <Settings2 size={19} aria-hidden="true" />
-              <strong>
-                {ui.advancedEarningAndRedemptionRules}
-              </strong>
+              <strong>{ui.advancedEarningAndRedemptionRules}</strong>
             </span>
             <ChevronDown size={18} aria-hidden="true" />
           </summary>
@@ -2078,9 +2060,7 @@ function RewardOperationsPanel({
               <Badge
                 tone={reward.thresholdStampCount === draft.requiredStampCount ? "success" : "brand"}
               >
-                {reward.thresholdStampCount === draft.requiredStampCount
-                  ? ui.final
-                  : ui.milestone}
+                {reward.thresholdStampCount === draft.requiredStampCount ? ui.final : ui.milestone}
               </Badge>
             </div>
             <div className="studio-form-grid">
@@ -2156,13 +2136,9 @@ function CustomersLocationsPanel({
       <section className="studio-locations-block">
         <div className="studio-section-heading">
           <div>
-            <span className="dashboard-card__label">
-              {ui.whereItWorks}
-            </span>
+            <span className="dashboard-card__label">{ui.whereItWorks}</span>
             <h3>{ui.participatingLocations}</h3>
-            <p>
-              {ui.customersCanEarnStampsAtTheActiveLocationsSelectedHere}
-            </p>
+            <p>{ui.customersCanEarnStampsAtTheActiveLocationsSelectedHere}</p>
           </div>
           <Badge tone={participating.length ? "success" : "warning"}>
             {interpolateStudioCopy(ui.selectedCount, participating.length)}
@@ -2206,9 +2182,7 @@ function CreateUpdatePrompt({
       <Plus size={24} aria-hidden="true" />
       <div>
         <h3>{ui.createAnUpdateToMakeChanges}</h3>
-        <p>
-          {ui.theLiveCardStaysUnchangedUntilYouReviewAndPublishTheUpdate}
-        </p>
+        <p>{ui.theLiveCardStaysUnchangedUntilYouReviewAndPublishTheUpdate}</p>
       </div>
       <Button onClick={onCreate}>{ui.createUpdate}</Button>
     </Card>
@@ -2244,9 +2218,7 @@ function StudioSettingsPanel({
           <div>
             <span className="dashboard-card__label">{ui.fieldOwnership}</span>
             <h3>{ui.designAndCustomerContent}</h3>
-            <p>
-              {ui.theseValuesAreSummarizedHereTheCardBuilderIsTheirOnlyEditor}
-            </p>
+            <p>{ui.theseValuesAreSummarizedHereTheCardBuilderIsTheirOnlyEditor}</p>
           </div>
           {editable ? (
             <Button variant="secondary" onClick={onEditDesign}>
@@ -2311,9 +2283,7 @@ function StudioSettingsPanel({
         <CreateUpdatePrompt onCreate={onCreateDraft} compact />
       ) : null}
 
-      {history ?? (
-        <Alert tone="info" title={ui.noChangeHistoryYet} />
-      )}
+      {history ?? <Alert tone="info" title={ui.noChangeHistoryYet} />}
     </div>
   );
 }
@@ -2387,12 +2357,7 @@ function StudioSectionContent({
           </Select>
         </FormField>
         {plan === "STARTER" ? (
-          <Alert
-            tone="info"
-            title={
-              ui.starterRestrictionsAreEnforcedByTheApi
-            }
-          >
+          <Alert tone="info" title={ui.starterRestrictionsAreEnforcedByTheApi}>
             {ui.proMultipleRewardsMilestonesPathAndRingRequireGrowthOrScale}
           </Alert>
         ) : null}
@@ -2443,7 +2408,9 @@ function StudioSectionContent({
           />
         </FormField>
         <Alert tone="info" title={ui.operationsPolicy}>
-          {ui.operationLimitsDailyCapsPurchasePolicyAndResetBehaviorFollowTheSetupEachCustomerJoinedUnder}
+          {
+            ui.operationLimitsDailyCapsPurchasePolicyAndResetBehaviorFollowTheSetupEachCustomerJoinedUnder
+          }
         </Alert>
       </div>
     );
@@ -2464,9 +2431,7 @@ function StudioSectionContent({
   if (section === "locations")
     return (
       <div className="studio-section-content">
-        <p>
-          {ui.selectOneOrMoreActiveLocationsExplicitly}
-        </p>
+        <p>{ui.selectOneOrMoreActiveLocationsExplicitly}</p>
         <div className="studio-check-grid">
           {locations.map((location) => (
             <Checkbox
@@ -2611,8 +2576,7 @@ function StudioSectionContent({
       </div>
     );
 
-  if (section === "layout")
-    return <LayoutEditor draft={draft} update={update} plan={plan} />;
+  if (section === "layout") return <LayoutEditor draft={draft} update={update} plan={plan} />;
 
   if (["customer-preview", "apple-preview", "google-preview"].includes(section))
     return <PreviewSettings section={section} draft={draft} update={update} />;
@@ -2668,34 +2632,61 @@ function TranslationEditor({
     <div className="studio-section-content" dir={rtl ? "rtl" : "ltr"}>
       <div className="studio-form-grid">
         <FormField label={ui.cardName}>
-          <TextInput value={value.programName} onChange={(event) => update("programName", event.target.value)} />
+          <TextInput
+            value={value.programName}
+            onChange={(event) => update("programName", event.target.value)}
+          />
         </FormField>
         <FormField label={ui.rewardSummary}>
-          <TextInput value={value.rewardSummary} onChange={(event) => update("rewardSummary", event.target.value)} />
+          <TextInput
+            value={value.rewardSummary}
+            onChange={(event) => update("rewardSummary", event.target.value)}
+          />
         </FormField>
       </div>
       <FormField label={ui.shortDescription}>
-        <TextInput value={value.shortDescription} onChange={(event) => update("shortDescription", event.target.value)} />
+        <TextInput
+          value={value.shortDescription}
+          onChange={(event) => update("shortDescription", event.target.value)}
+        />
       </FormField>
       <FormField label={ui.fullDescription}>
-        <TextArea value={value.fullDescription ?? ""} onChange={(event) => update("fullDescription", event.target.value)} />
+        <TextArea
+          value={value.fullDescription ?? ""}
+          onChange={(event) => update("fullDescription", event.target.value)}
+        />
       </FormField>
       <FormField label={ui.joinInstructions}>
-        <TextArea value={value.joinInstructions ?? ""} onChange={(event) => update("joinInstructions", event.target.value)} />
+        <TextArea
+          value={value.joinInstructions ?? ""}
+          onChange={(event) => update("joinInstructions", event.target.value)}
+        />
       </FormField>
       <FormField label={ui.termsAndConditions}>
-        <TextArea value={value.termsAndConditions} onChange={(event) => update("termsAndConditions", event.target.value)} />
+        <TextArea
+          value={value.termsAndConditions}
+          onChange={(event) => update("termsAndConditions", event.target.value)}
+        />
       </FormField>
       <div className="studio-form-grid">
         <FormField label={ui.completionMessage}>
-          <TextInput value={value.completionMessage} onChange={(event) => update("completionMessage", event.target.value)} />
+          <TextInput
+            value={value.completionMessage}
+            onChange={(event) => update("completionMessage", event.target.value)}
+          />
         </FormField>
         <FormField label={ui.rewardUnlockedMessage}>
-          <TextInput value={value.rewardUnlockedMessage} onChange={(event) => update("rewardUnlockedMessage", event.target.value)} />
+          <TextInput
+            value={value.rewardUnlockedMessage}
+            onChange={(event) => update("rewardUnlockedMessage", event.target.value)}
+          />
         </FormField>
       </div>
       <FormField label={ui.pausedMessage}>
-        <TextInput value={value.pausedMessage ?? ""} onChange={(event) => update("pausedMessage", event.target.value)} />
+        <TextInput
+          value={value.pausedMessage ?? ""}
+          onChange={(event) => update("pausedMessage", event.target.value)}
+        />
       </FormField>
     </div>
   );
@@ -2754,9 +2745,7 @@ function RewardsEditor({
       <div className="studio-section-heading">
         <div>
           <h3>{ui.descriptiveRewardsAndMilestones}</h3>
-          <p>
-            {ui.thresholdsMustBeUniqueAndOneFinalRewardMustSitAtTheGoal}
-          </p>
+          <p>{ui.thresholdsMustBeUniqueAndOneFinalRewardMustSitAtTheGoal}</p>
         </div>
         <Button
           variant="secondary"
@@ -2979,7 +2968,9 @@ function OperationsPolicyEditor({
   return (
     <div className="studio-section-content">
       <Alert tone="info" title={ui.howRuleChangesTakeEffect}>
-        {ui.newRulesApplyToCustomersWhoJoinAfterThisUpdateIsPublishedExistingCustomersKeepTheirCurrentTerms}
+        {
+          ui.newRulesApplyToCustomersWhoJoinAfterThisUpdateIsPublishedExistingCustomersKeepTheirCurrentTerms
+        }
       </Alert>
       <FormField label={ui.businessTimezone} required>
         <SearchableSelect
@@ -3121,18 +3112,11 @@ function OperationsPolicyEditor({
             managerOverrideAllowed: event.target.checked,
           }))
         }
-        label={
-          ui.allowManagerExceptionsWithARequiredReason
-        }
+        label={ui.allowManagerExceptionsWithARequiredReason}
       />
       <FormField label={ui.afterTheFinalRewardIsUsed}>
-        <TextInput
-          value={ui.startANewStampCycle}
-          disabled
-        />
-        <span className="field-help">
-          {ui.stampsStayFilledUntilTheRewardIsSuccessfullyUsed}
-        </span>
+        <TextInput value={ui.startANewStampCycle} disabled />
+        <span className="field-help">{ui.stampsStayFilledUntilTheRewardIsSuccessfullyUsed}</span>
       </FormField>
     </div>
   );
@@ -3169,9 +3153,7 @@ function LayoutEditor({
               }
             >
               <strong>{layout}</strong>
-              <small>
-                {locked ? "Growth required" : ui.responsiveLayout}
-              </small>
+              <small>{locked ? "Growth required" : ui.responsiveLayout}</small>
             </button>
           );
         })}
@@ -3382,9 +3364,7 @@ function PreviewSettings({
     <div className="studio-section-content">
       <CapabilitySummary platform="CUSTOMER_WEB" />
       <h3>{ui.customerFacingCardComposition}</h3>
-      <p>
-        {ui.thePreviewIncludesIdentityLocalizedContentStampsRewardAndTerms}
-      </p>
+      <p>{ui.thePreviewIncludesIdentityLocalizedContentStampsRewardAndTerms}</p>
       <FormField label={ui.cardStyle}>
         <Select
           value={draft.visualTheme.customerWebVariant}
@@ -3447,15 +3427,10 @@ function ValidationPanel({
       <div className="studio-section-heading">
         <div>
           <h3>{ui.automatedChecks}</h3>
-          <p>
-            {ui.checkTheCardLocationsAndPreviewSurfacesBeforeLaunch}
-          </p>
+          <p>{ui.checkTheCardLocationsAndPreviewSurfacesBeforeLaunch}</p>
         </div>
         <Button onClick={onValidate} loading={validating}>
-          <ShieldCheck size={16} />{" "}
-          {result
-            ? ui.runAutomatedChecksAgain
-            : ui.runAutomatedChecks}
+          <ShieldCheck size={16} /> {result ? ui.runAutomatedChecksAgain : ui.runAutomatedChecks}
         </Button>
       </div>
       {!result ? (
@@ -3555,7 +3530,7 @@ function VersionHistory({
               <span aria-hidden="true" />
               <div>
                 <strong>{auditEventLabel(event, interfaceLocale)}</strong>
-                <small>{event.actor?.displayName ?? (ui.system)}</small>
+                <small>{event.actor?.displayName ?? ui.system}</small>
               </div>
               <time dateTime={event.createdAt}>
                 {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
@@ -3571,9 +3546,7 @@ function VersionHistory({
           {ui.publicationAndLifecycleActionsWillAppearHere}
         </p>
       )}
-      <h4 className="studio-version-history__subheading">
-        {ui.savedSetupSnapshots}
-      </h4>
+      <h4 className="studio-version-history__subheading">{ui.savedSetupSnapshots}</h4>
       {versions.map((version) => {
         const timestamp =
           version.publishedAt ??
@@ -3590,15 +3563,12 @@ function VersionHistory({
             : version.status === "SUPERSEDED"
               ? ui.previousPublication
               : ui.unpublished;
-        const saveLabel =
-          version.status === "ABANDONED" ? (ui.abandoned) : ui.saved;
+        const saveLabel = version.status === "ABANDONED" ? ui.abandoned : ui.saved;
         return (
           <button type="button" key={version.id} onClick={() => onView(version.id)}>
             <span className="studio-version-history__title">
               <small>{ui.changeTitle}</small>
-              <strong>
-                {version.changeSummary || (ui.savedCardUpdate)}
-              </strong>
+              <strong>{version.changeSummary || ui.savedCardUpdate}</strong>
             </span>
             <dl className="studio-version-history__meta">
               <div>
@@ -3631,7 +3601,9 @@ function VersionHistory({
                         timeStyle: "short",
                       }).format(new Date(timestamp))}
                     </time>
-                  ) : ui.unavailable}
+                  ) : (
+                    ui.unavailable
+                  )}
                 </dd>
               </div>
             </dl>
@@ -3659,21 +3631,13 @@ function HistoricalModal({
 }) {
   const ui = useStudioUi();
   return (
-    <Modal
-      open={Boolean(version)}
-      title={ui.savedChangeDetails}
-      onClose={onClose}
-    >
+    <Modal open={Boolean(version)} title={ui.savedChangeDetails} onClose={onClose}>
       {version ? (
         <div className="historical-version">
           <div className="studio-section-heading">
-            <h3>{version.changeSummary || (ui.savedCardUpdate)}</h3>
+            <h3>{version.changeSummary || ui.savedCardUpdate}</h3>
             <Badge tone={version.status === "PUBLISHED" ? "success" : "neutral"}>
-              {version.status === "PUBLISHED"
-                ? ar
-                  ? "منشور"
-                  : "Published"
-                : ui.saved}
+              {version.status === "PUBLISHED" ? (ar ? "منشور" : "Published") : ui.saved}
             </Badge>
           </div>
           <dl className="quick-review-list">
@@ -3718,22 +3682,13 @@ function ConflictModal({
 }) {
   const ui = useStudioUi();
   return (
-    <Modal
-      open={Boolean(conflict)}
-      title={ui.editedElsewhere}
-      onClose={() => undefined}
-    >
+    <Modal open={Boolean(conflict)} title={ui.editedElsewhere} onClose={() => undefined}>
       {conflict ? (
         <div className="studio-conflict">
-          <Alert
-            tone="warning"
-            title={ui.yourLocalEditsArePreserved}
-          >
+          <Alert tone="warning" title={ui.yourLocalEditsArePreserved}>
             {ui.aNewerChangeWasSavedElsewhereWafloWillNotOverwriteEitherSetOfEditsAutomatically}
           </Alert>
-          <p>
-            {ui.keepACopyOfYourEditsThenLoadTheLatestCardOrDeliberatelyReapplyYours}
-          </p>
+          <p>{ui.keepACopyOfYourEditsThenLoadTheLatestCardOrDeliberatelyReapplyYours}</p>
           <details>
             <summary>{ui.showYourEditBackup}</summary>
             <pre>{JSON.stringify(apiDraft(conflict.localDraft), null, 2)}</pre>

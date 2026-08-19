@@ -517,7 +517,7 @@ export function ProgramCardBuilder({
       ? templateDisplayName(selectedTemplate, locale)
       : builderText(interfaceLocale).ui.selectedDesign;
   const selectedMeta = selectedTemplate
-    ? `${templateCategoryLabel(templateCategory(selectedTemplate), locale)} · ${blank ? (builderText(interfaceLocale).ui.neutral) : templateStyleLabel(selectedTemplate, locale)}`
+    ? `${templateCategoryLabel(templateCategory(selectedTemplate), locale)} · ${blank ? builderText(interfaceLocale).ui.neutral : templateStyleLabel(selectedTemplate, locale)}`
     : text.selectedDesign;
   const accentStyle = {
     "--builder-live-accent": draft.visualTheme.accentColor,
@@ -641,18 +641,10 @@ export function ProgramCardBuilder({
             </div>
 
             {activeSection === "basics" ? (
-              <BasicsSection
-                draft={draft}
-                update={update}
-                interfaceLocale={interfaceLocale}
-              />
+              <BasicsSection draft={draft} update={update} interfaceLocale={interfaceLocale} />
             ) : null}
             {activeSection === "reward" ? (
-              <RewardSection
-                draft={draft}
-                update={update}
-                interfaceLocale={interfaceLocale}
-              />
+              <RewardSection draft={draft} update={update} interfaceLocale={interfaceLocale} />
             ) : null}
             {activeSection === "languages" ? (
               <LanguagesSection
@@ -773,10 +765,10 @@ export function ProgramCardBuilder({
         closeLabel={text.closePreview}
         className="builder-preview-modal"
       >
-          <PreviewPanel
-            idPrefix="builder-mobile"
-            draft={draft}
-            interfaceLocale={interfaceLocale}
+        <PreviewPanel
+          idPrefix="builder-mobile"
+          draft={draft}
+          interfaceLocale={interfaceLocale}
           previewLocale={previewLocale}
           setPreviewLocale={setPreviewLocale}
           profile={profile}
@@ -856,10 +848,7 @@ function BasicsSection({
           }
         />
       </FormField>
-      <FormField
-        label={builderText(interfaceLocale).ui.howDoesACustomerEarnAStamp}
-        required
-      >
+      <FormField label={builderText(interfaceLocale).ui.howDoesACustomerEarnAStamp} required>
         <TextInput
           dir="auto"
           name="builder-earning-rule"
@@ -924,15 +913,10 @@ function RewardSection({
         <strong>
           {draft.requiredStampCount} {builderText(interfaceLocale).ui.stamps}
         </strong>
-        <small>
-          {builderText(interfaceLocale).ui.rewardReadinessAppearsOutsideTheStampGrid}
-        </small>
+        <small>{builderText(interfaceLocale).ui.rewardReadinessAppearsOutsideTheStampGrid}</small>
       </div>
       <div className="builder-form-grid">
-        <FormField
-          label={builderText(interfaceLocale).ui.whatDoesTheCustomerGet}
-          required
-        >
+        <FormField label={builderText(interfaceLocale).ui.whatDoesTheCustomerGet} required>
           <TextInput
             dir="ltr"
             lang="en"
@@ -975,14 +959,21 @@ function RewardSection({
               }
             >
               <option value="FREE_ITEM">{builderText(interfaceLocale).ui.freeItem}</option>
-              <option value="DISCOUNT_DESCRIPTION">{builderText(interfaceLocale).ui.discount}</option>
-              <option value="TEXT_REWARD">{builderText(interfaceLocale).ui.descriptiveReward}</option>
+              <option value="DISCOUNT_DESCRIPTION">
+                {builderText(interfaceLocale).ui.discount}
+              </option>
+              <option value="TEXT_REWARD">
+                {builderText(interfaceLocale).ui.descriptiveReward}
+              </option>
               <option value="CUSTOM">{builderText(interfaceLocale).ui.custom}</option>
             </Select>
           </FormField>
         </div>
         <p className="builder-studio-ownership-note">
-          {builderText(interfaceLocale).ui.rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete}
+          {
+            builderText(interfaceLocale).ui
+              .rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete
+          }
         </p>
       </details>
     </div>
@@ -1196,7 +1187,10 @@ function LocationsSection({
     <div className="builder-form-stack">
       {active.length === 1 ? (
         <Alert tone="info" title={builderText(interfaceLocale).ui.yourActiveLocationIsIncluded}>
-          {builderText(interfaceLocale).ui.youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness}
+          {
+            builderText(interfaceLocale).ui
+              .youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness
+          }
         </Alert>
       ) : null}
       {!active.length ? (
@@ -1226,10 +1220,16 @@ function LocationsSection({
                 />
                 <span>
                   <strong>{location.name}</strong>
-                  <small>{isActive ? (builderText(interfaceLocale).ui.active) : builderText(interfaceLocale).ui.inactive}</small>
+                  <small>
+                    {isActive
+                      ? builderText(interfaceLocale).ui.active
+                      : builderText(interfaceLocale).ui.inactive}
+                  </small>
                 </span>
                 <span className="builder-location__capabilities">
-                  <Badge tone={selected ? "success" : "neutral"}>{builderText(interfaceLocale).ui.earning}</Badge>
+                  <Badge tone={selected ? "success" : "neutral"}>
+                    {builderText(interfaceLocale).ui.earning}
+                  </Badge>
                   <Badge tone={selected ? "success" : "neutral"}>
                     {builderText(interfaceLocale).ui.redemption}
                   </Badge>
@@ -1397,9 +1397,7 @@ function AdvancedSection({
       {milestones.length > 0 ? (
         <Alert
           tone="warning"
-          title={
-            builderText(interfaceLocale).ui.removeMilestonesBeforeReturningToQuickMode
-          }
+          title={builderText(interfaceLocale).ui.removeMilestonesBeforeReturningToQuickMode}
         />
       ) : null}
       {draft.editingMode === "pro" ? (
@@ -1408,7 +1406,10 @@ function AdvancedSection({
             <div>
               <h3>{builderText(interfaceLocale).ui.milestoneRewards}</h3>
               <p>
-                {builderText(interfaceLocale).ui.milestonesRemainOutsideTheStampGridAndNeverReplaceASlot}
+                {
+                  builderText(interfaceLocale).ui
+                    .milestonesRemainOutsideTheStampGridAndNeverReplaceASlot
+                }
               </p>
             </div>
             <Button type="button" variant="secondary" onClick={addMilestone}>
@@ -1481,7 +1482,10 @@ function AdvancedSection({
       <div className="builder-studio-ownership-note" role="note">
         <strong>{builderText(interfaceLocale).ui.operationalRulesLiveInStudio}</strong>
         <p>
-          {builderText(interfaceLocale).ui.afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks}
+          {
+            builderText(interfaceLocale).ui
+              .afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks
+          }
         </p>
       </div>
       <details className="builder-disclosure">
@@ -1525,9 +1529,7 @@ function AdvancedSection({
           <div className="builder-subheading">
             <div>
               <h3>{builderText(interfaceLocale).ui.customerCard}</h3>
-              <p>
-                {builderText(interfaceLocale).ui.chooseTheRicherWebCardCompositionCustomersSee}
-              </p>
+              <p>{builderText(interfaceLocale).ui.chooseTheRicherWebCardCompositionCustomersSee}</p>
             </div>
           </div>
           <FormField label={builderText(interfaceLocale).ui.customerCardLayout}>
@@ -1647,11 +1649,11 @@ function AdvancedSection({
           }
         />
       </FormField>
-      <Alert
-        tone="info"
-        title={builderText(interfaceLocale).ui.finalRewardBehaviorIsFixed}
-      >
-        {builderText(interfaceLocale).ui.atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds}
+      <Alert tone="info" title={builderText(interfaceLocale).ui.finalRewardBehaviorIsFixed}>
+        {
+          builderText(interfaceLocale).ui
+            .atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds
+        }
       </Alert>
     </div>
   );

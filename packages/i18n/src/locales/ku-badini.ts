@@ -159,7 +159,10 @@ export const kuBadini: InterfaceMessages = {
         languageSummary: "ناڤەڕۆکا کڕیار ب ئینگلیزی و عەرەبی",
         locationSummary: "شوێنێن چالاک یێن بەشدار",
         appearanceSummary: "قالب، ڕەنگ، لۆگۆ و وێنێن مۆران",
-        ui: { ...loyaltyInterfaceCopy.kuBadini.builder.ui, ...loyaltyProgramsExtractedCopy.kuBadini.builder },
+        ui: {
+          ...loyaltyInterfaceCopy.kuBadini.builder.ui,
+          ...loyaltyProgramsExtractedCopy.kuBadini.builder,
+        },
       },
       programs: {
         ...loyaltyProgramsExtractedCopy.kuBadini.programs,

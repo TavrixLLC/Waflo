@@ -329,7 +329,12 @@ export const ar: InterfaceMessages = {
           paused: "متوقفة مؤقتاً",
           archived: "مؤرشفة",
         },
-        ui: { ...studioInterfaceCopy.ar.ui, ...studioEditorInterfaceCopy.ar, ...studioEditorRuntimeCopy.ar, ...studioContentExtractedCopy.ar },
+        ui: {
+          ...studioInterfaceCopy.ar.ui,
+          ...studioEditorInterfaceCopy.ar,
+          ...studioEditorRuntimeCopy.ar,
+          ...studioContentExtractedCopy.ar,
+        },
       },
     },
   },

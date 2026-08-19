@@ -341,7 +341,12 @@ export const en = {
           paused: "Paused",
           archived: "Archived",
         },
-        ui: { ...studioInterfaceCopy.en.ui, ...studioEditorInterfaceCopy.en, ...studioEditorRuntimeCopy.en, ...studioContentExtractedCopy.en },
+        ui: {
+          ...studioInterfaceCopy.en.ui,
+          ...studioEditorInterfaceCopy.en,
+          ...studioEditorRuntimeCopy.en,
+          ...studioContentExtractedCopy.en,
+        },
       },
     },
   },

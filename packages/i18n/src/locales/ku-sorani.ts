@@ -161,7 +161,10 @@ export const kuSorani: InterfaceMessages = {
         languageSummary: "ناوەڕۆکی کڕیار بە ئینگلیزی و عەرەبی",
         locationSummary: "شوێنە چالاکە بەشدارەکان",
         appearanceSummary: "قاڵب، ڕەنگ، لۆگۆ و هونەری مۆرەکان",
-        ui: { ...loyaltyInterfaceCopy.kuSorani.builder.ui, ...loyaltyProgramsExtractedCopy.kuSorani.builder },
+        ui: {
+          ...loyaltyInterfaceCopy.kuSorani.builder.ui,
+          ...loyaltyProgramsExtractedCopy.kuSorani.builder,
+        },
       },
       programs: {
         ...loyaltyProgramsExtractedCopy.kuSorani.programs,

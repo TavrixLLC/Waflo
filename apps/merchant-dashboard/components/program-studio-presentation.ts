@@ -298,7 +298,8 @@ function guidanceFor(
   if (key === "suspended")
     return {
       title: studioText(locale).ui.yourLoyaltyCardIsTemporarilyUnavailable,
-      description: studioText(locale).ui.reviewTheCurrentStatusThisScreenDoesNotCreateANewLifecycleTransition,
+      description:
+        studioText(locale).ui.reviewTheCurrentStatusThisScreenDoesNotCreateANewLifecycleTransition,
       tone: "danger",
     };
   if (key === "ready")
@@ -385,7 +386,10 @@ function launchRequirements(
           ? studioText(input.locale).ui.planLimitExceeded.replace("{planName}", input.planName)
           : checksComplete
             ? studioText(input.locale).ui.planChecksPassed.replace("{planName}", input.planName)
-            : studioText(input.locale).ui.planLimitsCheckedAutomatically.replace("{planName}", input.planName),
+            : studioText(input.locale).ui.planLimitsCheckedAutomatically.replace(
+                "{planName}",
+                input.planName,
+              ),
         complete: !planBlocked && checksComplete,
         blocking: planBlocked,
         action: planBlocked
@@ -570,13 +574,15 @@ export function deriveStudioLifecyclePresentation(
       ? launchReady
         ? studioText(locale).ui.theUpdateHasPassedItsChecksTheCurrentLiveCardIsUnchanged
         : (firstBlocker?.description ??
-          (studioText(locale).ui.completeTheUpdateChecksBeforePublishingTheCurrentLiveCardIsUnchanged))
+          studioText(locale).ui
+            .completeTheUpdateChecksBeforePublishingTheCurrentLiveCardIsUnchanged)
       : lifecycleOwnsLaunch
         ? lifecycle.description
         : launchReady
-          ? studioText(locale).ui.everyRequiredStepIsCompleteConfirmPublishingToMakeItAvailableToCustomers
+          ? studioText(locale).ui
+              .everyRequiredStepIsCompleteConfirmPublishingToMakeItAvailableToCustomers
           : (firstBlocker?.description ??
-            (studioText(locale).ui.completeTheRequiredStepsBeforePublishing));
+            studioText(locale).ui.completeTheRequiredStepsBeforePublishing);
 
   return {
     ...lifecycle,
@@ -584,7 +590,9 @@ export function deriveStudioLifecyclePresentation(
       updateInProgress && key === "live"
         ? {
             title: studioText(locale).ui.liveUnpublishedChanges,
-            description: studioText(locale).ui.yourCurrentCardIsLiveYouHaveUnpublishedChangesReviewAndPublishThemWhenYouAreReadyCustomersContinueToSeeTheCurrentLiveVersion,
+            description:
+              studioText(locale).ui
+                .yourCurrentCardIsLiveYouHaveUnpublishedChangesReviewAndPublishThemWhenYouAreReadyCustomersContinueToSeeTheCurrentLiveVersion,
             tone: "brand",
           }
         : guidanceFor(key, input.designComplete, input.locationsReady, locale),
