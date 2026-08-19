@@ -40,6 +40,10 @@ const releaseEntrypoint = readFileSync(
   "utf8",
 );
 const playwrightRunner = readFileSync(resolve(root, "scripts/run-playwright.mjs"), "utf8");
+const templateGalleryFixture = readFileSync(
+  resolve(root, "tests/e2e/template-gallery-fixtures.ts"),
+  "utf8",
+);
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
 const localReleaseShaVariable = "$" + "{release_sha}";
@@ -77,6 +81,11 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain("PORT: String(command.port)");
     expect(playwrightRunner).not.toContain("await prepareStandaloneFrontends()");
+  });
+
+  it("keeps browser fixtures bound to every isolated loopback API port", () => {
+    expect(templateGalleryFixture).toContain("localhost|127\\.0\\.0\\.1");
+    expect(templateGalleryFixture).toContain("isolatedLoopbackApiRoute");
   });
 
   it("keeps every service private at the host boundary", () => {

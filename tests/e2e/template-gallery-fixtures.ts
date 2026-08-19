@@ -13,6 +13,9 @@ import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
 export const templateGalleryOrganizationId = "merchant-template-gallery-fixture";
 
+const isolatedLoopbackApiRoute =
+  /https?:\/\/(?:(?:localhost|127\.0\.0\.1)(?::\d+)?|api\.waflo\.app)\/v1\/.*/u;
+
 function artworkPreviewUrl(content: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(content, "utf8").toString("base64")}`;
 }
@@ -502,7 +505,9 @@ export async function mockTemplateGalleryApi(
     };
   }
 
-  await page.route(/https?:\/\/(?:localhost:4000|api\.waflo\.app)\/v1\/.*/u, async (route) => {
+  // Isolated browser runs allocate a fresh loopback API port. Keep this fixture
+  // origin-scoped so mocked Studio pages cannot fall through to real auth.
+  await page.route(isolatedLoopbackApiRoute, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
