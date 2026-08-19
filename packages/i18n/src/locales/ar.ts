@@ -258,7 +258,7 @@ export const ar: InterfaceMessages = {
         closePreview: "إغلاق معاينة القالب",
         previewOnly: "للمعاينة فقط",
         contextRecommended: "قوالب مقترحة",
-        contextAll: "كل القوالب",
+        contextAll: "جميع القوالب",
       },
       studio: {
         operationErrors: {
