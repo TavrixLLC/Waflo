@@ -82,7 +82,7 @@ describe("merchant loyalty-card presentation boundary", () => {
       "utf8",
     );
 
-    expect(dashboardSource).toContain('programs: "Loyalty Cards"');
+    expect(dashboardSource).toContain("messages[interfaceLocale].merchant.shell");
     expect(listSource).toContain(`/v1/organizations/\${organizationId}/programs?limit=20`);
     expect(listSource).toContain(
       `/v1/organizations/\${organizationId}/programs/\${lifecycleConfirmation.programId}/\${lifecycleConfirmation.action}`,
