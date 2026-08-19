@@ -2,7 +2,12 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
-import { directionForInterface, formatDate, type InterfaceLocale } from "@waflo/i18n";
+import {
+  directionForInterface,
+  formatDate,
+  localeRegistry,
+  type InterfaceLocale,
+} from "@waflo/i18n";
 import { Alert, AlertDialog, Badge, Button, DropdownMenu, PageHeader } from "@waflo/ui";
 import { Archive, ArrowRight, Ellipsis, Layers3, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -50,111 +55,12 @@ const planCodes = {
 
 type CardLifecycleAction = Exclude<MerchantProgramLifecycleAction, "publish" | "abandon">;
 
-const loyaltyCardCopy = {
-  en: {
-    eyebrow: "LOYALTY CARDS",
-    title: "Loyalty cards",
-    description:
-      "Create and manage customer-ready loyalty cards for the web, with Wallet availability when supported.",
-    create: "Create loyalty card",
-    summaryLabel: "Loyalty card summary",
-    yourCards: "Your cards",
-    plan: "Plan",
-    cardSingular: "loyalty card",
-    cardPlural: "loyalty cards",
-    activeCardSingular: "active card included",
-    activeCardPlural: "active cards included",
-    noFixedLimit: "No fixed active-card limit",
-    currentPlan: "Current workspace plan",
-    emptyTitle: "Create your first loyalty card",
-    emptyDescription:
-      "Choose a design, customize your reward, review the customer experience, and publish when you’re ready.",
-    loading: "Loading loyalty cards…",
-    loadError:
-      "Loyalty cards could not be loaded. Your cards were not changed. Reload and try again.",
-    libraryTitle: "Your loyalty cards",
-    libraryDescription: "Open a card to review its setup or prepare the next update.",
-    visualSummary: "Design available in Studio",
-    updated: "Updated",
-    published: "Published",
-    open: "Open card",
-    loadMore: "Load more loyalty cards",
-    loadMoreAssets: "Load more design assets",
-    draftOnly: "Finish setup, review the customer experience, then publish this card.",
-    unpublishedChanges: "Unpublished changes are safely separate from the live card.",
-    live: "Live for customers. Create a draft when you’re ready to make changes.",
-    paused: "This card is paused and is not currently live for customers.",
-    archived: "This card is archived. Its setup and history remain preserved.",
-    suspended: "This card is suspended. Contact support before publishing changes.",
-    scheduled: "This card is scheduled, but scheduled publishing is not available yet.",
-    readyToTest: "The setup is validated and ready to publish.",
-    testing: "The setup is validated and ready to publish.",
-    moreActions: "More actions",
-    confirm: "Confirm",
-    cancel: "Cancel",
-    working: "Working…",
-    lifecycleError:
-      "The loyalty card status could not be updated. Its current status is unchanged. Try again.",
-    lifecycleDescriptions: {
-      pause: "The card will stop being live for customers until you resume it.",
-      resume: "The card will become live for customers again.",
-      archive: "The card will be archived while its setup and version history remain preserved.",
-      restore: "The card will return to its preserved state.",
-    },
-  },
-  ar: {
-    eyebrow: "بطاقات الولاء",
-    title: "بطاقات الولاء",
-    description:
-      "أنشئ وأدر بطاقات ولاء جاهزة للعملاء على الويب، مع توفر المحافظ الرقمية عند دعمها.",
-    create: "إنشاء بطاقة ولاء",
-    summaryLabel: "ملخص بطاقات الولاء",
-    yourCards: "بطاقاتك",
-    plan: "الخطة",
-    cardSingular: "بطاقة ولاء",
-    cardPlural: "بطاقات ولاء",
-    activeCardSingular: "بطاقة نشطة مشمولة",
-    activeCardPlural: "بطاقات نشطة مشمولة",
-    noFixedLimit: "بلا حد ثابت للبطاقات النشطة",
-    currentPlan: "خطة مساحة العمل الحالية",
-    emptyTitle: "أنشئ أول بطاقة ولاء",
-    emptyDescription:
-      "اختر تصميمًا، وخصّص المكافأة، وراجع التجربة، ثم انشر البطاقة عندما تصبح جاهزة.",
-    loading: "جارٍ تحميل بطاقات الولاء…",
-    loadError: "تعذر تحميل بطاقات الولاء. لم تتغير بطاقاتك. أعد تحميل الصفحة وحاول مرة أخرى.",
-    libraryTitle: "بطاقات الولاء الخاصة بك",
-    libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو تحضير التحديث التالي.",
-    visualSummary: "التصميم متاح في الاستوديو",
-    updated: "آخر تحديث",
-    published: "نُشرت في",
-    open: "فتح البطاقة",
-    loadMore: "تحميل المزيد من بطاقات الولاء",
-    loadMoreAssets: "تحميل المزيد من أصول التصميم",
-    draftOnly: "أكمل الإعداد، وراجع التجربة، ثم انشر هذه البطاقة.",
-    unpublishedChanges: "التغييرات غير المنشورة منفصلة بأمان عن البطاقة المباشرة.",
-    live: "البطاقة مباشرة للعملاء. أنشئ مسودة عندما تصبح مستعدًا لإجراء تغييرات.",
-    paused: "هذه البطاقة متوقفة مؤقتًا وليست مباشرة للعملاء حاليًا.",
-    archived: "هذه البطاقة مؤرشفة، مع الاحتفاظ بإعداداتها وسجلها.",
-    suspended: "هذه البطاقة موقوفة. تواصل مع الدعم قبل نشر أي تغييرات.",
-    scheduled: "هذه البطاقة مجدولة، لكن النشر المجدول غير متاح بعد.",
-    readyToTest: "تم التحقق من الإعدادات وأصبحت جاهزة للنشر.",
-    testing: "تم التحقق من الإعدادات وأصبحت جاهزة للنشر.",
-    moreActions: "المزيد من الإجراءات",
-    confirm: "تأكيد",
-    cancel: "إلغاء",
-    working: "جارٍ التنفيذ…",
-    lifecycleError: "تعذر تحديث حالة بطاقة الولاء. حالتها الحالية لم تتغير. حاول مرة أخرى.",
-    lifecycleDescriptions: {
-      pause: "ستتوقف البطاقة عن الظهور مباشرة للعملاء حتى تستأنفها.",
-      resume: "ستعود البطاقة مباشرة للعملاء.",
-      archive: "ستُؤرشف البطاقة مع الاحتفاظ بإعداداتها وسجل إصداراتها.",
-      restore: "ستعود البطاقة إلى حالتها المحفوظة.",
-    },
-  },
-} as const;
+function programsText(locale: InterfaceLocale) {
+  return localeRegistry[locale].messages.merchant.loyalty.programs;
+}
 
-function builderFlowError(error: unknown, locale: Locale): string {
-  const ar = locale === "ar";
+function builderFlowError(error: unknown, interfaceLocale: InterfaceLocale): string {
+  const ar = interfaceLocale === "ar";
   if (!(error instanceof ApiClientError))
     return ar
       ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
@@ -180,8 +86,8 @@ function builderFlowError(error: unknown, locale: Locale): string {
     : "Waflo could not start this loyalty card. Try again.";
 }
 
-function cardStateDescription(program: ProgramItem, locale: Locale): string {
-  const copy = loyaltyCardCopy[locale];
+function cardStateDescription(program: ProgramItem, interfaceLocale: InterfaceLocale): string {
+  const copy = programsText(interfaceLocale);
 
   if (program.status === "SUSPENDED") return copy.suspended;
   if (program.status === "ARCHIVED") return copy.archived;
@@ -229,7 +135,7 @@ export function ProgramsScreen({
   const router = useRouter();
   const interfaceDirection = directionForInterface(interfaceLocale);
   const ar = locale === "ar";
-  const copy = loyaltyCardCopy[locale];
+  const copy = programsText(interfaceLocale);
   const organizationId = membership.organization.id;
   const [programs, setPrograms] = useState<ProgramItem[]>([]);
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
@@ -421,7 +327,7 @@ export function ProgramsScreen({
       await load();
       router.push(`/${interfaceLocale}/dashboard/programs/${created.id}/edit`);
     } catch (caught) {
-      setBuilderError(builderFlowError(caught, locale));
+      setBuilderError(builderFlowError(caught, interfaceLocale));
     } finally {
       builderRequestRef.current = false;
       setCreatingBuilder(false);
@@ -653,7 +559,7 @@ export function ProgramsScreen({
           </div>
           <div className="program-list">
             {programs.map((program) => {
-              const status = merchantProgramStatus(program.status, locale);
+              const status = merchantProgramStatus(program.status, interfaceLocale);
               const lifecycleActions = cardLifecycleActions(program.status);
               const relevantDate =
                 program.currentDraftVersion || !program.currentPublishedVersion
@@ -684,7 +590,7 @@ export function ProgramsScreen({
                       <h3>{program.internalName}</h3>
                       <Badge tone={status.tone}>{status.label}</Badge>
                     </div>
-                    <p>{cardStateDescription(program, locale)}</p>
+                    <p>{cardStateDescription(program, interfaceLocale)}</p>
                     <div className="program-list__footer">
                       {relevantDate ? (
                         <span>
@@ -727,7 +633,7 @@ export function ProgramsScreen({
                               {action === "restore" ? (
                                 <RotateCcw size={17} aria-hidden="true" />
                               ) : null}
-                              {merchantProgramLifecycleLabel(action, locale)}
+                              {merchantProgramLifecycleLabel(action, interfaceLocale)}
                             </button>
                           ))}
                         </DropdownMenu>
@@ -774,7 +680,7 @@ export function ProgramsScreen({
         open={Boolean(lifecycleConfirmation)}
         title={
           lifecycleConfirmation
-            ? merchantProgramLifecycleLabel(lifecycleConfirmation.action, locale)
+            ? merchantProgramLifecycleLabel(lifecycleConfirmation.action, interfaceLocale)
             : ""
         }
         description={

@@ -2,7 +2,12 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale } from "@waflo/contracts";
-import { directionFor, directionForInterface, type InterfaceLocale } from "@waflo/i18n";
+import {
+  directionFor,
+  directionForInterface,
+  localeRegistry,
+  type InterfaceLocale,
+} from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -113,193 +118,22 @@ const sectionIcons = {
   review: Check,
 } as const;
 
-const copy = {
-  en: {
-    eyebrow: "CREATE LOYALTY CARD",
-    title: "Customize your loyalty card",
-    description: "Shape the reward, language, and look while the real card stays in view.",
-    back: "Loyalty cards",
-    saveDraft: "Save draft",
-    review: "Review card",
-    continueStudio: "Continue to Studio",
-    opening: "Opening your card builder…",
-    openingError:
-      "Card Builder could not open. No loyalty card data was changed. Return to Loyalty cards and try again.",
-    selectedDesign: "Starting design",
-    changeDesign: "Change design",
-    changeTitle: "Change this design?",
-    changeDescription:
-      "Changing the design updates colors, stamp artwork, card layout, and supported wallet branding. Your card name, reward, languages, goal, locations, and advanced policy stay unchanged.",
-    chooseDesign: "Choose another design",
-    keepDesign: "Keep this design",
-    quick: "Quick Mode",
-    pro: "Pro Mode",
-    preview: "Live preview",
-    previewOnly: "Preview only",
-    previewPending: "Save your changes to prepare this preview.",
-    previewPreparing: "Preparing your preview…",
-    previewLoading: "Updating the real card preview…",
-    previewError: "The preview could not be refreshed.",
-    walletPreviewNote:
-      "Visual preview only. Wallet availability and production readiness are shown separately in Studio.",
-    retry: "Retry",
-    customer: "Customer",
-    previewProgress: "Preview stamp progress",
-    openPreview: "Preview",
-    closePreview: "Close live preview",
-    advanced: "Advanced settings",
-    advancedDescription: "Operational policy and Pro controls stay out of the Quick path.",
-    sections: {
-      basics: "Basics",
-      reward: "Reward",
-      languages: "Languages",
-      locations: "Locations",
-      appearance: "Appearance",
-      review: "Review & validate",
-    },
-    sectionDescriptions: {
-      basics: "Name the card and confirm how customers earn stamps.",
-      reward: "Describe what the customer receives at the goal.",
-      languages: "Keep English and Arabic together and see what remains.",
-      locations: "Choose where earning and redemption are available.",
-      appearance: "Keep the template identity, then adjust supported visual controls.",
-      review: "Resolve readiness issues before publishing.",
-    },
-    saved: "Saved",
-    unsaved: "Unsaved changes",
-    saving: "Saving…",
-    failed: "Save failed",
-    conflict: "Conflict detected",
-    conflictTitle: "This draft changed in another editor",
-    conflictDescription:
-      "Your local edits are still here. Reload the saved draft or reapply your edits to the latest saved version.",
-    reloadSaved: "Reload saved draft",
-    keepEdits: "Keep my edits",
-    genericError: "Waflo could not update this loyalty card. Try again.",
-    planError: "Your current plan cannot create another active loyalty card.",
-    locationError: "Add an active location before creating a loyalty card.",
-    templateError: "That starting design is no longer available. Choose another design.",
-    featureError: "This control requires Growth or Scale.",
-    assetError: "One of the selected design assets is unavailable. Choose it again.",
-    ready: "Draft ready",
-    needsAttention: "Needs attention",
-    fieldsRemaining: "fields remaining",
-    complete: "Complete",
-    checksNotRun: "Readiness checks have not run yet.",
-    runChecks: "Run readiness checks",
-    runAgain: "Run again",
-    checksPassed: "Readiness checks passed",
-    issuesFound: "Readiness issues found",
-    fix: "Fix",
-    noPublish: "Publishing remains in Studio. Saving this draft does not change your billing.",
-    starterAdvanced: "Pro Mode requires Growth or Scale. Quick Mode remains fully available.",
-    mode: "Editing mode",
-    basicsSummary: "Card name, earning rule, and goal",
-    rewardSummary: "Final reward at the stamp goal",
-    languageSummary: "English and Arabic customer content",
-    locationSummary: "Participating active locations",
-    appearanceSummary: "Template, colors, logo, and stamp artwork",
-  },
-  ar: {
-    eyebrow: "إنشاء بطاقة ولاء",
-    title: "خصّص بطاقة الولاء",
-    description: "عدّل المكافأة واللغات والمظهر مع إبقاء البطاقة الحقيقية أمامك.",
-    back: "بطاقات الولاء",
-    saveDraft: "حفظ المسودة",
-    review: "مراجعة البطاقة",
-    continueStudio: "المتابعة إلى الاستوديو",
-    opening: "جارٍ فتح محرر البطاقة…",
-    openingError:
-      "تعذر فتح محرر البطاقة. لم تتغير أي بيانات لبطاقة الولاء. ارجع إلى بطاقات الولاء وحاول مرة أخرى.",
-    selectedDesign: "التصميم الأساسي",
-    changeDesign: "تغيير التصميم",
-    changeTitle: "هل تريد تغيير التصميم؟",
-    changeDescription:
-      "يحدّث التصميم الجديد الألوان ورسومات الأختام وتخطيط البطاقة وعناصر هوية المحافظ المدعومة. سيبقى اسم البطاقة والمكافأة واللغات والهدف والمواقع والسياسات المتقدمة كما هي.",
-    chooseDesign: "اختيار تصميم آخر",
-    keepDesign: "الاحتفاظ بهذا التصميم",
-    quick: "الوضع السريع",
-    pro: "الوضع الاحترافي",
-    preview: "معاينة مباشرة",
-    previewOnly: "للمعاينة فقط",
-    previewPending: "احفظ تغييراتك لإعداد هذه المعاينة.",
-    previewPreparing: "جارٍ إعداد المعاينة…",
-    previewLoading: "جارٍ تحديث المعاينة الحقيقية للبطاقة…",
-    previewError: "تعذر تحديث المعاينة.",
-    walletPreviewNote:
-      "معاينة مرئية فقط. يظهر توفر المحافظ الرقمية وجاهزيتها للإنتاج بشكل منفصل في الاستوديو.",
-    retry: "إعادة المحاولة",
-    customer: "العميل",
-    previewProgress: "تقدم الأختام في المعاينة",
-    openPreview: "معاينة",
-    closePreview: "إغلاق المعاينة المباشرة",
-    advanced: "الإعدادات المتقدمة",
-    advancedDescription: "تبقى سياسات التشغيل وأدوات Pro خارج المسار السريع.",
-    sections: {
-      basics: "الأساسيات",
-      reward: "المكافأة",
-      languages: "اللغات",
-      locations: "المواقع",
-      appearance: "المظهر",
-      review: "المراجعة والتحقق",
-    },
-    sectionDescriptions: {
-      basics: "سمّ البطاقة وأكّد طريقة حصول العملاء على الأختام.",
-      reward: "وضّح ما الذي سيحصل عليه العميل عند بلوغ الهدف.",
-      languages: "أدر الإنجليزية والعربية معًا واعرف ما تبقى.",
-      locations: "اختر المواقع التي يتاح فيها الكسب والاسترداد.",
-      appearance: "حافظ على هوية القالب وعدّل عناصر المظهر المدعومة.",
-      review: "عالج ملاحظات الجاهزية قبل النشر.",
-    },
-    saved: "تم الحفظ",
-    unsaved: "تغييرات غير محفوظة",
-    saving: "جارٍ الحفظ…",
-    failed: "فشل الحفظ",
-    conflict: "تم اكتشاف تعارض",
-    conflictTitle: "تغيّرت هذه المسودة في محرر آخر",
-    conflictDescription:
-      "ما زالت تعديلاتك المحلية محفوظة هنا. حمّل المسودة المحفوظة أو أعد تطبيق تعديلاتك على أحدث نسخة محفوظة.",
-    reloadSaved: "تحميل المسودة المحفوظة",
-    keepEdits: "الاحتفاظ بتعديلاتي",
-    genericError: "تعذر تحديث بطاقة الولاء. حاول مرة أخرى.",
-    planError: "لا تسمح خطتك الحالية بإنشاء بطاقة ولاء نشطة إضافية.",
-    locationError: "أضف موقعًا نشطًا قبل إنشاء بطاقة ولاء.",
-    templateError: "لم يعد هذا التصميم متاحًا. اختر تصميمًا آخر.",
-    featureError: "يتطلب هذا الخيار خطة Growth أو Scale.",
-    assetError: "أحد أصول التصميم المحددة غير متاح. اختره مرة أخرى.",
-    ready: "المسودة جاهزة",
-    needsAttention: "تحتاج إلى مراجعة",
-    fieldsRemaining: "حقول متبقية",
-    complete: "مكتمل",
-    checksNotRun: "لم تُشغّل فحوصات الجاهزية بعد.",
-    runChecks: "تشغيل فحوصات الجاهزية",
-    runAgain: "إعادة الفحص",
-    checksPassed: "اجتازت البطاقة فحوصات الجاهزية",
-    issuesFound: "توجد ملاحظات على الجاهزية",
-    fix: "إصلاح",
-    noPublish: "يبقى النشر داخل الاستوديو. حفظ المسودة لا يبدأ الفترة التجريبية.",
-    starterAdvanced: "يتطلب وضع Pro خطة Growth أو Scale. يبقى الوضع السريع متاحًا بالكامل.",
-    mode: "وضع التحرير",
-    basicsSummary: "اسم البطاقة وقاعدة الكسب والهدف",
-    rewardSummary: "المكافأة النهائية عند هدف الأختام",
-    languageSummary: "محتوى العميل بالإنجليزية والعربية",
-    locationSummary: "المواقع النشطة المشاركة",
-    appearanceSummary: "القالب والألوان والشعار ورسومات الأختام",
-  },
-} as const;
-
 function previewSource(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function previewLabel(profile: PreviewProfile, locale: Locale): string {
-  if (profile === "APPLE_WALLET") return "Apple Wallet";
-  if (profile === "GOOGLE_WALLET") return "Google Wallet";
-  return copy[locale].customer;
+function builderText(locale: InterfaceLocale | Locale) {
+  return localeRegistry[locale].messages.merchant.loyalty.builder;
 }
 
-function merchantError(error: unknown, locale: Locale): string {
-  const text = copy[locale];
+function previewLabel(profile: PreviewProfile, locale: InterfaceLocale | Locale): string {
+  if (profile === "APPLE_WALLET") return "Apple Wallet";
+  if (profile === "GOOGLE_WALLET") return "Google Wallet";
+  return builderText(locale).customer;
+}
+
+function merchantError(error: unknown, locale: InterfaceLocale | Locale): string {
+  const text = builderText(locale);
   if (!(error instanceof ApiClientError)) return text.genericError;
   if (error.code === "PROGRAM_LIMIT_REACHED") return text.planError;
   if (error.code === "PROGRAM_LOCATION_INVALID") return text.locationError;
@@ -357,7 +191,7 @@ export function ProgramCardBuilder({
 }) {
   const interfaceDirection = directionForInterface(interfaceLocale);
   const ar = locale === "ar";
-  const text = copy[locale];
+  const text = builderText(interfaceLocale);
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [saveState, setSaveState] = useState<BuilderSaveState>("saved");
@@ -466,7 +300,7 @@ export function ProgramCardBuilder({
             setSaveState("conflict");
           } else {
             setSaveState("failed");
-            setError(merchantError(caught, locale));
+            setError(merchantError(caught, interfaceLocale));
           }
           return false;
         });
@@ -481,7 +315,7 @@ export function ProgramCardBuilder({
         return saveLatest();
       return result;
     },
-    [conflict, locale, organizationId, programId],
+    [conflict, interfaceLocale, organizationId, programId],
   );
 
   useEffect(() => {
@@ -543,13 +377,13 @@ export function ProgramCardBuilder({
         return result;
       } catch (caught) {
         setPreviewError(true);
-        setError(merchantError(caught, locale));
+        setError(merchantError(caught, interfaceLocale));
         return null;
       } finally {
         setPreviewLoading(false);
       }
     },
-    [locale, organizationId, previewKey, previewLocale, programId, progress],
+    [interfaceLocale, organizationId, previewKey, previewLocale, programId, progress],
   );
 
   useEffect(() => {
@@ -580,7 +414,7 @@ export function ProgramCardBuilder({
       setValidation(result);
       await load();
     } catch (caught) {
-      setError(merchantError(caught, locale));
+      setError(merchantError(caught, interfaceLocale));
     } finally {
       setWorking(false);
     }
@@ -823,6 +657,7 @@ export function ProgramCardBuilder({
                 draft={draft}
                 update={update}
                 locale={locale}
+                interfaceLocale={interfaceLocale}
                 language={language}
                 setLanguage={(next) => {
                   setLanguage(next);
@@ -838,6 +673,7 @@ export function ProgramCardBuilder({
                 update={update}
                 locations={locations}
                 locale={locale}
+                interfaceLocale={interfaceLocale}
               />
             ) : null}
             {activeSection === "appearance" ? (
@@ -851,7 +687,13 @@ export function ProgramCardBuilder({
               />
             ) : null}
             {activeSection === "advanced" ? (
-              <AdvancedSection draft={draft} update={update} plan={plan} locale={locale} />
+              <AdvancedSection
+                draft={draft}
+                update={update}
+                plan={plan}
+                locale={locale}
+                interfaceLocale={interfaceLocale}
+              />
             ) : null}
             {activeSection === "review" ? (
               <ReviewSection
@@ -860,6 +702,7 @@ export function ProgramCardBuilder({
                 canRunChecks={localReadiness.ready}
                 working={working}
                 locale={locale}
+                interfaceLocale={interfaceLocale}
                 onSection={setActiveSection}
                 onRunChecks={() => void runChecks()}
               />
@@ -872,6 +715,7 @@ export function ProgramCardBuilder({
             idPrefix="builder-desktop"
             draft={draft}
             locale={locale}
+            interfaceLocale={interfaceLocale}
             previewLocale={previewLocale}
             setPreviewLocale={setPreviewLocale}
             profile={profile}
@@ -935,6 +779,7 @@ export function ProgramCardBuilder({
           idPrefix="builder-mobile"
           draft={draft}
           locale={locale}
+          interfaceLocale={interfaceLocale}
           previewLocale={previewLocale}
           setPreviewLocale={setPreviewLocale}
           profile={profile}
@@ -1159,6 +1004,7 @@ function LanguagesSection({
   draft,
   update,
   locale,
+  interfaceLocale,
   language,
   setLanguage,
   enCompleteness,
@@ -1167,12 +1013,14 @@ function LanguagesSection({
   draft: ProgramDraftInput;
   update: DraftUpdate;
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   language: "en" | "ar";
   setLanguage: (language: "en" | "ar") => void;
   enCompleteness: ReturnType<typeof languageCompleteness>;
   arCompleteness: ReturnType<typeof languageCompleteness>;
 }) {
   const ar = locale === "ar";
+  const text = builderText(interfaceLocale);
   const value = draft.translations[language];
   const completeness = language === "en" ? enCompleteness : arCompleteness;
   const contentDirection = directionFor(language);
@@ -1233,9 +1081,7 @@ function LanguagesSection({
             >
               <span>{item === "en" ? "English" : "العربية"}</span>
               <small>
-                {status.complete
-                  ? copy[locale].complete
-                  : `${status.missing} ${copy[locale].fieldsRemaining}`}
+                {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
               </small>
             </button>
           );
@@ -1352,13 +1198,16 @@ function LocationsSection({
   update,
   locations,
   locale,
+  interfaceLocale,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   locations: LocationItem[];
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
 }) {
   const ar = locale === "ar";
+  const text = builderText(interfaceLocale);
   const active = locations.filter((location) => location.status.toUpperCase() === "ACTIVE");
   return (
     <div className="builder-form-stack">
@@ -1370,7 +1219,7 @@ function LocationsSection({
         </Alert>
       ) : null}
       {!active.length ? (
-        <Alert tone="warning" title={copy[locale].locationError} />
+        <Alert tone="warning" title={text.locationError} />
       ) : (
         <div className="builder-location-list">
           {locations.map((location) => {
@@ -1508,13 +1357,16 @@ function AdvancedSection({
   update,
   plan,
   locale,
+  interfaceLocale,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   plan: "STARTER" | "GROWTH" | "SCALE";
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
 }) {
   const ar = locale === "ar";
+  const text = builderText(interfaceLocale);
   const planCode = plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
   const proAvailable = planCatalog[planCode].features.advancedCustomization;
   const milestones = draft.rewards.filter(
@@ -1545,8 +1397,8 @@ function AdvancedSection({
   }
   return (
     <div className="builder-form-stack">
-      {!proAvailable ? <Alert tone="info" title={copy[locale].starterAdvanced} /> : null}
-      <FormField label={copy[locale].mode}>
+      {!proAvailable ? <Alert tone="info" title={text.starterAdvanced} /> : null}
+      <FormField label={text.mode}>
         <Select
           value={draft.editingMode}
           onChange={(event) => {
@@ -1556,9 +1408,9 @@ function AdvancedSection({
             update((current) => ({ ...current, editingMode: mode }));
           }}
         >
-          <option value="quick">{copy[locale].quick}</option>
+          <option value="quick">{text.quick}</option>
           <option value="pro" disabled={!proAvailable}>
-            {copy[locale].pro}
+            {text.pro}
           </option>
         </Select>
       </FormField>
@@ -1849,6 +1701,7 @@ function ReviewSection({
   canRunChecks,
   working,
   locale,
+  interfaceLocale,
   onSection,
   onRunChecks,
 }: {
@@ -1857,11 +1710,12 @@ function ReviewSection({
   canRunChecks: boolean;
   working: boolean;
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   onSection: (section: BuilderSection) => void;
   onRunChecks: () => void;
 }) {
   const ar = locale === "ar";
-  const text = copy[locale];
+  const text = builderText(interfaceLocale);
   const items: Array<{
     section: Exclude<BuilderSection, "advanced" | "review">;
     label: string;
@@ -1983,6 +1837,7 @@ function PreviewPanel({
   idPrefix,
   draft,
   locale,
+  interfaceLocale,
   previewLocale,
   setPreviewLocale,
   profile,
@@ -1998,6 +1853,7 @@ function PreviewPanel({
   idPrefix: string;
   draft: ProgramDraftInput;
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   previewLocale: "EN" | "AR";
   setPreviewLocale: Dispatch<SetStateAction<"EN" | "AR">>;
   profile: PreviewProfile;
@@ -2010,7 +1866,7 @@ function PreviewPanel({
   stale: boolean;
   onRetry: () => void;
 }) {
-  const text = copy[locale];
+  const text = builderText(interfaceLocale);
   return (
     <div className="builder-preview-panel">
       <div className="builder-preview-header">
@@ -2053,7 +1909,7 @@ function PreviewPanel({
               if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
               event.preventDefault();
               const current = previewProfiles.indexOf(profile);
-              const logicalForward = locale === "ar" ? -1 : 1;
+              const logicalForward = directionForInterface(interfaceLocale) === "rtl" ? -1 : 1;
               const next =
                 event.key === "Home"
                   ? 0
@@ -2071,7 +1927,7 @@ function PreviewPanel({
               );
             }}
           >
-            {previewLabel(item, locale)}
+            {previewLabel(item, interfaceLocale)}
           </button>
         ))}
       </div>
@@ -2088,7 +1944,7 @@ function PreviewPanel({
         {preview ? (
           <Image
             src={previewSource(preview.svg)}
-            alt={`${previewLabel(profile, locale)} ${text.previewOnly}`}
+            alt={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
             width={preview.width}
             height={preview.height}
             unoptimized
@@ -2101,7 +1957,7 @@ function PreviewPanel({
               size={20}
               aria-hidden="true"
             />
-            <strong>{previewLabel(profile, locale)}</strong>
+            <strong>{previewLabel(profile, interfaceLocale)}</strong>
             <span>{previewLoading ? text.previewPreparing : text.previewPending}</span>
           </div>
         )}

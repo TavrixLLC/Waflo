@@ -94,7 +94,7 @@ import {
   deriveStudioLifecyclePresentation,
   type StudioArea,
   type StudioLifecyclePresentation,
-  studioAreaCopy,
+  studioArea,
   studioAreaForPublicationError,
   studioAreaForValidationPath,
   studioAreas,
@@ -164,8 +164,8 @@ function hasPublishedCustomerPreviewPayload(version: ProgramVersion): boolean {
   return Boolean(version.translations.length && version.stampRule && version.visualTheme);
 }
 
-function lifecycleActionLabel(action: LifecycleAction, ar: boolean): string {
-  return merchantProgramLifecycleLabel(action, ar ? "ar" : "en");
+function lifecycleActionLabel(action: LifecycleAction, interfaceLocale: InterfaceLocale): string {
+  return merchantProgramLifecycleLabel(action, interfaceLocale);
 }
 
 function lifecycleActionDescription(
@@ -405,8 +405,8 @@ export function ProgramStudioEditor({
   }
 
   useEffect(() => {
-    void load().catch(() => setError(studioOperationError("load", ar ? "ar" : "en")));
-  }, [ar, load]);
+    void load().catch(() => setError(studioOperationError("load", interfaceLocale)));
+  }, [interfaceLocale, load]);
 
   useEffect(() => {
     if (!draft || !initializedRef.current || conflict) return;
@@ -441,12 +441,12 @@ export function ProgramStudioEditor({
           setSaveState("conflict");
         } else {
           setSaveState("failed");
-          setError(studioOperationError("save", ar ? "ar" : "en"));
+          setError(studioOperationError("save", interfaceLocale));
         }
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [ar, conflict, draft, organizationId, programId, revision]);
+  }, [conflict, draft, interfaceLocale, organizationId, programId, revision]);
 
   const generatePreviews = useCallback(async () => {
     if (!draft) return;
@@ -466,9 +466,9 @@ export function ProgramStudioEditor({
     } catch {
       setPreviews({});
       setPreviewLoadState("unavailable");
-      setError(studioOperationError("preview", ar ? "ar" : "en"));
+      setError(studioOperationError("preview", interfaceLocale));
     }
-  }, [ar, draft, organizationId, programId, progress, saveState]);
+  }, [ar, draft, interfaceLocale, organizationId, programId, progress, saveState]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void generatePreviews(), 250);
@@ -519,7 +519,7 @@ export function ProgramStudioEditor({
       setValidation(result);
       await load();
     } catch {
-      setError(studioOperationError("readiness", ar ? "ar" : "en"));
+      setError(studioOperationError("readiness", interfaceLocale));
     } finally {
       setWorking(false);
     }
@@ -637,7 +637,7 @@ export function ProgramStudioEditor({
           publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, ar)
             .message,
         );
-      else setError(studioOperationError("lifecycle", ar ? "ar" : "en"));
+      else setError(studioOperationError("lifecycle", interfaceLocale));
     } finally {
       setWorking(false);
     }
@@ -654,7 +654,7 @@ export function ProgramStudioEditor({
       setPublicationSuccess(null);
       setPublicationFailure(null);
     } catch {
-      setError(studioOperationError("create-draft", ar ? "ar" : "en"));
+      setError(studioOperationError("create-draft", interfaceLocale));
     } finally {
       setWorking(false);
     }
@@ -726,8 +726,7 @@ export function ProgramStudioEditor({
     );
   }
 
-  const locale = ar ? "ar" : "en";
-  const areaCopy = studioAreaCopy[locale][activeArea];
+  const areaCopy = studioArea(interfaceLocale, activeArea);
   const publicationDecision = decideProgramPublicationState({
     programStatus: detail.status,
     hasCurrentPublishedVersion: detail.currentPublishedVersion !== null,
@@ -740,7 +739,7 @@ export function ProgramStudioEditor({
   const lifecycleState = deriveStudioLifecyclePresentation({
     programStatus: detail.status,
     draftVersionStatus: editingVersion?.status ?? displayVersion.status,
-    locale,
+    locale: interfaceLocale,
     validationState: validated ? "passed" : validation ? "failed" : "not-run",
     designComplete,
     locationsReady,
@@ -871,6 +870,7 @@ export function ProgramStudioEditor({
         <StudioNavigation
           activeArea={activeArea}
           ar={ar}
+          interfaceLocale={interfaceLocale}
           disabled={working}
           mobileOpen={mobileNavigationOpen}
           onArea={selectArea}
@@ -971,7 +971,7 @@ export function ProgramStudioEditor({
       />
       <AlertDialog
         open={Boolean(confirmation && confirmation !== "publish")}
-        title={confirmation ? lifecycleActionLabel(confirmation, ar) : ""}
+        title={confirmation ? lifecycleActionLabel(confirmation, interfaceLocale) : ""}
         description={
           confirmation
             ? lifecycleActionDescription(confirmation, ar, {
@@ -982,7 +982,9 @@ export function ProgramStudioEditor({
             : ""
         }
         confirmLabel={
-          confirmation && confirmation !== "publish" ? lifecycleActionLabel(confirmation, ar) : ""
+          confirmation && confirmation !== "publish"
+            ? lifecycleActionLabel(confirmation, interfaceLocale)
+            : ""
         }
         cancelLabel={ar ? "إلغاء" : "Cancel"}
         closeLabel={ar ? "إغلاق" : "Close"}
@@ -1145,17 +1147,18 @@ function StudioJourney({
 function StudioNavigation({
   activeArea,
   ar,
+  interfaceLocale,
   disabled,
   mobileOpen,
   onArea,
 }: {
   activeArea: StudioArea;
   ar: boolean;
+  interfaceLocale: InterfaceLocale;
   disabled: boolean;
   mobileOpen: boolean;
   onArea: (area: StudioArea) => void;
 }) {
-  const locale = ar ? "ar" : "en";
   return (
     <nav
       className={`studio-section-nav${mobileOpen ? " studio-section-nav--mobile-open" : ""}`}
@@ -1163,7 +1166,7 @@ function StudioNavigation({
       aria-label={ar ? "أقسام الاستوديو" : "Studio sections"}
     >
       {studioAreas.map((area) => {
-        const copy = studioAreaCopy[locale][area];
+        const copy = studioArea(interfaceLocale, area);
         const group =
           area === "overview"
             ? ar
@@ -2352,22 +2355,26 @@ function StudioSettingsPanel({
         <div className="studio-lifecycle-actions">
           {lifecycleState.capabilities.canPause ? (
             <Button variant="secondary" onClick={() => onLifecycle("pause")}>
-              <Pause size={16} aria-hidden="true" /> {lifecycleActionLabel("pause", ar)}
+              <Pause size={16} aria-hidden="true" />{" "}
+              {lifecycleActionLabel("pause", ar ? "ar" : "en")}
             </Button>
           ) : null}
           {lifecycleState.capabilities.canResume ? (
             <Button onClick={() => onLifecycle("resume")}>
-              <Play size={16} aria-hidden="true" /> {lifecycleActionLabel("resume", ar)}
+              <Play size={16} aria-hidden="true" />{" "}
+              {lifecycleActionLabel("resume", ar ? "ar" : "en")}
             </Button>
           ) : null}
           {lifecycleState.capabilities.canArchive ? (
             <Button variant="secondary" onClick={() => onLifecycle("archive")}>
-              <Archive size={16} aria-hidden="true" /> {lifecycleActionLabel("archive", ar)}
+              <Archive size={16} aria-hidden="true" />{" "}
+              {lifecycleActionLabel("archive", ar ? "ar" : "en")}
             </Button>
           ) : null}
           {lifecycleState.capabilities.canRestore ? (
             <Button onClick={() => onLifecycle("restore")}>
-              <RotateCcw size={16} aria-hidden="true" /> {lifecycleActionLabel("restore", ar)}
+              <RotateCcw size={16} aria-hidden="true" />{" "}
+              {lifecycleActionLabel("restore", ar ? "ar" : "en")}
             </Button>
           ) : null}
         </div>
@@ -3623,8 +3630,8 @@ function ValidationPanel({
                 </span>
                 <span>
                   {ar
-                    ? `إصلاح في ${studioAreaCopy.ar[studioAreaForValidationPath(item.path)].label}`
-                    : `Fix in ${studioAreaCopy.en[studioAreaForValidationPath(item.path)].label}`}
+                    ? `إصلاح في ${studioArea("ar", studioAreaForValidationPath(item.path)).label}`
+                    : `Fix in ${studioArea("en", studioAreaForValidationPath(item.path)).label}`}
                 </span>
               </button>
             ))}

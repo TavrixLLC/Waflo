@@ -1,7 +1,7 @@
 "use client";
 
 import type { Locale } from "@waflo/contracts";
-import { directionForInterface, type InterfaceLocale } from "@waflo/i18n";
+import { directionForInterface, localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Button, Modal, PageHeader, TextInput } from "@waflo/ui";
 import { ArrowLeft, ArrowRight, Search, Sparkles, X } from "lucide-react";
 import Image from "next/image";
@@ -18,92 +18,6 @@ import {
   templateGalleryCategories,
   templateStyleLabel,
 } from "./template-gallery-presentation";
-
-const galleryCopy = {
-  en: {
-    eyebrow: "CREATE LOYALTY CARD",
-    title: "Choose a starting design",
-    description: "Start with a ready-made design or build your loyalty card from scratch.",
-    back: "Back to loyalty cards",
-    backToTemplates: "Back to templates",
-    loading: "Preparing your template gallery…",
-    recommended: "Recommended for you",
-    recommendedForBusiness: "Recommended for your business",
-    recommendedDescription: "Three relevant starting points based on your business profile.",
-    allTemplates: "All templates",
-    allTemplatesDescription: "Compare real card designs, or begin from a neutral starting point.",
-    searchLabel: "Search loyalty card templates",
-    searchPlaceholder: "Search by name, category, or style",
-    clearSearch: "Clear search",
-    discoveryLabel: "Search and filter templates",
-    filtersLabel: "Filter templates by category",
-    preview: "Preview",
-    useTemplate: "Use template",
-    useThisTemplate: "Use this template",
-    stampGoal: "Stamp goal",
-    stamps: "stamps",
-    reward: "Reward",
-    blankName: "Start from scratch",
-    blankDescription:
-      "Begin with a neutral loyalty card, then choose the design and reward in the existing editor.",
-    blankCategory: "Loyalty card",
-    blankStyle: "Neutral",
-    blankReward: "Your reward",
-    noResults: "No templates match that search.",
-    noResultsDescription: "Try another name, style, or category.",
-    resetFilters: "Show all templates",
-    previewDescription: "Review the real customer and wallet rendering before you continue.",
-    previewLoading: "Rendering the three preview surfaces…",
-    previewLoadError: "The detailed preview could not be loaded.",
-    retryPreview: "Try again",
-    customer: "Customer",
-    closePreview: "Close template preview",
-    previewOnly: "Preview only",
-    contextRecommended: "recommended templates",
-    contextAll: "all templates",
-  },
-  ar: {
-    eyebrow: "إنشاء بطاقة ولاء",
-    title: "اختر تصميمًا للبدء",
-    description: "ابدأ بتصميم جاهز، أو أنشئ بطاقة الولاء من نقطة بداية مرنة.",
-    back: "العودة إلى بطاقات الولاء",
-    backToTemplates: "العودة إلى القوالب",
-    loading: "جارٍ تجهيز معرض القوالب…",
-    recommended: "مقترحة لك",
-    recommendedForBusiness: "مقترحة لنشاطك التجاري",
-    recommendedDescription: "ثلاث نقاط بداية مناسبة استنادًا إلى فئة نشاطك التجاري.",
-    allTemplates: "جميع القوالب",
-    allTemplatesDescription: "قارن تصاميم البطاقات الحقيقية، أو ابدأ من تصميم محايد.",
-    searchLabel: "البحث في قوالب بطاقات الولاء",
-    searchPlaceholder: "ابحث بالاسم أو الفئة أو الطابع",
-    clearSearch: "مسح البحث",
-    discoveryLabel: "البحث في القوالب وتصفيتها",
-    filtersLabel: "تصفية القوالب حسب الفئة",
-    preview: "معاينة",
-    useTemplate: "استخدام القالب",
-    useThisTemplate: "استخدام هذا القالب",
-    stampGoal: "هدف الأختام",
-    stamps: "أختام",
-    reward: "المكافأة",
-    blankName: "ابدأ من الصفر",
-    blankDescription: "ابدأ ببطاقة ولاء محايدة، ثم اختر التصميم والمكافأة داخل المحرر الحالي.",
-    blankCategory: "بطاقة ولاء",
-    blankStyle: "محايد",
-    blankReward: "مكافأتك",
-    noResults: "لا توجد قوالب مطابقة لبحثك.",
-    noResultsDescription: "جرّب اسمًا أو طابعًا أو فئة أخرى.",
-    resetFilters: "عرض جميع القوالب",
-    previewDescription: "راجع العرض الحقيقي للعميل والمحافظ قبل المتابعة.",
-    previewLoading: "جارٍ إعداد أسطح المعاينة الثلاثة…",
-    previewLoadError: "تعذر تحميل المعاينة التفصيلية.",
-    retryPreview: "إعادة المحاولة",
-    customer: "العميل",
-    closePreview: "إغلاق معاينة القالب",
-    previewOnly: "للمعاينة فقط",
-    contextRecommended: "القوالب المقترحة",
-    contextAll: "جميع القوالب",
-  },
-} as const;
 
 const previewProfiles = ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
 
@@ -124,10 +38,14 @@ function previewSource(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function previewLabel(profile: PreviewProfile, locale: Locale): string {
+function templatesText(locale: InterfaceLocale) {
+  return localeRegistry[locale].messages.merchant.loyalty.templates;
+}
+
+function previewLabel(profile: PreviewProfile, interfaceLocale: InterfaceLocale): string {
   if (profile === "APPLE_WALLET") return "Apple Wallet";
   if (profile === "GOOGLE_WALLET") return "Google Wallet";
-  return galleryCopy[locale].customer;
+  return templatesText(interfaceLocale).customer;
 }
 
 function selectionKey(selection: PreviewSelection, locale: Locale): string {
@@ -137,17 +55,19 @@ function selectionKey(selection: PreviewSelection, locale: Locale): string {
 function TemplateTile({
   template,
   locale,
+  interfaceLocale,
   context,
   blank = false,
   onPreview,
 }: {
   template: TemplateItem;
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   context: string;
   blank?: boolean;
   onPreview: (selection: PreviewSelection, trigger: HTMLButtonElement) => void;
 }) {
-  const copy = galleryCopy[locale];
+  const copy = templatesText(interfaceLocale);
   const title = blank ? copy.blankName : templateDisplayName(template, locale);
   const style = blank ? copy.blankStyle : templateStyleLabel(template, locale);
   const category = blank
@@ -221,6 +141,7 @@ function TemplatePreviewDialog({
   loading,
   error,
   locale,
+  interfaceLocale,
   selectionPending,
   onClose,
   onRetry,
@@ -231,12 +152,13 @@ function TemplatePreviewDialog({
   loading: boolean;
   error: boolean;
   locale: Locale;
+  interfaceLocale: InterfaceLocale;
   selectionPending: boolean;
   onClose: () => void;
   onRetry: () => void;
   onUseTemplate: (template: TemplateItem, options: { blank: boolean }) => void;
 }) {
-  const copy = galleryCopy[locale];
+  const copy = templatesText(interfaceLocale);
   const [profile, setProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
   const tabsId = useId();
   if (!selection) return null;
@@ -259,8 +181,10 @@ function TemplatePreviewDialog({
     let nextIndex = activeIndex;
     if (key === "Home") nextIndex = 0;
     else if (key === "End") nextIndex = previewProfiles.length - 1;
-    else if (key === "ArrowRight") nextIndex = activeIndex + (locale === "ar" ? -1 : 1);
-    else if (key === "ArrowLeft") nextIndex = activeIndex + (locale === "ar" ? 1 : -1);
+    else if (key === "ArrowRight")
+      nextIndex = activeIndex + (directionForInterface(interfaceLocale) === "rtl" ? -1 : 1);
+    else if (key === "ArrowLeft")
+      nextIndex = activeIndex + (directionForInterface(interfaceLocale) === "rtl" ? 1 : -1);
     else return;
 
     const normalized = (nextIndex + previewProfiles.length) % previewProfiles.length;
@@ -306,7 +230,7 @@ function TemplatePreviewDialog({
               }
             }}
           >
-            {previewLabel(item, locale)}
+            {previewLabel(item, interfaceLocale)}
           </button>
         ))}
       </div>
@@ -325,7 +249,7 @@ function TemplatePreviewDialog({
         ) : selectedPreview ? (
           <Image
             src={previewSource(selectedPreview.svg)}
-            alt={`${title} — ${previewLabel(profile, locale)} ${copy.previewOnly}`}
+            alt={`${title} — ${previewLabel(profile, interfaceLocale)} ${copy.previewOnly}`}
             width={selectedPreview.width}
             height={selectedPreview.height}
             unoptimized
@@ -394,7 +318,7 @@ export function TemplateGallery({
   onUseTemplate: (template: TemplateItem, options: { blank: boolean }) => void;
 }) {
   const interfaceDirection = directionForInterface(interfaceLocale);
-  const copy = galleryCopy[locale];
+  const copy = templatesText(interfaceLocale);
   const [selectedCategory, setSelectedCategory] = useState<TemplateGalleryCategory>("all");
   const [query, setQuery] = useState("");
   const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
@@ -412,10 +336,13 @@ export function TemplateGallery({
     [query, selectedCategory, templates],
   );
   const normalizedQuery = query.trim().toLocaleLowerCase(locale === "ar" ? "ar" : "en-US");
-  const blankSearchTerms =
-    `${galleryCopy.en.blankName} blank card ${galleryCopy.ar.blankName} بطاقة فارغة ${galleryCopy.en.blankDescription} ${galleryCopy.ar.blankDescription}`.toLocaleLowerCase(
-      "en-US",
-    );
+  const blankSearchTerms = Object.values(localeRegistry)
+    .map((item) => {
+      const text = item.messages.merchant.loyalty.templates;
+      return `${text.blankName} ${text.blankDescription}`;
+    })
+    .join(" ")
+    .toLocaleLowerCase("en-US");
   const showBlank =
     Boolean(generalTemplate?.blankGalleryThumbnail) &&
     (selectedCategory === "all" || selectedCategory === "general") &&
@@ -540,6 +467,7 @@ export function TemplateGallery({
                 key={`recommended-${template.code}`}
                 template={template}
                 locale={locale}
+                interfaceLocale={interfaceLocale}
                 context={copy.contextRecommended}
                 onPreview={(selection, trigger) => void loadPreview(selection, false, trigger)}
               />
@@ -570,6 +498,7 @@ export function TemplateGallery({
               <TemplateTile
                 template={generalTemplate}
                 locale={locale}
+                interfaceLocale={interfaceLocale}
                 context={copy.contextAll}
                 blank
                 onPreview={(selection, trigger) => void loadPreview(selection, false, trigger)}
@@ -580,6 +509,7 @@ export function TemplateGallery({
                 key={template.code}
                 template={template}
                 locale={locale}
+                interfaceLocale={interfaceLocale}
                 context={copy.contextAll}
                 onPreview={(selection, trigger) => void loadPreview(selection, false, trigger)}
               />
@@ -595,6 +525,7 @@ export function TemplateGallery({
         loading={previewRequest?.key === activePreviewKey && previewRequest.status === "loading"}
         error={previewRequest?.key === activePreviewKey && previewRequest.status === "error"}
         locale={locale}
+        interfaceLocale={interfaceLocale}
         selectionPending={selectionPending}
         onClose={closePreview}
         onRetry={() => {

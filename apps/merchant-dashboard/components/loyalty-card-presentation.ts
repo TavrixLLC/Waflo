@@ -1,4 +1,5 @@
-import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
+import type { ProgramOperationalStatus } from "@waflo/contracts";
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 
 export interface MerchantProgramStatusPresentation {
   label: string;
@@ -13,62 +14,27 @@ export type MerchantProgramLifecycleAction =
   | "restore"
   | "abandon";
 
-const merchantProgramStatuses = {
-  en: {
-    DRAFT: { label: "Draft", tone: "neutral" },
-    VALIDATED: { label: "Ready to publish", tone: "brand" },
-    TEST: { label: "Ready to publish", tone: "brand" },
-    SCHEDULED: { label: "Scheduled", tone: "brand" },
-    PUBLISHED: { label: "Live", tone: "success" },
-    PAUSED: { label: "Paused", tone: "warning" },
-    ARCHIVED: { label: "Archived", tone: "neutral" },
-    SUSPENDED: { label: "Suspended", tone: "danger" },
-  },
-  ar: {
-    DRAFT: { label: "مسودة", tone: "neutral" },
-    VALIDATED: { label: "جاهزة للنشر", tone: "brand" },
-    TEST: { label: "جاهزة للنشر", tone: "brand" },
-    SCHEDULED: { label: "مجدولة", tone: "brand" },
-    PUBLISHED: { label: "مباشرة", tone: "success" },
-    PAUSED: { label: "متوقفة مؤقتًا", tone: "warning" },
-    ARCHIVED: { label: "مؤرشفة", tone: "neutral" },
-    SUSPENDED: { label: "موقوفة", tone: "danger" },
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<ProgramOperationalStatus, MerchantProgramStatusPresentation>>>
->;
-
 export function merchantProgramStatus(
   status: ProgramOperationalStatus,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): MerchantProgramStatusPresentation {
-  return merchantProgramStatuses[locale][status];
+  const label = localeRegistry[locale].messages.merchant.loyalty.programs.statuses[status];
+  const tones: Record<ProgramOperationalStatus, MerchantProgramStatusPresentation["tone"]> = {
+    DRAFT: "neutral",
+    VALIDATED: "brand",
+    TEST: "brand",
+    SCHEDULED: "brand",
+    PUBLISHED: "success",
+    PAUSED: "warning",
+    ARCHIVED: "neutral",
+    SUSPENDED: "danger",
+  };
+  return { label, tone: tones[status] };
 }
-
-const merchantProgramLifecycleLabels = {
-  en: {
-    publish: "Publish card",
-    pause: "Pause card",
-    resume: "Resume card",
-    archive: "Archive card",
-    restore: "Restore card",
-    abandon: "Abandon draft",
-  },
-  ar: {
-    publish: "نشر البطاقة",
-    pause: "إيقاف البطاقة مؤقتًا",
-    resume: "استئناف البطاقة",
-    archive: "أرشفة البطاقة",
-    restore: "استعادة البطاقة",
-    abandon: "التخلي عن المسودة",
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<MerchantProgramLifecycleAction, string>>>
->;
 
 export function merchantProgramLifecycleLabel(
   action: MerchantProgramLifecycleAction,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): string {
-  return merchantProgramLifecycleLabels[locale][action];
+  return localeRegistry[locale].messages.merchant.loyalty.programs.lifecycleActions[action];
 }

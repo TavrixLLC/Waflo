@@ -1,4 +1,5 @@
-import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
+import type { ProgramOperationalStatus } from "@waflo/contracts";
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 
 export const studioAreas = [
   "overview",
@@ -19,60 +20,33 @@ export type StudioOperationErrorContext =
   | "lifecycle"
   | "create-draft";
 
-const studioOperationErrorCopy = {
-  en: {
-    load: "Loyalty Studio could not be opened. Your saved card has not changed. Reload and try again.",
-    save: "Changes could not be saved. Your last saved version is still safe. Try saving again.",
-    preview: "The preview could not be refreshed. Your saved card is unchanged. Try again.",
-    readiness: "Readiness checks could not run. Your saved card is unchanged. Try again.",
-    lifecycle: "The card status could not be updated. Its current status is unchanged. Try again.",
-    "create-draft": "A change draft could not be created. The live card is unchanged. Try again.",
-  },
-  ar: {
-    load: "تعذر فتح استوديو الولاء. لم تتغير بطاقتك المحفوظة. أعد تحميل الصفحة وحاول مرة أخرى.",
-    save: "تعذر حفظ التغييرات. آخر نسخة محفوظة من بطاقتك لا تزال آمنة. حاول الحفظ مرة أخرى.",
-    preview: "تعذر تحديث المعاينة. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
-    readiness: "تعذر تشغيل فحوصات الجاهزية. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
-    lifecycle: "تعذر تحديث حالة البطاقة. حالتها الحالية لم تتغير. حاول مرة أخرى.",
-    "create-draft": "تعذر إنشاء مسودة تغييرات. البطاقة المباشرة لم تتغير. حاول مرة أخرى.",
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<StudioOperationErrorContext, string>>>
->;
-
-export function studioOperationError(context: StudioOperationErrorContext, locale: Locale): string {
-  return studioOperationErrorCopy[locale][context];
+function studioText(locale: InterfaceLocale) {
+  return localeRegistry[locale].messages.merchant.loyalty.studio;
 }
 
-export const studioAreaCopy = {
-  en: {
-    overview: { label: "Overview", description: "Card status and next step" },
-    "how-it-works": { label: "How it works", description: "Earning and reward rules" },
-    "customers-locations": {
-      label: "Customers & locations",
-      description: "Where and how customers join",
-    },
-    engagement: {
-      label: "Wallet Engagement",
-      description: "Nearby relevance and consented messages",
-    },
-    launch: { label: "Review & launch", description: "Resolve checks, then publish safely" },
-    settings: { label: "Settings", description: "Advanced controls and history" },
-  },
-  ar: {
-    overview: { label: "نظرة عامة", description: "حالة البطاقة والخطوة التالية" },
-    "how-it-works": { label: "طريقة العمل", description: "قواعد الكسب والمكافأة" },
-    "customers-locations": {
-      label: "العملاء والمواقع",
-      description: "أماكن وطريقة انضمام العملاء",
-    },
-    engagement: { label: "تفاعل Wallet", description: "التذكير القريب والرسائل بموافقة العميل" },
-    launch: { label: "الإطلاق", description: "فحوصات الجاهزية والنشر" },
-    settings: { label: "الإعدادات", description: "التحكم المتقدم وسجل التغييرات" },
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<StudioArea, { label: string; description: string }>>>
->;
+export function studioOperationError(
+  context: StudioOperationErrorContext,
+  locale: InterfaceLocale,
+): string {
+  const key = context === "create-draft" ? "createDraft" : context;
+  return studioText(locale).operationErrors[key];
+}
+
+const studioAreaMessageKeys = {
+  overview: "overview",
+  "how-it-works": "howItWorks",
+  "customers-locations": "customersLocations",
+  engagement: "engagement",
+  launch: "launch",
+  settings: "settings",
+} as const;
+
+export function studioArea(
+  locale: InterfaceLocale,
+  area: StudioArea,
+): { label: string; description: string } {
+  return studioText(locale).areas[studioAreaMessageKeys[area]];
+}
 
 export function studioAreaForValidationPath(path: string): StudioArea {
   if (path.startsWith("earning") || path.startsWith("rewards") || path.startsWith("policies"))
@@ -173,7 +147,7 @@ export interface StudioLifecyclePresentation extends MerchantStudioState {
 export interface StudioLifecyclePresentationInput {
   programStatus: ProgramOperationalStatus;
   draftVersionStatus: string | null;
-  locale: Locale;
+  locale: InterfaceLocale;
   validationState: "not-run" | "passed" | "failed";
   designComplete: boolean;
   locationsReady: boolean;
@@ -183,110 +157,6 @@ export interface StudioLifecyclePresentationInput {
   planName: "STARTER" | "GROWTH" | "SCALE";
   validationIssues?: ReadonlyArray<{ code: string; path: string }> | undefined;
 }
-
-const stateCopy = {
-  en: {
-    draft: {
-      label: "Draft",
-      description: "Not visible to real customers until it is launched.",
-      tone: "neutral",
-    },
-    ready: {
-      label: "Ready to launch",
-      description: "Required checks are complete. The card is not live yet.",
-      tone: "brand",
-    },
-    live: {
-      label: "Live",
-      description: "Currently available to eligible customers.",
-      tone: "success",
-    },
-    paused: {
-      label: "Paused",
-      description: "The card setup is retained, but new activity is temporarily unavailable.",
-      tone: "warning",
-    },
-    archived: {
-      label: "Archived",
-      description: "Removed from normal operation and available to restore with its saved setup.",
-      tone: "neutral",
-    },
-    scheduled: {
-      label: "Scheduled to go live",
-      description: "This card is waiting for its existing scheduled launch.",
-      tone: "brand",
-    },
-    suspended: {
-      label: "Temporarily unavailable",
-      description: "This card is unavailable under the existing suspension rule.",
-      tone: "danger",
-    },
-  },
-  ar: {
-    draft: {
-      label: "مسودة",
-      description: "غير ظاهرة للعملاء الحقيقيين حتى يتم إطلاقها.",
-      tone: "neutral",
-    },
-    ready: {
-      label: "جاهزة للإطلاق",
-      description: "اكتملت الفحوصات المطلوبة، ولم تصبح البطاقة مباشرة بعد.",
-      tone: "brand",
-    },
-    live: {
-      label: "مباشرة",
-      description: "متاحة حالياً للعملاء المؤهلين.",
-      tone: "success",
-    },
-    paused: {
-      label: "متوقفة مؤقتاً",
-      description: "إعدادات البطاقة محفوظة، لكن النشاط الجديد غير متاح مؤقتاً.",
-      tone: "warning",
-    },
-    archived: {
-      label: "مؤرشفة",
-      description: "أُزيلت من التشغيل المعتاد ويمكن استعادتها بإعداداتها المحفوظة.",
-      tone: "neutral",
-    },
-    scheduled: {
-      label: "مجدولة للإطلاق",
-      description: "تنتظر هذه البطاقة موعد الإطلاق المجدول حالياً.",
-      tone: "brand",
-    },
-    suspended: {
-      label: "غير متاحة مؤقتاً",
-      description: "هذه البطاقة غير متاحة وفق قاعدة الإيقاف الحالية.",
-      tone: "danger",
-    },
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<MerchantStudioState["key"], Omit<MerchantStudioState, "key">>>>
->;
-
-const journeyCopy = {
-  en: {
-    design: "Design",
-    checks: "Review",
-    live: "Live",
-    complete: "Complete",
-    current: "Next required",
-    pending: "Pending",
-    blocked: "Blocked",
-    paused: "Paused",
-    archived: "Archived",
-  },
-  ar: {
-    design: "التصميم",
-    checks: "الفحوصات",
-    live: "مباشرة",
-    complete: "مكتملة",
-    current: "المطلوبة تاليًا",
-    pending: "بانتظار الإكمال",
-    blocked: "متوقفة",
-    paused: "متوقفة مؤقتاً",
-    archived: "مؤرشفة",
-  },
-} as const;
 
 function lifecycleKey(
   programStatus: ProgramOperationalStatus,
@@ -306,7 +176,7 @@ function presentationAction(
   checksComplete: boolean,
   designComplete: boolean,
   locationsReady: boolean,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): { primary: StudioPresentationAction; secondary?: StudioPresentationAction } {
   const ar = locale === "ar";
   if (key === "live")
@@ -400,7 +270,7 @@ function guidanceFor(
   key: MerchantStudioState["key"],
   designComplete: boolean,
   locationsReady: boolean,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): StudioLifecyclePresentation["guidance"] {
   const ar = locale === "ar";
   if (key === "live")
@@ -591,7 +461,20 @@ export function deriveStudioLifecyclePresentation(
     domainKey === "ready" && !(input.designComplete && input.locationsReady && checksComplete)
       ? "draft"
       : domainKey;
-  const lifecycle = { key, ...stateCopy[locale][key] } as MerchantStudioState;
+  const stateTones: Record<MerchantStudioState["key"], MerchantStudioState["tone"]> = {
+    draft: "neutral",
+    ready: "brand",
+    live: "success",
+    paused: "warning",
+    archived: "neutral",
+    scheduled: "brand",
+    suspended: "danger",
+  };
+  const lifecycle = {
+    key,
+    ...studioText(locale).states[key],
+    tone: stateTones[key],
+  } as MerchantStudioState;
   const baseActions = presentationAction(
     key,
     checksComplete,
@@ -650,7 +533,7 @@ export function deriveStudioLifecyclePresentation(
     return currentJourneyStage === stage ? "current" : "pending";
   };
 
-  const jc = journeyCopy[locale];
+  const jc = studioText(locale).journey;
   const makeStage = (
     keyValue: StudioJourneyStagePresentation["key"],
     hint: string,
@@ -827,8 +710,18 @@ export function deriveStudioLifecyclePresentation(
 export function merchantStudioState(
   status: ProgramOperationalStatus,
   draftVersionStatus: string | null,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): MerchantStudioState {
   const key = lifecycleKey(status, draftVersionStatus);
-  return { key, ...stateCopy[locale][key] } as MerchantStudioState;
+  const tone: MerchantStudioState["tone"] =
+    key === "live"
+      ? "success"
+      : key === "ready" || key === "scheduled"
+        ? "brand"
+        : key === "paused"
+          ? "warning"
+          : key === "suspended"
+            ? "danger"
+            : "neutral";
+  return { key, ...studioText(locale).states[key], tone };
 }

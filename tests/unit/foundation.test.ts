@@ -427,6 +427,50 @@ describe("API and localization utilities", () => {
       localeRegistry["ku-sorani"].messages.merchant.shell.programs,
     );
   });
+
+  it("keeps every interface catalog structurally complete and removes legacy loyalty copy maps", () => {
+    const flatten = (value: unknown, prefix = ""): string[] => {
+      if (typeof value === "string") return [prefix];
+      if (!value || typeof value !== "object") return [];
+      return Object.entries(value).flatMap(([key, nested]) =>
+        flatten(nested, prefix ? `${prefix}.${key}` : key),
+      );
+    };
+    const interfaceIds = ["en", "ar", "ku-badini", "ku-sorani"] as const;
+    const englishKeys = flatten(localeRegistry.en.messages).sort();
+
+    for (const id of interfaceIds) {
+      const messages = localeRegistry[id].messages;
+      expect(flatten(messages).sort()).toEqual(englishKeys);
+      expect(Object.values(messages).length).toBeGreaterThan(0);
+      expect(JSON.stringify(messages)).not.toMatch(/"":|:undefined/u);
+    }
+
+    expect(localeRegistry.en.direction).toBe("ltr");
+    expect(localeRegistry.ar.direction).toBe("rtl");
+    expect(localeRegistry["ku-badini"].direction).toBe("rtl");
+    expect(localeRegistry["ku-sorani"].direction).toBe("rtl");
+    expect(JSON.stringify(localeRegistry["ku-badini"].messages)).not.toBe(
+      JSON.stringify(localeRegistry["ku-sorani"].messages),
+    );
+
+    const root = resolve(import.meta.dirname, "../..");
+    const legacyMapSymbols = [
+      ["apps/merchant-dashboard/components/program-card-builder.tsx", "const copy = {"],
+      ["apps/merchant-dashboard/components/programs-screen.tsx", "loyaltyCardCopy"],
+      ["apps/merchant-dashboard/components/template-gallery.tsx", "galleryCopy"],
+      [
+        "apps/merchant-dashboard/components/program-studio-presentation.ts",
+        "studioOperationErrorCopy",
+      ],
+      ["apps/merchant-dashboard/components/program-studio-presentation.ts", "studioAreaCopy"],
+      ["apps/merchant-dashboard/components/program-studio-presentation.ts", "stateCopy"],
+      ["apps/merchant-dashboard/components/program-studio-presentation.ts", "journeyCopy"],
+    ] as const;
+    for (const [relativePath, symbol] of legacyMapSymbols) {
+      expect(readFileSync(resolve(root, relativePath), "utf8")).not.toContain(symbol);
+    }
+  });
 });
 
 describe("merchant hostname parsing and resolution", () => {
