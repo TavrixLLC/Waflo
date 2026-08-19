@@ -57,7 +57,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import {
   type MerchantProgramLifecycleAction,
@@ -149,17 +149,42 @@ interface ProgramAuditEvent {
   metadata?: Record<string, unknown> | null;
 }
 
-function statusLabel(state: SaveState, ar: boolean) {
-  const labels: Record<SaveState, [string, string]> = {
-    saved: ["Saved", "تم الحفظ"],
-    unsaved: ["Unsaved changes", "تغييرات غير محفوظة"],
-    saving: ["Saving…", "جارٍ الحفظ…"],
-    failed: ["Save failed", "فشل الحفظ"],
-    conflict: ["Edited elsewhere", "تم التحرير في مكان آخر"],
-  };
-  return labels[state][ar ? 1 : 0];
+type StudioUi = typeof localeRegistry.en.messages.merchant.loyalty.studio.ui;
+type StudioUiKey = keyof StudioUi;
+
+const StudioInterfaceLocaleContext = createContext<InterfaceLocale | null>(null);
+
+function studioUi(interfaceLocale: InterfaceLocale): StudioUi {
+  return localeRegistry[interfaceLocale].messages.merchant.loyalty.studio.ui;
 }
 
+function useStudioInterfaceLocale(): InterfaceLocale {
+  const interfaceLocale = useContext(StudioInterfaceLocaleContext);
+  if (!interfaceLocale) {
+    throw new Error("Studio interface locale is required");
+  }
+  return interfaceLocale;
+}
+
+function useStudioUi(): StudioUi {
+  return studioUi(useStudioInterfaceLocale());
+}
+
+function interpolateStudioCopy(template: string, value: string | number): string {
+  return template.replace(/\{[^}]+\}/u, String(value));
+}
+
+function statusLabel(state: SaveState, interfaceLocale: InterfaceLocale) {
+  const ui = studioUi(interfaceLocale);
+  const labels = {
+    saved: "saveCompleted",
+    unsaved: "unsavedChanges",
+    saving: "saving",
+    failed: "saveFailed",
+    conflict: "editedElsewhere",
+  } as const satisfies Record<SaveState, StudioUiKey>;
+  return ui[labels[state]];
+}
 function hasPublishedCustomerPreviewPayload(version: ProgramVersion): boolean {
   return Boolean(version.translations.length && version.stampRule && version.visualTheme);
 }
@@ -170,103 +195,53 @@ function lifecycleActionLabel(action: LifecycleAction, interfaceLocale: Interfac
 
 function lifecycleActionDescription(
   action: LifecycleAction,
-  ar: boolean,
+  interfaceLocale: InterfaceLocale,
   options: { hasPublishedVersion: boolean; pausedWithPublishedVersion: boolean },
 ): string {
+  const ui = studioUi(interfaceLocale);
   if (action === "publish") {
-    if (options.pausedWithPublishedVersion) {
-      return ar
-        ? "ستُنشر التغييرات الجديدة، لكن البطاقة ستظل متوقفة مؤقتاً. استخدم الاستئناف بشكل منفصل عندما تكون مستعداً لإعادتها للعمل."
-        : "The new changes will be published, but the card will remain paused. Resume it separately when you are ready to make it live.";
-    }
-    return ar
-      ? "تصبح التغييرات التي راجعتها مباشرة للعملاء بعد اكتمال التحقق الآلي."
-      : "The reviewed changes become live for customers after automatic validation is complete.";
+    return options.pausedWithPublishedVersion
+      ? ui.theNewChangesWillBePublishedButTheCardWillRemainPausedResumeItSeparatelyWhenYouAreReadyToMakeItLive
+      : ui.theReviewedChangesBecomeLiveForCustomersAfterAutomaticValidationIsComplete;
   }
-  if (action === "abandon") {
-    return ar
-      ? "ستُعلَّم المسودة القابلة للتحرير كمسودة متروكة، بينما تبقى البطاقة المنشورة مباشرة."
-      : "The editable draft will be marked abandoned. The published card remains live.";
-  }
+  if (action === "abandon") return ui.theEditableDraftWillBeMarkedAbandonedThePublishedCardRemainsLive;
   if (action === "archive" && !options.hasPublishedVersion) {
-    return ar
-      ? "تُؤرشف البطاقة غير المنشورة بأمان، مع الاحتفاظ بمسودتها الحالية وسجل تغييراتها لاستعادتها لاحقاً."
-      : "Archive this unpublished card safely. Its current draft and change history will be preserved for restoration.";
+    return ui.archiveThisUnpublishedCardSafelyItsCurrentDraftAndChangeHistoryWillBePreservedForRestoration;
   }
   if (action === "restore" && !options.hasPublishedVersion) {
-    return ar
-      ? "تعود البطاقة غير المنشورة إلى حالة المسودة المحفوظة."
-      : "Restore this unpublished card to its preserved draft state.";
+    return ui.restoreThisUnpublishedCardToItsPreservedDraftState;
   }
-  const descriptions: Record<Exclude<LifecycleAction, "publish" | "abandon">, [string, string]> = {
-    pause: [
-      "New enrollment, stamp earning, and reward use will stop. Existing customer cards remain viewable while paused, and a Wallet status sync will be queued.",
-      "سيتوقف التسجيل الجديد وإصدار الأختام واستخدام المكافآت. تبقى بطاقات العملاء الحاليين قابلة للعرض، وستتم جدولة مزامنة حالة Wallet.",
-    ],
-    resume: [
-      "Enrollment and loyalty operations return according to the published policy, and a Wallet status sync will be queued.",
-      "يعود التسجيل وعمليات الولاء وفق السياسة المنشورة، وستتم جدولة مزامنة حالة Wallet.",
-    ],
-    archive: [
-      "The card leaves discovery and stops enrollment and loyalty operations. Existing direct cards remain viewable, setup and history are preserved, the active-card slot is freed, and Wallet invalidation is queued.",
-      "ستغادر البطاقة الاكتشاف ويتوقف التسجيل وعمليات الولاء. تبقى البطاقات المباشرة الحالية قابلة للعرض، وتُحفظ الإعدادات والسجل، وتتحرر خانة بطاقة نشطة، وتتم جدولة إبطال Wallet.",
-    ],
-    restore: [
-      "The plan limit will be checked, then the card returns to its preserved published or draft state and a Wallet status sync is queued.",
-      "سيتم فحص حد الخطة، ثم تعود البطاقة إلى حالتها المنشورة أو مسودتها المحفوظة وتتم جدولة مزامنة Wallet.",
-    ],
-  };
-  return descriptions[action][ar ? 1 : 0];
+  if (action === "pause") return ui.pauseDescription;
+  if (action === "resume") return ui.resumeDescription;
+  if (action === "archive") return ui.archiveDescription;
+  return ui.restoreDescription;
 }
-
-function publicationStateGuidance(status: ProgramOperationalStatus, ar: boolean) {
-  if (status === "ARCHIVED")
+function publicationStateGuidance(status: ProgramOperationalStatus, interfaceLocale: InterfaceLocale) {
+  const ui = studioUi(interfaceLocale);
+  if (status === "ARCHIVED") {
     return {
-      title: ar ? "البطاقة مؤرشفة" : "Restore required before publishing",
-      message: ar
-        ? "استعد البطاقة أولاً، ثم راجع المسودة وانشرها."
-        : "Restore this card before publishing. Its preserved draft will remain available.",
+      title: ui.restoreRequiredBeforePublishing,
+      message: ui.restoreThisCardBeforePublishingItsPreservedDraftWillRemainAvailable,
     };
-  if (status === "SUSPENDED")
+  }
+  if (status === "SUSPENDED") {
     return {
-      title: ar ? "النشر غير متاح" : "Publishing is unavailable",
-      message: ar
-        ? "لا يمكن نشر هذه البطاقة في حالتها الحالية. تواصل مع الدعم للمساعدة."
-        : "This card cannot be published in its current state. Contact support for assistance.",
+      title: ui.publishingIsUnavailable,
+      message: ui.thisCardCannotBePublishedInItsCurrentStateContactSupportForAssistance,
     };
-  if (status === "SCHEDULED")
+  }
+  if (status === "SCHEDULED") {
     return {
-      title: ar ? "النشر المجدول غير متاح" : "Scheduled publishing is unavailable",
-      message: ar
-        ? "لا يمكن نشر البطاقة المجدولة حتى تتوفر ميزة الجدولة."
-        : "This card cannot publish while scheduling is not implemented.",
+      title: ui.scheduledPublishingIsUnavailable,
+      message: ui.thisCardCannotPublishWhileSchedulingIsNotImplemented,
     };
+  }
   return {
-    title: ar ? "حالة البطاقة تمنع النشر" : "Card status blocks publishing",
-    message: ar
-      ? "راجع حالة البطاقة قبل محاولة النشر."
-      : "Review the card status before publishing.",
+    title: ui.cardStatusBlocksPublishing,
+    message: ui.reviewTheCardStatusBeforePublishing,
   };
 }
-
-export function ProgramStudioEditor({
-  interfaceLocale,
-  organizationId,
-  programId,
-  plan,
-  locations,
-  assets,
-  onAssetUploaded,
-  ar,
-  canManageEngagement,
-  initialArea = "overview",
-  onAreaChange,
-  onClose,
-  onEditDesign,
-  onOpenCustomers,
-  onOpenBilling,
-  onChanged,
-}: {
+interface ProgramStudioEditorProps {
   interfaceLocale: InterfaceLocale;
   organizationId: string;
   programId: string;
@@ -284,7 +259,35 @@ export function ProgramStudioEditor({
   onOpenCustomers: () => void;
   onOpenBilling: () => void;
   onChanged: () => Promise<void>;
-}) {
+}
+
+export function ProgramStudioEditor(props: ProgramStudioEditorProps) {
+  return (
+    <StudioInterfaceLocaleContext.Provider value={props.interfaceLocale}>
+      <ProgramStudioEditorContent {...props} />
+    </StudioInterfaceLocaleContext.Provider>
+  );
+}
+
+function ProgramStudioEditorContent({
+  interfaceLocale,
+  organizationId,
+  programId,
+  plan,
+  locations,
+  assets,
+  onAssetUploaded,
+  ar,
+  canManageEngagement,
+  initialArea = "overview",
+  onAreaChange,
+  onClose,
+  onEditDesign,
+  onOpenCustomers,
+  onOpenBilling,
+  onChanged,
+}: ProgramStudioEditorProps) {
+  const ui = useStudioUi();
   const interfaceDirection = directionForInterface(interfaceLocale);
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
@@ -578,45 +581,17 @@ export function ProgramStudioEditor({
       await load();
       await onChanged();
       if (action === "archive") selectArea("settings");
-      const notices: Record<
-        Exclude<LifecycleAction, "publish">,
-        [string, string, string, string]
-      > = {
-        pause: [
-          "Loyalty card paused",
-          "New enrollment and loyalty operations are stopped. Existing cards remain viewable.",
-          "تم إيقاف بطاقة الولاء",
-          "توقف التسجيل الجديد وعمليات الولاء. تبقى البطاقات الحالية قابلة للعرض.",
-        ],
-        resume: [
-          "Loyalty card resumed",
-          "Customer access and loyalty operations now follow the published policy.",
-          "تم استئناف بطاقة الولاء",
-          "يتبع وصول العملاء وعمليات الولاء الآن السياسة المنشورة.",
-        ],
-        archive: [
-          "Loyalty card archived",
-          "The setup and change history are preserved, and the active-card slot is available again.",
-          "تمت أرشفة بطاقة الولاء",
-          "تم حفظ الإعدادات وسجل التغييرات، وأصبحت خانة البطاقة النشطة متاحة مجددًا.",
-        ],
-        restore: [
-          "Loyalty card restored",
-          "The card returned to its preserved state after the plan check passed.",
-          "تمت استعادة بطاقة الولاء",
-          "عادت البطاقة إلى حالتها المحفوظة بعد اجتياز فحص الخطة.",
-        ],
-        abandon: [
-          "Draft abandoned",
-          "The published card remains unchanged and the abandoned update stays in history.",
-          "تم التخلي عن المسودة",
-          "تبقى البطاقة المنشورة دون تغيير ويظل الإصدار المتروك في السجل.",
-        ],
-      };
+      const notices = {
+        pause: { title: ui.pausedNoticeTitle, message: ui.pausedNoticeMessage },
+        resume: { title: ui.resumedNoticeTitle, message: ui.resumedNoticeMessage },
+        archive: { title: ui.archivedNoticeTitle, message: ui.archivedNoticeMessage },
+        restore: { title: ui.restoredNoticeTitle, message: ui.restoredNoticeMessage },
+        abandon: { title: ui.abandonedNoticeTitle, message: ui.abandonedNoticeMessage },
+      } as const;
       const notice = notices[action];
       setLifecycleNotice({
-        title: notice[ar ? 2 : 0],
-        message: notice[ar ? 3 : 1],
+        title: notice.title,
+        message: notice.message,
         action,
       });
     } catch (caught) {
@@ -634,7 +609,7 @@ export function ProgramStudioEditor({
         typeof caught.details?.programStatus === "string"
       )
         setError(
-          publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, ar)
+          publicationStateGuidance(caught.details.programStatus as ProgramOperationalStatus, interfaceLocale)
             .message,
         );
       else setError(studioOperationError("lifecycle", interfaceLocale));
@@ -689,7 +664,7 @@ export function ProgramStudioEditor({
         <Card className="builder-loading builder-loading--unavailable" role="alert">
           <CircleAlert aria-hidden="true" />
           <div>
-            <strong>{ar ? "تعذر فتح استوديو الولاء" : "Loyalty Studio could not open"}</strong>
+            <strong>{ui.loyaltyStudioCouldNotOpen}</strong>
             <p>
               {ar
                 ? "لم تتغير أي بيانات. ارجع إلى بطاقات الولاء وتحقق من البطاقة أو صلاحية الوصول."
@@ -698,12 +673,12 @@ export function ProgramStudioEditor({
           </div>
           <Button variant="secondary" onClick={onClose}>
             <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
-            {ar ? "بطاقات الولاء" : "Loyalty cards"}
+            {ui.loyaltyCards}
           </Button>
         </Card>
       );
     }
-    return <StudioLoadingSkeleton ar={ar} />;
+    return <StudioLoadingSkeleton />;
   }
 
   if (!displayDraft || !displayVersion) {
@@ -711,11 +686,11 @@ export function ProgramStudioEditor({
       <div className="studio-shell" dir={interfaceDirection}>
         <Button variant="secondary" onClick={onClose}>
           <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
-          {ar ? "بطاقات الولاء" : "Loyalty cards"}
+          {ui.loyaltyCards}
         </Button>
         <Card className="studio-live-only" role="status">
           <CircleAlert size={32} aria-hidden="true" />
-          <h1>{ar ? "لا يوجد إعداد محفوظ لهذه البطاقة" : "This card has no saved setup"}</h1>
+          <h1>{ui.thisCardHasNoSavedSetup}</h1>
           <p>
             {ar
               ? "ارجع إلى بطاقات الولاء واختر بطاقة أخرى."
@@ -755,10 +730,10 @@ export function ProgramStudioEditor({
       <div className="studio-toolbar">
         <Button variant="secondary" onClick={onClose}>
           <ArrowLeft className="studio-back-icon" size={16} aria-hidden="true" />
-          {ar ? "بطاقات الولاء" : "Loyalty cards"}
+          {ui.loyaltyCards}
         </Button>
         <div className="studio-toolbar__title">
-          <span className="dashboard-card__label">{ar ? "استوديو الولاء" : "LOYALTY STUDIO"}</span>
+          <span className="dashboard-card__label">{ui.loyaltyStudio}</span>
           <div className="studio-title-line">
             <h1>{displayDraft.internalName}</h1>
             <Badge tone={lifecycleState.tone}>{lifecycleState.label}</Badge>
@@ -783,13 +758,13 @@ export function ProgramStudioEditor({
                 ? ar
                   ? "تغييرات غير منشورة محفوظة"
                   : "Unpublished changes saved"
-                : statusLabel(saveState, ar)}
+                : statusLabel(saveState, interfaceLocale)}
             </span>
           </div>
         ) : (
           <div className="studio-save-state studio-save-state--saved" role="status">
             <ShieldCheck size={16} aria-hidden="true" />
-            <span>{ar ? "الإعداد المنشور محفوظ" : "Published setup saved"}</span>
+            <span>{ui.publishedSetupSaved}</span>
           </div>
         )}
       </div>
@@ -830,7 +805,7 @@ export function ProgramStudioEditor({
           {lifecycleNotice.action === "archive" ? (
             <div className="studio-lifecycle-notice__actions">
               <Button onClick={onClose}>
-                {ar ? "العودة إلى بطاقات الولاء" : "Return to Loyalty Cards"}
+                {ui.returnToLoyaltyCards}
               </Button>
               <Button
                 variant="secondary"
@@ -842,7 +817,7 @@ export function ProgramStudioEditor({
                 }}
               >
                 <History size={16} aria-hidden="true" />
-                {ar ? "عرض سجل التغييرات" : "View change history"}
+                {ui.viewChangeHistory}
               </Button>
             </div>
           ) : null}
@@ -880,7 +855,7 @@ export function ProgramStudioEditor({
           <div className="studio-panel-heading">
             <div>
               <span className="dashboard-card__label">
-                {ar ? "إدارة بطاقة الولاء" : "MANAGE LOYALTY CARD"}
+                {ui.manageLoyaltyCard}
               </span>
               <h2>{areaCopy.label}</h2>
               <p>{areaCopy.description}</p>
@@ -888,7 +863,7 @@ export function ProgramStudioEditor({
             {draft?.editingMode === "pro" ? (
               <Badge tone="brand">PRO</Badge>
             ) : (
-              <Badge>{ar ? "أساسي" : "QUICK"}</Badge>
+              <Badge>{ui.quick}</Badge>
             )}
           </div>
 
@@ -974,7 +949,7 @@ export function ProgramStudioEditor({
         title={confirmation ? lifecycleActionLabel(confirmation, interfaceLocale) : ""}
         description={
           confirmation
-            ? lifecycleActionDescription(confirmation, ar, {
+            ? lifecycleActionDescription(confirmation, interfaceLocale, {
                 hasPublishedVersion: Boolean(detail.currentPublishedVersion),
                 pausedWithPublishedVersion:
                   detail.status === "PAUSED" && Boolean(detail.currentPublishedVersion),
@@ -986,8 +961,8 @@ export function ProgramStudioEditor({
             ? lifecycleActionLabel(confirmation, interfaceLocale)
             : ""
         }
-        cancelLabel={ar ? "إلغاء" : "Cancel"}
-        closeLabel={ar ? "إغلاق" : "Close"}
+        cancelLabel={ui.cancel}
+        closeLabel={ui.close}
         danger={confirmation === "archive" || confirmation === "abandon"}
         loading={working && Boolean(confirmation && confirmation !== "publish")}
         onClose={() => setConfirmation(null)}
@@ -999,10 +974,11 @@ export function ProgramStudioEditor({
   );
 }
 
-function StudioLoadingSkeleton({ ar }: { ar: boolean }) {
+function StudioLoadingSkeleton() {
+  const ui = useStudioUi();
   return (
     <section className="studio-loading-skeleton" aria-busy="true" aria-live="polite" role="status">
-      <span className="wf-sr-only">{ar ? "جارٍ فتح الاستوديو…" : "Opening Studio…"}</span>
+      <span className="wf-sr-only">{ui.openingStudio}</span>
       <div className="studio-loading-skeleton__header" aria-hidden="true">
         <span className="wf-skeleton studio-loading-skeleton__title" />
         <span className="wf-skeleton studio-loading-skeleton__action" />
@@ -1050,6 +1026,8 @@ function StudioJourney({
   ar: boolean;
   onArea: (area: StudioArea) => void;
 }) {
+  const ui = useStudioUi();
+  const interfaceDirection = directionForInterface(useStudioInterfaceLocale());
   const stageRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const locationStage =
     activeArea === "launch"
@@ -1084,7 +1062,7 @@ function StudioJourney({
     <div className="studio-journey-shell">
       <section
         className="studio-journey"
-        aria-label={ar ? "رحلة إطلاق البطاقة" : "Card launch journey"}
+        aria-label={ui.cardLaunchJourney}
       >
         {presentation.journeyStages.map((stage, index) => (
           <button
@@ -1101,8 +1079,8 @@ function StudioJourney({
             data-progression-state={stage.state}
             onClick={() => onArea(stage.area)}
             onKeyDown={(event) => {
-              const previousKey = ar ? "ArrowRight" : "ArrowLeft";
-              const nextKey = ar ? "ArrowLeft" : "ArrowRight";
+              const previousKey = interfaceDirection === "rtl" ? "ArrowRight" : "ArrowLeft";
+              const nextKey = interfaceDirection === "rtl" ? "ArrowLeft" : "ArrowRight";
               if (event.key === previousKey) {
                 event.preventDefault();
                 moveFocus(index, -1);
@@ -1159,11 +1137,12 @@ function StudioNavigation({
   mobileOpen: boolean;
   onArea: (area: StudioArea) => void;
 }) {
+  const ui = useStudioUi();
   return (
     <nav
       className={`studio-section-nav${mobileOpen ? " studio-section-nav--mobile-open" : ""}`}
       id="studio-mobile-navigation-menu"
-      aria-label={ar ? "أقسام الاستوديو" : "Studio sections"}
+      aria-label={ui.studioSections}
     >
       {studioAreas.map((area) => {
         const copy = studioArea(interfaceLocale, area);
@@ -1499,6 +1478,7 @@ function StudioOverview({
   onLifecycle: (action: LifecycleAction) => void;
   organization: OrganizationPublicationContext | null;
 }) {
+  const ui = useStudioUi();
   const finalReward = [...displayDraft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
@@ -1543,7 +1523,7 @@ function StudioOverview({
           ? ({
               kind: "navigate",
               area: "launch",
-              label: ar ? "مراجعة التغييرات" : "Review changes",
+              label: ui.reviewChanges,
             } as const)
           : detail.currentPublishedVersion && sharing.primaryAction === "share"
             ? ({ kind: "share", label: sharing.primaryActionLabel } as const)
@@ -1590,7 +1570,7 @@ function StudioOverview({
           onProfile={onProfile}
         />
         <section className="studio-next-action" aria-labelledby="studio-next-action-title">
-          <span className="dashboard-card__label">{ar ? "الخطوة التالية" : "NEXT"}</span>
+          <span className="dashboard-card__label">{ui.next}</span>
           <h3 id="studio-next-action-title">{primaryAction.label}</h3>
           <p>
             {hasUnpublishedChanges
@@ -1621,14 +1601,14 @@ function StudioOverview({
             <Workflow size={18} aria-hidden="true" />
           </span>
           <div>
-            <small>{ar ? "طريقة العمل" : "How it works"}</small>
+            <small>{ui.howItWorks}</small>
             <strong>
-              {displayDraft.requiredStampCount} {ar ? "أختام" : "stamps"} · {rewardName}
+              {displayDraft.requiredStampCount} {ui.stamps} · {rewardName}
             </strong>
             <p>{customerContent.earningDescription}</p>
           </div>
           <button type="button" onClick={() => onArea("how-it-works")}>
-            {ar ? "فتح" : "Open"}
+            {ui.open}
             <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
           </button>
         </section>
@@ -1637,7 +1617,7 @@ function StudioOverview({
             <Store size={18} aria-hidden="true" />
           </span>
           <div>
-            <small>{ar ? "المواقع المشاركة" : "Participating locations"}</small>
+            <small>{ui.participatingLocations}</small>
             <strong>
               {activeLocations.length === 1
                 ? activeLocations[0]?.name
@@ -1654,7 +1634,7 @@ function StudioOverview({
             </p>
           </div>
           <button type="button" onClick={() => onArea("customers-locations")}>
-            {ar ? "فتح" : "Open"}
+            {ui.open}
             <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
           </button>
         </section>
@@ -1663,7 +1643,7 @@ function StudioOverview({
             <Clock3 size={18} aria-hidden="true" />
           </span>
           <div>
-            <small>{ar ? "آخر تغيير" : "Last changed"}</small>
+            <small>{ui.lastChanged}</small>
             <strong>
               {changedAt ? (
                 <time dateTime={changedAt}>
@@ -1671,18 +1651,14 @@ function StudioOverview({
                     dateStyle: "medium",
                   }).format(new Date(changedAt))}
                 </time>
-              ) : ar ? (
-                "محفوظ"
-              ) : (
-                "Saved"
-              )}
+              ) : ui.saved}
             </strong>
             <p>
-              {displayVersion.changeSummary || (ar ? "لا يوجد ملخص للتغيير" : "No change summary")}
+              {displayVersion.changeSummary || (ui.noChangeSummary)}
             </p>
           </div>
           <button type="button" onClick={() => onArea("settings")}>
-            {ar ? "السجل" : "History"}
+            {ui.history}
             <ChevronRight className="studio-logical-next" size={15} aria-hidden="true" />
           </button>
         </section>
@@ -1706,7 +1682,7 @@ function StudioOverview({
         <div>
           <Eye size={19} aria-hidden="true" />
           <span>
-            <strong>{ar ? "التصميم ومحتوى العميل" : "Design and customer content"}</strong>
+            <strong>{ui.designAndCustomerContent}</strong>
             <small>
               {ar
                 ? "تُدار في منشئ البطاقة وتظهر هنا كملخص فقط."
@@ -1716,7 +1692,7 @@ function StudioOverview({
         </div>
         {editable ? (
           <Button variant="secondary" onClick={onEditDesign}>
-            {ar ? "تعديل التصميم" : "Edit design"}
+            {ui.editDesign}
           </Button>
         ) : null}
       </div>
@@ -1753,6 +1729,7 @@ function StudioPreview({
   onProfile: (profile: PreviewProfile) => void;
   brandLogoUrl?: string | undefined;
 }) {
+  const ui = useStudioUi();
   const [selectedVersion, setSelectedVersion] = useState<"published" | "draft">(
     source === "published" ? "published" : "draft",
   );
@@ -1776,32 +1753,32 @@ function StudioPreview({
   const publishedState =
     publishedStatus === "PUBLISHED"
       ? {
-          eyebrow: ar ? "المنشور حالياً" : "CURRENTLY LIVE",
-          label: ar ? "مباشرة الآن" : "Currently live",
+          eyebrow: ui.currentlyLive,
+          label: ui.currentlyLiveLabel,
           tone: "success" as const,
         }
       : publishedStatus === "PAUSED"
         ? {
-            eyebrow: ar ? "الإعداد المنشور" : "PUBLISHED SETUP",
-            label: ar ? "متوقفة" : "Paused",
+            eyebrow: ui.publishedSetup,
+            label: ui.paused,
             tone: "warning" as const,
           }
         : publishedStatus === "ARCHIVED"
           ? {
-              eyebrow: ar ? "الإعداد المحفوظ" : "PRESERVED SETUP",
-              label: ar ? "مؤرشفة" : "Archived",
+              eyebrow: ui.preservedSetup,
+              label: ui.archived,
               tone: "neutral" as const,
             }
           : {
-              eyebrow: ar ? "الإعداد المنشور" : "PUBLISHED SETUP",
-              label: ar ? "منشورة" : "Published",
+              eyebrow: ui.publishedSetup,
+              label: ui.published,
               tone: "neutral" as const,
             };
   const loading = activeSource === "draft" && (loadState === "idle" || loadState === "loading");
   return (
     <section
       className="studio-preview-panel studio-preview-panel--overview"
-      aria-label={ar ? "معاينة البطاقة" : "Card preview"}
+      aria-label={ui.cardPreview}
     >
       <div className="studio-preview-header">
         <div>
@@ -1850,7 +1827,7 @@ function StudioPreview({
         <div
           className="studio-preview-tabs"
           role="tablist"
-          aria-label={ar ? "أسطح المعاينة" : "Preview surfaces"}
+          aria-label={ui.previewSurfaces}
         >
           {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
             <button
@@ -1886,7 +1863,7 @@ function StudioPreview({
         ) : activeSource === "draft" && preview ? (
           <Image
             src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview.svg)}`}
-            alt={ar ? `معاينة ${profileLabel}` : `${profileLabel} preview`}
+            alt={interpolateStudioCopy(ui.previewAlt, profileLabel)}
             width={preview.width}
             height={preview.height}
             unoptimized
@@ -1911,7 +1888,7 @@ function StudioPreview({
         )}
       </div>
       {activeSource !== "unavailable" ? (
-        <FormField label={ar ? "تقدم العميل" : "Customer progress"}>
+        <FormField label={ui.customerProgress}>
           <div className="studio-preview-progress">
             <input
               type="range"
@@ -1945,6 +1922,7 @@ function PublishedCardSummary({
   ar: boolean;
   brandLogoUrl?: string | undefined;
 }) {
+  const ui = useStudioUi();
   const content = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
   const reward = [...draft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
@@ -1965,14 +1943,14 @@ function PublishedCardSummary({
         borderRadius: `${Math.max(14, draft.visualTheme.borderRadius)}px`,
       }}
       role="img"
-      aria-label={ar ? "ملخص البطاقة المنشورة حاليًا" : "Current published card summary"}
+      aria-label={ui.currentPublishedCardSummary}
     >
       <div className="studio-published-customer-preview__issuer">
         <MerchantBrandMark
           className="studio-published-customer-preview__issuer-mark"
           contentUrl={brandLogoUrl}
         />
-        <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
+        <small>{ui.loyaltyCard}</small>
       </div>
       <h4>{content.programName}</h4>
       <p>{content.shortDescription}</p>
@@ -1989,7 +1967,7 @@ function PublishedCardSummary({
         ))}
       </div>
       <div className="studio-published-customer-preview__reward">
-        <small>{ar ? "المكافأة" : "REWARD"}</small>
+        <small>{ui.reward}</small>
         <strong>{rewardName}</strong>
       </div>
       <output dir="ltr">
@@ -2016,6 +1994,7 @@ function HowItWorksPanel({
   advancedRules: React.ReactNode;
   onCreateDraft: () => void;
 }) {
+  const ui = useStudioUi();
   const reward = [...draft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
@@ -2031,9 +2010,9 @@ function HowItWorksPanel({
             {draft.requiredStampCount}
           </span>
           <div>
-            <small>{ar ? "هدف الأختام" : "Stamp goal"}</small>
+            <small>{ui.stampGoal}</small>
             <h3>
-              {draft.requiredStampCount} {ar ? "أختام" : "stamps"}
+              {draft.requiredStampCount} {ui.stamps}
             </h3>
             <p>{content.earningDescription}</p>
           </div>
@@ -2043,7 +2022,7 @@ function HowItWorksPanel({
             <Gift size={22} aria-hidden="true" />
           </span>
           <div>
-            <small>{ar ? "المكافأة" : "Reward"}</small>
+            <small>{ui.rewardLabel}</small>
             <h3>{rewardName}</h3>
             <p>
               {reward?.requiresManagerApproval
@@ -2062,7 +2041,7 @@ function HowItWorksPanel({
         <div>
           <Eye size={19} aria-hidden="true" />
           <span>
-            <strong>{ar ? "اسم المكافأة وشكل البطاقة" : "Reward name and card appearance"}</strong>
+            <strong>{ui.rewardNameAndCardAppearance}</strong>
             <small>
               {ar
                 ? "يُعدّلان في منشئ البطاقة حتى يبقى لكل حقل مكان واحد."
@@ -2072,7 +2051,7 @@ function HowItWorksPanel({
         </div>
         {editable ? (
           <Button variant="secondary" onClick={onEditDesign}>
-            {ar ? "تعديل التصميم" : "Edit design"}
+            {ui.editDesign}
           </Button>
         ) : null}
       </div>
@@ -2083,7 +2062,7 @@ function HowItWorksPanel({
             <span>
               <Settings2 size={19} aria-hidden="true" />
               <strong>
-                {ar ? "قواعد الكسب والاسترداد المتقدمة" : "Advanced earning and redemption rules"}
+                {ui.advancedEarningAndRedemptionRules}
               </strong>
             </span>
             <ChevronDown size={18} aria-hidden="true" />
@@ -2109,6 +2088,7 @@ function RewardOperationsPanel({
   setDraft: React.Dispatch<React.SetStateAction<ProgramDraftInput | null>>;
   ar: boolean;
 }) {
+  const ui = useStudioUi();
   function updateReward(clientId: string, transform: (reward: RewardInput) => RewardInput) {
     setDraft((current) =>
       current
@@ -2124,8 +2104,8 @@ function RewardOperationsPanel({
   return (
     <section className="studio-operational-rewards">
       <div>
-        <span className="dashboard-card__label">{ar ? "عند الاسترداد" : "AT REDEMPTION"}</span>
-        <h3>{ar ? "طريقة استخدام المكافآت" : "How rewards are used"}</h3>
+        <span className="dashboard-card__label">{ui.atRedemption}</span>
+        <h3>{ui.howRewardsAreUsed}</h3>
       </div>
       {draft.rewards.map((reward) => {
         const name = selectStudioLocalizedRewardContent(reward, ar ? "ar" : "en").name;
@@ -2153,7 +2133,7 @@ function RewardOperationsPanel({
               </Badge>
             </div>
             <div className="studio-form-grid">
-              <FormField label={ar ? "مدة الصلاحية بالأيام" : "Valid for (days)"}>
+              <FormField label={ui.validForDays}>
                 <TextInput
                   type="number"
                   min={1}
@@ -2167,7 +2147,7 @@ function RewardOperationsPanel({
                   }
                 />
               </FormField>
-              <FormField label={ar ? "مرات الاستخدام لكل مكافأة" : "Uses per earned reward"}>
+              <FormField label={ui.usesPerEarnedReward}>
                 <TextInput
                   type="number"
                   min={1}
@@ -2184,7 +2164,7 @@ function RewardOperationsPanel({
             </div>
             <Checkbox
               checked={reward.requiresManagerApproval}
-              label={ar ? "طلب موافقة المدير عند الاسترداد" : "Require manager approval to redeem"}
+              label={ui.requireManagerApprovalToRedeem}
               onChange={(event) =>
                 updateReward(reward.clientId, (current) => ({
                   ...current,
@@ -2218,6 +2198,7 @@ function CustomersLocationsPanel({
   locationEditor: React.ReactNode;
   onCreateDraft: () => void;
 }) {
+  const ui = useStudioUi();
   const participating = locations.filter((location) => draft.locationIds.includes(location.id));
   return (
     <div className="studio-area-stack">
@@ -2225,9 +2206,9 @@ function CustomersLocationsPanel({
         <div className="studio-section-heading">
           <div>
             <span className="dashboard-card__label">
-              {ar ? "أماكن المشاركة" : "WHERE IT WORKS"}
+              {ui.whereItWorks}
             </span>
-            <h3>{ar ? "المواقع المشاركة" : "Participating locations"}</h3>
+            <h3>{ui.participatingLocations}</h3>
             <p>
               {ar
                 ? "يمكن للعملاء كسب الأختام في المواقع النشطة المحددة هنا."
@@ -2235,7 +2216,7 @@ function CustomersLocationsPanel({
             </p>
           </div>
           <Badge tone={participating.length ? "success" : "warning"}>
-            {ar ? `${participating.length} محددة` : `${participating.length} selected`}
+            {interpolateStudioCopy(ui.selectedCount, participating.length)}
           </Badge>
         </div>
         {editable ? (
@@ -2272,18 +2253,19 @@ function CreateUpdatePrompt({
   onCreate: () => void;
   compact?: boolean;
 }) {
+  const ui = useStudioUi();
   return (
     <Card className={`studio-create-update${compact ? " studio-create-update--compact" : ""}`}>
       <Plus size={24} aria-hidden="true" />
       <div>
-        <h3>{ar ? "أنشئ تحديثًا للتعديل" : "Create an update to make changes"}</h3>
+        <h3>{ui.createAnUpdateToMakeChanges}</h3>
         <p>
           {ar
             ? "ستبقى البطاقة المباشرة كما هي حتى تختبر التحديث وتنشره."
             : "The live card stays unchanged until you review and publish the update."}
         </p>
       </div>
-      <Button onClick={onCreate}>{ar ? "إنشاء تحديث" : "Create update"}</Button>
+      <Button onClick={onCreate}>{ui.createUpdate}</Button>
     </Card>
   );
 }
@@ -2307,14 +2289,16 @@ function StudioSettingsPanel({
   onCreateDraft: () => void;
   onLifecycle: (action: LifecycleAction) => void;
 }) {
+  const ui = useStudioUi();
+  const interfaceLocale = useStudioInterfaceLocale();
   const customerContent = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
   return (
     <div className="studio-area-stack">
       <section className="studio-settings-section">
         <div className="studio-section-heading">
           <div>
-            <span className="dashboard-card__label">{ar ? "ملكية الحقول" : "FIELD OWNERSHIP"}</span>
-            <h3>{ar ? "التصميم ومحتوى العميل" : "Design and customer content"}</h3>
+            <span className="dashboard-card__label">{ui.fieldOwnership}</span>
+            <h3>{ui.designAndCustomerContent}</h3>
             <p>
               {ar
                 ? "تظهر هذه القيم هنا كملخص. يعدّلها منشئ البطاقة فقط."
@@ -2323,22 +2307,22 @@ function StudioSettingsPanel({
           </div>
           {editable ? (
             <Button variant="secondary" onClick={onEditDesign}>
-              {ar ? "تعديل التصميم" : "Edit design"}
+              {ui.editDesign}
             </Button>
           ) : null}
         </div>
         <dl className="studio-settings-summary">
           <div>
-            <dt>{ar ? "اسم البطاقة" : "Card name"}</dt>
+            <dt>{ui.cardName}</dt>
             <dd>{customerContent.programName}</dd>
           </div>
           <div>
-            <dt>{ar ? "هدف الأختام" : "Stamp goal"}</dt>
+            <dt>{ui.stampGoal}</dt>
             <dd>{draft.requiredStampCount}</dd>
           </div>
           <div>
-            <dt>{ar ? "لغة العرض" : "Customer languages"}</dt>
-            <dd>{ar ? "العربية والإنجليزية" : "English and Arabic"}</dd>
+            <dt>{ui.customerLanguages}</dt>
+            <dd>{ui.englishAndArabic}</dd>
           </div>
         </dl>
       </section>
@@ -2346,7 +2330,7 @@ function StudioSettingsPanel({
       <section className="studio-settings-section">
         <div className="studio-section-heading">
           <div>
-            <span className="dashboard-card__label">{ar ? "حالة البطاقة" : "CARD STATE"}</span>
+            <span className="dashboard-card__label">{ui.cardState}</span>
             <h3>{lifecycleState.label}</h3>
             <p>{lifecycleState.description}</p>
           </div>
@@ -2356,25 +2340,25 @@ function StudioSettingsPanel({
           {lifecycleState.capabilities.canPause ? (
             <Button variant="secondary" onClick={() => onLifecycle("pause")}>
               <Pause size={16} aria-hidden="true" />{" "}
-              {lifecycleActionLabel("pause", ar ? "ar" : "en")}
+              {lifecycleActionLabel("pause", interfaceLocale)}
             </Button>
           ) : null}
           {lifecycleState.capabilities.canResume ? (
             <Button onClick={() => onLifecycle("resume")}>
               <Play size={16} aria-hidden="true" />{" "}
-              {lifecycleActionLabel("resume", ar ? "ar" : "en")}
+              {lifecycleActionLabel("resume", interfaceLocale)}
             </Button>
           ) : null}
           {lifecycleState.capabilities.canArchive ? (
             <Button variant="secondary" onClick={() => onLifecycle("archive")}>
               <Archive size={16} aria-hidden="true" />{" "}
-              {lifecycleActionLabel("archive", ar ? "ar" : "en")}
+              {lifecycleActionLabel("archive", interfaceLocale)}
             </Button>
           ) : null}
           {lifecycleState.capabilities.canRestore ? (
             <Button onClick={() => onLifecycle("restore")}>
               <RotateCcw size={16} aria-hidden="true" />{" "}
-              {lifecycleActionLabel("restore", ar ? "ar" : "en")}
+              {lifecycleActionLabel("restore", interfaceLocale)}
             </Button>
           ) : null}
         </div>
@@ -2385,7 +2369,7 @@ function StudioSettingsPanel({
       ) : null}
 
       {history ?? (
-        <Alert tone="info" title={ar ? "لا يوجد سجل تغييرات بعد" : "No change history yet"} />
+        <Alert tone="info" title={ui.noChangeHistoryYet} />
       )}
     </div>
   );
@@ -2430,12 +2414,13 @@ function StudioSectionContent({
   onLoadMoreVersions?: (() => void) | undefined;
   onAbandon: () => void;
 }) {
+  const ui = useStudioUi();
   const update = (transform: (current: ProgramDraftInput) => ProgramDraftInput) =>
     setDraft((current) => (current ? transform(current) : current));
   if (section === "overview")
     return (
       <div className="studio-section-content">
-        <FormField label={ar ? "الاسم الداخلي" : "Internal name"} required>
+        <FormField label={ui.internalName} required>
           <TextInput
             value={draft.internalName}
             onChange={(event) =>
@@ -2443,7 +2428,7 @@ function StudioSectionContent({
             }
           />
         </FormField>
-        <FormField label={ar ? "وضع التحرير" : "Editing mode"}>
+        <FormField label={ui.editingMode}>
           <Select
             value={draft.editingMode}
             onChange={(event) => {
@@ -2462,7 +2447,7 @@ function StudioSectionContent({
           <Alert
             tone="info"
             title={
-              ar ? "قيود Starter مفعلة على الخادم" : "Starter restrictions are enforced by the API"
+              ui.starterRestrictionsAreEnforcedByTheApi
             }
           >
             {ar
@@ -2470,7 +2455,7 @@ function StudioSectionContent({
               : "Pro, multiple rewards, milestones, Path, and Ring require Growth or Scale."}
           </Alert>
         ) : null}
-        <FormField label={ar ? "ملخص التغيير" : "Change summary"}>
+        <FormField label={ui.changeSummary}>
           <TextInput
             value={draft.changeSummary ?? ""}
             onChange={(event) =>
@@ -2485,7 +2470,7 @@ function StudioSectionContent({
   if (section === "earning")
     return (
       <div className="studio-section-content">
-        <FormField label={ar ? "عدد الأختام المطلوبة" : "Required stamp count"}>
+        <FormField label={ui.requiredStampCount}>
           <input
             type="range"
             min={2}
@@ -2505,10 +2490,10 @@ function StudioSectionContent({
             }}
           />
           <strong>
-            {draft.requiredStampCount} {ar ? "أختام" : "stamps"}
+            {draft.requiredStampCount} {ui.stamps}
           </strong>
         </FormField>
-        <FormField label={ar ? "وصف طريقة الكسب" : "Earning description"}>
+        <FormField label={ui.earningDescription}>
           <TextInput
             value={draft.earningDescription}
             onChange={(event) =>
@@ -2516,7 +2501,7 @@ function StudioSectionContent({
             }
           />
         </FormField>
-        <Alert tone="info" title={ar ? "سياسة العمليات" : "Operations policy"}>
+        <Alert tone="info" title={ui.operationsPolicy}>
           {ar
             ? "تُطبّق حدود العملية واليوم وسياسة الشراء من إصدار البرنامج المثبت للعضوية."
             : "Operation limits, daily caps, purchase policy, and reset behavior follow the setup each customer joined under."}
@@ -2592,11 +2577,11 @@ function StudioSectionContent({
         <div className="studio-color-grid">
           {(
             [
-              ["backgroundColor", ar ? "الخلفية" : "Background"],
-              ["foregroundColor", ar ? "النص" : "Foreground"],
-              ["accentColor", ar ? "التمييز" : "Accent"],
-              ["secondaryColor", ar ? "الثانوي" : "Secondary"],
-              ["mutedColor", ar ? "الهادئ" : "Muted"],
+              ["backgroundColor", ui.background],
+              ["foregroundColor", ui.foreground],
+              ["accentColor", ui.accent],
+              ["secondaryColor", ui.secondary],
+              ["mutedColor", ui.muted],
             ] as const
           ).map(([key, label]) => (
             <FormField key={key} label={label}>
@@ -2624,7 +2609,7 @@ function StudioSectionContent({
             </FormField>
           ))}
         </div>
-        <FormField label={ar ? "نمط ويب العميل" : "Customer Web style"}>
+        <FormField label={ui.customerWebStyle}>
           <Select
             value={draft.visualTheme.customerWebVariant}
             onChange={(event) =>
@@ -2650,11 +2635,11 @@ function StudioSectionContent({
       <div className="studio-section-content">
         {(
           [
-            ["HERO", "heroAssetId", ar ? "صورة البطل" : "Hero"],
-            ["BACKGROUND", "backgroundAssetId", ar ? "الخلفية" : "Background"],
-            ["STAMP_FILLED", "filledStampAssetId", ar ? "الختم الممتلئ" : "Filled stamp"],
-            ["STAMP_EMPTY", "emptyStampAssetId", ar ? "الختم الفارغ" : "Empty stamp"],
-            ["STAMP_MILESTONE", "defaultMilestoneAssetId", ar ? "ختم المعلم" : "Milestone stamp"],
+            ["HERO", "heroAssetId", ui.hero],
+            ["BACKGROUND", "backgroundAssetId", ui.background],
+            ["STAMP_FILLED", "filledStampAssetId", ui.filledStamp],
+            ["STAMP_EMPTY", "emptyStampAssetId", ui.emptyStamp],
+            ["STAMP_MILESTONE", "defaultMilestoneAssetId", ui.milestoneStamp],
           ] as const
         ).map(([category, key, label]) => (
           <div key={key}>
@@ -2690,7 +2675,7 @@ function StudioSectionContent({
     );
 
   if (section === "layout")
-    return <LayoutEditor draft={draft} update={update} plan={plan} ar={ar} />;
+    return <LayoutEditor draft={draft} update={update} plan={plan} />;
 
   if (["customer-preview", "apple-preview", "google-preview"].includes(section))
     return <PreviewSettings section={section} draft={draft} update={update} ar={ar} />;
@@ -2720,10 +2705,10 @@ function StudioSectionContent({
       />
       {detail.currentPublishedVersion ? (
         <Button variant="danger" onClick={onAbandon}>
-          <Trash2 size={16} /> {ar ? "التخلي عن المسودة" : "Abandon draft"}
+          <Trash2 size={16} /> {ui.abandonDraft}
         </Button>
       ) : (
-        <Alert tone="info" title={ar ? "المسودة الأولى محفوظة" : "Initial draft is preserved"}>
+        <Alert tone="info" title={ui.initialDraftIsPreserved}>
           {ar
             ? "استخدم إجراء الأرشفة الآمن لإخفاء البطاقة غير المنشورة مع الاحتفاظ بالمسودة وسجل الإصدارات."
             : "Use Archive to hide this unpublished card while preserving its draft and change history."}
@@ -2824,6 +2809,7 @@ function RewardsEditor({
   plan: "STARTER" | "GROWTH" | "SCALE";
   ar: boolean;
 }) {
+  const ui = useStudioUi();
   function updateReward(clientId: string, transform: (reward: RewardInput) => RewardInput) {
     update((current) => ({
       ...current,
@@ -2859,7 +2845,7 @@ function RewardsEditor({
     <div className="studio-section-content">
       <div className="studio-section-heading">
         <div>
-          <h3>{ar ? "مكافآت وصفية ومعالم" : "Descriptive rewards and milestones"}</h3>
+          <h3>{ui.descriptiveRewardsAndMilestones}</h3>
           <p>
             {ar
               ? "يجب أن تكون العتبات فريدة وأن توجد مكافأة نهائية عند الهدف."
@@ -2872,7 +2858,7 @@ function RewardsEditor({
           disabled={plan === "STARTER" || draft.editingMode !== "pro"}
           title={plan === "STARTER" ? "Growth or Scale required." : undefined}
         >
-          <Plus size={16} /> {ar ? "إضافة معلم" : "Add milestone"}
+          <Plus size={16} /> {ui.addMilestone}
         </Button>
       </div>
       {draft.rewards.map((reward, index) => (
@@ -2896,12 +2882,12 @@ function RewardsEditor({
                   }))
                 }
               >
-                <X size={16} /> {ar ? "إزالة" : "Remove"}
+                <X size={16} /> {ui.remove}
               </Button>
             ) : null}
           </div>
           <div className="studio-form-grid">
-            <FormField label={ar ? "العتبة" : "Threshold"}>
+            <FormField label={ui.threshold}>
               <TextInput
                 type="number"
                 min={2}
@@ -2915,7 +2901,7 @@ function RewardsEditor({
                 }
               />
             </FormField>
-            <FormField label={ar ? "الاسم الداخلي" : "Internal name"}>
+            <FormField label={ui.internalName}>
               <TextInput
                 value={reward.internalName}
                 onChange={(event) =>
@@ -2926,7 +2912,7 @@ function RewardsEditor({
                 }
               />
             </FormField>
-            <FormField label={ar ? "الصلاحية بالأيام" : "Validity days"}>
+            <FormField label={ui.validityDays}>
               <TextInput
                 type="number"
                 min={1}
@@ -2940,7 +2926,7 @@ function RewardsEditor({
                 }
               />
             </FormField>
-            <FormField label={ar ? "الاسترداد لكل كسب" : "Redemptions per earned reward"}>
+            <FormField label={ui.redemptionsPerEarnedReward}>
               <TextInput
                 type="number"
                 min={1}
@@ -2956,7 +2942,7 @@ function RewardsEditor({
             </FormField>
           </div>
           <Checkbox
-            label={ar ? "يتطلب موافقة المدير" : "Requires manager approval"}
+            label={ui.requiresManagerApproval}
             checked={reward.requiresManagerApproval}
             onChange={(event) =>
               updateReward(reward.clientId, (current) => ({
@@ -3044,7 +3030,7 @@ function RewardsEditor({
           <ProgramAssetPicker
             organizationId={organizationId}
             category="STAMP_MILESTONE"
-            label={`${ar ? "رسم المعلم" : "Milestone artwork"} ${index + 1}`}
+            label={`${ui.milestoneArtwork} ${index + 1}`}
             assets={assets}
             selectedId={reward.visualOverride?.stampAssetId}
             onSelected={(assetId) =>
@@ -3074,6 +3060,7 @@ function OperationsPolicyEditor({
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
   ar: boolean;
 }) {
+  const ui = useStudioUi();
   const timezoneChoices = useMemo(
     () =>
       timeZoneOptions(ar ? "ar" : "en").map((option) => ({
@@ -3085,12 +3072,12 @@ function OperationsPolicyEditor({
   );
   return (
     <div className="studio-section-content">
-      <Alert tone="info" title={ar ? "قواعد التحديث" : "How rule changes take effect"}>
+      <Alert tone="info" title={ui.howRuleChangesTakeEffect}>
         {ar
           ? "تطبّق التغييرات الجديدة على العملاء الذين ينضمون بعد نشر التحديث، بينما تبقى شروط العملاء الحاليين كما هي."
           : "New rules apply to customers who join after this update is published. Existing customers keep their current terms."}
       </Alert>
-      <FormField label={ar ? "المنطقة الزمنية للنشاط" : "Business timezone"} required>
+      <FormField label={ui.businessTimezone} required>
         <SearchableSelect
           name="operationalTimezone"
           options={timezoneChoices}
@@ -3098,7 +3085,7 @@ function OperationsPolicyEditor({
           onValueChange={(value) =>
             value && update((current) => ({ ...current, operationalTimezone: value }))
           }
-          placeholder={ar ? "ابحث عن منطقة زمنية" : "Search timezones"}
+          placeholder={ui.searchTimezones}
           required
         />
         <span className="field-help">
@@ -3107,7 +3094,7 @@ function OperationsPolicyEditor({
             : "Controls daily limits, reporting days, and reward expiry dates."}
         </span>
       </FormField>
-      <FormField label={ar ? "أقصى أختام لكل عملية شراء" : "Most stamps per purchase"}>
+      <FormField label={ui.mostStampsPerPurchase}>
         <TextInput
           type="number"
           min={1}
@@ -3131,10 +3118,10 @@ function OperationsPolicyEditor({
               : null,
           }))
         }
-        label={ar ? "تفعيل حد يومي لكل عميل" : "Set a daily limit per customer"}
+        label={ui.setADailyLimitPerCustomer}
       />
       {draft.maximumStampsPerCustomerPerDay !== null ? (
-        <FormField label={ar ? "أقصى أختام يومية للعميل" : "Most stamps per customer per day"}>
+        <FormField label={ui.mostStampsPerCustomerPerDay}>
           <TextInput
             type="number"
             min={1}
@@ -3163,11 +3150,11 @@ function OperationsPolicyEditor({
             minimumPurchaseCurrency: event.target.checked ? "IQD" : null,
           }))
         }
-        label={ar ? "اشتراط حد أدنى للشراء" : "Require a minimum purchase"}
+        label={ui.requireAMinimumPurchase}
       />
       {draft.minimumPurchaseAmountMinor !== null ? (
         <div className="studio-form-grid">
-          <FormField label={ar ? "أصغر قيمة شراء مؤهلة" : "Smallest qualifying purchase"}>
+          <FormField label={ui.smallestQualifyingPurchase}>
             <TextInput
               type="number"
               min={0}
@@ -3181,7 +3168,7 @@ function OperationsPolicyEditor({
               }
             />
           </FormField>
-          <FormField label={ar ? "عملة الشراء" : "Purchase currency"}>
+          <FormField label={ui.purchaseCurrency}>
             <TextInput
               value={draft.minimumPurchaseCurrency ?? ""}
               maxLength={3}
@@ -3197,7 +3184,7 @@ function OperationsPolicyEditor({
         </div>
       ) : null}
       <div className="studio-form-grid">
-        <FormField label={ar ? "مهلة تصحيح الموظف (ثوانٍ)" : "Staff correction window (seconds)"}>
+        <FormField label={ui.staffCorrectionWindowSeconds}>
           <TextInput
             type="number"
             min={15}
@@ -3211,7 +3198,7 @@ function OperationsPolicyEditor({
             }
           />
         </FormField>
-        <FormField label={ar ? "مهلة تصحيح المدير (دقائق)" : "Manager correction window (minutes)"}>
+        <FormField label={ui.managerCorrectionWindowMinutes}>
           <TextInput
             type="number"
             min={1}
@@ -3240,9 +3227,9 @@ function OperationsPolicyEditor({
             : "Allow manager exceptions with a required reason"
         }
       />
-      <FormField label={ar ? "بعد استخدام المكافأة النهائية" : "After the final reward is used"}>
+      <FormField label={ui.afterTheFinalRewardIsUsed}>
         <TextInput
-          value={ar ? "يبدأ العميل دورة أختام جديدة" : "Start a new stamp cycle"}
+          value={ui.startANewStampCycle}
           disabled
         />
         <span className="field-help">
@@ -3259,13 +3246,12 @@ function LayoutEditor({
   draft,
   update,
   plan,
-  ar,
 }: {
   draft: ProgramDraftInput;
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
   plan: "STARTER" | "GROWTH" | "SCALE";
-  ar: boolean;
 }) {
+  const ui = useStudioUi();
   return (
     <div className="studio-section-content">
       <div className="studio-layout-grid">
@@ -3288,14 +3274,14 @@ function LayoutEditor({
             >
               <strong>{layout}</strong>
               <small>
-                {locked ? "Growth required" : ar ? "تخطيط متجاوب" : "Responsive layout"}
+                {locked ? "Growth required" : ui.responsiveLayout}
               </small>
             </button>
           );
         })}
       </div>
       <div className="studio-form-grid">
-        <FormField label={ar ? "حجم الختم" : "Stamp size"}>
+        <FormField label={ui.stampSize}>
           <input
             type="range"
             min={24}
@@ -3309,7 +3295,7 @@ function LayoutEditor({
             }
           />
         </FormField>
-        <FormField label={ar ? "تباعد الأختام" : "Stamp spacing"}>
+        <FormField label={ui.stampSpacing}>
           <input
             type="range"
             min={0}
@@ -3324,7 +3310,7 @@ function LayoutEditor({
           />
         </FormField>
         {["GRID", "PATH"].includes(draft.visualTheme.layoutType) ? (
-          <FormField label={ar ? "الأعمدة" : "Columns"}>
+          <FormField label={ui.columns}>
             <TextInput
               type="number"
               min={draft.visualTheme.layoutType === "PATH" ? 3 : 2}
@@ -3346,7 +3332,7 @@ function LayoutEditor({
           </FormField>
         ) : null}
         {draft.visualTheme.layoutType === "RING" ? (
-          <FormField label={ar ? "زاوية البداية" : "Start angle"}>
+          <FormField label={ui.startAngle}>
             <TextInput
               type="number"
               min={-180}
@@ -3370,7 +3356,7 @@ function LayoutEditor({
       </div>
       <div className="studio-check-grid">
         <Checkbox
-          label={ar ? "عرض ملصق التقدم" : "Show progress label"}
+          label={ui.showProgressLabel}
           checked={draft.visualTheme.progressLabelVisible}
           onChange={(event) =>
             update((current) => ({
@@ -3383,7 +3369,7 @@ function LayoutEditor({
           }
         />
         <Checkbox
-          label={ar ? "عرض ملصق المكافأة" : "Show reward label"}
+          label={ui.showRewardLabel}
           checked={draft.visualTheme.rewardLabelVisible}
           onChange={(event) =>
             update((current) => ({
@@ -3411,6 +3397,7 @@ function PreviewSettings({
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
   ar: boolean;
 }) {
+  const ui = useStudioUi();
   if (section === "apple-preview")
     return (
       <div className="studio-section-content">
@@ -3504,13 +3491,13 @@ function PreviewSettings({
   return (
     <div className="studio-section-content">
       <CapabilitySummary platform="CUSTOMER_WEB" />
-      <h3>{ar ? "تكوين بطاقة العميل" : "Customer-facing card composition"}</h3>
+      <h3>{ui.customerFacingCardComposition}</h3>
       <p>
         {ar
           ? "تتضمن المعاينة الهوية والمحتوى المحلي والأختام والمكافأة والشروط."
           : "The preview includes identity, localized content, stamps, reward, and terms."}
       </p>
-      <FormField label={ar ? "نمط البطاقة" : "Card style"}>
+      <FormField label={ui.cardStyle}>
         <Select
           value={draft.visualTheme.customerWebVariant}
           onChange={(event) =>
@@ -3566,11 +3553,12 @@ function ValidationPanel({
   onIssue: (issue: ValidationIssue) => void;
   ar: boolean;
 }) {
+  const ui = useStudioUi();
   return (
     <div className="studio-section-content">
       <div className="studio-section-heading">
         <div>
-          <h3>{ar ? "الفحوصات الآلية" : "Automated checks"}</h3>
+          <h3>{ui.automatedChecks}</h3>
           <p>
             {ar
               ? "تأكد من اكتمال البطاقة والمواقع وتجارب العرض قبل الإطلاق."
@@ -3589,7 +3577,7 @@ function ValidationPanel({
         </Button>
       </div>
       {!result ? (
-        <Alert tone="info" title={ar ? "لم تُشغّل الفحوصات بعد" : "Checks have not run yet"}>
+        <Alert tone="info" title={ui.checksHaveNotRunYet}>
           {ar
             ? "شغّل الفحوصات لرؤية أي خطوة تحتاج إلى إصلاح."
             : "Run the checks to see whether anything needs attention."}
@@ -3642,35 +3630,25 @@ function ValidationPanel({
   );
 }
 
-function auditEventLabel(event: ProgramAuditEvent, ar: boolean): string {
+function auditEventLabel(event: ProgramAuditEvent, interfaceLocale: InterfaceLocale): string {
+  const ui = studioUi(interfaceLocale);
   if (event.action === "program.published") {
-    const first = event.metadata?.publicationType === "FIRST_PUBLICATION";
-    return first
-      ? ar
-        ? "تم إطلاق بطاقة الولاء"
-        : "Loyalty card launched"
-      : ar
-        ? "تم نشر تغييرات البطاقة"
-        : "Card changes published";
+    return event.metadata?.publicationType === "FIRST_PUBLICATION"
+      ? ui.loyaltyCardLaunched
+      : ui.cardChangesPublished;
   }
-  const labels: Record<string, [string, string]> = {
-    "program.draft_updated": ["Draft change saved", "تم حفظ تغيير في المسودة"],
-    "program.draft_abandoned": ["Draft abandoned", "تم التخلي عن المسودة"],
-    "program.paused": ["Loyalty card paused", "تم إيقاف بطاقة الولاء"],
-    "program.resumed": ["Loyalty card resumed", "تم استئناف بطاقة الولاء"],
-    "program.archived": ["Loyalty card archived", "تمت أرشفة بطاقة الولاء"],
-    "program.restored": ["Loyalty card restored", "تمت استعادة بطاقة الولاء"],
-    "program.version_superseded": ["Previous publication replaced", "تم استبدال النشر السابق"],
-    "program.wallet_sync_job_created": [
-      "Wallet status sync queued",
-      "تمت جدولة مزامنة حالة Wallet",
-    ],
+  const labels: Record<string, StudioUiKey> = {
+    "program.draft_updated": "draftChangeSaved",
+    "program.draft_abandoned": "draftAbandoned",
+    "program.paused": "pausedNoticeTitle",
+    "program.resumed": "resumedNoticeTitle",
+    "program.archived": "archivedNoticeTitle",
+    "program.restored": "restoredNoticeTitle",
+    "program.version_superseded": "previousPublicationReplaced",
+    "program.wallet_sync_job_created": "walletStatusSyncQueued",
   };
-  return (
-    labels[event.action]?.[ar ? 1 : 0] ?? (ar ? "تم تحديث بطاقة الولاء" : "Loyalty card updated")
-  );
+  return ui[labels[event.action] ?? "loyaltyCardUpdated"];
 }
-
 function VersionHistory({
   versions,
   auditEvents,
@@ -3684,24 +3662,26 @@ function VersionHistory({
   onView: (versionId: string) => void;
   onLoadMore?: (() => void) | undefined;
 }) {
+  const ui = useStudioUi();
+  const interfaceLocale = useStudioInterfaceLocale();
   return (
     <Card className="studio-version-history" id="studio-change-history" tabIndex={-1}>
       <div className="studio-section-heading">
         <div>
-          <span className="dashboard-card__label">{ar ? "سجل التغييرات" : "CHANGE HISTORY"}</span>
-          <h3>{ar ? "التغييرات المحفوظة" : "Saved changes"}</h3>
+          <span className="dashboard-card__label">{ui.changeHistory}</span>
+          <h3>{ui.savedChanges}</h3>
         </div>
         <History size={20} aria-hidden="true" />
       </div>
       {auditEvents.length ? (
         <div className="studio-audit-timeline">
-          <h4>{ar ? "نشاط البطاقة" : "Card activity"}</h4>
+          <h4>{ui.cardActivity}</h4>
           {auditEvents.slice(0, 12).map((event) => (
             <article key={event.id}>
               <span aria-hidden="true" />
               <div>
-                <strong>{auditEventLabel(event, ar)}</strong>
-                <small>{event.actor?.displayName ?? (ar ? "النظام" : "System")}</small>
+                <strong>{auditEventLabel(event, interfaceLocale)}</strong>
+                <small>{event.actor?.displayName ?? (ui.system)}</small>
               </div>
               <time dateTime={event.createdAt}>
                 {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
@@ -3720,7 +3700,7 @@ function VersionHistory({
         </p>
       )}
       <h4 className="studio-version-history__subheading">
-        {ar ? "لقطات الإعداد المحفوظ" : "Saved setup snapshots"}
+        {ui.savedSetupSnapshots}
       </h4>
       {versions.map((version) => {
         const timestamp =
@@ -3743,18 +3723,18 @@ function VersionHistory({
                 ? "غير منشور"
                 : "Unpublished";
         const saveLabel =
-          version.status === "ABANDONED" ? (ar ? "متروك" : "Abandoned") : ar ? "محفوظ" : "Saved";
+          version.status === "ABANDONED" ? (ui.abandoned) : ui.saved;
         return (
           <button type="button" key={version.id} onClick={() => onView(version.id)}>
             <span className="studio-version-history__title">
-              <small>{ar ? "عنوان التغيير" : "Change title"}</small>
+              <small>{ui.changeTitle}</small>
               <strong>
-                {version.changeSummary || (ar ? "تحديث محفوظ للبطاقة" : "Saved card update")}
+                {version.changeSummary || (ui.savedCardUpdate)}
               </strong>
             </span>
             <dl className="studio-version-history__meta">
               <div>
-                <dt>{ar ? "حالة النشر" : "Publication state"}</dt>
+                <dt>{ui.publicationState}</dt>
                 <dd>
                   <Badge
                     tone={
@@ -3770,11 +3750,11 @@ function VersionHistory({
                 </dd>
               </div>
               <div>
-                <dt>{ar ? "حالة الحفظ" : "Save status"}</dt>
+                <dt>{ui.saveStatus}</dt>
                 <dd>{saveLabel}</dd>
               </div>
               <div>
-                <dt>{ar ? "الوقت" : "Timestamp"}</dt>
+                <dt>{ui.timestamp}</dt>
                 <dd>
                   {timestamp ? (
                     <time dateTime={timestamp}>
@@ -3783,11 +3763,7 @@ function VersionHistory({
                         timeStyle: "short",
                       }).format(new Date(timestamp))}
                     </time>
-                  ) : ar ? (
-                    "غير متاح"
-                  ) : (
-                    "Not available"
-                  )}
+                  ) : ui.unavailable}
                 </dd>
               </div>
             </dl>
@@ -3797,7 +3773,7 @@ function VersionHistory({
       })}
       {onLoadMore ? (
         <Button variant="secondary" onClick={onLoadMore}>
-          {ar ? "تحميل المزيد من التغييرات" : "Load more changes"}
+          {ui.loadMoreChanges}
         </Button>
       ) : null}
     </Card>
@@ -3813,16 +3789,17 @@ function HistoricalModal({
   onClose: () => void;
   ar: boolean;
 }) {
+  const ui = useStudioUi();
   return (
     <Modal
       open={Boolean(version)}
-      title={ar ? "تفاصيل التغيير المحفوظ" : "Saved change details"}
+      title={ui.savedChangeDetails}
       onClose={onClose}
     >
       {version ? (
         <div className="historical-version">
           <div className="studio-section-heading">
-            <h3>{version.changeSummary || (ar ? "تحديث محفوظ للبطاقة" : "Saved card update")}</h3>
+            <h3>{version.changeSummary || (ui.savedCardUpdate)}</h3>
             <Badge tone={version.status === "PUBLISHED" ? "success" : "neutral"}>
               {version.status === "PUBLISHED"
                 ? ar
@@ -3835,24 +3812,24 @@ function HistoricalModal({
           </div>
           <dl className="quick-review-list">
             <div>
-              <dt>{ar ? "هدف الأختام" : "Stamp goal"}</dt>
+              <dt>{ui.stampGoal}</dt>
               <dd>{version.stampRule?.requiredStampCount ?? "—"}</dd>
             </div>
             <div>
-              <dt>{ar ? "المكافآت" : "Rewards"}</dt>
+              <dt>{ui.rewards}</dt>
               <dd>{version.rewards.length}</dd>
             </div>
             <div>
-              <dt>{ar ? "المواقع" : "Locations"}</dt>
+              <dt>{ui.locations}</dt>
               <dd>{version.locations.length}</dd>
             </div>
             <div>
-              <dt>{ar ? "تاريخ النشر" : "Published"}</dt>
+              <dt>{ui.published}</dt>
               <dd>{version.publishedAt ?? "—"}</dd>
             </div>
           </dl>
-          <Alert tone="info" title={ar ? "للعرض فقط" : "Read only"}>
-            {ar ? "لا يمكن تعديل هذا التغيير المحفوظ." : "Saved changes cannot be edited."}
+          <Alert tone="info" title={ui.readOnly}>
+            {ui.savedChangesCannotBeEdited}
           </Alert>
         </div>
       ) : null}
@@ -3875,17 +3852,18 @@ function ConflictModal({
   onReload: () => void;
   onReapply: () => void;
 }) {
+  const ui = useStudioUi();
   return (
     <Modal
       open={Boolean(conflict)}
-      title={ar ? "تم التحرير في مكان آخر" : "Edited elsewhere"}
+      title={ui.editedElsewhere}
       onClose={() => undefined}
     >
       {conflict ? (
         <div className="studio-conflict">
           <Alert
             tone="warning"
-            title={ar ? "تم الاحتفاظ بتعديلاتك المحلية" : "Your local edits are preserved"}
+            title={ui.yourLocalEditsArePreserved}
           >
             {ar
               ? "تم حفظ تغيير أحدث في مكان آخر. لن يستبدل Waflo أي تعديل تلقائيًا."
@@ -3897,21 +3875,21 @@ function ConflictModal({
               : "Keep a copy of your edits, then load the latest card or deliberately reapply yours."}
           </p>
           <details>
-            <summary>{ar ? "عرض نسخة تعديلاتك" : "Show your edit backup"}</summary>
+            <summary>{ui.showYourEditBackup}</summary>
             <pre>{JSON.stringify(apiDraft(conflict.localDraft), null, 2)}</pre>
           </details>
           <div className="dashboard-actions">
             <Button variant="secondary" onClick={onCopy}>
-              <Copy size={16} /> {ar ? "نسخ" : "Copy local"}
+              <Copy size={16} /> {ui.copyLocal}
             </Button>
             <Button variant="secondary" onClick={onExport}>
-              <Download size={16} /> {ar ? "تنزيل نسخة احتياطية" : "Download backup"}
+              <Download size={16} /> {ui.downloadBackup}
             </Button>
             <Button variant="secondary" onClick={onReload}>
-              <RefreshCcw size={16} /> {ar ? "تحميل أحدث بطاقة" : "Load latest card"}
+              <RefreshCcw size={16} /> {ui.loadLatestCard}
             </Button>
             <Button onClick={onReapply}>
-              <UploadCloud size={16} /> {ar ? "إعادة تطبيق تعديلاتي" : "Reapply my edits"}
+              <UploadCloud size={16} /> {ui.reapplyMyEdits}
             </Button>
           </div>
         </div>

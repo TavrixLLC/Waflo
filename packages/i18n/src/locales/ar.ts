@@ -1,5 +1,7 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
+import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const ar: InterfaceMessages = {
@@ -323,7 +325,7 @@ export const ar: InterfaceMessages = {
           paused: "متوقفة مؤقتاً",
           archived: "مؤرشفة",
         },
-        ui: studioInterfaceCopy.ar.ui,
+        ui: { ...studioInterfaceCopy.ar.ui, ...studioEditorInterfaceCopy.ar, ...studioEditorRuntimeCopy.ar },
       },
     },
   },

@@ -1,4 +1,6 @@
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
+import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const en = {
@@ -335,7 +337,7 @@ export const en = {
           paused: "Paused",
           archived: "Archived",
         },
-        ui: studioInterfaceCopy.en.ui,
+        ui: { ...studioInterfaceCopy.en.ui, ...studioEditorInterfaceCopy.en, ...studioEditorRuntimeCopy.en },
       },
     },
   },

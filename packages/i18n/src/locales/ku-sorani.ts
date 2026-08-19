@@ -1,5 +1,7 @@
 import type { InterfaceMessages } from "./en.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
+import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
+import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 
 export const kuSorani: InterfaceMessages = {
@@ -339,7 +341,11 @@ export const kuSorani: InterfaceMessages = {
           paused: "وەستاو",
           archived: "ئارشیفکراو",
         },
-        ui: studioInterfaceCopy.kuSorani.ui,
+        ui: {
+          ...studioInterfaceCopy.kuSorani.ui,
+          ...studioEditorInterfaceCopy.kuSorani,
+          ...studioEditorRuntimeCopy.kuSorani,
+        },
       },
     },
   },
