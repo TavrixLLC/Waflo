@@ -691,6 +691,7 @@ export class PublicEnrollmentService {
           position: number;
           programName: string | null;
           shortDescription: string | null;
+          earningDescription: string | null;
           fullDescription: string | null;
           rewardSummary: string | null;
           joinInstructions: string | null;
@@ -761,6 +762,7 @@ export class PublicEnrollmentService {
       position,
       programName: item.programName,
       shortDescription: item.shortDescription,
+      earningDescription: version.stampRule?.earningDescription ?? null,
       fullDescription: item.fullDescription,
       rewardSummary: item.rewardSummary,
       joinInstructions: item.joinInstructions,
@@ -847,6 +849,8 @@ export class PublicEnrollmentService {
           {
             programName: item.programName ?? "",
             shortDescription: item.shortDescription ?? "",
+            earningDescription:
+              item.earningDescription ?? version.stampRule?.earningDescription ?? "",
             fullDescription: item.fullDescription,
             rewardSummary: item.rewardSummary ?? "",
             joinInstructions: item.joinInstructions,

@@ -350,6 +350,7 @@ export const rewardTypeSchema = z.enum([
 const translationInputSchema = z.object({
   programName: z.string().trim().max(120),
   shortDescription: z.string().trim().max(240),
+  earningDescription: z.string().trim().max(240).optional(),
   fullDescription: z.string().trim().max(4000).optional(),
   rewardSummary: z.string().trim().max(240),
   joinInstructions: z.string().trim().max(4000).optional(),

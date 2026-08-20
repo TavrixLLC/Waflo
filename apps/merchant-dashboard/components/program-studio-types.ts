@@ -20,6 +20,7 @@ export type AssetCategory =
 export interface ProgramTranslationInput {
   programName: string;
   shortDescription: string;
+  earningDescription: string;
   fullDescription?: string | undefined;
   rewardSummary: string;
   joinInstructions?: string | undefined;
@@ -201,6 +202,7 @@ interface ServerCardLocale {
   position: number;
   programName?: string | null;
   shortDescription?: string | null;
+  earningDescription?: string | null;
   fullDescription?: string | null;
   rewardSummary?: string | null;
   joinInstructions?: string | null;
@@ -450,6 +452,10 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
       {
         programName: item.programName ?? program.internalName,
         shortDescription: item.shortDescription ?? "",
+        earningDescription:
+          item.earningDescription ??
+          version.stampRule?.earningDescription ??
+          "One stamp per qualifying visit.",
         fullDescription: item.fullDescription ?? undefined,
         rewardSummary: item.rewardSummary ?? "",
         joinInstructions: item.joinInstructions ?? undefined,
@@ -463,6 +469,7 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
   cardTranslations.en ??= {
     programName: program.internalName,
     shortDescription: "",
+    earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
     rewardSummary: "",
     termsAndConditions: "",
     completionMessage: "",
@@ -471,6 +478,7 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
   cardTranslations.ar ??= {
     programName: program.internalName,
     shortDescription: "",
+    earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
     rewardSummary: "",
     termsAndConditions: "",
     completionMessage: "",
@@ -594,7 +602,11 @@ export function createQuickDraft(
     resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
     earningDescription: template.earningDescription,
     locationIds: [],
-    translations: structuredClone(template.copy),
+    translations: {
+      ...structuredClone(template.copy),
+      en: { ...structuredClone(template.copy.en), earningDescription: template.earningDescription },
+      ar: { ...structuredClone(template.copy.ar), earningDescription: template.earningDescription },
+    },
     rewards: templateRewards.map((reward, index) => ({
       clientId: crypto.randomUUID(),
       thresholdStampCount: reward.thresholdStampCount,

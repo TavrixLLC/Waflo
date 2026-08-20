@@ -12,6 +12,7 @@ export interface PublicProgram {
     {
       programName: string;
       shortDescription: string;
+      earningDescription: string;
       fullDescription?: string | null;
       rewardSummary: string;
       joinInstructions?: string | null;

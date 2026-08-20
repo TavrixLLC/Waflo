@@ -51,6 +51,7 @@ export type BuilderSaveState = "saved" | "unsaved" | "saving" | "failed" | "conf
 const requiredLanguageFields = [
   "programName",
   "shortDescription",
+  "earningDescription",
   "termsAndConditions",
   "completionMessage",
   "rewardUnlockedMessage",
@@ -76,6 +77,7 @@ function neutralCopy(locale: "en" | "ar"): ProgramDraftInput["translations"]["en
     return {
       programName: "بطاقة ولائك",
       shortDescription: "اجمع ختمًا مع كل زيارة مؤهلة.",
+      earningDescription: "اجمع ختمًا مع كل زيارة مؤهلة.",
       rewardSummary: "مكافأتك",
       termsAndConditions: "تُطبق شروط المتجر على الزيارات والمكافآت المؤهلة.",
       completionMessage: "اكتمل هدف الأختام.",
@@ -86,6 +88,7 @@ function neutralCopy(locale: "en" | "ar"): ProgramDraftInput["translations"]["en
   return {
     programName: "Your loyalty card",
     shortDescription: "Earn a stamp with every qualifying visit.",
+    earningDescription: "Earn a stamp with every qualifying visit.",
     rewardSummary: "Your reward",
     termsAndConditions: "Store terms apply to qualifying visits and rewards.",
     completionMessage: "Your stamp goal is complete.",
@@ -118,14 +121,13 @@ export function cardLocaleCompleteness(
     };
   }
   const program = languageCompleteness(translation);
-  const finalReward = draft.rewards.find(
-    (reward) => reward.thresholdStampCount === draft.requiredStampCount,
-  );
-  const rewardTranslation = finalReward?.translations[locale];
-  const rewardMissing = [
-    ...(!rewardTranslation?.name.trim() ? ["reward.name"] : []),
-    ...(!rewardTranslation?.description.trim() ? ["reward.description"] : []),
-  ];
+  const rewardMissing = draft.rewards.flatMap((reward, rewardIndex) => {
+    const rewardTranslation = reward.translations[locale];
+    return [
+      ...(!rewardTranslation?.name.trim() ? [`rewards.${rewardIndex}.name`] : []),
+      ...(!rewardTranslation?.description.trim() ? [`rewards.${rewardIndex}.description`] : []),
+    ];
+  });
   const missingFields = [...program.missingFields, ...rewardMissing];
   return {
     complete: missingFields.length === 0,
@@ -142,7 +144,7 @@ export function builderReadiness(draft: ProgramDraftInput): BuilderReadiness {
     draft.internalName.trim().length >= 2 &&
     draft.requiredStampCount >= 2 &&
     draft.requiredStampCount <= 30 &&
-    draft.earningDescription.trim().length > 0;
+    (draft.translations[draft.defaultLocale]?.earningDescription.trim().length ?? 0) > 0;
   const reward = Boolean(
     finalReward &&
       draft.enabledLocales.every((locale) => cardLocaleCompleteness(draft, locale).complete),

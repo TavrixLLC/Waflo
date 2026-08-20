@@ -516,6 +516,11 @@ export class ProgramsService {
               program.internalName,
             shortDescription:
               selectedTranslation.shortDescription ?? defaultCardLocale?.shortDescription ?? "",
+            earningDescription:
+              selectedTranslation.earningDescription ??
+              defaultCardLocale?.earningDescription ??
+              version.stampRule?.earningDescription ??
+              "",
             rewardSummary:
               selectedTranslation.rewardSummary ?? defaultCardLocale?.rewardSummary ?? "",
             termsAndConditions:
@@ -559,6 +564,10 @@ export class ProgramsService {
             locale: item.locale,
             programName: item.programName,
             shortDescription: item.shortDescription,
+            earningDescription:
+              "earningDescription" in item
+                ? item.earningDescription
+                : version.stampRule?.earningDescription,
             rewardSummary: item.rewardSummary,
             termsAndConditions: item.termsAndConditions,
           })),
@@ -1385,6 +1394,7 @@ export class ProgramsService {
             enabled: locale.enabled,
             programName: locale.programName,
             shortDescription: locale.shortDescription,
+            earningDescription: locale.earningDescription,
             rewardSummary: locale.rewardSummary,
             termsAndConditions: locale.termsAndConditions,
             completionMessage: locale.completionMessage,
@@ -3223,6 +3233,7 @@ export class ProgramsService {
                   locale: "en",
                   enabled: true,
                   position: 0,
+                  earningDescription: version.stampRule?.earningDescription ?? null,
                   rewardTranslations: [],
                 },
               ]
@@ -3235,6 +3246,7 @@ export class ProgramsService {
                   locale: "ar",
                   enabled: true,
                   position: 1,
+                  earningDescription: version.stampRule?.earningDescription ?? null,
                   rewardTranslations: [],
                 },
               ]
@@ -3246,6 +3258,10 @@ export class ProgramsService {
         {
           programName: item.programName ?? internalName,
           shortDescription: item.shortDescription ?? "",
+          earningDescription:
+            item.earningDescription ??
+            version.stampRule?.earningDescription ??
+            "One stamp per qualifying visit.",
           fullDescription: item.fullDescription ?? undefined,
           rewardSummary: item.rewardSummary ?? "",
           joinInstructions: item.joinInstructions ?? undefined,
@@ -3414,6 +3430,7 @@ export class ProgramsService {
           position,
           programName: translation.programName || null,
           shortDescription: translation.shortDescription || null,
+          earningDescription: translation.earningDescription || input.earningDescription || null,
           fullDescription: translation.fullDescription || null,
           rewardSummary: translation.rewardSummary || null,
           joinInstructions: translation.joinInstructions || null,
@@ -3454,6 +3471,7 @@ export class ProgramsService {
       transaction.loyaltyProgramVersion.findUniqueOrThrow({
         where: { id: sourceVersionId },
         include: {
+          stampRule: true,
           translations: true,
           rewards: { include: { translations: true } },
           cardLocales: {
@@ -3482,6 +3500,7 @@ export class ProgramsService {
           position,
           programName: translation.programName,
           shortDescription: translation.shortDescription,
+          earningDescription: source.stampRule?.earningDescription ?? null,
           fullDescription: translation.fullDescription,
           rewardSummary: translation.rewardSummary,
           joinInstructions: translation.joinInstructions,
@@ -3507,6 +3526,7 @@ export class ProgramsService {
           position: locale.position,
           programName: locale.programName,
           shortDescription: locale.shortDescription,
+          earningDescription: locale.earningDescription,
           fullDescription: locale.fullDescription,
           rewardSummary: locale.rewardSummary,
           joinInstructions: locale.joinInstructions,

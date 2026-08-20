@@ -117,6 +117,7 @@ function withProgramTranslationField(
 ): ProgramTranslationInput {
   if (key === "programName") return { ...value, programName: next };
   if (key === "shortDescription") return { ...value, shortDescription: next };
+  if (key === "earningDescription") return { ...value, earningDescription: next };
   if (key === "fullDescription") return { ...value, fullDescription: next };
   if (key === "rewardSummary") return { ...value, rewardSummary: next };
   if (key === "joinInstructions") return { ...value, joinInstructions: next };
@@ -710,8 +711,12 @@ export function ProgramCardBuilder({
                 draft={draft}
                 update={update}
                 plan={plan}
-                locale={locale}
                 interfaceLocale={interfaceLocale}
+                language={language}
+                setLanguage={(next) => {
+                  setLanguage(next);
+                  setPreviewLocale(next);
+                }}
               />
             ) : null}
             {activeSection === "review" ? (
@@ -873,17 +878,6 @@ function BasicsSection({
           maxLength={120}
           onChange={(event) =>
             update((current) => ({ ...current, internalName: event.target.value }))
-          }
-        />
-      </FormField>
-      <FormField label={builderText(interfaceLocale).ui.howDoesACustomerEarnAStamp} required>
-        <TextInput
-          dir="auto"
-          name="builder-earning-rule"
-          value={draft.earningDescription}
-          maxLength={240}
-          onChange={(event) =>
-            update((current) => ({ ...current, earningDescription: event.target.value }))
           }
         />
       </FormField>
@@ -1110,6 +1104,9 @@ function LanguagesSection({
         current.translations.en;
       return {
         ...current,
+        ...(key === "earningDescription" && language === current.defaultLocale
+          ? { earningDescription: next }
+          : {}),
         translations: {
           ...current.translations,
           [language]: withProgramTranslationField(currentValue, key, next),
@@ -1128,6 +1125,7 @@ function LanguagesSection({
         [locale]: current.translations[locale] ?? {
           programName: "",
           shortDescription: "",
+          earningDescription: "",
           rewardSummary: "",
           termsAndConditions: "",
           completionMessage: "",
@@ -1160,6 +1158,8 @@ function LanguagesSection({
       ...current,
       defaultLocale: locale,
       enabledLocales: [locale, ...current.enabledLocales.filter((item) => item !== locale)],
+      earningDescription:
+        current.translations[locale]?.earningDescription ?? current.earningDescription,
     }));
   }
 
@@ -1305,6 +1305,15 @@ function LanguagesSection({
             value={value.shortDescription}
             maxLength={240}
             onChange={(event) => setField("shortDescription", event.target.value)}
+          />
+        </FormField>
+        <FormField label={text.ui.howDoesACustomerEarnAStamp} required>
+          <TextInput
+            dir={contentDirection}
+            lang={language}
+            value={value.earningDescription}
+            maxLength={240}
+            onChange={(event) => setField("earningDescription", event.target.value)}
           />
         </FormField>
         <details className="builder-disclosure">
@@ -1533,17 +1542,19 @@ function AdvancedSection({
   draft,
   update,
   plan,
-  locale,
   interfaceLocale,
+  language,
+  setLanguage,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   plan: "STARTER" | "GROWTH" | "SCALE";
-  locale: Locale;
   interfaceLocale: InterfaceLocale;
+  language: string;
+  setLanguage: (language: string) => void;
 }) {
-  const ar = locale === "ar";
   const text = builderText(interfaceLocale);
+  const contentMetadata = cardLocaleMetadata(language);
   const planCode = plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
   const proAvailable = planCatalog[planCode].features.advancedCustomization;
   const milestones = draft.rewards.filter(
@@ -1565,8 +1576,11 @@ function AdvancedSection({
           requiresManagerApproval: false,
           maximumRedemptionsPerEarned: 1,
           translations: {
-            en: { name: "Milestone reward", description: "Milestone reward" },
-            ar: { name: "مكافأة مرحلية", description: "مكافأة مرحلية" },
+            en: { name: "", description: "" },
+            ar: { name: "", description: "" },
+            ...Object.fromEntries(
+              current.enabledLocales.map((locale) => [locale, { name: "", description: "" }]),
+            ),
           },
         },
       ],
@@ -1599,6 +1613,12 @@ function AdvancedSection({
       ) : null}
       {draft.editingMode === "pro" ? (
         <div className="builder-pro-rewards">
+          <ContentLocaleTabs
+            draft={draft}
+            value={language}
+            onValueChange={setLanguage}
+            interfaceLocale={interfaceLocale}
+          />
           <div className="builder-subheading">
             <div>
               <h3>{builderText(interfaceLocale).ui.milestoneRewards}</h3>
@@ -1636,7 +1656,9 @@ function AdvancedSection({
                 </FormField>
                 <FormField label={builderText(interfaceLocale).ui.rewardName}>
                   <TextInput
-                    value={ar ? reward.translations.ar.name : reward.translations.en.name}
+                    dir={contentMetadata?.direction ?? "ltr"}
+                    lang={language}
+                    value={reward.translations[language]?.name ?? ""}
                     onChange={(event) =>
                       update((current) => ({
                         ...current,
@@ -1646,9 +1668,36 @@ function AdvancedSection({
                                 ...item,
                                 translations: {
                                   ...item.translations,
-                                  [ar ? "ar" : "en"]: {
-                                    ...item.translations[ar ? "ar" : "en"],
+                                  [language]: {
+                                    ...item.translations[language],
                                     name: event.target.value,
+                                    description: item.translations[language]?.description ?? "",
+                                  },
+                                },
+                              }
+                            : item,
+                        ),
+                      }))
+                    }
+                  />
+                </FormField>
+                <FormField label={builderText(interfaceLocale).ui.rewardDescription}>
+                  <TextInput
+                    dir={contentMetadata?.direction ?? "ltr"}
+                    lang={language}
+                    value={reward.translations[language]?.description ?? ""}
+                    onChange={(event) =>
+                      update((current) => ({
+                        ...current,
+                        rewards: current.rewards.map((item) =>
+                          item.clientId === reward.clientId
+                            ? {
+                                ...item,
+                                translations: {
+                                  ...item.translations,
+                                  [language]: {
+                                    ...item.translations[language],
+                                    name: item.translations[language]?.name ?? "",
                                     description: event.target.value,
                                   },
                                 },

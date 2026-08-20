@@ -11,6 +11,7 @@ CREATE TABLE "program_version_locales" (
     "position" INTEGER NOT NULL DEFAULT 0,
     "program_name" VARCHAR(120),
     "short_description" VARCHAR(240),
+    "earning_description" VARCHAR(240),
     "full_description" TEXT,
     "reward_summary" VARCHAR(240),
     "join_instructions" TEXT,
@@ -100,19 +101,23 @@ ENABLE TRIGGER "loyalty_program_version_tenant_guard";
 -- enabled status and deterministic order without inventing any translations.
 INSERT INTO "program_version_locales" (
   "id", "version_id", "locale", "enabled", "position", "program_name",
-  "short_description", "full_description", "reward_summary", "join_instructions",
+  "short_description", "earning_description", "full_description", "reward_summary", "join_instructions",
   "terms_and_conditions", "completion_message", "reward_unlocked_message",
   "paused_message", "created_at", "updated_at"
 )
 SELECT
-  "id", "version_id",
-  CASE WHEN "locale"::text = 'AR' THEN 'ar' ELSE 'en' END,
+  translation."id", translation."version_id",
+  CASE WHEN translation."locale"::text = 'AR' THEN 'ar' ELSE 'en' END,
   true,
-  CASE WHEN "locale"::text = 'EN' THEN 0 ELSE 1 END,
-  "program_name", "short_description", "full_description", "reward_summary",
-  "join_instructions", "terms_and_conditions", "completion_message",
-  "reward_unlocked_message", "paused_message", "created_at", "updated_at"
-FROM "program_translations";
+  CASE WHEN translation."locale"::text = 'EN' THEN 0 ELSE 1 END,
+  translation."program_name", translation."short_description", stamp_rule."earning_description",
+  translation."full_description", translation."reward_summary", translation."join_instructions",
+  translation."terms_and_conditions", translation."completion_message",
+  translation."reward_unlocked_message", translation."paused_message", translation."created_at",
+  translation."updated_at"
+FROM "program_translations" AS translation
+JOIN "stamp_rules" AS stamp_rule
+  ON stamp_rule."version_id" = translation."version_id";
 
 INSERT INTO "program_locale_reward_translations" (
   "id", "reward_id", "program_version_locale_id", "name", "description",

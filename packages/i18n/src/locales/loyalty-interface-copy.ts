@@ -76,6 +76,7 @@ export const loyaltyInterfaceCopy = {
         addMilestone: "Add milestone",
         stampThreshold: "Stamp threshold",
         rewardName: "Reward name",
+        rewardDescription: "Reward description",
         removeMilestone: "Remove milestone",
         operationalRulesLiveInStudio: "Operational rules live in Studio",
         afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks:
@@ -204,6 +205,7 @@ export const loyaltyInterfaceCopy = {
           "\u0625\u0636\u0627\u0641\u0629 \u0645\u0643\u0627\u0641\u0623\u0629 \u0645\u0631\u062d\u0644\u064a\u0629",
         stampThreshold: "\u0639\u0646\u062f \u0639\u062f\u062f \u0623\u062e\u062a\u0627\u0645",
         rewardName: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629",
+        rewardDescription: "\u0648\u0635\u0641 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629",
         removeMilestone:
           "\u0625\u0632\u0627\u0644\u0629 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629 \u0627\u0644\u0645\u0631\u062d\u0644\u064a\u0629",
         operationalRulesLiveInStudio:
@@ -347,6 +349,8 @@ export const loyaltyInterfaceCopy = {
           "\u0645\u06ce\u0644\u06cc\u06c6\u0646\u06ce \u0632\u06ce\u062f\u06d5 \u0628\u06cc\u06a9\u06cc\u0646",
         stampThreshold: "\u0633\u06ce\u0646\u06af\u06ce \u0645\u06c6\u0631\u06d5\u0646",
         rewardName: "\u0646\u06d5\u06a4\u06ce \u062e\u06d5\u0644\u06d5\u062a\u06ce",
+        rewardDescription:
+          "\u067e\u06ce\u0646\u0627\u0633\u06d5\u06cc\u0627 \u062e\u06d5\u0644\u0627\u062a\u06ce",
         removeMilestone:
           "\u0645\u06cc\u0644\u06d5\u0633\u062a\u06c6\u0646\u06d5 \u0698\u06ce\u0628\u06cc\u0631\u06cc\u0646",
         operationalRulesLiveInStudio:
@@ -494,6 +498,7 @@ export const loyaltyInterfaceCopy = {
           "\u0628\u0695\u0628\u0695\u06d5\u06cc \u06af\u0631\u0646\u06af \u0632\u06cc\u0627\u062f \u0628\u06a9\u06d5",
         stampThreshold: "\u0626\u0627\u0633\u062a\u06cc \u0645\u06c6\u0631",
         rewardName: "\u0646\u0627\u0648\u06cc \u067e\u0627\u062f\u0627\u0634\u062a",
+        rewardDescription: "\u0648\u06d5\u0633\u0641\u06cc \u067e\u0627\u062f\u0627\u0634\u062a",
         removeMilestone:
           "\u0644\u0627\u0628\u0631\u062f\u0646\u06cc \u0628\u0695\u0628\u0695\u06d5\u06cc \u067e\u0634\u062a",
         operationalRulesLiveInStudio:

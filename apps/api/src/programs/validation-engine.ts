@@ -34,6 +34,7 @@ export interface ValidationEngineInput {
     enabled: boolean;
     programName: string | null;
     shortDescription: string | null;
+    earningDescription: string | null;
     rewardSummary: string | null;
     termsAndConditions: string | null;
     completionMessage: string | null;
@@ -297,6 +298,7 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
       const incomplete =
         !translation.programName?.trim() ||
         !translation.shortDescription?.trim() ||
+        !translation.earningDescription?.trim() ||
         !translation.rewardSummary?.trim() ||
         !translation.termsAndConditions?.trim() ||
         !translation.completionMessage?.trim() ||

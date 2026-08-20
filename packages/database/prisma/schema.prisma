@@ -1331,6 +1331,7 @@ model ProgramVersionLocale {
   position              Int                   @default(0)
   programName           String?               @map("program_name") @db.VarChar(120)
   shortDescription      String?               @map("short_description") @db.VarChar(240)
+  earningDescription    String?               @map("earning_description") @db.VarChar(240)
   fullDescription       String?               @map("full_description") @db.Text
   rewardSummary         String?               @map("reward_summary") @db.VarChar(240)
   joinInstructions      String?               @map("join_instructions") @db.Text
