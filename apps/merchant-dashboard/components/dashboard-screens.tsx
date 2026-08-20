@@ -10,6 +10,7 @@ import {
   type PlanCode,
   timeZoneOptions,
 } from "@waflo/contracts";
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   Avatar,
@@ -51,7 +52,8 @@ import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import { billingPriceTruth, canPersistCatalogSelection } from "./billing-presentation";
 import type { DashboardSection, MembershipView } from "./dashboard";
 import { ProgramAssetPicker } from "./program-asset-uploader";
-import type { AssetItem } from "./program-studio-types";
+import type { AssetItem, ProgramItem } from "./program-studio-types";
+import { deriveOverviewNextStep } from "./overview-next-step";
 import {
   LocationAddressFields,
   LocationMapPicker,
@@ -92,25 +94,39 @@ interface OrganizationView {
 }
 
 export function OverviewScreen({
+  interfaceLocale,
   locale,
   membership,
 }: {
+  interfaceLocale: InterfaceLocale;
   locale: Locale;
   membership: MembershipView;
 }) {
-  const ar = locale === "ar";
+  const copy = localeRegistry[interfaceLocale].messages.merchant.overview;
   const [organization, setOrganization] = useState<OrganizationView | null>(null);
+  const [programs, setPrograms] = useState<ProgramItem[]>([]);
   const [error, setError] = useState("");
-  useEffect(() => {
+  const loadOverview = useCallback(async () => {
     const id = membership.organization.id;
-    void apiFetch<OrganizationView>(`/v1/organizations/${id}`)
-      .then(setOrganization)
-      .catch((caught: unknown) =>
-        setError(
-          message(caught, ar ? "تعذر تحميل البيانات." : "Unable to load organization data."),
-        ),
-      );
-  }, [membership.organization.id, ar]);
+    try {
+      const [organizationData, programData] = await Promise.all([
+        apiFetch<OrganizationView>(`/v1/organizations/${id}`),
+        apiFetch<{ items: ProgramItem[] }>(`/v1/organizations/${id}/programs?limit=100`),
+      ]);
+      setOrganization(organizationData);
+      setPrograms(programData.items);
+      setError("");
+    } catch (caught) {
+      setError(message(caught, copy.loadError));
+    }
+  }, [copy.loadError, membership.organization.id]);
+
+  useEffect(() => {
+    void loadOverview();
+    const refresh = () => void loadOverview();
+    window.addEventListener("waflo:programs-changed", refresh);
+    return () => window.removeEventListener("waflo:programs-changed", refresh);
+  }, [loadOverview]);
   if (error) return <Alert tone="danger" title={error} />;
   if (!organization) {
     return (
@@ -124,13 +140,13 @@ export function OverviewScreen({
   }
   const status = organization.billingProfile.subscriptionStatus;
   const statusCopy = {
-    PENDING_ACTIVATION: ar ? "جاهز لبدء التجربة" : "Ready to start",
-    TRIALING: ar ? "تجربة مجانية" : "Free trial",
-    ACTIVE: ar ? "نشط" : "Active",
-    PAST_DUE: ar ? "تعذّر الدفع" : "Payment needed",
-    GRACE_PERIOD: ar ? "يتطلب انتباهك" : "Needs attention",
-    SUSPENDED: ar ? "متوقف مؤقتاً" : "Paused",
-    CANCELED: ar ? "ملغي" : "Canceled",
+    PENDING_ACTIVATION: copy.status.pending,
+    TRIALING: copy.status.trialing,
+    ACTIVE: copy.status.active,
+    PAST_DUE: copy.status.pastDue,
+    GRACE_PERIOD: copy.status.grace,
+    SUSPENDED: copy.status.suspended,
+    CANCELED: copy.status.canceled,
   }[status];
   const statusTone =
     status === "ACTIVE" || status === "TRIALING"
@@ -139,66 +155,64 @@ export function OverviewScreen({
         ? "warning"
         : "danger";
   const trialEnd = organization.billingProfile.trialEnd
-    ? new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", { dateStyle: "medium" }).format(
-        new Date(organization.billingProfile.trialEnd),
-      )
+    ? new Intl.DateTimeFormat(localeRegistry[interfaceLocale].dateFormattingLocale, {
+        dateStyle: "medium",
+      }).format(new Date(organization.billingProfile.trialEnd))
     : null;
+  const nextStep = deriveOverviewNextStep(programs);
+  const nextStepContent = {
+    first: { description: copy.firstDescription, action: copy.firstAction },
+    draft: { description: copy.draftDescription, action: copy.draftAction },
+    ready: { description: copy.readyDescription, action: copy.readyAction },
+    live: { description: copy.liveDescription, action: copy.liveAction },
+    unpublished: {
+      description: copy.unpublishedDescription,
+      action: copy.unpublishedAction,
+    },
+    archived: { description: copy.archivedDescription, action: copy.archivedAction },
+  }[nextStep];
   return (
     <>
       <PageHeader
-        title={ar ? `مرحباً، ${organization.name}` : `Welcome, ${organization.name}`}
-        description={ar ? "كل ما يحتاج انتباهك اليوم." : "What needs your attention today."}
+        title={copy.welcome.replace("{name}", organization.name)}
+        description={copy.attentionToday}
       />
       <div className="overview-layout">
         <section className="overview-status" aria-labelledby="overview-status-title">
           <div>
             <div className="overview-status__title">
-              <h2 id="overview-status-title">{ar ? "اشتراكك" : "Your subscription"}</h2>
+              <h2 id="overview-status-title">{copy.subscription}</h2>
               <Badge tone={statusTone}>{statusCopy}</Badge>
             </div>
             <p>
               {status === "PENDING_ACTIVATION"
-                ? ar
-                  ? "اختر باقتك وأضف طريقة الدفع لبدء 7 أيام مجاناً."
-                  : "Choose a plan and add a payment method to start 7 days free."
+                ? copy.pendingDescription
                 : status === "TRIALING" && trialEnd
-                  ? ar
-                    ? `تجربتك مجانية حتى ${trialEnd}.`
-                    : `Your trial is free through ${trialEnd}.`
+                  ? copy.trialDescription.replace("{date}", trialEnd)
                   : status === "ACTIVE"
-                    ? ar
-                      ? "اشتراكك يعمل بشكل طبيعي."
-                      : "Your subscription is running normally."
-                    : ar
-                      ? "افتح الفوترة لمعرفة الإجراء المطلوب."
-                      : "Open Billing to see what needs attention."}
+                    ? copy.activeDescription
+                    : copy.billingAttentionDescription}
             </p>
           </div>
           <Link
             className="wf-button wf-button--secondary dashboard-action-link"
             href={`/${locale}/dashboard/billing`}
           >
-            {status === "PENDING_ACTIVATION"
-              ? ar
-                ? "ابدأ التجربة"
-                : "Start trial"
-              : ar
-                ? "عرض الفوترة"
-                : "View billing"}
+            {status === "PENDING_ACTIVATION" ? copy.startTrial : copy.viewBilling}
           </Link>
         </section>
 
-        <dl className="overview-metrics" aria-label={ar ? "ملخص النشاط" : "Business summary"}>
+        <dl className="overview-metrics" aria-label={copy.businessSummary}>
           <div>
-            <dt>{ar ? "الباقة" : "Plan"}</dt>
+            <dt>{copy.plan}</dt>
             <dd>{organization.selectedPlan}</dd>
           </div>
           <div>
-            <dt>{ar ? "الفروع" : "Locations"}</dt>
+            <dt>{copy.locations}</dt>
             <dd>{organization._count.locations}</dd>
           </div>
           <div>
-            <dt>{ar ? "أعضاء الفريق" : "Team members"}</dt>
+            <dt>{copy.teamMembers}</dt>
             <dd>{organization._count.members}</dd>
           </div>
         </dl>
@@ -206,37 +220,29 @@ export function OverviewScreen({
         <div className="overview-columns">
           <section className="overview-next">
             <div className="overview-section-heading">
-              <h2>{ar ? "خطوتك التالية" : "Next step"}</h2>
+              <h2>{copy.nextStep}</h2>
               <span aria-hidden="true">01</span>
             </div>
-            <p>
-              {ar
-                ? "أنشئ بطاقة الولاء الأولى، ثم شاركها مع عملائك."
-                : "Create your first loyalty card, then share it with customers."}
-            </p>
+            <p>{nextStepContent.description}</p>
             <Link
               className="wf-button wf-button--primary dashboard-action-link"
               href={`/${locale}/dashboard/programs`}
             >
-              {ar ? "إنشاء بطاقة ولاء" : "Create loyalty card"}
+              {nextStepContent.action}
             </Link>
           </section>
 
           <section className="overview-link">
             <div className="overview-section-heading">
-              <h2>{ar ? "رابط نشاطك" : "Your business link"}</h2>
+              <h2>{copy.businessLink}</h2>
             </div>
-            <p>
-              {ar
-                ? "استخدمه عندما تصبح بطاقتك جاهزة."
-                : "Share it when your loyalty card is ready."}
-            </p>
+            <p>{copy.businessLinkDescription}</p>
             <div className="dashboard-url" dir="ltr">
               <span>https://{organization.merchantSlug}.waflo.app</span>
               <button
                 type="button"
                 className="wf-icon-button wf-button--ghost"
-                aria-label={ar ? "نسخ الرابط" : "Copy URL"}
+                aria-label={copy.copyUrl}
                 onClick={() =>
                   void navigator.clipboard.writeText(
                     `https://${organization.merchantSlug}.waflo.app`,

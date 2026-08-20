@@ -518,7 +518,10 @@ export function DashboardRoute({
   changeProgramId?: string;
 }) {
   const { interfaceLocale, locale, me, membership, reloadMemberships } = useDashboard();
-  if (section === "overview") return <OverviewScreen locale={locale} membership={membership} />;
+  if (section === "overview")
+    return (
+      <OverviewScreen interfaceLocale={interfaceLocale} locale={locale} membership={membership} />
+    );
   if (
     me.accountState?.access === "read_only_billing_recovery" &&
     !["billing", "security", "analytics"].includes(section)

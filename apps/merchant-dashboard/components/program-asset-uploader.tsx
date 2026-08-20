@@ -1,5 +1,6 @@
 "use client";
 
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Button, FormField, Modal } from "@waflo/ui";
 import { Crop, ImagePlus, Upload } from "lucide-react";
 import Image from "next/image";
@@ -54,6 +55,7 @@ export function ProgramAssetPicker({
   onSelected,
   onUploaded,
   ar,
+  interfaceLocale,
 }: {
   organizationId: string;
   category: AssetCategory;
@@ -63,7 +65,10 @@ export function ProgramAssetPicker({
   onSelected: (assetId: string | null) => void;
   onUploaded: (asset: AssetItem) => void;
   ar: boolean;
+  interfaceLocale?: InterfaceLocale | undefined;
 }) {
+  const copy =
+    localeRegistry[interfaceLocale ?? (ar ? "ar" : "en")].messages.merchant.assetUploader;
   const fileInput = useRef<HTMLInputElement>(null);
   const dragOrigin = useRef<{
     pointerX: number;
@@ -155,7 +160,7 @@ export function ProgramAssetPicker({
   }
 
   function displayName(asset: AssetItem): string {
-    if (ar && asset.source === "WAFLO_LIBRARY") return "رسم مدمج من Waflo";
+    if (asset.source === "WAFLO_LIBRARY") return copy.embeddedWafloArtwork;
     const name = asset.originalFilename
       .replace(/\.[^.]+$/u, "")
       .replace(/[-_]v\d+$/iu, "")
@@ -197,29 +202,17 @@ export function ProgramAssetPicker({
       onSelected(asset.id);
       setUploadMessage(
         asset.uploadDisposition === "REPLAYED"
-          ? ar
-            ? "تمت إعادة استخدام الأصل المطابق الموجود."
-            : "The existing matching asset was reused."
+          ? copy.reused
           : asset.uploadDisposition === "RESTORED"
-            ? ar
-              ? "تمت استعادة الأصل المؤرشف وإصلاح ملفاته."
-              : "The archived matching asset was restored and repaired."
+            ? copy.restored
             : asset.uploadDisposition === "REPAIRED"
-              ? ar
-                ? "تم إصلاح ملفات الأصل المطابق."
-                : "The matching asset object set was repaired."
-              : ar
-                ? "تم رفع الأصل ومعالجته."
-                : "The asset was uploaded and processed.",
+              ? copy.repaired
+              : copy.uploadedProcessed,
       );
       setFile(null);
       setCrop({ x: 0, y: 0, width: 1, height: 1, zoom: 1 });
     } catch {
-      setError(
-        ar
-          ? "تعذر رفع الملف. التصميم المحفوظ حاليًا لم يتغير. تحقق من الملف وحاول مرة أخرى."
-          : "The file could not be uploaded. The currently saved design is unchanged. Check the file and try again.",
-      );
+      setError(copy.uploadError);
     } finally {
       setUploading(false);
     }
@@ -231,15 +224,11 @@ export function ProgramAssetPicker({
       <div className="studio-section-heading">
         <div>
           <h4>{label}</h4>
-          <p>
-            {ar
-              ? "اختر من مكتبة Waflo أو ارفع صورة PNG أو JPEG أو WebP."
-              : "Choose from the Waflo library or upload PNG, JPEG, or WebP."}
-          </p>
+          <p>{copy.guidance}</p>
         </div>
         {selectedAsset ? (
           <Button type="button" variant="ghost" onClick={() => setShowChoices((open) => !open)}>
-            {showChoices ? (ar ? "إخفاء الخيارات" : "Hide options") : ar ? "تغيير" : "Change"}
+            {showChoices ? copy.hideOptions : copy.change}
           </Button>
         ) : null}
         <input
@@ -247,7 +236,7 @@ export function ProgramAssetPicker({
           className="wf-sr-only"
           type="file"
           accept="image/png,image/jpeg,image/webp"
-          aria-label={`${label} ${ar ? "رفع صورة" : "image upload"}`}
+          aria-label={`${label} ${copy.imageUpload}`}
           onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
         />
       </div>
@@ -255,16 +244,10 @@ export function ProgramAssetPicker({
         <div className="studio-asset-current">
           <AssetThumbnail asset={selectedAsset} label={label} />
           <span>
-            <small>{ar ? "المستخدم حاليًا" : "Currently used"}</small>
+            <small>{copy.currentlyUsed}</small>
             <strong>{displayName(selectedAsset)}</strong>
             <small>
-              {selectedAsset.source === "WAFLO_LIBRARY"
-                ? ar
-                  ? "مكتبة Waflo"
-                  : "Waflo library"
-                : ar
-                  ? "تصميم مرفوع"
-                  : "Uploaded artwork"}
+              {selectedAsset.source === "WAFLO_LIBRARY" ? copy.wafloLibrary : copy.uploadedArtwork}
             </small>
           </span>
         </div>
@@ -275,22 +258,14 @@ export function ProgramAssetPicker({
           onClick={() => fileInput.current?.click()}
         >
           <ImagePlus size={24} />
-          {category === "LOGO"
-            ? ar
-              ? "إضافة شعار"
-              : "Add logo"
-            : ar
-              ? "اختيار رسم أو رفع تصميمك"
-              : "Choose artwork or upload your own"}
+          {category === "LOGO" ? copy.addLogo : copy.chooseArtwork}
         </button>
       )}
       {showChoices ? (
         <div className="studio-asset-library">
           {choices.length ? (
             <>
-              <span className="studio-asset-library__label">
-                {ar ? "الاختيار من المكتبة" : "Choose from library"}
-              </span>
+              <span className="studio-asset-library__label">{copy.chooseFromLibrary}</span>
               <div className="studio-asset-grid">
                 {choices.map((asset) => (
                   <button
@@ -304,13 +279,7 @@ export function ProgramAssetPicker({
                     <AssetThumbnail asset={asset} label={displayName(asset)} />
                     <span>{displayName(asset)}</span>
                     <small>
-                      {asset.source === "WAFLO_LIBRARY"
-                        ? ar
-                          ? "مكتبة Waflo"
-                          : "Waflo library"
-                        : ar
-                          ? "مرفوع"
-                          : "Uploaded"}
+                      {asset.source === "WAFLO_LIBRARY" ? copy.wafloLibrary : copy.uploaded}
                     </small>
                   </button>
                 ))}
@@ -320,27 +289,19 @@ export function ProgramAssetPicker({
           {selectedAsset || choices.length ? (
             <Button type="button" variant="secondary" onClick={() => fileInput.current?.click()}>
               <Upload size={16} />
-              {ar ? "رفع تصميمك" : "Upload your own"}
+              {copy.uploadYourOwn}
             </Button>
           ) : null}
         </div>
       ) : null}
 
-      <Modal
-        open={Boolean(file)}
-        title={ar ? "قص الصورة بأمان" : "Crop image safely"}
-        onClose={() => setFile(null)}
-      >
+      <Modal open={Boolean(file)} title={copy.cropSafely} onClose={() => setFile(null)}>
         {previewUrl ? (
           <div className="studio-crop-layout">
             <button
               type="button"
               className="studio-crop-preview"
-              aria-label={
-                ar
-                  ? "منطقة القص. اسحب الصورة أو استخدم مفاتيح الأسهم لتحريكها."
-                  : "Crop area. Drag the image or use the arrow keys to reposition it."
-              }
+              aria-label={copy.cropArea}
               onPointerDown={beginPan}
               onPointerMove={pan}
               onPointerUp={endPan}
@@ -356,7 +317,7 @@ export function ProgramAssetPicker({
             >
               <Image
                 src={previewUrl}
-                alt={ar ? "معاينة القص" : "Crop preview"}
+                alt={copy.cropPreview}
                 width={520}
                 height={360}
                 unoptimized
@@ -374,7 +335,7 @@ export function ProgramAssetPicker({
               />
               <span className="studio-crop-safe-area" aria-hidden="true" />
               <span className="studio-crop-instruction" aria-hidden="true">
-                {ar ? "اسحب للتحريك" : "Drag to reposition"}
+                {copy.dragToReposition}
               </span>
             </button>
             <div className="studio-crop-controls">
@@ -382,14 +343,10 @@ export function ProgramAssetPicker({
                 <Crop size={15} />
                 {naturalSize.width} × {naturalSize.height}px ·{" "}
                 {naturalSize.width < 256 || naturalSize.height < 256
-                  ? ar
-                    ? "الدقة منخفضة لختم واضح."
-                    : "Resolution is low for a crisp stamp."
-                  : ar
-                    ? "الدقة مناسبة."
-                    : "Resolution looks good."}
+                  ? copy.resolutionLow
+                  : copy.resolutionGood}
               </p>
-              <FormField label={ar ? "التكبير" : "Zoom"}>
+              <FormField label={copy.zoom}>
                 <input
                   type="range"
                   min={1}
@@ -400,17 +357,13 @@ export function ProgramAssetPicker({
                 />
               </FormField>
               <div className="studio-crop-control-row">
-                <p>
-                  {ar
-                    ? "اسحب الصورة مباشرة. استخدم عجلة الفأرة للتكبير، أو الأسهم للتحريك الدقيق."
-                    : "Drag the image directly. Use the wheel to zoom, or arrow keys for precise movement."}
-                </p>
+                <p>{copy.cropHelp}</p>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={() => setCrop({ x: 0, y: 0, width: 1, height: 1, zoom: 1 })}
                 >
-                  {ar ? "إعادة الضبط" : "Reset crop"}
+                  {copy.resetCrop}
                 </Button>
               </div>
               {error ? <p className="wf-form-error">{error}</p> : null}
@@ -419,10 +372,10 @@ export function ProgramAssetPicker({
         ) : null}
         <div className="wf-dialog__actions">
           <Button type="button" variant="secondary" onClick={() => setFile(null)}>
-            {ar ? "إلغاء" : "Cancel"}
+            {copy.cancel}
           </Button>
           <Button type="button" onClick={() => void upload()} loading={uploading}>
-            {ar ? "معالجة ورفع" : "Process and upload"}
+            {copy.processUpload}
           </Button>
         </div>
       </Modal>

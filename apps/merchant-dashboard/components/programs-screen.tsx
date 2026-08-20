@@ -45,6 +45,7 @@ interface CursorPage<T> {
 
 interface OrganizationPresentationView {
   businessCategory: string | null;
+  brandLogoAsset: Pick<AssetItem, "contentUrl"> | null;
 }
 
 const planCodes = {
@@ -128,6 +129,7 @@ export function ProgramsScreen({
   const [programCursor, setProgramCursor] = useState<string | null>(null);
   const [assetCursor, setAssetCursor] = useState<string | null>(null);
   const [businessCategory, setBusinessCategory] = useState<string | null>(null);
+  const [brandLogoUrl, setBrandLogoUrl] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(legacyCreate);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
   const [studioProgramId, setStudioProgramId] = useState<string | null>(
@@ -187,6 +189,7 @@ export function ProgramsScreen({
       setAssets(assetData.items);
       setAssetCursor(assetData.nextCursor);
       setBusinessCategory(organizationData.businessCategory);
+      setBrandLogoUrl(organizationData.brandLogoAsset?.contentUrl ?? null);
     } catch {
       setError(copy.loadError);
     } finally {
@@ -308,6 +311,7 @@ export function ProgramsScreen({
         method: "POST",
         body: JSON.stringify(apiDraft(draft)),
       });
+      window.dispatchEvent(new Event("waflo:programs-changed"));
       await load();
       router.push(`/${interfaceLocale}/dashboard/programs/${created.id}/edit`);
     } catch (caught) {
@@ -441,6 +445,7 @@ export function ProgramsScreen({
       onCreated={(programId) => {
         setWizardOpen(false);
         setSelectedTemplate(null);
+        window.dispatchEvent(new Event("waflo:programs-changed"));
         router.push(`/${interfaceLocale}/dashboard/programs/${programId}`);
         void load();
       }}
@@ -568,6 +573,7 @@ export function ProgramsScreen({
                     rewardSummary={translation?.rewardSummary ?? copy.visualSummary}
                     visualTheme={theme}
                     locale={locale}
+                    brandLogoUrl={brandLogoUrl}
                   />
                   <div className="program-list__content">
                     <div className="program-list__heading">

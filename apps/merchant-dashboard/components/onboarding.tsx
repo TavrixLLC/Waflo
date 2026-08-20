@@ -38,6 +38,8 @@ import {
   LocationMapPicker,
   type LocationMapSelection,
 } from "./location-map-picker";
+import { ProgramAssetPicker } from "./program-asset-uploader";
+import type { AssetItem } from "./program-studio-types";
 
 type OnboardingStep = 1 | 2 | 3 | 4 | 5;
 
@@ -494,6 +496,10 @@ export function BusinessOnboarding({
   const [error, setError] = useState("");
   const [slug, setSlug] = useState("");
   const [availability, setAvailability] = useState("");
+  const [logoAssets, setLogoAssets] = useState<AssetItem[]>([]);
+  const [brandLogoAssetId, setBrandLogoAssetId] = useState<string | null>(null);
+  const [logoNotice, setLogoNotice] = useState("");
+  const [logoError, setLogoError] = useState("");
   const [firstLocation, setFirstLocation] =
     useState<LocationMapSelection>(initialLocationSelection);
   const resumed = useRef(false);
@@ -619,6 +625,45 @@ export function BusinessOnboarding({
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [copy.organization.urlAvailable, copy.organization.urlUnavailable, slug]);
+
+  useEffect(() => {
+    if (!organizationId || step !== 2) return;
+    let active = true;
+    void Promise.all([
+      apiFetch<{ brandLogoAsset: AssetItem | null }>(`/v1/organizations/${organizationId}`),
+      apiFetch<{ items: AssetItem[] }>(
+        `/v1/organizations/${organizationId}/assets?category=LOGO&limit=30`,
+      ),
+    ])
+      .then(([organization, assets]) => {
+        if (!active) return;
+        setBrandLogoAssetId(organization.brandLogoAsset?.id ?? null);
+        setLogoAssets(assets.items);
+        setLogoError("");
+      })
+      .catch(() => {
+        if (active) setLogoError(copy.logo.loadError);
+      });
+    return () => {
+      active = false;
+    };
+  }, [copy.logo.loadError, organizationId, step]);
+
+  async function updateMerchantLogo(assetId: string | null): Promise<void> {
+    if (!organizationId) return;
+    setLogoNotice("");
+    setLogoError("");
+    try {
+      await apiFetch(`/v1/organizations/${organizationId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ brandLogoAssetId: assetId }),
+      });
+      setBrandLogoAssetId(assetId);
+      if (assetId) setLogoNotice(copy.logo.saved);
+    } catch {
+      setLogoError(copy.logo.saveError);
+    }
+  }
 
   async function createOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -835,17 +880,59 @@ export function BusinessOnboarding({
   if (step === 2) {
     return (
       <OnboardingShell locale={locale} step={2}>
-        <PlanStep
-          locale={locale}
-          plan={plan}
-          cadence={cadence}
-          onPlan={setPlan}
-          onCadence={setCadence}
-          onContinue={() => {
-            setStep(3);
-            writeWizard({ organizationId, plan, cadence, step: 3 });
-          }}
-        />
+        <section className="onboarding-logo-panel" aria-labelledby="onboarding-logo-title">
+          <div className="onboarding-logo-panel__heading">
+            <div>
+              <h2 id="onboarding-logo-title">{copy.logo.title}</h2>
+              <span>{copy.logo.optional}</span>
+            </div>
+            <p>{copy.logo.description}</p>
+            <p className="field-help">{copy.logo.settingsHint}</p>
+          </div>
+          {logoNotice ? <Alert tone="success" title={logoNotice} /> : null}
+          {logoError ? <Alert tone="danger" title={logoError} /> : null}
+          <ProgramAssetPicker
+            organizationId={organizationId}
+            category="LOGO"
+            label={copy.logo.title}
+            assets={logoAssets}
+            selectedId={brandLogoAssetId}
+            onSelected={(assetId) => void updateMerchantLogo(assetId)}
+            onUploaded={(asset) =>
+              setLogoAssets((current) => [
+                asset,
+                ...current.filter((existing) => existing.id !== asset.id),
+              ])
+            }
+            ar={contentLocale === "ar"}
+            interfaceLocale={locale}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() =>
+              document.getElementById("onboarding-plan-section")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              })
+            }
+          >
+            {copy.logo.skip}
+          </Button>
+        </section>
+        <div id="onboarding-plan-section">
+          <PlanStep
+            locale={locale}
+            plan={plan}
+            cadence={cadence}
+            onPlan={setPlan}
+            onCadence={setCadence}
+            onContinue={() => {
+              setStep(3);
+              writeWizard({ organizationId, plan, cadence, step: 3 });
+            }}
+          />
+        </div>
       </OnboardingShell>
     );
   }
