@@ -599,7 +599,7 @@ export function BusinessOnboarding({
             : 2;
       setStep(authoritativeResumeStep as OnboardingStep);
     }
-  }, [copy.payment.resumeError, initialOrganizationId, preparePayment, resumeState]);
+  }, [copy, initialOrganizationId, preparePayment, resumeState]);
 
   useEffect(() => {
     if (slug.length < 3) {
