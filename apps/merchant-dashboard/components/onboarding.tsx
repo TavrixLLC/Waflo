@@ -139,7 +139,10 @@ function writeWizard(update: Partial<WizardDraft>) {
 
 type OnboardingCopy = InterfaceMessages["onboarding"];
 
-function localizedError(_caught: unknown, fallback: string): string {
+function localizedError(caught: unknown, copy: OnboardingCopy, fallback: string): string {
+  if (caught instanceof ApiClientError && caught.code === "BILLING_CONFIGURATION_INCOMPLETE") {
+    return copy.payment.billingConfigurationIncomplete;
+  }
   return fallback;
 }
 
@@ -396,7 +399,7 @@ function SecurePaymentForm({
       if (stripeError) setError(copy.payment.verifyCardError);
       else if (setupIntent?.status === "succeeded")
         void loadPreview(setupIntent.id).catch((caught) =>
-          setError(localizedError(caught, copy.payment.reviewTrialError)),
+          setError(localizedError(caught, copy, copy.payment.reviewTrialError)),
         );
     });
   }, [copy, loadPreview, stripe]);
@@ -440,7 +443,7 @@ function SecurePaymentForm({
     try {
       await loadPreview(result.setupIntent.id);
     } catch (caught) {
-      setError(localizedError(caught, copy.payment.reviewTrialError));
+      setError(localizedError(caught, copy, copy.payment.reviewTrialError));
     } finally {
       setLoading(false);
     }
@@ -580,7 +583,7 @@ export function BusinessOnboarding({
       void preparePayment(currentOrganizationId, currentPlan, currentCadence, draft.billingIdentity)
         .catch((caught) => {
           setStep(3);
-          setError(localizedError(caught, copy.payment.resumeError));
+          setError(localizedError(caught, copy, copy.payment.resumeError));
         })
         .finally(() => setLoading(false));
     } else if (currentOrganizationId) {
@@ -688,7 +691,7 @@ export function BusinessOnboarding({
         `/${locale}/onboarding/business?organization=${organization.id}`,
       );
     } catch (caught) {
-      setError(localizedError(caught, copy.organization.createError));
+      setError(localizedError(caught, copy, copy.organization.createError));
     } finally {
       setLoading(false);
     }
@@ -714,7 +717,7 @@ export function BusinessOnboarding({
     try {
       await preparePayment(organizationId, plan, cadence, identity);
     } catch (caught) {
-      setError(localizedError(caught, copy.payment.startSetupError));
+      setError(localizedError(caught, copy, copy.payment.startSetupError));
     } finally {
       setLoading(false);
     }
@@ -731,7 +734,7 @@ export function BusinessOnboarding({
         sessionCommand(BILLING_COMMAND_KEY),
       );
     } catch (caught) {
-      setError(localizedError(caught, copy.payment.startTrialError));
+      setError(localizedError(caught, copy, copy.payment.startTrialError));
     } finally {
       setLoading(false);
     }

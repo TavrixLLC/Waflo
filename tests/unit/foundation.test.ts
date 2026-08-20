@@ -374,7 +374,7 @@ describe("API and localization utilities", () => {
     expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
     expect(contentLocaleForInterface("ku-badini")).toBe("en");
     expect(contentLocaleForInterface("ku-sorani")).toBe("en");
-    expect(contentLocaleForInterface("ar")).toBe("en");
+    expect(contentLocaleForInterface("ar")).toBe("ar");
     expect(interfaceTextLocaleFor("en")).toBe("en");
     expect(interfaceTextLocaleFor("ar")).toBe("ar");
     expect(interfaceTextLocaleFor("ku-badini")).toBe("ku-badini");

@@ -56,6 +56,8 @@ export const onboardingInterfaceCopy = {
       continue: "Continue",
     },
     payment: {
+      billingConfigurationIncomplete:
+        "Billing setup is not configured right now. Try again or contact Waflo support.",
       verifyCardError: "Unable to verify the card.",
       reviewTrialError: "Unable to review your trial.",
       saveCardError: "Unable to save the card.",
@@ -211,6 +213,8 @@ export const onboardingInterfaceCopy = {
       continue: "متابعة",
     },
     payment: {
+      billingConfigurationIncomplete:
+        "إعداد الفوترة غير مهيأ حالياً. حاول مرة أخرى أو تواصل مع دعم Waflo.",
       verifyCardError: "تعذر التحقق من البطاقة.",
       reviewTrialError: "تعذرت مراجعة تجربتك.",
       saveCardError: "تعذر حفظ البطاقة.",
@@ -364,6 +368,8 @@ export const onboardingInterfaceCopy = {
       continue: "بەردەوام بە",
     },
     payment: {
+      billingConfigurationIncomplete:
+        "ڕێکخستنا پارەدانێ نووکە نەهاتییە ئامادەکرن. دووبارە هەول بدە یان پەیوەندییێ ب پشتەڤانیا Waflo بکە.",
       verifyCardError: "پشتڕاستکرنا کارتێ سەرنەکەفت.",
       reviewTrialError: "پێداچوونا تاقیکرنێ سەرنەکەفت.",
       saveCardError: "پاشەکەفتکرنا کارتێ سەرنەکەفت.",
@@ -518,6 +524,8 @@ export const onboardingInterfaceCopy = {
       continue: "بەردەوام بە",
     },
     payment: {
+      billingConfigurationIncomplete:
+        "ڕێکخستنی پارەدان ئێستا ئامادە نەکراوە. دووبارە هەوڵ بدە یان پەیوەندی بە پشتگیری Waflo بکە.",
       verifyCardError: "پشتڕاستکردنەوەی کارت سەرنەکەوت.",
       reviewTrialError: "پێداچوونەوەی تاقیکردنەوە سەرنەکەوت.",
       saveCardError: "پاشەکەوتکردنی کارت سەرنەکەوت.",

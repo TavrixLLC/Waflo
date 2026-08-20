@@ -68,7 +68,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     direction: "rtl",
     typography: "cairo",
     enabled: true,
-    contentFallback: "en",
+    contentFallback: "ar",
     dateFormattingLocale: "ar-IQ-u-nu-latn",
     numberFormattingLocale: "ar-IQ-u-nu-latn",
     messages: ar,
