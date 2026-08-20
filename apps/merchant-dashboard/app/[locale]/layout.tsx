@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { Cairo, Manrope } from "next/font/google";
-import localFont from "next/font/local";
+import { Cairo, Manrope, Noto_Sans_Arabic } from "next/font/google";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { interfaceLocaleFor } from "@waflo/i18n";
@@ -8,13 +7,10 @@ import "../globals.css";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
 const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", display: "swap" });
-const kurdistan24 = localFont({
-  src: "../fonts/kurdistan-24-light.ttf",
-  variable: "--font-kurdistan-24",
+const notoSansArabic = Noto_Sans_Arabic({
+  subsets: ["arabic"],
+  variable: "--font-noto-sans-arabic",
   display: "swap",
-  preload: true,
-  weight: "300",
-  style: "normal",
 });
 
 export async function generateMetadata({
@@ -54,15 +50,16 @@ export default async function LocaleLayout({
   const { locale } = await params;
   const definition = interfaceLocaleFor(locale);
   if (!definition) notFound();
+  const fontVariables = `${manrope.variable} ${cairo.variable}${
+    locale.startsWith("ku-") ? ` ${notoSansArabic.variable}` : ""
+  }`;
   return (
     <html
       lang={definition.htmlLang}
       dir={definition.direction}
       data-interface-typography={definition.typography}
     >
-      <body className={`${manrope.variable} ${cairo.variable} ${kurdistan24.variable}`}>
-        {children}
-      </body>
+      <body className={fontVariables}>{children}</body>
     </html>
   );
 }

@@ -92,7 +92,7 @@ test("Kurdish authentication, language menus, and onboarding remain accessible",
     const authFont = await page
       .locator(".auth-layout")
       .evaluate((element) => getComputedStyle(element).fontFamily);
-    expect(authFont.toLowerCase()).toContain("kurdistan24");
+    expect(authFont.toLowerCase()).toContain("noto sans arabic");
     await page.getByRole("button", { name: copy.language.label }).click();
     await expect(page.getByRole("menu")).toBeVisible();
     await expectNoCriticalViolations(page);
@@ -105,9 +105,26 @@ test("Kurdish authentication, language menus, and onboarding remain accessible",
     const onboardingFont = await page
       .locator(".onboarding-shell")
       .evaluate((element) => getComputedStyle(element).fontFamily);
-    expect(onboardingFont.toLowerCase()).toContain("kurdistan24");
+    expect(onboardingFont.toLowerCase()).toContain("noto sans arabic");
     await expectNoCriticalViolations(page);
   }
+
+  await page.goto("http://localhost:3001/en/onboarding/business");
+  await page.evaluate(() => {
+    (
+      window as typeof window & { __wafloLocaleNavigationProbe?: boolean }
+    ).__wafloLocaleNavigationProbe = true;
+  });
+  await page.getByRole("button", { name: messages.en.language.label }).click();
+  await page.getByRole("menuitemradio", { name: "کوردی سۆرانی", exact: true }).click();
+  await expect(page).toHaveURL(/\/ku-sorani\/onboarding\/business$/u);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __wafloLocaleNavigationProbe?: boolean })
+          .__wafloLocaleNavigationProbe,
+    ),
+  ).toBe(true);
 });
 
 test("Verify Email feedback, resend action, RTL, and zoom remain accessible", async ({ page }) => {

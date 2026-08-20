@@ -368,8 +368,8 @@ describe("API and localization utilities", () => {
     expect(directionForInterface("ku-sorani")).toBe("rtl");
     expect(localeRegistry.en.typography).toBe("default");
     expect(localeRegistry.ar.typography).toBe("cairo");
-    expect(localeRegistry["ku-badini"].typography).toBe("kurdistan24");
-    expect(localeRegistry["ku-sorani"].typography).toBe("kurdistan24");
+    expect(localeRegistry["ku-badini"].typography).toBe("cairo");
+    expect(localeRegistry["ku-sorani"].typography).toBe("cairo");
     expect(localeRegistry["ku-badini"].htmlLang).toBe("kmr-Arab-IQ");
     expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
     expect(contentLocaleForInterface("ku-badini")).toBe("en");
@@ -416,6 +416,16 @@ describe("API and localization utilities", () => {
       resolve(root, "apps/merchant-dashboard/app/[locale]/layout.tsx"),
       "utf8",
     );
+    const merchantPicker = readFileSync(
+      resolve(root, "apps/merchant-dashboard/components/merchant-language-picker.tsx"),
+      "utf8",
+    );
+    const merchantStyles = readFileSync(
+      resolve(root, "apps/merchant-dashboard/app/globals.css"),
+      "utf8",
+    );
+    const customerLayout = readFileSync(resolve(root, "apps/customer-web/app/layout.tsx"), "utf8");
+    const customerStyles = readFileSync(resolve(root, "apps/customer-web/app/globals.css"), "utf8");
 
     expect(picker).toContain("interfaceLocales.map");
     expect(picker).toContain("interfaceLanguageGroups");
@@ -426,8 +436,18 @@ describe("API and localization utilities", () => {
     expect(dashboard).toContain("InterfaceLanguagePicker");
     expect(dashboard).toContain("waflo_interface_locale");
     expect(dashboard).toContain("ku-badini|ku-sorani");
+    expect(dashboard).toContain("router.prefetch(localePath(target.id))");
+    expect(merchantPicker).toContain("router.prefetch(hrefForLocale(target.id))");
+    expect(merchantPicker).toContain("router.push(hrefForLocale(target))");
     expect(layout).toContain("definition.htmlLang");
     expect(layout).toContain("definition.direction");
+    expect(layout).toContain("Noto_Sans_Arabic");
+    expect(layout).not.toContain("kurdistan-24-light.ttf");
+    expect(merchantStyles).toContain("font-variant-ligatures: common-ligatures contextual");
+    expect(merchantStyles).toContain('html[data-interface-typography="cairo"] body *');
+    expect(customerLayout).toContain("Noto_Sans_Arabic");
+    expect(customerStyles).toContain(":lang(ckb)");
+    expect(customerStyles).toContain(":lang(kmr)");
     expect(localeRegistry["ku-badini"].messages.merchant.shell.programs).not.toBe(
       localeRegistry["ku-sorani"].messages.merchant.shell.programs,
     );

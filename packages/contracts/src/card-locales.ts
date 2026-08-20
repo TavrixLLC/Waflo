@@ -265,7 +265,7 @@ export function fontStackForCardLocale(value: string): string {
   const metadata = cardLocaleMetadata(value);
   if (!metadata) return "var(--font-manrope, Manrope), system-ui, sans-serif";
   if (metadata.id === "ckb" || metadata.id === "ku-Arab-IQ") {
-    return 'var(--font-kurdistan-24, var(--font-cairo, "Noto Sans Arabic")), "Noto Sans Arabic", system-ui, sans-serif';
+    return 'var(--font-noto-sans-arabic, "Noto Sans Arabic"), var(--font-cairo, Cairo), system-ui, sans-serif';
   }
   if (metadata.script === "Arab") {
     return 'var(--font-cairo, Cairo), "Noto Sans Arabic", system-ui, sans-serif';

@@ -2,7 +2,13 @@ import type { Metadata } from "next";
 import { Cairo, Manrope } from "next/font/google";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { directionFor, isLocale } from "@waflo/i18n";
+import {
+  directionForInterface,
+  interfaceLocales,
+  isInterfaceLocale,
+  localeRegistry,
+} from "@waflo/i18n";
+import { marketingCopy } from "../../lib/marketing-copy";
 import { createMarketingMetadata, marketingOrigin } from "../../lib/seo";
 import "../globals.css";
 
@@ -15,13 +21,13 @@ export async function generateMetadata({
   params: Promise<{ locale: string }>;
 }): Promise<Metadata> {
   const { locale } = await params;
-  if (!isLocale(locale)) return {};
+  if (!isInterfaceLocale(locale)) return {};
   const home = createMarketingMetadata(locale, "home");
   return {
     ...home,
     metadataBase: new URL(marketingOrigin),
     title: {
-      default: locale === "ar" ? "Waflo — الولاء صار أسهل" : "Waflo — Loyalty that flows",
+      default: `Waflo — ${marketingCopy[locale].meta.title}`,
       template: "%s · Waflo",
     },
     manifest: "/site.webmanifest",
@@ -32,6 +38,10 @@ export async function generateMetadata({
   };
 }
 
+export function generateStaticParams() {
+  return interfaceLocales.map((locale) => ({ locale: locale.id }));
+}
+
 export default async function LocaleLayout({
   children,
   params,
@@ -40,10 +50,17 @@ export default async function LocaleLayout({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
+  if (!isInterfaceLocale(locale)) notFound();
+  const definition = localeRegistry[locale];
   return (
-    <html lang={locale} dir={directionFor(locale)}>
-      <body className={`${manrope.variable} ${cairo.variable}`}>{children}</body>
+    <html lang={definition.htmlLang} dir={directionForInterface(locale)}>
+      <body
+        className={`${manrope.variable} ${cairo.variable}`}
+        data-interface-locale={locale}
+        data-interface-typography={definition.typography}
+      >
+        {children}
+      </body>
     </html>
   );
 }

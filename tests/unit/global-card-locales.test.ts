@@ -67,7 +67,7 @@ describe("global card-content locale registry", () => {
   it("uses script-aware card stacks without bundling a font per language", () => {
     expect(fontStackForCardLocale("fr")).toContain("--font-manrope");
     expect(fontStackForCardLocale("ar")).toContain("--font-cairo");
-    expect(fontStackForCardLocale("ckb")).toContain("--font-kurdistan-24");
+    expect(fontStackForCardLocale("ckb")).toContain("--font-noto-sans-arabic");
     expect(fontStackForCardLocale("ja")).toContain("Yu Gothic");
   });
 

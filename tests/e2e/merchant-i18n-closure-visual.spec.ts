@@ -43,8 +43,12 @@ async function assertKurdishStudioSurface(page: Page, surface: ".builder-shell" 
   await expect(container).not.toContainText("Stamp goal");
   await expect(container).not.toContainText("Saved changes");
   await expect(container).not.toContainText("Run automated checks");
-  const fontFamily = await container.evaluate((element) => getComputedStyle(element).fontFamily);
-  expect(fontFamily.toLowerCase()).toContain("kurdistan24");
+  const typography = await container.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { fontFamily: style.fontFamily, letterSpacing: style.letterSpacing };
+  });
+  expect(typography.fontFamily.toLowerCase()).toContain("noto sans arabic");
+  expect(typography.letterSpacing).toBe("normal");
 }
 
 const globalEnglishInterfaceLeaks = {
@@ -99,12 +103,17 @@ async function assertNoInterfaceLeaks(
 async function assertKurdishGlobalSurface(page: Page, selector: string): Promise<void> {
   const surface = page.locator(selector);
   await expect(surface).toBeVisible();
-  const { direction, fontFamily } = await surface.evaluate((element) => {
+  const { direction, fontFamily, letterSpacing } = await surface.evaluate((element) => {
     const style = getComputedStyle(element);
-    return { direction: style.direction, fontFamily: style.fontFamily };
+    return {
+      direction: style.direction,
+      fontFamily: style.fontFamily,
+      letterSpacing: style.letterSpacing,
+    };
   });
   expect(direction).toBe("rtl");
-  expect(fontFamily.toLowerCase()).toContain("kurdistan24");
+  expect(fontFamily.toLowerCase()).toContain("noto sans arabic");
+  expect(letterSpacing).toBe("normal");
 }
 
 test("captures the centralized loyalty interface catalog across all four locales", async ({

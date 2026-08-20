@@ -1,5 +1,7 @@
 import type { Locale } from "@waflo/contracts";
+import type { InterfaceLocale } from "@waflo/i18n";
 import type { Metadata } from "next";
+import { marketingCopy } from "./marketing-copy";
 
 export const marketingOrigin = "https://waflo.app";
 export const marketingSocialImage = "/brand/waflo-open-graph-1200x630.png";
@@ -102,16 +104,21 @@ const pageCopy: Record<
   },
 };
 
-export function localizedMarketingUrl(locale: Locale, path = ""): string {
+export function localizedMarketingUrl(locale: InterfaceLocale, path = ""): string {
   return `${marketingOrigin}/${locale}${path}`;
 }
 
 export function alternateMarketingUrls(path = "") {
-  return {
+  const languages: Record<string, string> = {
     en: localizedMarketingUrl("en", path),
     ar: localizedMarketingUrl("ar", path),
     "x-default": localizedMarketingUrl("en", path),
   };
+  if (!path) {
+    languages["ku-badini"] = localizedMarketingUrl("ku-badini");
+    languages["ku-sorani"] = localizedMarketingUrl("ku-sorani");
+  }
+  return languages;
 }
 
 export function isStagingDeployment(
@@ -120,8 +127,11 @@ export function isStagingDeployment(
   return deploymentEnvironment === "staging";
 }
 
-export function createMarketingMetadata(locale: Locale, page: MarketingPage): Metadata {
-  const content = pageCopy[page][locale];
+export function createMarketingMetadata(locale: InterfaceLocale, page: MarketingPage): Metadata {
+  const content =
+    page === "home"
+      ? { ...marketingCopy[locale].meta, path: "" as const }
+      : pageCopy[page][locale === "en" || locale === "ar" ? locale : "en"];
   const url = localizedMarketingUrl(locale, content.path);
   const socialTitle = `${content.title} · Waflo`;
 
@@ -143,7 +153,7 @@ export function createMarketingMetadata(locale: Locale, page: MarketingPage): Me
           url: marketingSocialImage,
           width: 1200,
           height: 630,
-          alt: locale === "ar" ? "Waflo — الولاء صار أسهل" : "Waflo — Loyalty that flows",
+          alt: `Waflo — ${marketingCopy[locale].meta.title}`,
         },
       ],
     },
@@ -210,7 +220,7 @@ export function marketingStructuredData() {
         "@id": `${marketingOrigin}/#website`,
         name: "Waflo",
         url: marketingOrigin,
-        inLanguage: ["en", "ar"],
+        inLanguage: ["en", "ar", "kmr-Arab-IQ", "ckb-Arab-IQ"],
         publisher: { "@id": `${marketingOrigin}/#organization` },
       },
     ],

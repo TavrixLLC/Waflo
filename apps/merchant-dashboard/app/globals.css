@@ -11,10 +11,24 @@ body {
   min-height: 100dvh;
 }
 
-html[data-interface-typography="kurdistan24"] body,
-html[data-interface-typography="kurdistan24"] [dir="rtl"] {
-  font-family: var(--font-kurdistan-24), var(--font-cairo), sans-serif;
-  font-synthesis: none;
+html:lang(kmr-Arab-IQ) body,
+html:lang(ckb-Arab-IQ) body {
+  --waflo-font-arabic:
+    var(--font-noto-sans-arabic), "Noto Sans Arabic", var(--font-cairo), system-ui, sans-serif;
+
+  font-family: var(--waflo-font-arabic);
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
+}
+
+:where(
+  html[data-interface-typography="cairo"] body,
+  html[data-interface-typography="cairo"] body *,
+  html[data-interface-typography="cairo"] body *::before,
+  html[data-interface-typography="cairo"] body *::after
+) {
+  /* biome-ignore lint/complexity/noImportantStyles: Arabic-script shaping must override Latin tracking in every product component. */
+  letter-spacing: normal !important;
 }
 
 .auth-layout {

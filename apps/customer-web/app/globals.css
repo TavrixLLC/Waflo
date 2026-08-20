@@ -25,6 +25,20 @@ body {
   font-family: var(--waflo-font-arabic);
 }
 
+:lang(ckb),
+:lang(kmr),
+:lang(ku) {
+  font-family:
+    var(--font-noto-sans-arabic), "Noto Sans Arabic", var(--font-cairo), system-ui, sans-serif;
+}
+
+:where(:lang(ar), :lang(ckb), :lang(kmr), :lang(ku)) {
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
+  /* biome-ignore lint/complexity/noImportantStyles: Arabic-script shaping must override Latin tracking in every customer surface. */
+  letter-spacing: normal !important;
+}
+
 button,
 input,
 select {

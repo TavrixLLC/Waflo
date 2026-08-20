@@ -7,7 +7,7 @@ import { kuSorani } from "./locales/ku-sorani.js";
 export type TextDirection = "ltr" | "rtl";
 export type InterfaceLocale = "en" | "ar" | "ku-badini" | "ku-sorani";
 export type InterfaceLanguageGroup = "kurdish";
-export type InterfaceTypography = "default" | "cairo" | "kurdistan24";
+export type InterfaceTypography = "default" | "cairo";
 
 /**
  * Presentation metadata for grouped language choices. Keeping this alongside
@@ -30,11 +30,7 @@ export interface InterfaceLocaleDefinition {
   readonly englishName?: string;
   readonly htmlLang: string;
   readonly direction: TextDirection;
-  /**
-   * Presentation typography is locale metadata, never a component-level
-   * language conditional. `kurdistan24` is intentionally declarative until
-   * the approved local Kurdistan 24 Light webfont is supplied.
-   */
+  /** Presentation typography is locale metadata, never a component-level language conditional. */
   readonly typography: InterfaceTypography;
   readonly languageGroup?: InterfaceLanguageGroup;
   readonly enabled: true;
@@ -80,7 +76,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     englishName: "Kurdish Badini",
     htmlLang: "kmr-Arab-IQ",
     direction: "rtl",
-    typography: "kurdistan24",
+    typography: "cairo",
     languageGroup: "kurdish",
     enabled: true,
     contentFallback: "en",
@@ -95,7 +91,7 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     englishName: "Kurdish Sorani",
     htmlLang: "ckb-Arab-IQ",
     direction: "rtl",
-    typography: "kurdistan24",
+    typography: "cairo",
     languageGroup: "kurdish",
     enabled: true,
     contentFallback: "en",

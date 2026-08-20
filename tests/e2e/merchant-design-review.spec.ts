@@ -456,7 +456,7 @@ test("captures public, authentication, and marketing review states", async ({ pa
   await page.goto("http://localhost:3000/en");
   await expect(page.locator("h1")).toBeVisible();
   await capture(page, "48-marketing-home-desktop-en.png", true);
-  await captureElement(page, ".marketing-hero-stage", "marketing-loyalty-preview.png");
+  await captureElement(page, ".landing-hero-demo", "marketing-loyalty-preview.png");
   await page.goto("http://localhost:3000/ar");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await capture(page, "49-marketing-home-desktop-ar.png", true);

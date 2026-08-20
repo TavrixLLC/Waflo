@@ -11,14 +11,7 @@ import {
   type InterfaceLocale,
   type InterfaceMessages,
 } from "@waflo/i18n";
-import {
-  Alert,
-  Button,
-  FormField,
-  InterfaceLanguagePicker,
-  SearchableSelect,
-  TextInput,
-} from "@waflo/ui";
+import { Alert, Button, FormField, SearchableSelect, TextInput } from "@waflo/ui";
 import { Check, CreditCard, Link2, LockKeyhole } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -38,6 +31,7 @@ import {
   LocationMapPicker,
   type LocationMapSelection,
 } from "./location-map-picker";
+import { MerchantLanguagePicker } from "./merchant-language-picker";
 import { ProgramAssetPicker } from "./program-asset-uploader";
 import type { AssetItem } from "./program-studio-types";
 
@@ -216,10 +210,9 @@ function OnboardingShell({
           height={40}
           priority
         />
-        <InterfaceLanguagePicker
+        <MerchantLanguagePicker
           locale={locale}
           routePath="/onboarding/business"
-          persistSelection
           label={copy.language.label}
         />
       </header>

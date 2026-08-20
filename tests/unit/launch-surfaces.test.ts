@@ -59,16 +59,28 @@ describe("public launch surfaces", () => {
       }
     }
 
-    expect(titles).toHaveLength(10);
+    for (const locale of ["ku-badini", "ku-sorani"] as const) {
+      const metadata = createMarketingMetadata(locale, "home");
+      const serialized = JSON.stringify(metadata);
+      titles.add(String(metadata.title));
+      expect(metadata.description).toBeTruthy();
+      expect(serialized).toContain(`${marketingOrigin}/${locale}`);
+      expect(serialized).toContain(`${marketingOrigin}/en`);
+      expect(serialized).toContain(`${marketingOrigin}/ar`);
+      expect(serialized).toContain(`${marketingOrigin}/ku-badini`);
+      expect(serialized).toContain(`${marketingOrigin}/ku-sorani`);
+    }
+
+    expect(titles).toHaveLength(12);
   });
 
   it("limits the sitemap to canonical localized Marketing URLs", () => {
     const entries = sitemap();
-    expect(entries).toHaveLength(publicMarketingPaths.length * 2);
+    expect(entries).toHaveLength(publicMarketingPaths.length * 2 + 2);
     expect(new Set(entries.map((entry) => entry.url)).size).toBe(entries.length);
     for (const entry of entries) {
       expect(entry.url.startsWith(`${marketingOrigin}/`)).toBe(true);
-      expect(entry.url).toMatch(/\/(en|ar)(?:\/|$)/);
+      expect(entry.url).toMatch(/\/(en|ar|ku-badini|ku-sorani)(?:\/|$)/);
       expect(entry.url).not.toContain("localhost");
       expect(entry.url).not.toContain("staging");
       expect(entry.url).not.toContain("app.waflo.app");
@@ -144,10 +156,11 @@ describe("public launch surfaces", () => {
     for (const route of ["/pricing", "/contact", "/privacy", "/terms"]) {
       expect(shell).toContain(route);
     }
-    expect(shell).toContain("/" + "$" + "{alternate}" + "$" + "{path}");
+    expect(shell).toContain("interfaceLocales");
+    expect(shell).toContain("hrefForLocale");
   });
 
-  it("removes obsolete implementation-phase promises and keeps store availability truthful", () => {
+  it("removes obsolete implementation-phase promises and keeps wallet previews truthful", () => {
     const home = readFileSync(resolve(root, "apps/marketing-web/app/[locale]/page.tsx"), "utf8");
     const sources = [
       "apps/marketing-web/app/[locale]/page.tsx",
@@ -159,9 +172,8 @@ describe("public launch surfaces", () => {
       .map((path) => readFileSync(resolve(root, path), "utf8"))
       .join("\n");
     expect(sources).not.toMatch(/\bW[1-4]\b/);
-    expect(home).toContain("Coming soon — store link not yet available");
-    expect(home).toContain("قريباً — رابط المتجر غير متاح بعد");
-    expect(home).toContain("/brand/google-play-badge-en.png");
+    expect(home).toContain("<WalletDemo copy={copy} />");
+    expect(home).not.toContain("google-play-badge");
     expect(home).not.toContain("NEXT_PUBLIC_GOOGLE_PLAY");
   });
 

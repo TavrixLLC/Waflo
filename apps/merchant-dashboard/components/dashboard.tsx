@@ -3,6 +3,7 @@
 import type { Locale } from "@waflo/contracts";
 import {
   directionForInterface,
+  interfaceLocales,
   messages,
   type InterfaceLocale,
   type InterfaceMessages,
@@ -260,6 +261,13 @@ export function DashboardShell({
   const languageCopy = messages[interfaceLocale].language;
   const routeLocale = interfaceLocale;
   const interfaceDirection = directionForInterface(interfaceLocale);
+  const localePath = useCallback(
+    (target: InterfaceLocale) => {
+      const suffix = pathname.replace(/^\/(en|ar|ku-badini|ku-sorani)(?=\/|$)/, "");
+      return `/${target}${suffix || "/dashboard"}`;
+    },
+    [pathname],
+  );
 
   const loadMe = useCallback(async () => {
     try {
@@ -304,6 +312,11 @@ export function DashboardShell({
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [loadMe]);
+  useEffect(() => {
+    for (const target of interfaceLocales) {
+      if (target.id !== routeLocale) router.prefetch(localePath(target.id));
+    }
+  }, [localePath, routeLocale, router]);
 
   const membership = me?.memberships.find((item) => item.organization.id === activeId);
   const sections = useMemo(() => allowedSections(membership?.role ?? "STAFF"), [membership?.role]);
@@ -320,24 +333,21 @@ export function DashboardShell({
     router.replace(`/${routeLocale}/logged-out`);
   }
 
-  async function switchLanguage(target: InterfaceLocale) {
-    const suffix = pathname.replace(/^\/(en|ar|ku-badini|ku-sorani)(?=\/|$)/, "");
-    const targetPath = `/${target}${suffix || "/dashboard"}`;
+  function switchLanguage(target: InterfaceLocale) {
+    const targetPath = localePath(target);
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
     // Cookie Store is not yet available in every supported browser. The value is a closed locale union.
     // biome-ignore lint/suspicious/noDocumentCookie: Browser-compatible persistence for the selected interface locale.
     document.cookie = `waflo_interface_locale=${target}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
-    if (target === "en" || target === "ar") {
-      try {
-        await apiFetch("/v1/auth/me", {
-          method: "PATCH",
-          body: JSON.stringify({ preferredLocale: target }),
-        });
-      } catch {
-        // Route and the interface-locale cookie remain authoritative for this browser.
-      }
-    }
     router.push(targetPath);
+    if (target === "en" || target === "ar") {
+      void apiFetch("/v1/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify({ preferredLocale: target }),
+      }).catch(() => {
+        // Route and the interface-locale cookie remain authoritative for this browser.
+      });
+    }
   }
 
   if (!me || !membership) return <DashboardBoot copy={copy} error={error} />;
@@ -435,10 +445,7 @@ export function DashboardShell({
             <div className="dashboard-topbar__actions">
               <InterfaceLanguagePicker
                 locale={routeLocale}
-                hrefForLocale={(target) => {
-                  const suffix = pathname.replace(/^\/(en|ar|ku-badini|ku-sorani)(?=\/|$)/, "");
-                  return `/${target}${suffix || "/dashboard"}`;
-                }}
+                hrefForLocale={localePath}
                 onLocaleChange={switchLanguage}
                 label={languageCopy.label}
                 className="dashboard-language"

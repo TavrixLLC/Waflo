@@ -12,19 +12,15 @@
  */
 
 import { isInterfaceLocale, localeRegistry, type InterfaceLocale } from "@waflo/i18n";
-import { Cairo, Manrope } from "next/font/google";
-import localFont from "next/font/local";
+import { Cairo, Manrope, Noto_Sans_Arabic } from "next/font/google";
 import { useEffect, useState } from "react";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
 const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", display: "swap" });
-const kurdistan24 = localFont({
-  src: "./fonts/kurdistan-24-light.ttf",
-  variable: "--font-kurdistan-24",
+const notoSansArabic = Noto_Sans_Arabic({
+  subsets: ["arabic"],
+  variable: "--font-noto-sans-arabic",
   display: "swap",
-  preload: true,
-  weight: "300",
-  style: "normal",
 });
 
 export default function GlobalError({
@@ -67,7 +63,11 @@ export default function GlobalError({
       dir={definition.direction}
       data-interface-typography={definition.typography}
     >
-      <body className={`${manrope.variable} ${cairo.variable} ${kurdistan24.variable}`}>
+      <body
+        className={`${manrope.variable} ${cairo.variable}${
+          locale.startsWith("ku-") ? ` ${notoSansArabic.variable}` : ""
+        }`}
+      >
         <style>{`
           *,*::before,*::after{box-sizing:border-box}
           body{margin:0;min-height:100dvh;display:grid;place-items:center;
@@ -75,8 +75,10 @@ export default function GlobalError({
             background:#faf9f8;color:#241916}
           html[data-interface-typography="cairo"] body{
             font-family:var(--font-cairo),system-ui,sans-serif}
-          html[data-interface-typography="kurdistan24"] body{
-            font-family:var(--font-kurdistan-24),var(--font-cairo),sans-serif}
+          html:lang(kmr-Arab-IQ) body,html:lang(ckb-Arab-IQ) body{
+            font-family:var(--font-noto-sans-arabic),var(--font-cairo),system-ui,sans-serif;
+            font-kerning:normal;font-variant-ligatures:common-ligatures contextual;
+            letter-spacing:normal}
           .ge-card{width:min(480px,calc(100vw - 2rem));padding:2rem;
             background:#fff;border:1px solid #e5ddd9;border-radius:16px;
             text-align:center}
