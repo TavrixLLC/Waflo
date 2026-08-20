@@ -71,37 +71,6 @@ image_digest() {
   printf '%s\n' "${digest}"
 }
 
-mirror_invariant_tag() {
-  local package="$1"
-  local staging="${registry}/waflo-${package}:${release_sha}-staging"
-  local production="${registry}/waflo-${package}:${release_sha}-production"
-  if image_exists "${staging}" && ! image_exists "${production}"; then
-    docker buildx imagetools create --tag "${production}" "${staging}"
-  elif image_exists "${production}" && ! image_exists "${staging}"; then
-    docker buildx imagetools create --tag "${staging}" "${production}"
-  fi
-}
-
-for package in migrate api operational-worker wallet-worker; do
-  mirror_invariant_tag "${package}"
-  staging_reference="${registry}/waflo-${package}:${release_sha}-staging"
-  production_reference="${registry}/waflo-${package}:${release_sha}-production"
-  if image_exists "${staging_reference}" && image_exists "${production_reference}"; then
-    staging_digest="$(image_digest "${staging_reference}")" || {
-      printf 'Staging image did not resolve to an OCI digest: %s.\n' "${staging_reference}" >&2
-      exit 4
-    }
-    production_digest="$(image_digest "${production_reference}")" || {
-      printf 'Production image did not resolve to an OCI digest: %s.\n' "${production_reference}" >&2
-      exit 4
-    }
-    if [[ "${staging_digest}" != "${production_digest}" ]]; then
-      printf 'Invariant image tags resolve to different manifests for %s.\n' "${package}" >&2
-      exit 4
-    fi
-  fi
-done
-
 declare -a missing_targets=()
 declare -A target_references=(
   [migrate]="${registry}/waflo-migrate:${release_sha}-staging"
@@ -142,6 +111,7 @@ if (( ${#missing_targets[@]} > 0 )); then
   for target in "${missing_targets[@]}"; do
     docker buildx bake \
       --file "${repository_root}/deploy/vps/docker-bake.hcl" \
+      --set "${target}.tags=${target_references[${target}]}" \
       --push \
       "${target}"
   done
