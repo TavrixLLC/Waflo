@@ -375,9 +375,10 @@ describe("API and localization utilities", () => {
     expect(contentLocaleForInterface("ku-badini")).toBe("en");
     expect(contentLocaleForInterface("ku-sorani")).toBe("en");
     expect(contentLocaleForInterface("ar")).toBe("en");
+    expect(interfaceTextLocaleFor("en")).toBe("en");
     expect(interfaceTextLocaleFor("ar")).toBe("ar");
-    expect(interfaceTextLocaleFor("ku-badini")).toBe("en");
-    expect(interfaceTextLocaleFor("ku-sorani")).toBe("en");
+    expect(interfaceTextLocaleFor("ku-badini")).toBe("ku-badini");
+    expect(interfaceTextLocaleFor("ku-sorani")).toBe("ku-sorani");
     expect(localeRegistry["ku-badini"].messages.navigation.home).not.toBe(
       localeRegistry.ar.messages.navigation.home,
     );
@@ -433,21 +434,23 @@ describe("API and localization utilities", () => {
   });
 
   it("keeps every interface catalog structurally complete and removes legacy loyalty copy maps", () => {
-    const flatten = (value: unknown, prefix = ""): string[] => {
-      if (typeof value === "string") return [prefix];
+    const flatten = (value: unknown, prefix = ""): Array<readonly [string, string]> => {
+      if (typeof value === "string") return [[prefix, value]];
       if (!value || typeof value !== "object") return [];
-      return Object.entries(value).flatMap(([key, nested]) =>
-        flatten(nested, prefix ? `${prefix}.${key}` : key),
-      );
+      return Object.entries(value).flatMap(([key, nested]) => {
+        return flatten(nested, prefix ? `${prefix}.${key}` : key);
+      });
     };
     const interfaceIds = ["en", "ar", "ku-badini", "ku-sorani"] as const;
-    const englishKeys = flatten(localeRegistry.en.messages).sort();
+    const englishEntries = flatten(localeRegistry.en.messages);
+    const englishKeys = englishEntries.map(([key]) => key).sort();
 
     for (const id of interfaceIds) {
       const messages = localeRegistry[id].messages;
-      expect(flatten(messages).sort()).toEqual(englishKeys);
+      const entries = flatten(messages);
+      expect(entries.map(([key]) => key).sort()).toEqual(englishKeys);
+      expect(entries.every(([, value]) => value.trim().length > 0)).toBe(true);
       expect(Object.values(messages).length).toBeGreaterThan(0);
-      expect(JSON.stringify(messages)).not.toMatch(/"":|:undefined/u);
     }
 
     expect(localeRegistry.en.direction).toBe("ltr");
@@ -457,6 +460,23 @@ describe("API and localization utilities", () => {
     expect(JSON.stringify(localeRegistry["ku-badini"].messages)).not.toBe(
       JSON.stringify(localeRegistry["ku-sorani"].messages),
     );
+    const englishGlobalCopy = new Map(
+      englishEntries.filter(([key]) => /^(?:auth|onboarding)\./u.test(key)),
+    );
+    const arabicGlobalCopy = new Map(
+      flatten(localeRegistry.ar.messages).filter(([key]) => /^(?:auth|onboarding)\./u.test(key)),
+    );
+    for (const id of ["ku-badini", "ku-sorani"] as const) {
+      for (const [key, value] of flatten(localeRegistry[id].messages).filter(([key]) =>
+        /^(?:auth|onboarding)\./u.test(key),
+      )) {
+        expect(value, `${id}:${key} must not fall back to English`).not.toBe(
+          englishGlobalCopy.get(key),
+        );
+        expect(value, `${id}:${key} must not copy Arabic`).not.toBe(arabicGlobalCopy.get(key));
+        expect(value, `${id}:${key} must use Western digits`).not.toMatch(/[٠-٩۰-۹]/u);
+      }
+    }
 
     const root = resolve(import.meta.dirname, "../..");
     const legacyMapSymbols = [
@@ -473,6 +493,56 @@ describe("API and localization utilities", () => {
     ] as const;
     for (const [relativePath, symbol] of legacyMapSymbols) {
       expect(readFileSync(resolve(root, relativePath), "utf8")).not.toContain(symbol);
+    }
+  });
+
+  it("keeps auth and onboarding interface copy centralized without a legacy locale fallback", () => {
+    const root = resolve(import.meta.dirname, "../..");
+    const formerFallbackConsumers = [
+      "apps/merchant-dashboard/app/[locale]/forgot-password/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/invite/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/logged-out/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/login/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/not-found.tsx",
+      "apps/merchant-dashboard/app/[locale]/onboarding/business/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/onboarding/complete/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/reset-password/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/session-expired/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/signup/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/verify-email/page.tsx",
+    ] as const;
+    for (const relativePath of formerFallbackConsumers) {
+      expect(readFileSync(resolve(root, relativePath), "utf8")).not.toContain(
+        "interfaceTextLocaleFor",
+      );
+    }
+
+    const migratedInterfaceFiles = [
+      "apps/merchant-dashboard/components/auth-layout.tsx",
+      "apps/merchant-dashboard/components/auth-forms.tsx",
+      "apps/merchant-dashboard/components/invite-client.tsx",
+      "apps/merchant-dashboard/components/onboarding.tsx",
+      "apps/merchant-dashboard/components/location-map-picker.tsx",
+      "apps/merchant-dashboard/app/[locale]/oauth/callback/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/not-found.tsx",
+    ] as const;
+    const retiredEnglishInterfaceLiterals = [
+      "Every visit becomes a reason to return.",
+      "Create your merchant account",
+      "Welcome back",
+      "Reset your password",
+      "Invitation unavailable.",
+      "Set up your organization",
+      "Choose your plan",
+      "Billing details",
+      "Place the pin on the storefront",
+      "This page could not be found",
+    ] as const;
+    for (const relativePath of migratedInterfaceFiles) {
+      const source = readFileSync(resolve(root, relativePath), "utf8");
+      for (const retiredLiteral of retiredEnglishInterfaceLiterals) {
+        expect(source).not.toContain(retiredLiteral);
+      }
     }
   });
 });

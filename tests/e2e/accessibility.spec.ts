@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { messages } from "../../packages/i18n/dist/index.js";
 
 async function expectNoCriticalViolations(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page }).analyze();
@@ -78,6 +79,35 @@ test("public, authentication, and form-error screens have no serious accessibili
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByText("Passwords do not match.")).toBeVisible();
   await expectNoCriticalViolations(page);
+});
+
+test("Kurdish authentication, language menus, and onboarding remain accessible", async ({
+  page,
+}) => {
+  for (const locale of ["ku-badini", "ku-sorani"] as const) {
+    const copy = messages[locale];
+    await page.goto(`http://localhost:3001/${locale}/login`);
+    await expect(page.getByRole("heading", { name: copy.auth.login.title })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    const authFont = await page
+      .locator(".auth-layout")
+      .evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(authFont.toLowerCase()).toContain("kurdistan24");
+    await page.getByRole("button", { name: copy.language.label }).click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await expectNoCriticalViolations(page);
+    await page.keyboard.press("Escape");
+
+    await page.goto(`http://localhost:3001/${locale}/onboarding/business`);
+    await expect(
+      page.getByRole("heading", { name: copy.onboarding.organization.setupTitle }),
+    ).toBeVisible();
+    const onboardingFont = await page
+      .locator(".onboarding-shell")
+      .evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(onboardingFont.toLowerCase()).toContain("kurdistan24");
+    await expectNoCriticalViolations(page);
+  }
 });
 
 test("Verify Email feedback, resend action, RTL, and zoom remain accessible", async ({ page }) => {
