@@ -28,6 +28,21 @@ export interface ValidationEngineInput {
     completionMessage: string;
     rewardUnlockedMessage: string;
   }>;
+  defaultCardLocale?: string;
+  cardLocales?: Array<{
+    locale: string;
+    enabled: boolean;
+    programName: string | null;
+    shortDescription: string | null;
+    rewardSummary: string | null;
+    termsAndConditions: string | null;
+    completionMessage: string | null;
+    rewardUnlockedMessage: string | null;
+    rewardTranslations: Array<{
+      name: string | null;
+      description: string | null;
+    }>;
+  }>;
   rewards: Array<{
     thresholdStampCount: number;
     maximumRedemptionsPerEarned: number;
@@ -264,26 +279,67 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
       ),
     );
 
-  for (const locale of ["EN", "AR"] as const) {
-    const translation = input.translations.find((item) => item.locale === locale);
-    if (
-      !translation?.programName.trim() ||
-      !translation.shortDescription.trim() ||
-      !translation.rewardSummary.trim() ||
-      !translation.termsAndConditions.trim() ||
-      !translation.completionMessage.trim() ||
-      !translation.rewardUnlockedMessage.trim()
-    )
+  const enabledCardLocales = input.cardLocales?.filter((locale) => locale.enabled) ?? [];
+  if (enabledCardLocales.length) {
+    if (!enabledCardLocales.some((locale) => locale.locale === input.defaultCardLocale)) {
       issues.push(
         issue(
-          "TRANSLATION_REQUIRED",
+          "DEFAULT_CARD_LOCALE_NOT_ENABLED",
           "error",
-          `content.${locale.toLowerCase()}`,
+          "content.languages",
           "CUSTOMER_WEB",
-          `${locale} customer content is incomplete.`,
-          `Complete every required ${locale} content field.`,
+          "The default card language must be enabled.",
+          "Choose one enabled language as the default.",
         ),
       );
+    }
+    for (const translation of enabledCardLocales) {
+      const incomplete =
+        !translation.programName?.trim() ||
+        !translation.shortDescription?.trim() ||
+        !translation.rewardSummary?.trim() ||
+        !translation.termsAndConditions?.trim() ||
+        !translation.completionMessage?.trim() ||
+        !translation.rewardUnlockedMessage?.trim() ||
+        translation.rewardTranslations.length < input.rewards.length ||
+        translation.rewardTranslations.some(
+          (reward) => !reward.name?.trim() || !reward.description?.trim(),
+        );
+      if (incomplete) {
+        issues.push(
+          issue(
+            "CARD_LOCALE_INCOMPLETE",
+            "error",
+            `content.${translation.locale}`,
+            "CUSTOMER_WEB",
+            `${translation.locale} customer content is incomplete.`,
+            `Complete every required ${translation.locale} card and reward field.`,
+          ),
+        );
+      }
+    }
+  } else {
+    for (const locale of ["EN", "AR"] as const) {
+      const translation = input.translations.find((item) => item.locale === locale);
+      if (
+        !translation?.programName.trim() ||
+        !translation.shortDescription.trim() ||
+        !translation.rewardSummary.trim() ||
+        !translation.termsAndConditions.trim() ||
+        !translation.completionMessage.trim() ||
+        !translation.rewardUnlockedMessage.trim()
+      )
+        issues.push(
+          issue(
+            "TRANSLATION_REQUIRED",
+            "error",
+            `content.${locale.toLowerCase()}`,
+            "CUSTOMER_WEB",
+            `${locale} customer content is incomplete.`,
+            `Complete every required ${locale} content field.`,
+          ),
+        );
+    }
   }
 
   if (!input.rewards.length)
@@ -548,8 +604,13 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
       );
   }
 
-  const english = input.translations.find((translation) => translation.locale === "EN");
-  if ((english?.programName.length ?? 0) > 32 || (english?.rewardSummary.length ?? 0) > 64)
+  const providerDefault =
+    enabledCardLocales.find((translation) => translation.locale === input.defaultCardLocale) ??
+    input.translations.find((translation) => translation.locale === "EN");
+  if (
+    (providerDefault?.programName?.length ?? 0) > 32 ||
+    (providerDefault?.rewardSummary?.length ?? 0) > 64
+  )
     issues.push(
       issue(
         "APPLE_TEXT_LIMIT",
@@ -560,7 +621,7 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
         "Shorten the English program name or reward summary.",
       ),
     );
-  if ((english?.shortDescription.length ?? 0) > 64)
+  if ((providerDefault?.shortDescription?.length ?? 0) > 64)
     issues.push(
       issue(
         "GOOGLE_TEXT_LIMIT",

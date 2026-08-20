@@ -1288,6 +1288,7 @@ model LoyaltyProgramVersion {
   validationFingerprint String?                 @map("validation_fingerprint") @db.Char(64)
   renderFingerprint   String?                   @map("render_fingerprint") @db.Char(64)
   operationalTimezone String                    @default("Asia/Baghdad") @map("operational_timezone") @db.VarChar(64)
+  defaultCardLocale   String                    @default("en") @map("default_card_locale") @db.VarChar(35)
   staffOwnReversalWindowSeconds Int             @default(120) @map("staff_own_reversal_window_seconds")
   managerReversalWindowMinutes Int              @default(1440) @map("manager_reversal_window_minutes")
   managerOverrideAllowed Boolean                @default(true) @map("manager_override_allowed")
@@ -1297,6 +1298,7 @@ model LoyaltyProgramVersion {
   currentDraftFor     LoyaltyProgram?           @relation("CurrentDraftVersion")
   currentPublishedFor LoyaltyProgram?           @relation("CurrentPublishedVersion")
   translations        ProgramTranslation[]
+  cardLocales         ProgramVersionLocale[]
   stampRule           StampRule?
   rewards             RewardDefinition[]
   locations           ProgramLocation[]
@@ -1315,6 +1317,35 @@ model LoyaltyProgramVersion {
   @@index([organizationId, programId, status])
   @@index([organizationId, updatedAt(sort: Desc)])
   @@map("loyalty_program_versions")
+}
+
+// Dynamic customer-card locales are version scoped so unpublished language
+// changes cannot affect the current live card. The legacy EN/AR translation
+// tables remain during the compatibility window and are dual-written by the
+// application for existing mobile/worker readers.
+model ProgramVersionLocale {
+  id                    String                @id @default(uuid()) @db.Uuid
+  versionId             String                @map("version_id") @db.Uuid
+  locale                String                @db.VarChar(35)
+  enabled               Boolean               @default(true)
+  position              Int                   @default(0)
+  programName           String?               @map("program_name") @db.VarChar(120)
+  shortDescription      String?               @map("short_description") @db.VarChar(240)
+  fullDescription       String?               @map("full_description") @db.Text
+  rewardSummary         String?               @map("reward_summary") @db.VarChar(240)
+  joinInstructions      String?               @map("join_instructions") @db.Text
+  termsAndConditions    String?               @map("terms_and_conditions") @db.Text
+  completionMessage     String?               @map("completion_message") @db.VarChar(240)
+  rewardUnlockedMessage String?               @map("reward_unlocked_message") @db.VarChar(240)
+  pausedMessage         String?               @map("paused_message") @db.VarChar(240)
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version               LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  rewardTranslations    ProgramLocaleRewardTranslation[]
+
+  @@unique([versionId, locale])
+  @@index([versionId, enabled, position])
+  @@map("program_version_locales")
 }
 
 model ProgramTranslation {
@@ -1370,6 +1401,7 @@ model RewardDefinition {
   updatedAt                 DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
   version                   LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
   translations              RewardTranslation[]
+  cardLocaleTranslations    ProgramLocaleRewardTranslation[]
   visualOverride           RewardVisualOverride?
   testEvents                ProgramTestEvent[]
   entitlements              RewardEntitlement[]
@@ -1378,6 +1410,23 @@ model RewardDefinition {
   @@unique([versionId, thresholdStampCount])
   @@index([versionId, sortOrder])
   @@map("reward_definitions")
+}
+
+model ProgramLocaleRewardTranslation {
+  id                     String               @id @default(uuid()) @db.Uuid
+  rewardId               String               @map("reward_id") @db.Uuid
+  programVersionLocaleId String               @map("program_version_locale_id") @db.Uuid
+  name                   String?              @db.VarChar(120)
+  description            String?              @db.VarChar(240)
+  redemptionInstructions String?              @map("redemption_instructions") @db.Text
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reward                 RewardDefinition     @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  programVersionLocale   ProgramVersionLocale @relation(fields: [programVersionLocaleId], references: [id], onDelete: Restrict)
+
+  @@unique([rewardId, programVersionLocaleId])
+  @@index([programVersionLocaleId])
+  @@map("program_locale_reward_translations")
 }
 
 model RewardTranslation {

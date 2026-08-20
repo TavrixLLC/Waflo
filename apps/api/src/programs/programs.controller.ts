@@ -1,5 +1,10 @@
 import { Body, Controller, Get, HttpStatus, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { programCreateSchema, programPublishSchema, programUpdateSchema } from "@waflo/contracts";
+import {
+  cardLocaleSchema,
+  programCreateSchema,
+  programPublishSchema,
+  programUpdateSchema,
+} from "@waflo/contracts";
 import { AppError } from "../common/app-error.js";
 import { pageLimit } from "../common/cursor-pagination.js";
 import { CurrentUser } from "../common/decorators.js";
@@ -197,16 +202,16 @@ export class ProgramsController {
     @Query("progress") progress = "0",
     @Query("layout") layout?: string,
     @Query("profile") profile = "CUSTOMER_WEB",
-    @Query("locale") locale = "EN",
+    @Query("locale") locale = "en",
   ) {
     const numericProgress = Number(progress);
     const normalizedProfile = profile.toUpperCase();
-    const normalizedLocale = locale.toUpperCase();
+    const parsedLocale = cardLocaleSchema.safeParse(locale);
     if (
       !Number.isInteger(numericProgress) ||
       numericProgress < 0 ||
       !["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"].includes(normalizedProfile) ||
-      !["EN", "AR"].includes(normalizedLocale)
+      !parsedLocale.success
     )
       throw new AppError(
         "PREVIEW_PARAMETERS_INVALID",
@@ -225,7 +230,7 @@ export class ProgramsController {
       parseUuid(programId),
       numericProgress,
       normalizedProfile as "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET",
-      normalizedLocale as "EN" | "AR",
+      parsedLocale.data,
       request,
     );
   }

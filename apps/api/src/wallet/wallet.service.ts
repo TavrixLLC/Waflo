@@ -6,6 +6,7 @@ import type {
   WalletProgramInput,
   WalletProviderCode,
 } from "@waflo/wallet-core";
+import { resolveCardLocale } from "@waflo/contracts";
 import {
   APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   resolveWalletNearbyText,
@@ -45,6 +46,10 @@ const walletPassInclude = {
       enrollmentProgramVersion: {
         include: {
           translations: true,
+          cardLocales: {
+            where: { enabled: true },
+            orderBy: [{ position: "asc" }, { locale: "asc" }],
+          },
           stampRule: true,
           locations: { select: { locationId: true } },
           visualTheme: publishedVisualThemeInclude,
@@ -52,7 +57,7 @@ const walletPassInclude = {
       },
     },
   },
-} as const;
+} satisfies Prisma.WalletPassInstanceInclude;
 
 @Injectable()
 export class WalletService {
@@ -320,11 +325,31 @@ export class WalletService {
   ): Promise<WalletMembershipInput> {
     const membership = pass.membership;
     const version = membership.enrollmentProgramVersion;
-    const locale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const localizedContent = version.cardLocales.length
+      ? version.cardLocales.map((item) => ({
+          locale: item.locale,
+          programName: item.programName ?? membership.program.internalName,
+          description: item.shortDescription ?? "",
+          rewardSummary: item.rewardSummary ?? "",
+        }))
+      : version.translations.map((item) => ({
+          locale: item.locale === "AR" ? "ar" : "en",
+          programName: item.programName,
+          description: item.shortDescription,
+          rewardSummary: item.rewardSummary,
+        }));
+    const enabledLocales = localizedContent.map((item) => item.locale);
+    const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+      ? version.defaultCardLocale
+      : (enabledLocales[0] ?? "en");
+    const locale = resolveCardLocale({
+      enabledLocales,
+      defaultLocale,
+      explicitLocale: nearbyLocale,
+    });
     const translation =
-      version.translations.find((item) => item.locale === (locale === "ar" ? "AR" : "EN")) ??
-      version.translations.find((item) => item.locale === "EN") ??
-      version.translations[0];
+      localizedContent.find((item) => item.locale === locale) ?? localizedContent[0];
     const goal = version.stampRule?.requiredStampCount ?? 8;
     const progress = membership.progress?.currentCycleStampCount ?? 0;
     if (!version.visualTheme) throw new Error("Published Wallet stamp artwork is unavailable.");
@@ -347,7 +372,7 @@ export class WalletService {
       programId: membership.programId,
       programVersionId: version.id,
       programName: translation?.programName ?? membership.program.internalName,
-      description: translation?.shortDescription ?? "",
+      description: translation?.description ?? "",
       rewardSummary: translation?.rewardSummary ?? "",
       backgroundColor: version.visualTheme?.backgroundColor ?? "#F7F4EE",
       foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
@@ -356,6 +381,8 @@ export class WalletService {
         version.renderFingerprint ??
         createHash("sha256").update(version.id).digest("hex"),
       locale,
+      defaultLocale,
+      localizedContent,
       nearbyRelevance: walletNearbyRelevance({
         enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
         locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
@@ -363,9 +390,9 @@ export class WalletService {
         templateCode: version.baseTemplateCode,
         businessCategory: membership.organization.businessCategory,
         merchantName: membership.organization.name,
-        locale,
+        locale: nearbyLocale,
         customText:
-          locale === "ar"
+          nearbyLocale === "ar"
             ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
             : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
       }),

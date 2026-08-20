@@ -38,6 +38,11 @@ function billingStatus(value: string): BillingStatus {
 const publicVersionInclude = {
   enrollmentPolicy: true,
   translations: true,
+  cardLocales: {
+    where: { enabled: true },
+    orderBy: [{ position: "asc" }, { locale: "asc" }],
+    include: { rewardTranslations: true },
+  },
   stampRule: true,
   rewards: { include: { translations: true }, orderBy: { sortOrder: "asc" as const } },
   locations: {
@@ -53,7 +58,7 @@ const publicVersionInclude = {
     },
   },
   visualTheme: publishedVisualThemeInclude,
-} as const;
+} satisfies Prisma.LoyaltyProgramVersionInclude;
 
 @Injectable()
 export class PublicEnrollmentService {
@@ -669,6 +674,7 @@ export class PublicEnrollmentService {
       currentPublishedVersion: {
         id: string;
         validationFingerprint: string | null;
+        defaultCardLocale: string;
         translations: Array<{
           locale: "EN" | "AR";
           programName: string;
@@ -679,8 +685,26 @@ export class PublicEnrollmentService {
           termsAndConditions: string;
           pausedMessage: string | null;
         }>;
+        cardLocales: Array<{
+          locale: string;
+          enabled: boolean;
+          position: number;
+          programName: string | null;
+          shortDescription: string | null;
+          fullDescription: string | null;
+          rewardSummary: string | null;
+          joinInstructions: string | null;
+          termsAndConditions: string | null;
+          pausedMessage: string | null;
+          rewardTranslations: Array<{
+            rewardId: string;
+            name: string | null;
+            description: string | null;
+          }>;
+        }>;
         stampRule: { requiredStampCount: number; earningDescription: string } | null;
         rewards: Array<{
+          id: string;
           thresholdStampCount: number;
           translations: Array<{ locale: "EN" | "AR"; name: string; description: string }>;
         }>;
@@ -731,28 +755,62 @@ export class PublicEnrollmentService {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     const goal = version.stampRule?.requiredStampCount ?? 8;
-    const previews = await Promise.all(
-      (["en", "ar"] as const).map((locale) =>
-        renderPublishedStampArtwork({
-          storage: this.objectStorage,
-          organizationId: organization.id,
-          programId: program.id,
-          programVersionId: version.id,
-          membershipId: `join-preview:${version.id}`,
-          locale,
-          requiredStampCount: goal,
-          currentStampCount: 0,
-          rewardReady: false,
-          theme: visualTheme,
-          outputProfile: "JOIN_PREVIEW",
-        }),
+    const legacyCardLocales = version.translations.map((item, position) => ({
+      locale: item.locale === "AR" ? "ar" : "en",
+      enabled: true,
+      position,
+      programName: item.programName,
+      shortDescription: item.shortDescription,
+      fullDescription: item.fullDescription,
+      rewardSummary: item.rewardSummary,
+      joinInstructions: item.joinInstructions,
+      termsAndConditions: item.termsAndConditions,
+      pausedMessage: item.pausedMessage,
+      rewardTranslations: version.rewards.flatMap((reward) =>
+        reward.translations
+          .filter((translation) => translation.locale === item.locale)
+          .map((translation) => ({
+            rewardId: reward.id,
+            name: translation.name,
+            description: translation.description,
+          })),
       ),
-    );
-    const [englishPreview, arabicPreview] = previews;
-    if (!englishPreview || !arabicPreview) {
-      throw new Error("Published enrollment previews could not be rendered.");
-    }
-    const safePreview = (preview: typeof englishPreview) => ({
+    }));
+    const cardLocales = (version.cardLocales.length ? version.cardLocales : legacyCardLocales)
+      .filter((item) => item.enabled)
+      .toSorted(
+        (left, right) => left.position - right.position || left.locale.localeCompare(right.locale),
+      );
+    if (cardLocales.length === 0)
+      throw new AppError(
+        "PROGRAM_CARD_LOCALES_INVALID",
+        "The published program has no enabled card language.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    const firstCardLocale = cardLocales[0];
+    if (!firstCardLocale)
+      throw new AppError(
+        "PROGRAM_CARD_LOCALES_INVALID",
+        "The published program has no enabled card language.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    const defaultLocale =
+      cardLocales.find((item) => item.locale === version.defaultCardLocale)?.locale ??
+      firstCardLocale.locale;
+    const defaultPreview = await renderPublishedStampArtwork({
+      storage: this.objectStorage,
+      organizationId: organization.id,
+      programId: program.id,
+      programVersionId: version.id,
+      membershipId: `join-preview:${version.id}`,
+      locale: defaultLocale,
+      requiredStampCount: goal,
+      currentStampCount: 0,
+      rewardReady: false,
+      theme: visualTheme,
+      outputProfile: "JOIN_PREVIEW",
+    });
+    const safePreview = (preview: typeof defaultPreview) => ({
       dataUri: preview.dataUri,
       contentDigest: preview.contentDigest,
       configurationDigest: preview.configurationDigest,
@@ -781,34 +839,46 @@ export class PublicEnrollmentService {
       versionFingerprint:
         version.validationFingerprint ??
         sha256({ version: version.id, programSlug: program.publicSlug }),
+      defaultLocale,
+      enabledLocales: cardLocales.map((item) => item.locale),
       translations: Object.fromEntries(
-        version.translations.map((item) => [
-          item.locale === "AR" ? "ar" : "en",
+        cardLocales.map((item) => [
+          item.locale,
           {
-            programName: item.programName,
-            shortDescription: item.shortDescription,
+            programName: item.programName ?? "",
+            shortDescription: item.shortDescription ?? "",
             fullDescription: item.fullDescription,
-            rewardSummary: item.rewardSummary,
+            rewardSummary: item.rewardSummary ?? "",
             joinInstructions: item.joinInstructions,
-            termsAndConditions: item.termsAndConditions,
+            termsAndConditions: item.termsAndConditions ?? "",
             pausedMessage: item.pausedMessage,
           },
         ]),
       ),
       goal,
-      stampPreview: safePreview(englishPreview),
-      stampPreviews: {
-        en: safePreview(englishPreview),
-        ar: safePreview(arabicPreview),
-      },
+      stampPreview: safePreview(defaultPreview),
+      stampPreviews: Object.fromEntries(
+        cardLocales.map((item) => [item.locale, safePreview(defaultPreview)]),
+      ),
       earningDescription: version.stampRule?.earningDescription ?? "",
       rewards: version.rewards.map((reward) => ({
         thresholdStampCount: reward.thresholdStampCount,
         translations: Object.fromEntries(
-          reward.translations.map((item) => [
-            item.locale === "AR" ? "ar" : "en",
-            { name: item.name, description: item.description },
-          ]),
+          cardLocales.map((item) => {
+            const translation = item.rewardTranslations.find(
+              (candidate) => candidate.rewardId === reward.id,
+            );
+            const legacy = reward.translations.find(
+              (candidate) => candidate.locale === (item.locale === "ar" ? "AR" : "EN"),
+            );
+            return [
+              item.locale,
+              {
+                name: translation?.name ?? legacy?.name ?? "",
+                description: translation?.description ?? legacy?.description ?? "",
+              },
+            ];
+          }),
         ),
       })),
       locations: version.locations

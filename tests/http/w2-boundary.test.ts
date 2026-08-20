@@ -705,7 +705,10 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
         headers: getHeaders(owner),
       });
       expect(response.statusCode).toBe(200);
-      expect(data<{ profile: string; locale: string }>(response)).toMatchObject(preview);
+      expect(data<{ profile: string; locale: string }>(response)).toMatchObject({
+        profile: preview.profile,
+        locale: preview.locale.toLowerCase(),
+      });
     }
 
     const validationPass = await app.inject({

@@ -23,8 +23,12 @@ export class CustomerCardController {
 
   @Get("card")
   @RateLimit(90)
-  card(@Req() request: WafloRequest, @Query("tenant") tenant?: string) {
-    return this.cards.card(request, undefined, tenant);
+  card(
+    @Req() request: WafloRequest,
+    @Query("tenant") tenant?: string,
+    @Query("locale") locale?: string,
+  ) {
+    return this.cards.card(request, undefined, tenant, locale);
   }
 
   @Get("card/:publicMembershipId")
@@ -33,8 +37,9 @@ export class CustomerCardController {
     @Req() request: WafloRequest,
     @Param("publicMembershipId") publicMembershipId: string,
     @Query("tenant") tenant?: string,
+    @Query("locale") locale?: string,
   ) {
-    return this.cards.card(request, publicMembershipId, tenant);
+    return this.cards.card(request, publicMembershipId, tenant, locale);
   }
 
   @Get("wallet-status")

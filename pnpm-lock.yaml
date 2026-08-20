@@ -217,6 +217,9 @@ importers:
       '@waflo/brand':
         specifier: workspace:*
         version: link:../../packages/brand
+      '@waflo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@waflo/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -440,6 +443,9 @@ importers:
       '@waflo/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@waflo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@waflo/customer-security':
         specifier: workspace:*
         version: link:../../packages/customer-security

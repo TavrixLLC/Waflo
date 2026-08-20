@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { hasMerchantOperationalBillingAccess } from "@waflo/billing";
 import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
+import { resolveCardLocale } from "@waflo/contracts";
 import {
   createCustomerDataKeyring,
   decodeSecret,
@@ -96,7 +97,7 @@ const passInclude = {
           brandLogoAsset: { include: { variants: true } },
           walletNearbyConfiguration: {
             include: {
-              locations: { include: { location: true }, orderBy: { sortOrder: "asc" as const } },
+              locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
             },
           },
         },
@@ -107,6 +108,10 @@ const passInclude = {
       enrollmentProgramVersion: {
         include: {
           translations: true,
+          cardLocales: {
+            where: { enabled: true },
+            orderBy: [{ position: "asc" }, { locale: "asc" }],
+          },
           stampRule: true,
           locations: { select: { locationId: true } },
           visualTheme: {
@@ -119,7 +124,7 @@ const passInclude = {
       },
     },
   },
-} as const;
+} satisfies Prisma.WalletPassInstanceInclude;
 
 type PassRecord = Prisma.WalletPassInstanceGetPayload<{ include: typeof passInclude }>;
 
@@ -269,18 +274,38 @@ function mapPass(
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
-  const locale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+  const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+  const localizedContent = version.cardLocales.length
+    ? version.cardLocales.map((item) => ({
+        locale: item.locale,
+        programName: item.programName ?? membership.program.internalName,
+        description: item.shortDescription ?? "",
+        rewardSummary: item.rewardSummary ?? "",
+      }))
+    : version.translations.map((item) => ({
+        locale: item.locale === "AR" ? "ar" : "en",
+        programName: item.programName,
+        description: item.shortDescription,
+        rewardSummary: item.rewardSummary,
+      }));
+  const enabledLocales = localizedContent.map((item) => item.locale);
+  const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+    ? version.defaultCardLocale
+    : (enabledLocales[0] ?? "en");
+  const locale = resolveCardLocale({
+    enabledLocales,
+    defaultLocale,
+    explicitLocale: nearbyLocale,
+  });
   const translation =
-    version.translations.find((item) => item.locale === (locale === "ar" ? "AR" : "EN")) ??
-    version.translations.find((item) => item.locale === "EN") ??
-    version.translations[0];
+    localizedContent.find((item) => item.locale === locale) ?? localizedContent[0];
   return {
     organizationId: membership.organizationId,
     organizationName: membership.organization.name,
     programId: membership.programId,
     programVersionId: version.id,
     programName: translation?.programName ?? membership.program.internalName,
-    description: translation?.shortDescription ?? "",
+    description: translation?.description ?? "",
     rewardSummary: translation?.rewardSummary ?? "",
     backgroundColor: version.visualTheme?.backgroundColor ?? "#F7F4EE",
     foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
@@ -289,6 +314,8 @@ function mapPass(
       version.renderFingerprint ??
       createHash("sha256").update(version.id).digest("hex"),
     locale,
+    defaultLocale,
+    localizedContent,
     nearbyRelevance: nearbyRelevance({
       enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
       locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
@@ -296,9 +323,9 @@ function mapPass(
       templateCode: version.baseTemplateCode,
       businessCategory: membership.organization.businessCategory,
       merchantName: membership.organization.name,
-      locale,
+      locale: nearbyLocale,
       customText:
-        locale === "ar"
+        nearbyLocale === "ar"
           ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
           : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
     }),
@@ -336,6 +363,7 @@ function mapProgram(
       programVersion: {
         include: {
           translations: true;
+          cardLocales: true;
           visualTheme: true;
           locations: { select: { locationId: true } };
         };
@@ -344,25 +372,46 @@ function mapProgram(
   }>,
   programLogoUrl?: string,
 ): WalletProgramInput {
-  const locale = binding.organization.defaultLocale === "AR" ? "ar" : "en";
+  const nearbyLocale = binding.organization.defaultLocale === "AR" ? "ar" : "en";
+  const localizedContent = binding.programVersion.cardLocales.length
+    ? binding.programVersion.cardLocales
+        .filter((item) => item.enabled)
+        .toSorted(
+          (left, right) =>
+            left.position - right.position || left.locale.localeCompare(right.locale),
+        )
+        .map((item) => ({
+          locale: item.locale,
+          programName: item.programName ?? binding.program.internalName,
+          description: item.shortDescription ?? "",
+          rewardSummary: item.rewardSummary ?? "",
+        }))
+    : binding.programVersion.translations.map((item) => ({
+        locale: item.locale === "AR" ? "ar" : "en",
+        programName: item.programName,
+        description: item.shortDescription,
+        rewardSummary: item.rewardSummary,
+      }));
+  const enabledLocales = localizedContent.map((item) => item.locale);
+  const defaultLocale = enabledLocales.includes(binding.programVersion.defaultCardLocale)
+    ? binding.programVersion.defaultCardLocale
+    : (enabledLocales[0] ?? "en");
   const translation =
-    binding.programVersion.translations.find(
-      (item) => item.locale === (locale === "ar" ? "AR" : "EN"),
-    ) ??
-    binding.programVersion.translations.find((item) => item.locale === "EN") ??
-    binding.programVersion.translations[0];
+    localizedContent.find((item) => item.locale === defaultLocale) ?? localizedContent[0];
   return {
     organizationId: binding.organizationId,
     organizationName: binding.organization.name,
     programId: binding.programId,
     programVersionId: binding.programVersionId,
     programName: translation?.programName ?? binding.program.internalName,
-    description: translation?.shortDescription ?? "",
+    description: translation?.description ?? "",
     rewardSummary: translation?.rewardSummary ?? "",
     backgroundColor: binding.programVersion.visualTheme?.backgroundColor ?? "#F7F4EE",
     foregroundColor: binding.programVersion.visualTheme?.foregroundColor ?? "#241916",
     configurationFingerprint: binding.configurationFingerprint,
-    locale,
+    locale: defaultLocale,
+    defaultLocale,
+    localizedContent,
     nearbyRelevance: nearbyRelevance({
       enabled: binding.organization.walletNearbyConfiguration?.enabled ?? false,
       locations: binding.organization.walletNearbyConfiguration?.locations ?? [],
@@ -370,9 +419,9 @@ function mapProgram(
       templateCode: binding.programVersion.baseTemplateCode,
       businessCategory: binding.organization.businessCategory,
       merchantName: binding.organization.name,
-      locale,
+      locale: nearbyLocale,
       customText:
-        locale === "ar"
+        nearbyLocale === "ar"
           ? binding.program.walletNearbyProgramCopy?.appleCustomTextAr
           : binding.program.walletNearbyProgramCopy?.appleCustomTextEn,
     }),
@@ -1124,6 +1173,7 @@ export class WalletWorker {
                 programVersion: {
                   include: {
                     translations: true,
+                    cardLocales: true,
                     visualTheme: true,
                     locations: { select: { locationId: true } },
                   },
@@ -1784,6 +1834,7 @@ export class WalletWorker {
         programVersion: {
           include: {
             translations: true;
+            cardLocales: true;
             visualTheme: true;
             locations: { select: { locationId: true } };
           };

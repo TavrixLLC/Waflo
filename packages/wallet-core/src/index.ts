@@ -270,7 +270,16 @@ export interface WalletProgramInput {
   readonly programLogoUrl?: string;
   readonly publicAssetBaseUrl?: string;
   readonly configurationFingerprint: string;
-  readonly locale: "en" | "ar";
+  /** Locale selected for this membership/pass instance. */
+  readonly locale: string;
+  /** Published card-version source of truth, independent of provider identifiers. */
+  readonly defaultLocale?: string;
+  readonly localizedContent?: ReadonlyArray<{
+    readonly locale: string;
+    readonly programName: string;
+    readonly description: string;
+    readonly rewardSummary: string;
+  }>;
   readonly nearbyRelevance?: WalletNearbyRelevanceInput;
 }
 

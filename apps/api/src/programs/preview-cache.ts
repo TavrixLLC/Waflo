@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const PREVIEW_RENDERER_SCHEMA_VERSION = 4;
+export const PREVIEW_RENDERER_SCHEMA_VERSION = 5;
 
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);

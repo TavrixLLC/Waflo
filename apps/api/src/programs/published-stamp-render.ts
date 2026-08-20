@@ -36,7 +36,7 @@ export async function renderPublishedStampArtwork(input: {
   programId: string;
   programVersionId: string;
   membershipId: string;
-  locale: "en" | "ar";
+  locale: string;
   requiredStampCount: number;
   currentStampCount: number;
   rewardReady: boolean;

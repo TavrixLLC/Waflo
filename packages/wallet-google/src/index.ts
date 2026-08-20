@@ -46,12 +46,26 @@ export function googleLoyaltyObjectId(
   return `${issuerId}.waflo_member_v${schemaVersion}_${suffix(walletPassInstanceId)}`;
 }
 
-function translated(value: string, locale: "en" | "ar") {
+function translated(
+  value: string,
+  locale: string,
+  translatedValues: readonly { locale: string; value: string }[] = [],
+) {
   return {
     defaultValue: {
-      language: locale === "ar" ? "ar" : "en-US",
+      language: locale,
       value,
     },
+    ...(translatedValues.length
+      ? {
+          translatedValues: translatedValues
+            .filter((translation) => translation.locale !== locale)
+            .map((translation) => ({
+              language: translation.locale,
+              value: translation.value,
+            })),
+        }
+      : {}),
   };
 }
 
@@ -59,22 +73,41 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
   if (input.nearbyRelevance?.enabled && input.nearbyRelevance.locations.length > 10) {
     throw new Error("Google Wallet supports at most 10 MerchantLocations per class.");
   }
+  const defaultLocale = input.defaultLocale ?? input.locale;
+  const localizedContent = input.localizedContent ?? [
+    {
+      locale: defaultLocale,
+      programName: input.programName,
+      description: input.description,
+      rewardSummary: input.rewardSummary,
+    },
+  ];
+  const defaultContent =
+    localizedContent.find((content) => content.locale === defaultLocale) ?? localizedContent[0];
+  const programName = defaultContent?.programName ?? input.programName;
   return {
     id: classId,
     issuerName: input.organizationName.slice(0, 60),
-    programName: input.programName.slice(0, 60),
+    programName: programName.slice(0, 60),
     reviewStatus: "UNDER_REVIEW",
     hexBackgroundColor: input.backgroundColor,
     ...(input.programLogoUrl
       ? {
           programLogo: {
             sourceUri: { uri: input.programLogoUrl },
-            contentDescription: translated(`${input.programName} logo`, input.locale),
+            contentDescription: translated(`${programName} logo`, defaultLocale),
           },
         }
       : {}),
-    localizedIssuerName: translated(input.organizationName.slice(0, 60), input.locale),
-    localizedProgramName: translated(input.programName.slice(0, 60), input.locale),
+    localizedIssuerName: translated(input.organizationName.slice(0, 60), defaultLocale),
+    localizedProgramName: translated(
+      programName.slice(0, 60),
+      defaultLocale,
+      localizedContent.map((content) => ({
+        locale: content.locale,
+        value: content.programName.slice(0, 60),
+      })),
+    ),
     merchantLocations: input.nearbyRelevance?.enabled
       ? input.nearbyRelevance.locations.map((location) => ({
           latitude: location.latitude,
@@ -82,7 +115,11 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
         }))
       : [],
     textModulesData: [
-      { id: "reward", header: "Reward", body: input.rewardSummary.slice(0, 500) },
+      {
+        id: "reward",
+        header: "Reward",
+        body: (defaultContent?.rewardSummary ?? input.rewardSummary).slice(0, 500),
+      },
       {
         id: "waflo",
         header: "Operator",

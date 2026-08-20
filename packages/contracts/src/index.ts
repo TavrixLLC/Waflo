@@ -1,8 +1,14 @@
 import { z } from "zod";
+import {
+  canonicalizeCardLocale,
+  isSupportedCardLocale,
+  normalizeCardLocaleConfiguration,
+} from "./card-locales.js";
 import { canonicalTimeZoneSchema, countryCodeSchema } from "./geography.js";
 import { programOperationalStatuses } from "./program-publication-state.js";
 
 export * from "./geography.js";
+export * from "./card-locales.js";
 export * from "./m2.js";
 export * from "./platform-capabilities.js";
 export * from "./program-publication-state.js";
@@ -342,14 +348,14 @@ export const rewardTypeSchema = z.enum([
 ]);
 
 const translationInputSchema = z.object({
-  programName: z.string().trim().min(1).max(120),
-  shortDescription: z.string().trim().min(1).max(240),
+  programName: z.string().trim().max(120),
+  shortDescription: z.string().trim().max(240),
   fullDescription: z.string().trim().max(4000).optional(),
-  rewardSummary: z.string().trim().min(1).max(240),
+  rewardSummary: z.string().trim().max(240),
   joinInstructions: z.string().trim().max(4000).optional(),
-  termsAndConditions: z.string().trim().min(1).max(8000),
-  completionMessage: z.string().trim().min(1).max(240),
-  rewardUnlockedMessage: z.string().trim().min(1).max(240),
+  termsAndConditions: z.string().trim().max(8000),
+  completionMessage: z.string().trim().max(240),
+  rewardUnlockedMessage: z.string().trim().max(240),
   pausedMessage: z.string().trim().max(240).optional(),
 });
 
@@ -372,18 +378,14 @@ const rewardInputSchema = z.object({
     })
     .strict()
     .optional(),
-  translations: z.object({
-    en: z.object({
-      name: z.string().trim().min(1).max(120),
-      description: z.string().trim().min(1).max(240),
+  translations: z.record(
+    z.string().min(2).max(35),
+    z.object({
+      name: z.string().trim().max(120),
+      description: z.string().trim().max(240),
       redemptionInstructions: z.string().trim().max(4000).optional(),
     }),
-    ar: z.object({
-      name: z.string().trim().min(1).max(120),
-      description: z.string().trim().min(1).max(240),
-      redemptionInstructions: z.string().trim().max(4000).optional(),
-    }),
-  }),
+  ),
 });
 
 const layoutConfigurationSchema = z
@@ -495,7 +497,9 @@ const programInputSchema = z
     resetBehaviorAfterReward: z
       .literal("RESET_ON_FINAL_REWARD_REDEMPTION")
       .default("RESET_ON_FINAL_REWARD_REDEMPTION"),
-    translations: z.object({ en: translationInputSchema, ar: translationInputSchema }),
+    defaultLocale: z.string().trim().min(2).max(35).optional(),
+    enabledLocales: z.array(z.string().trim().min(2).max(35)).min(1).optional(),
+    translations: z.record(z.string().min(2).max(35), translationInputSchema),
     earningDescription: z
       .string()
       .trim()
@@ -509,6 +513,54 @@ const programInputSchema = z
   .strict();
 
 function validateProgramInput(value: z.infer<typeof programInputSchema>, context: z.RefinementCtx) {
+  const translationLocales = Object.keys(value.translations);
+  const defaultLocale = value.defaultLocale ?? "en";
+  const enabledLocales = value.enabledLocales ?? translationLocales;
+  const configuration = normalizeCardLocaleConfiguration(defaultLocale, enabledLocales);
+  if (!configuration) {
+    context.addIssue({
+      code: "custom",
+      path: ["enabledLocales"],
+      message: "Card locales must be unique, supported, non-empty, and include the default locale.",
+    });
+  }
+  for (const locale of translationLocales) {
+    const canonical = canonicalizeCardLocale(locale);
+    if (!canonical || canonical !== locale || !isSupportedCardLocale(locale)) {
+      context.addIssue({
+        code: "custom",
+        path: ["translations", locale],
+        message: "Translation keys must be canonical supported BCP-47 card locales.",
+      });
+    }
+  }
+  if (!value.translations[defaultLocale]) {
+    context.addIssue({
+      code: "custom",
+      path: ["translations", defaultLocale],
+      message: "The default card locale needs a translation record.",
+    });
+  }
+  for (const locale of enabledLocales) {
+    if (!value.translations[locale]) {
+      context.addIssue({
+        code: "custom",
+        path: ["translations", locale],
+        message: "Every enabled card locale needs a translation record.",
+      });
+    }
+  }
+  value.rewards.forEach((reward, rewardIndex) => {
+    for (const locale of translationLocales) {
+      if (!reward.translations[locale]) {
+        context.addIssue({
+          code: "custom",
+          path: ["rewards", rewardIndex, "translations", locale],
+          message: "Every card locale needs a matching reward translation record.",
+        });
+      }
+    }
+  });
   const thresholds = value.rewards.map((reward) => reward.thresholdStampCount);
   if (new Set(thresholds).size !== thresholds.length) {
     context.addIssue({

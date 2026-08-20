@@ -15,6 +15,8 @@ import { resolvePreviewAssetContent, type PreviewAsset } from "../programs/previ
 import { CustomerSecurityService } from "./customer-security.service.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import { WalletProviderRegistry } from "../wallet/wallet-provider.registry.js";
+import { resolveCardLocale } from "@waflo/contracts";
+import type { Prisma } from "@waflo/database";
 
 const customerCardMembershipInclude = {
   organization: { include: { brandLogoAsset: { include: { variants: true } } } },
@@ -30,16 +32,20 @@ const customerCardMembershipInclude = {
   enrollmentProgramVersion: {
     include: {
       translations: true,
+      cardLocales: {
+        where: { enabled: true },
+        orderBy: [{ position: "asc" }, { locale: "asc" }],
+      },
       stampRule: true,
-      rewards: { include: { translations: true }, orderBy: { sortOrder: "asc" as const } },
+      rewards: { include: { translations: true }, orderBy: { sortOrder: "asc" } },
       visualTheme: publishedVisualThemeInclude,
       enrollmentPolicy: true,
     },
   },
   progress: true,
-  credentials: { orderBy: { credentialVersion: "desc" as const } },
+  credentials: { orderBy: { credentialVersion: "desc" } },
   walletPassInstances: {
-    orderBy: { createdAt: "desc" as const },
+    orderBy: { createdAt: "desc" },
     select: {
       provider: true,
       status: true,
@@ -48,7 +54,7 @@ const customerCardMembershipInclude = {
       providerState: true,
     },
   },
-} as const;
+} satisfies Prisma.MembershipInclude;
 
 @Injectable()
 export class CustomerCardService {
@@ -97,6 +103,7 @@ export class CustomerCardService {
     request: WafloRequest,
     expectedPublicMembershipId?: string,
     developmentOverride?: string,
+    requestedCardLocale?: string,
   ) {
     const context = await this.requireSession(request, developmentOverride);
     const membership = context.session.membership;
@@ -116,12 +123,28 @@ export class CustomerCardService {
       credentialStatus === "ACTIVE" &&
       membership.status === "ACTIVE" &&
       membership.customer.status === "ACTIVE";
-    const locale = membership.customer.preferredLocale === "AR" ? "AR" : "EN";
-    const translations = membership.enrollmentProgramVersion.translations;
-    const selected =
-      translations.find((item) => item.locale === locale) ??
-      translations.find((item) => item.locale === "EN") ??
-      translations[0];
+    const interfaceLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const version = membership.enrollmentProgramVersion;
+    const legacyLocales = version.translations.map((item) => (item.locale === "AR" ? "ar" : "en"));
+    const enabledLocales = version.cardLocales.length
+      ? version.cardLocales.map((item) => item.locale)
+      : legacyLocales;
+    const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+      ? version.defaultCardLocale
+      : (enabledLocales[0] ?? "en");
+    const cardLocale = resolveCardLocale({
+      enabledLocales,
+      defaultLocale,
+      ...(requestedCardLocale !== undefined ? { explicitLocale: requestedCardLocale } : {}),
+      ...(typeof request.headers["accept-language"] === "string"
+        ? { acceptedLanguages: request.headers["accept-language"] }
+        : {}),
+    });
+    const dynamicSelected = version.cardLocales.find((item) => item.locale === cardLocale);
+    const legacySelected =
+      version.translations.find((item) => item.locale === (cardLocale === "ar" ? "AR" : "EN")) ??
+      version.translations[0];
+    const selected = dynamicSelected ?? legacySelected;
     const goal = membership.enrollmentProgramVersion.stampRule?.requiredStampCount ?? 8;
     const progress = membership.progress?.currentCycleStampCount ?? 0;
     const wallet = membership.walletPassInstances.filter(
@@ -141,7 +164,7 @@ export class CustomerCardService {
       programId: membership.programId,
       programVersionId: membership.enrollmentProgramVersionId,
       membershipId: membership.id,
-      locale: locale === "AR" ? "ar" : "en",
+      locale: cardLocale,
       requiredStampCount: goal,
       currentStampCount: progress,
       rewardReady: membership.progress?.rewardReady ?? false,
@@ -154,7 +177,7 @@ export class CustomerCardService {
       publicMembershipId: membership.publicMembershipId,
       customer: {
         displayName: membership.customer.displayName,
-        preferredLocale: locale === "AR" ? "ar" : "en",
+        preferredLocale: interfaceLocale,
         maskedEmail: email?.maskedDisplayValue ?? null,
         emailVerificationStatus: email?.verificationStatus ?? null,
       },
@@ -164,6 +187,9 @@ export class CustomerCardService {
         brandLogoDataUri,
       },
       program: {
+        defaultLocale,
+        enabledLocales,
+        contentLocale: cardLocale,
         slug: membership.program.publicSlug,
         status: membership.program.status,
         name: selected?.programName ?? membership.program.internalName,

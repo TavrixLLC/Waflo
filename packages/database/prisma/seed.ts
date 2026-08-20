@@ -480,6 +480,75 @@ async function seedProgram(input: ProgramSeed, now: Date) {
       });
     }
   }
+  const legacyProgramTranslations = await prisma.programTranslation.findMany({
+    where: { versionId: input.versionId },
+  });
+  for (const [position, translation] of legacyProgramTranslations
+    .toSorted((left, right) => left.locale.localeCompare(right.locale))
+    .entries()) {
+    const locale = translation.locale === "AR" ? "ar" : "en";
+    const localeRow = await prisma.programVersionLocale.upsert({
+      where: { versionId_locale: { versionId: input.versionId, locale } },
+      update: {
+        enabled: true,
+        position,
+        programName: translation.programName,
+        shortDescription: translation.shortDescription,
+        fullDescription: translation.fullDescription,
+        rewardSummary: translation.rewardSummary,
+        joinInstructions: translation.joinInstructions,
+        termsAndConditions: translation.termsAndConditions,
+        completionMessage: translation.completionMessage,
+        rewardUnlockedMessage: translation.rewardUnlockedMessage,
+        pausedMessage: translation.pausedMessage,
+      },
+      create: {
+        versionId: input.versionId,
+        locale,
+        enabled: true,
+        position,
+        programName: translation.programName,
+        shortDescription: translation.shortDescription,
+        fullDescription: translation.fullDescription,
+        rewardSummary: translation.rewardSummary,
+        joinInstructions: translation.joinInstructions,
+        termsAndConditions: translation.termsAndConditions,
+        completionMessage: translation.completionMessage,
+        rewardUnlockedMessage: translation.rewardUnlockedMessage,
+        pausedMessage: translation.pausedMessage,
+      },
+    });
+    for (const reward of rewards) {
+      const legacyReward = await prisma.rewardTranslation.findUniqueOrThrow({
+        where: {
+          rewardId_locale: {
+            rewardId: reward.id,
+            locale: translation.locale,
+          },
+        },
+      });
+      await prisma.programLocaleRewardTranslation.upsert({
+        where: {
+          rewardId_programVersionLocaleId: {
+            rewardId: reward.id,
+            programVersionLocaleId: localeRow.id,
+          },
+        },
+        update: {
+          name: legacyReward.name,
+          description: legacyReward.description,
+          redemptionInstructions: legacyReward.redemptionInstructions,
+        },
+        create: {
+          rewardId: reward.id,
+          programVersionLocaleId: localeRow.id,
+          name: legacyReward.name,
+          description: legacyReward.description,
+          redemptionInstructions: legacyReward.redemptionInstructions,
+        },
+      });
+    }
+  }
   for (const locationId of [IDs.locationOne, IDs.locationTwo]) {
     await prisma.programLocation.upsert({
       where: { versionId_locationId: { versionId: input.versionId, locationId } },

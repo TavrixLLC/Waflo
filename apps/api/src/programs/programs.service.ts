@@ -9,8 +9,10 @@ import {
   programPublicationFeatureViolations,
 } from "@waflo/billing";
 import {
+  canonicalizeCardLocale,
   decideProgramPublicationState,
   findProgramTemplate,
+  normalizeCardLocaleConfiguration,
   type ProgramCreateInput,
   type ProgramTemplateDefinition,
   type ProgramTestRedeemInput,
@@ -110,12 +112,18 @@ const requiredPublicationPreviews = [
 
 const includeVersion = {
   translations: true,
+  cardLocales: {
+    orderBy: [{ position: "asc" }, { locale: "asc" }],
+    include: { rewardTranslations: true },
+  },
   stampRule: true,
-  rewards: { include: { translations: true, visualOverride: true } },
+  rewards: {
+    include: { translations: true, cardLocaleTranslations: true, visualOverride: true },
+  },
   locations: { include: { location: true } },
   visualTheme: true,
   enrollmentPolicy: true,
-} as const;
+} satisfies Prisma.LoyaltyProgramVersionInclude;
 
 const reservedProgramSlugs = new Set([
   "admin",
@@ -200,6 +208,17 @@ export class ProgramsService {
             revision: true,
             stampRule: { select: { requiredStampCount: true } },
             translations: { select: { locale: true, programName: true, rewardSummary: true } },
+            defaultCardLocale: true,
+            cardLocales: {
+              orderBy: [{ position: "asc" }, { locale: "asc" }],
+              select: {
+                locale: true,
+                enabled: true,
+                position: true,
+                programName: true,
+                rewardSummary: true,
+              },
+            },
             visualTheme: {
               select: {
                 backgroundColor: true,
@@ -218,6 +237,17 @@ export class ProgramsService {
             publishedAt: true,
             stampRule: { select: { requiredStampCount: true } },
             translations: { select: { locale: true, programName: true, rewardSummary: true } },
+            defaultCardLocale: true,
+            cardLocales: {
+              orderBy: [{ position: "asc" }, { locale: "asc" }],
+              select: {
+                locale: true,
+                enabled: true,
+                position: true,
+                programName: true,
+                rewardSummary: true,
+              },
+            },
             visualTheme: {
               select: {
                 backgroundColor: true,
@@ -386,7 +416,7 @@ export class ProgramsService {
     programId: string,
     progress: number,
     outputProfile: StampOutputProfile,
-    locale: "EN" | "AR",
+    locale: string,
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
@@ -403,6 +433,10 @@ export class ProgramsService {
           currentDraftVersion: {
             include: {
               translations: true,
+              cardLocales: {
+                orderBy: [{ position: "asc" }, { locale: "asc" }],
+                include: { rewardTranslations: true },
+              },
               stampRule: true,
               rewards: {
                 include: {
@@ -425,6 +459,10 @@ export class ProgramsService {
           currentPublishedVersion: {
             include: {
               translations: true,
+              cardLocales: {
+                orderBy: [{ position: "asc" }, { locale: "asc" }],
+                include: { rewardTranslations: true },
+              },
               stampRule: true,
               rewards: {
                 include: {
@@ -453,6 +491,43 @@ export class ProgramsService {
           "Program version not found.",
           HttpStatus.NOT_FOUND,
         );
+      const enabledCardLocales = version.cardLocales.filter((item) => item.enabled);
+      const defaultCardLocale =
+        enabledCardLocales.find((item) => item.locale === version.defaultCardLocale) ??
+        enabledCardLocales[0];
+      const requestedCardLocale = enabledCardLocales.find((item) => item.locale === locale);
+      const legacyLocale = locale === "ar" ? "AR" : "EN";
+      const legacyDefaultLocale = version.defaultCardLocale === "ar" ? "AR" : "EN";
+      const legacyTranslation =
+        version.translations.find((item) => item.locale === legacyLocale) ??
+        version.translations.find((item) => item.locale === legacyDefaultLocale) ??
+        version.translations.find((item) => item.locale === "EN") ??
+        version.translations[0];
+      const effectiveCardLocale =
+        requestedCardLocale?.locale ??
+        defaultCardLocale?.locale ??
+        (legacyTranslation?.locale === "AR" ? "ar" : "en");
+      const selectedTranslation = requestedCardLocale ?? defaultCardLocale;
+      const translation = selectedTranslation
+        ? {
+            programName:
+              selectedTranslation.programName ??
+              defaultCardLocale?.programName ??
+              program.internalName,
+            shortDescription:
+              selectedTranslation.shortDescription ?? defaultCardLocale?.shortDescription ?? "",
+            rewardSummary:
+              selectedTranslation.rewardSummary ?? defaultCardLocale?.rewardSummary ?? "",
+            termsAndConditions:
+              selectedTranslation.termsAndConditions ?? defaultCardLocale?.termsAndConditions ?? "",
+          }
+        : legacyTranslation;
+      if (!translation)
+        throw new AppError(
+          "PROGRAM_TRANSLATION_NOT_FOUND",
+          "Program translation not found.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
       const goal = version.stampRule?.requiredStampCount ?? 8;
       const baseTemplate = version.baseTemplateCode
         ? findProgramTemplate(version.baseTemplateCode, version.baseTemplateVersion ?? undefined)
@@ -475,10 +550,10 @@ export class ProgramsService {
         },
         version: { id: version.id, revision: version.revision },
         progress: safeProgress,
-        locale,
+        locale: effectiveCardLocale,
         profile: outputProfile,
         goal,
-        translations: version.translations
+        translations: (version.cardLocales.length ? version.cardLocales : version.translations)
           .toSorted((left, right) => left.locale.localeCompare(right.locale))
           .map((item) => ({
             locale: item.locale,
@@ -575,7 +650,7 @@ export class ProgramsService {
           digest: cachedDigest,
           warnings: cached.warnings,
           profile: outputProfile,
-          locale,
+          locale: effectiveCardLocale,
           cacheStatus: "HIT" as const,
         };
       }
@@ -613,15 +688,6 @@ export class ProgramsService {
             )) ?? defaultMilestoneAsset,
         })),
       );
-      const translation =
-        version.translations.find((item) => item.locale === locale) ??
-        version.translations.find((item) => item.locale === "EN");
-      if (!translation)
-        throw new AppError(
-          "PROGRAM_TRANSLATION_NOT_FOUND",
-          "Program translation not found.",
-          HttpStatus.UNPROCESSABLE_ENTITY,
-        );
       const visualInput = visual ?? {
         backgroundColor: "#F7F4EE",
         foregroundColor: "#222222",
@@ -637,10 +703,15 @@ export class ProgramsService {
         googlePreviewConfig: {},
       };
       const rewardReady = safeProgress >= goal;
-      const rewardReadyText =
-        locale === "AR"
-          ? `المكافأة جاهزة: ${translation.rewardSummary}`
-          : `Reward ready: ${translation.rewardSummary}`;
+      const rewardReadyPrefix =
+        effectiveCardLocale === "ar"
+          ? "المكافأة جاهزة"
+          : effectiveCardLocale === "ckb"
+            ? "خەڵاتەکە ئامادەیە"
+            : effectiveCardLocale === "ku-Arab-IQ"
+              ? "خەلات ئامادەیە"
+              : "Reward ready";
+      const rewardReadyText = `${rewardReadyPrefix}: ${translation.rewardSummary}`;
       const rendered = renderStampSvg({
         goal,
         progress: safeProgress,
@@ -686,7 +757,7 @@ export class ProgramsService {
       }>;
       const composed = composeProgramPreview({
         profile: outputProfile,
-        locale,
+        locale: effectiveCardLocale,
         organizationName: program.organization.name,
         programName: translation.programName,
         shortDescription: translation.shortDescription,
@@ -723,7 +794,7 @@ export class ProgramsService {
           barcodeLabel: googleConfig.barcodeLabel ?? "Preview barcode",
         },
       });
-      const objectKey = `organizations/${organizationId}/previews/${version.id}/${outputProfile.toLowerCase()}-${locale.toLowerCase()}-${previewCacheKey}.svg`;
+      const objectKey = `organizations/${organizationId}/previews/${version.id}/${outputProfile.toLowerCase()}-${effectiveCardLocale.toLowerCase()}-${previewCacheKey}.svg`;
       await this.objectStorage.ensureReady();
       const previewBytes = Buffer.from(composed.svg);
       const storageResult = await this.objectStorage.putImmutable(
@@ -797,7 +868,7 @@ export class ProgramsService {
             versionId: version.id,
             versionRevision: version.revision,
             profile: outputProfile,
-            locale,
+            locale: effectiveCardLocale,
             progress: safeProgress,
           },
         },
@@ -809,7 +880,7 @@ export class ProgramsService {
         digest: composed.digest,
         warnings: composed.warnings,
         profile: outputProfile,
-        locale,
+        locale: effectiveCardLocale,
         cacheStatus: "MISS" as const,
       };
     });
@@ -915,10 +986,11 @@ export class ProgramsService {
           userId,
           selectedTemplate,
         );
+        const localeConfiguration = this.localeConfiguration(input);
         const publicSlug = await this.allocatePublicSlug(
           transaction,
           organizationId,
-          input.translations.en.programName || input.internalName,
+          input.translations[localeConfiguration.defaultLocale]?.programName || input.internalName,
         );
         const program = await transaction.loyaltyProgram.create({
           data: {
@@ -942,6 +1014,7 @@ export class ProgramsService {
             "Unable to create program.",
             HttpStatus.INTERNAL_SERVER_ERROR,
           );
+        await this.syncDynamicCardLocales(transaction, version.id, input);
         await transaction.programEnrollmentPolicy.create({
           data: {
             organizationId,
@@ -976,7 +1049,11 @@ export class ProgramsService {
           },
           request,
         );
-        return { ...updated, currentDraftVersion: version };
+        const localizedVersion = await transaction.loyaltyProgramVersion.findUniqueOrThrow({
+          where: { id: version.id },
+          include: includeVersion,
+        });
+        return { ...updated, currentDraftVersion: localizedVersion };
       },
     );
   }
@@ -1121,6 +1198,7 @@ export class ProgramsService {
             changeSummary: next.changeSummary ?? null,
           } as never,
         });
+        await this.syncDynamicCardLocales(transaction, current.id, next);
         const updated = await transaction.loyaltyProgram.update({
           where: { id: programId },
           data: {
@@ -1189,6 +1267,7 @@ export class ProgramsService {
               supersededAt: null,
             } as never,
           });
+          await this.cloneDynamicCardLocales(transaction, source.id, version.id);
           const updated = await transaction.loyaltyProgram.update({
             where: { id: programId },
             data: { currentDraftVersionId: version.id, latestVersionNumber: { increment: 1 } },
@@ -1245,6 +1324,10 @@ export class ProgramsService {
             currentDraftVersion: {
               include: {
                 translations: true,
+                cardLocales: {
+                  orderBy: [{ position: "asc" }, { locale: "asc" }],
+                  include: { rewardTranslations: true },
+                },
                 stampRule: true,
                 rewards: {
                   include: {
@@ -1296,6 +1379,21 @@ export class ProgramsService {
           plan: program.organization.selectedPlan,
           goal: version.stampRule?.requiredStampCount ?? 0,
           translations: version.translations,
+          defaultCardLocale: version.defaultCardLocale,
+          cardLocales: version.cardLocales.map((locale) => ({
+            locale: locale.locale,
+            enabled: locale.enabled,
+            programName: locale.programName,
+            shortDescription: locale.shortDescription,
+            rewardSummary: locale.rewardSummary,
+            termsAndConditions: locale.termsAndConditions,
+            completionMessage: locale.completionMessage,
+            rewardUnlockedMessage: locale.rewardUnlockedMessage,
+            rewardTranslations: locale.rewardTranslations.map((reward) => ({
+              name: reward.name,
+              description: reward.description,
+            })),
+          })),
           rewards: version.rewards.map((reward) => ({
             thresholdStampCount: reward.thresholdStampCount,
             maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
@@ -2991,6 +3089,10 @@ export class ProgramsService {
     template: ProgramTemplateDefinition,
   ) {
     const visual = input.visualTheme;
+    const localeConfiguration = this.localeConfiguration(input);
+    const legacyTranslations = Object.entries(input.translations).filter(
+      ([locale]) => locale === "en" || locale === "ar",
+    );
     const policy = input.persistedStampPolicy ?? {
       defaultStampsPerAction: W2_STAMP_POLICY_DEFAULTS.defaultStampsPerAction,
       maximumStampsPerOperation: W2_STAMP_POLICY_DEFAULTS.maximumStampsPerOperation,
@@ -3008,11 +3110,11 @@ export class ProgramsService {
       editingMode: input.editingMode.toUpperCase() as "QUICK" | "PRO",
       baseTemplateCode: template.code,
       baseTemplateVersion: template.version,
-      configurationSchemaVersion: 2,
+      configurationSchemaVersion: 3,
+      defaultCardLocale: localeConfiguration.defaultLocale,
       createdByUserId: userId,
       translations: {
-        create: (["en", "ar"] as const).map((locale) => {
-          const translation = input.translations[locale];
+        create: legacyTranslations.map(([locale, translation]) => {
           return {
             locale: locale.toUpperCase() as "EN" | "AR",
             programName: translation.programName,
@@ -3049,15 +3151,16 @@ export class ProgramsService {
           requiresManagerApproval: reward.requiresManagerApproval,
           maximumRedemptionsPerEarned: reward.maximumRedemptionsPerEarned,
           translations: {
-            create: (["en", "ar"] as const).map((locale) => {
-              const translation = reward.translations[locale];
-              return {
-                locale: locale.toUpperCase() as "EN" | "AR",
-                name: translation.name,
-                description: translation.description,
-                redemptionInstructions: translation.redemptionInstructions ?? null,
-              };
-            }),
+            create: Object.entries(reward.translations)
+              .filter(([locale]) => locale === "en" || locale === "ar")
+              .map(([locale, translation]) => {
+                return {
+                  locale: locale.toUpperCase() as "EN" | "AR",
+                  name: translation.name,
+                  description: translation.description,
+                  redemptionInstructions: translation.redemptionInstructions ?? null,
+                };
+              }),
           },
           ...(reward.visualOverride
             ? {
@@ -3109,8 +3212,54 @@ export class ProgramsService {
   ): CanonicalMutableProgramInput {
     const en = version.translations.find((item) => item.locale === "EN");
     const ar = version.translations.find((item) => item.locale === "AR");
+    const cardLocales = version.cardLocales.length
+      ? version.cardLocales
+      : [
+          ...(en
+            ? [
+                {
+                  ...en,
+                  id: en.id,
+                  locale: "en",
+                  enabled: true,
+                  position: 0,
+                  rewardTranslations: [],
+                },
+              ]
+            : []),
+          ...(ar
+            ? [
+                {
+                  ...ar,
+                  id: ar.id,
+                  locale: "ar",
+                  enabled: true,
+                  position: 1,
+                  rewardTranslations: [],
+                },
+              ]
+            : []),
+        ];
+    const translations = Object.fromEntries(
+      cardLocales.map((item) => [
+        item.locale,
+        {
+          programName: item.programName ?? internalName,
+          shortDescription: item.shortDescription ?? "",
+          fullDescription: item.fullDescription ?? undefined,
+          rewardSummary: item.rewardSummary ?? "",
+          joinInstructions: item.joinInstructions ?? undefined,
+          termsAndConditions: item.termsAndConditions ?? "",
+          completionMessage: item.completionMessage ?? "",
+          rewardUnlockedMessage: item.rewardUnlockedMessage ?? "",
+          pausedMessage: item.pausedMessage ?? undefined,
+        },
+      ]),
+    );
     return {
       internalName,
+      defaultLocale: version.defaultCardLocale,
+      enabledLocales: cardLocales.filter((item) => item.enabled).map((item) => item.locale),
       editingMode: version.editingMode.toLowerCase() as "quick" | "pro",
       templateCode: version.baseTemplateCode ?? undefined,
       templateVersion: version.baseTemplateVersion ?? undefined,
@@ -3129,30 +3278,7 @@ export class ProgramsService {
       earningDescription:
         version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
       locationIds: version.locations.map((item) => item.locationId),
-      translations: {
-        en: {
-          programName: en?.programName ?? internalName,
-          shortDescription: en?.shortDescription ?? "",
-          fullDescription: en?.fullDescription ?? undefined,
-          rewardSummary: en?.rewardSummary ?? "",
-          joinInstructions: en?.joinInstructions ?? undefined,
-          termsAndConditions: en?.termsAndConditions ?? "",
-          completionMessage: en?.completionMessage ?? "",
-          rewardUnlockedMessage: en?.rewardUnlockedMessage ?? "",
-          pausedMessage: en?.pausedMessage ?? undefined,
-        },
-        ar: {
-          programName: ar?.programName ?? internalName,
-          shortDescription: ar?.shortDescription ?? "",
-          fullDescription: ar?.fullDescription ?? undefined,
-          rewardSummary: ar?.rewardSummary ?? "",
-          joinInstructions: ar?.joinInstructions ?? undefined,
-          termsAndConditions: ar?.termsAndConditions ?? "",
-          completionMessage: ar?.completionMessage ?? "",
-          rewardUnlockedMessage: ar?.rewardUnlockedMessage ?? "",
-          pausedMessage: ar?.pausedMessage ?? undefined,
-        },
-      },
+      translations,
       rewards: version.rewards.map((reward) => ({
         thresholdStampCount: reward.thresholdStampCount,
         rewardType: reward.rewardType,
@@ -3167,28 +3293,23 @@ export class ProgramsService {
               accentOverride: reward.visualOverride.accentOverride,
             }
           : undefined,
-        translations: {
-          en: {
-            name:
-              reward.translations.find((item) => item.locale === "EN")?.name ?? reward.internalName,
-            description:
-              reward.translations.find((item) => item.locale === "EN")?.description ??
-              reward.internalName,
-            redemptionInstructions:
-              reward.translations.find((item) => item.locale === "EN")?.redemptionInstructions ??
-              undefined,
-          },
-          ar: {
-            name:
-              reward.translations.find((item) => item.locale === "AR")?.name ?? reward.internalName,
-            description:
-              reward.translations.find((item) => item.locale === "AR")?.description ??
-              reward.internalName,
-            redemptionInstructions:
-              reward.translations.find((item) => item.locale === "AR")?.redemptionInstructions ??
-              undefined,
-          },
-        },
+        translations: Object.fromEntries(
+          cardLocales.map((locale) => {
+            const localized = locale.rewardTranslations.find((item) => item.rewardId === reward.id);
+            const legacy = reward.translations.find(
+              (item) => item.locale === (locale.locale === "ar" ? "AR" : "EN"),
+            );
+            return [
+              locale.locale,
+              {
+                name: localized?.name ?? legacy?.name ?? "",
+                description: localized?.description ?? legacy?.description ?? "",
+                redemptionInstructions:
+                  localized?.redemptionInstructions ?? legacy?.redemptionInstructions ?? undefined,
+              },
+            ];
+          }),
+        ),
       })),
       persistedStampPolicy: {
         defaultStampsPerAction:
@@ -3236,7 +3357,198 @@ export class ProgramsService {
     };
   }
 
+  private localeConfiguration(
+    input: Pick<ProgramCreateInput, "defaultLocale" | "enabledLocales" | "translations">,
+  ) {
+    const configuration = normalizeCardLocaleConfiguration(
+      input.defaultLocale ?? "en",
+      input.enabledLocales ?? Object.keys(input.translations),
+    );
+    if (!configuration) {
+      throw new AppError(
+        "PROGRAM_CARD_LOCALES_INVALID",
+        "Card locales must be supported, unique, and include the default locale.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    return configuration;
+  }
+
+  private async syncDynamicCardLocales(
+    transaction: Prisma.TransactionClient,
+    versionId: string,
+    input: ProgramCreateInput,
+  ) {
+    const configuration = this.localeConfiguration(input);
+    const existing = await transaction.programVersionLocale.findMany({
+      where: { versionId },
+      select: { id: true },
+    });
+    if (existing.length) {
+      await transaction.programLocaleRewardTranslation.deleteMany({
+        where: { programVersionLocaleId: { in: existing.map((item) => item.id) } },
+      });
+      await transaction.programVersionLocale.deleteMany({ where: { versionId } });
+    }
+    const persistedRewards = await transaction.rewardDefinition.findMany({
+      where: { versionId },
+      select: { id: true, thresholdStampCount: true },
+    });
+    const rewardIdByThreshold = new Map(
+      persistedRewards.map((reward) => [reward.thresholdStampCount, reward.id]),
+    );
+    const allLocales = [
+      ...configuration.enabledLocales,
+      ...Object.keys(input.translations)
+        .filter((locale) => !configuration.enabledLocales.includes(locale))
+        .toSorted((left, right) => left.localeCompare(right, "en")),
+    ];
+    for (const [position, locale] of allLocales.entries()) {
+      const translation = input.translations[locale];
+      if (!translation || !canonicalizeCardLocale(locale)) continue;
+      await transaction.programVersionLocale.create({
+        data: {
+          versionId,
+          locale,
+          enabled: configuration.enabledLocales.includes(locale),
+          position,
+          programName: translation.programName || null,
+          shortDescription: translation.shortDescription || null,
+          fullDescription: translation.fullDescription || null,
+          rewardSummary: translation.rewardSummary || null,
+          joinInstructions: translation.joinInstructions || null,
+          termsAndConditions: translation.termsAndConditions || null,
+          completionMessage: translation.completionMessage || null,
+          rewardUnlockedMessage: translation.rewardUnlockedMessage || null,
+          pausedMessage: translation.pausedMessage || null,
+          rewardTranslations: {
+            create: input.rewards.flatMap((reward) => {
+              const rewardId = rewardIdByThreshold.get(reward.thresholdStampCount);
+              const localized = reward.translations[locale];
+              if (!rewardId || !localized) return [];
+              return [
+                {
+                  rewardId,
+                  name: localized.name || null,
+                  description: localized.description || null,
+                  redemptionInstructions: localized.redemptionInstructions || null,
+                },
+              ];
+            }),
+          },
+        },
+      });
+    }
+    await transaction.loyaltyProgramVersion.update({
+      where: { id: versionId },
+      data: { defaultCardLocale: configuration.defaultLocale },
+    });
+  }
+
+  private async cloneDynamicCardLocales(
+    transaction: Prisma.TransactionClient,
+    sourceVersionId: string,
+    targetVersionId: string,
+  ) {
+    const [source, targetRewards] = await Promise.all([
+      transaction.loyaltyProgramVersion.findUniqueOrThrow({
+        where: { id: sourceVersionId },
+        include: {
+          translations: true,
+          rewards: { include: { translations: true } },
+          cardLocales: {
+            orderBy: [{ position: "asc" }, { locale: "asc" }],
+            include: { rewardTranslations: true },
+          },
+        },
+      }),
+      transaction.rewardDefinition.findMany({
+        where: { versionId: targetVersionId },
+        select: { id: true, thresholdStampCount: true },
+      }),
+    ]);
+    const targetRewardId = new Map(
+      targetRewards.map((reward) => [reward.thresholdStampCount, reward.id]),
+    );
+    const sourceRewardThreshold = new Map(
+      source.rewards.map((reward) => [reward.id, reward.thresholdStampCount]),
+    );
+    const localeRows = source.cardLocales.length
+      ? source.cardLocales
+      : source.translations.map((translation, position) => ({
+          id: translation.id,
+          locale: translation.locale === "AR" ? "ar" : "en",
+          enabled: true,
+          position,
+          programName: translation.programName,
+          shortDescription: translation.shortDescription,
+          fullDescription: translation.fullDescription,
+          rewardSummary: translation.rewardSummary,
+          joinInstructions: translation.joinInstructions,
+          termsAndConditions: translation.termsAndConditions,
+          completionMessage: translation.completionMessage,
+          rewardUnlockedMessage: translation.rewardUnlockedMessage,
+          pausedMessage: translation.pausedMessage,
+          createdAt: translation.createdAt,
+          updatedAt: translation.updatedAt,
+          versionId: sourceVersionId,
+          rewardTranslations: source.rewards.flatMap((reward) =>
+            reward.translations
+              .filter((item) => item.locale === (translation.locale === "AR" ? "AR" : "EN"))
+              .map((item) => ({ ...item, rewardId: reward.id, programVersionLocaleId: "" })),
+          ),
+        }));
+    for (const locale of localeRows) {
+      await transaction.programVersionLocale.create({
+        data: {
+          versionId: targetVersionId,
+          locale: locale.locale,
+          enabled: locale.enabled,
+          position: locale.position,
+          programName: locale.programName,
+          shortDescription: locale.shortDescription,
+          fullDescription: locale.fullDescription,
+          rewardSummary: locale.rewardSummary,
+          joinInstructions: locale.joinInstructions,
+          termsAndConditions: locale.termsAndConditions,
+          completionMessage: locale.completionMessage,
+          rewardUnlockedMessage: locale.rewardUnlockedMessage,
+          pausedMessage: locale.pausedMessage,
+          rewardTranslations: {
+            create: locale.rewardTranslations.flatMap((translation) => {
+              const threshold = sourceRewardThreshold.get(translation.rewardId);
+              const rewardId = threshold === undefined ? undefined : targetRewardId.get(threshold);
+              if (!rewardId) return [];
+              return [
+                {
+                  rewardId,
+                  name: translation.name,
+                  description: translation.description,
+                  redemptionInstructions: translation.redemptionInstructions,
+                },
+              ];
+            }),
+          },
+        },
+      });
+    }
+    await transaction.loyaltyProgramVersion.update({
+      where: { id: targetVersionId },
+      data: { defaultCardLocale: source.defaultCardLocale },
+    });
+  }
+
   private async clearDraftChildren(transaction: Prisma.TransactionClient, versionId: string) {
+    const cardLocales = await transaction.programVersionLocale.findMany({
+      where: { versionId },
+      select: { id: true },
+    });
+    if (cardLocales.length) {
+      await transaction.programLocaleRewardTranslation.deleteMany({
+        where: { programVersionLocaleId: { in: cardLocales.map((item) => item.id) } },
+      });
+      await transaction.programVersionLocale.deleteMany({ where: { versionId } });
+    }
     const rewards = await transaction.rewardDefinition.findMany({
       where: { versionId },
       select: { id: true },
@@ -3268,6 +3580,7 @@ export class ProgramsService {
       baseTemplateCode: source.baseTemplateCode,
       baseTemplateVersion: source.baseTemplateVersion,
       configurationSchemaVersion: source.configurationSchemaVersion,
+      defaultCardLocale: source.defaultCardLocale,
       operationalTimezone: source.operationalTimezone,
       staffOwnReversalWindowSeconds: source.staffOwnReversalWindowSeconds,
       managerReversalWindowMinutes: source.managerReversalWindowMinutes,

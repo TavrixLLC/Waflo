@@ -69,7 +69,8 @@ export interface PublishedMembershipStampRenderInput {
   readonly programVersionId: string;
   readonly membershipId: string;
   readonly rendererSchemaVersion: "waflo-stamp-render-v1";
-  readonly locale: "en" | "ar";
+  /** Canonical card-content BCP-47 locale. */
+  readonly locale: string;
   readonly requiredStampCount: number;
   readonly currentStampCount: number;
   readonly rewardReady: boolean;
