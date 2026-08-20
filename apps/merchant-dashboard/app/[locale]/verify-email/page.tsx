@@ -1,18 +1,19 @@
-import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { interfaceTextLocaleFor, isInterfaceLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { AuthLayout } from "../../../components/auth-layout";
+import { authPageMetadata } from "../../../components/auth-page-metadata";
 import { VerificationForm } from "../../../components/auth-forms";
 
-export const metadata: Metadata = { title: "Verify email" };
+export function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
+  return authPageMetadata(params, "verifyEmail");
+}
 
 export default async function VerifyEmailPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isInterfaceLocale(locale)) notFound();
-  const interfaceTextLocale = interfaceTextLocaleFor(locale);
   return (
-    <AuthLayout locale={interfaceTextLocale} interfaceLocale={locale} routePath="/verify-email">
-      <VerificationForm locale={interfaceTextLocale} />
+    <AuthLayout locale={locale} routePath="/verify-email">
+      <VerificationForm locale={locale} />
     </AuthLayout>
   );
 }

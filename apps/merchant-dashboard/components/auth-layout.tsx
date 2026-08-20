@@ -1,4 +1,3 @@
-import type { Locale } from "@waflo/contracts";
 import { directionForInterface, messages, type InterfaceLocale } from "@waflo/i18n";
 import { InterfaceLanguagePicker } from "@waflo/ui";
 import { Gift, ShieldCheck } from "lucide-react";
@@ -9,18 +8,15 @@ const STAMP_IDS = ["stamp-1", "stamp-2", "stamp-3", "stamp-4", "stamp-5", "stamp
 
 export function AuthLayout({
   locale,
-  interfaceLocale = locale,
   routePath = "/login",
   children,
 }: {
-  locale: Locale;
-  interfaceLocale?: InterfaceLocale;
+  locale: InterfaceLocale;
   routePath?: string;
   children: ReactNode;
 }) {
-  const ar = locale === "ar";
-  const interfaceDirection = directionForInterface(interfaceLocale);
-  const languageCopy = messages[interfaceLocale].language;
+  const interfaceDirection = directionForInterface(locale);
+  const copy = messages[locale];
   return (
     <main className="auth-layout" dir={interfaceDirection}>
       <section className="auth-brand">
@@ -34,19 +30,15 @@ export function AuthLayout({
           />
         </a>
         <div className="auth-brand__message">
-          <span>LOYALTY THAT FLOWS</span>
-          <h1>{ar ? "كل زيارة تصبح سبباً للعودة." : "Every visit becomes a reason to return."}</h1>
-          <p>
-            {ar
-              ? "أنشئ برنامج ولاء رقمياً واضحاً لعملائك، من أول زيارة إلى أول مكافأة."
-              : "A calm, secure home for your loyalty program—from the first visit to the first reward."}
-          </p>
+          <span>{copy.auth.layout.eyebrow}</span>
+          <h1>{copy.auth.layout.headline}</h1>
+          <p>{copy.auth.layout.description}</p>
           <div className="auth-loyalty-preview" aria-hidden="true">
             <div className="auth-loyalty-preview__identity">
               <span>W</span>
               <div>
-                <small>{ar ? "بطاقة الولاء" : "LOYALTY CARD"}</small>
-                <strong>{ar ? "مقهى وافلو" : "Waflo Coffee"}</strong>
+                <small>{copy.auth.layout.loyaltyCard}</small>
+                <strong>{copy.auth.layout.previewMerchantName}</strong>
               </div>
             </div>
             <div className="auth-loyalty-preview__stamps">
@@ -56,7 +48,7 @@ export function AuthLayout({
             </div>
             <p>
               <span>
-                <Gift size={15} /> {ar ? "باقي زيارتان للمكافأة" : "2 visits to your reward"}
+                <Gift size={15} /> {copy.auth.layout.visitsToReward}
               </span>
               <b dir="ltr" className="numeric-fraction">
                 4 / 6
@@ -66,7 +58,7 @@ export function AuthLayout({
         </div>
         <small className="auth-brand__security">
           <ShieldCheck size={16} />
-          {ar ? "محمي بعناية من Waflo" : "Protected with care by Waflo"}
+          {copy.auth.layout.protectedByWaflo}
         </small>
       </section>
       <section className="auth-panel">
@@ -79,10 +71,10 @@ export function AuthLayout({
               height={80}
             />
             <InterfaceLanguagePicker
-              locale={interfaceLocale}
+              locale={locale}
               routePath={routePath}
               persistSelection
-              label={languageCopy.label}
+              label={copy.language.label}
             />
           </div>
           <div className="auth-card__body">{children}</div>

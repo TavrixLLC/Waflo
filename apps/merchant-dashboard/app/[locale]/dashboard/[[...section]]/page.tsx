@@ -1,3 +1,4 @@
+import { isInterfaceLocale, messages, type InterfaceLocale } from "@waflo/i18n";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { DashboardRoute, type DashboardSection } from "../../../../components/dashboard";
@@ -25,35 +26,32 @@ const studioAreaSegments = new Map<string, StudioArea>([
   ["settings", "settings"],
 ]);
 
-const dashboardSectionTitles = new Map<DashboardSection, string>([
-  ["overview", "Overview"],
-  ["programs", "Loyalty Cards"],
-  ["customers", "Customers"],
-  ["locations", "Locations"],
-  ["team", "Team"],
-  ["analytics", "Analytics"],
-  ["exports", "Exports"],
-  ["billing", "Billing"],
-  ["settings", "Settings"],
-  ["security", "Security"],
-]);
-
-const studioAreaTitles = new Map<string, string>([
-  ["overview", "Loyalty Studio"],
-  ["how-it-works", "How it works"],
-  ["customers-locations", "Customers & locations"],
-  ["engagement", "Wallet Engagement"],
-  ["launch", "Launch loyalty card"],
-  ["settings", "Loyalty card settings"],
-]);
-
-function titleForDashboardRoute(section?: string[]): string {
+function titleForDashboardRoute(locale: InterfaceLocale, section?: string[]): string {
+  const copy = messages[locale];
   const selected = (section?.[0] ?? "overview") as DashboardSection;
-  if (selected !== "programs") return dashboardSectionTitles.get(selected) ?? "Merchant dashboard";
-  if (!section?.[1]) return dashboardSectionTitles.get("programs") ?? "Loyalty Cards";
-  if (section[1] === "new") return "Choose a loyalty card design";
-  if (section[2] === "edit") return "Customize loyalty card";
-  return studioAreaTitles.get(section[2] ?? "overview") ?? "Loyalty Studio";
+  if (selected !== "programs") {
+    const sectionTitles: Record<DashboardSection, string> = {
+      overview: copy.merchant.shell.overview,
+      programs: copy.merchant.shell.programs,
+      customers: copy.merchant.shell.customers,
+      locations: copy.merchant.shell.locations,
+      team: copy.merchant.shell.team,
+      analytics: copy.merchant.shell.analytics,
+      exports: copy.merchant.shell.exports,
+      billing: copy.merchant.shell.billing,
+      settings: copy.merchant.shell.settings,
+      security: copy.merchant.shell.security,
+    };
+    return sectionTitles[selected] ?? copy.auth.metadata.merchantDashboard;
+  }
+  if (!section?.[1]) return copy.merchant.shell.programs;
+  if (section[1] === "new") return copy.merchant.loyalty.templates.title;
+  if (section[2] === "edit") return copy.merchant.loyalty.builder.title;
+  const area = studioAreaSegments.get(section[2] ?? "overview") ?? "overview";
+  const areas = copy.merchant.loyalty.studio.areas;
+  if (area === "how-it-works") return areas.howItWorks.label;
+  if (area === "customers-locations") return areas.customersLocations.label;
+  return areas[area].label;
 }
 
 export async function generateMetadata({
@@ -61,8 +59,9 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; section?: string[] }>;
 }): Promise<Metadata> {
-  const { section } = await params;
-  return { title: titleForDashboardRoute(section) };
+  const { locale, section } = await params;
+  const interfaceLocale = isInterfaceLocale(locale) ? locale : "en";
+  return { title: titleForDashboardRoute(interfaceLocale, section) };
 }
 
 export default async function DashboardPage({

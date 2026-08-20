@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { interfaceTextLocaleFor, isInterfaceLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { AuthLayout } from "../../../components/auth-layout";
 import { LoggedOutState } from "../../../components/auth-forms";
 
@@ -10,10 +10,9 @@ export default async function SessionExpiredPage({
 }) {
   const { locale } = await params;
   if (!isInterfaceLocale(locale)) notFound();
-  const interfaceTextLocale = interfaceTextLocaleFor(locale);
   return (
-    <AuthLayout locale={interfaceTextLocale} interfaceLocale={locale} routePath="/session-expired">
-      <LoggedOutState locale={interfaceTextLocale} expired />
+    <AuthLayout locale={locale} routePath="/session-expired">
+      <LoggedOutState locale={locale} expired />
     </AuthLayout>
   );
 }

@@ -17,23 +17,32 @@ const kurdistan24 = localFont({
   style: "normal",
 });
 
-export const metadata: Metadata = {
-  title: {
-    default: "Waflo merchant dashboard",
-    template: "%s · Waflo",
-  },
-  description: "Secure merchant administration for Waflo.",
-  robots: {
-    index: false,
-    follow: false,
-    nocache: true,
-  },
-  manifest: "/site.webmanifest",
-  icons: {
-    icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],
-    apple: "/apple-touch-icon-180.png",
-  },
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const definition = interfaceLocaleFor(locale);
+  if (!definition) return {};
+  return {
+    title: {
+      default: definition.messages.auth.metadata.merchantDashboard,
+      template: "%s · Waflo",
+    },
+    description: definition.messages.auth.metadata.merchantDescription,
+    robots: {
+      index: false,
+      follow: false,
+      nocache: true,
+    },
+    manifest: "/site.webmanifest",
+    icons: {
+      icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],
+      apple: "/apple-touch-icon-180.png",
+    },
+  };
+}
 
 export default async function LocaleLayout({
   children,

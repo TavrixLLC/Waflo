@@ -1,7 +1,7 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
 import { countryOptions } from "@waflo/contracts";
+import { contentLocaleForInterface, messages, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Button, FormField, SearchableSelect, TextInput } from "@waflo/ui";
 import { CheckCircle2, LoaderCircle, MapPin, Search } from "lucide-react";
 import {
@@ -58,11 +58,13 @@ interface CoordinateResponse {
 
 const defaultCenter: [number, number] = [44.3661, 33.3152];
 
-function displayAddress(value: LocationMapSelection, ar: boolean): string {
+function displayAddress(
+  value: LocationMapSelection,
+  separator: string,
+  unavailable: string,
+): string {
   const parts = [value.addressLine1, value.city, value.region, value.countryCode].filter(Boolean);
-  return (
-    parts.join(ar ? "، " : ", ") || (ar ? "لم يتوفر عنوان نصي" : "No written address available")
-  );
+  return parts.join(separator) || unavailable;
 }
 
 function createSessionToken(): string {
@@ -132,21 +134,26 @@ export function LocationAddressFields({
   value,
   onChange,
 }: {
-  locale: Locale;
+  locale: InterfaceLocale;
   value: LocationMapSelection;
   onChange: (value: LocationMapSelection) => void;
 }) {
-  const ar = locale === "ar";
+  const copy = messages[locale].onboarding.location;
+  const contentLocale = contentLocaleForInterface(locale);
   const countries = useMemo(
-    () => countryOptions(locale).map((country) => ({ value: country.code, label: country.name })),
-    [locale],
+    () =>
+      countryOptions(contentLocale).map((country) => ({
+        value: country.code,
+        label: country.name,
+      })),
+    [contentLocale],
   );
   const update = (field: keyof LocationMapSelection) => (event: ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [field]: event.currentTarget.value });
 
   return (
     <div className="location-address-fields">
-      <FormField label={ar ? "العنوان" : "Address"}>
+      <FormField label={copy.address}>
         <TextInput
           name="addressLine1"
           value={value.addressLine1}
@@ -154,7 +161,7 @@ export function LocationAddressFields({
           autoComplete="address-line1"
         />
       </FormField>
-      <FormField label={ar ? "تفاصيل إضافية (اختياري)" : "Address line 2 (optional)"}>
+      <FormField label={copy.addressLine2}>
         <TextInput
           name="addressLine2"
           value={value.addressLine2}
@@ -163,7 +170,7 @@ export function LocationAddressFields({
         />
       </FormField>
       <div className="location-address-fields__grid">
-        <FormField label={ar ? "المدينة" : "City"}>
+        <FormField label={copy.city}>
           <TextInput
             name="city"
             value={value.city}
@@ -171,7 +178,7 @@ export function LocationAddressFields({
             autoComplete="address-level2"
           />
         </FormField>
-        <FormField label={ar ? "المحافظة / المنطقة" : "Region / state"}>
+        <FormField label={copy.region}>
           <TextInput
             name="region"
             value={value.region}
@@ -179,7 +186,7 @@ export function LocationAddressFields({
             autoComplete="address-level1"
           />
         </FormField>
-        <FormField label={ar ? "الرمز البريدي" : "Postal code"}>
+        <FormField label={copy.postalCode}>
           <TextInput
             name="postalCode"
             value={value.postalCode}
@@ -187,22 +194,20 @@ export function LocationAddressFields({
             autoComplete="postal-code"
           />
         </FormField>
-        <FormField label={ar ? "البلد" : "Country"} required>
+        <FormField label={copy.country} required>
           <SearchableSelect
             name="countryCode"
             options={countries}
             value={value.countryCode}
             onValueChange={(countryCode) => onChange({ ...value, countryCode })}
-            placeholder={ar ? "ابحث عن بلد" : "Search countries"}
+            placeholder={copy.searchCountries}
             required
           />
         </FormField>
       </div>
       <div className="location-timezone-row">
-        <span>{ar ? "المنطقة الزمنية" : "Timezone"}</span>
-        <strong dir="ltr">
-          {value.timezone || (ar ? "تُحدد بعد اختيار الموقع" : "Set after map selection")}
-        </strong>
+        <span>{copy.timezone}</span>
+        <strong dir="ltr">{value.timezone || copy.timezonePending}</strong>
       </div>
     </div>
   );
@@ -213,11 +218,12 @@ export function LocationMapPicker({
   value,
   onChange,
 }: {
-  locale: Locale;
+  locale: InterfaceLocale;
   value: LocationMapSelection;
   onChange: (value: LocationMapSelection) => void;
 }) {
-  const ar = locale === "ar";
+  const copy = messages[locale].onboarding.location;
+  const contentLocale = contentLocaleForInterface(locale);
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?.trim() ?? "";
   const tokenStatus = classifyMapboxToken(token);
   const listboxId = useId();
@@ -247,7 +253,7 @@ export function LocationMapPicker({
     const params = new URLSearchParams({
       latitude: String(latitude),
       longitude: String(longitude),
-      language: locale,
+      language: contentLocale,
       permanent: "true",
       access_token: token,
     });
@@ -298,17 +304,9 @@ export function LocationMapPicker({
     onChange(next);
     setResolving(false);
     if (coordinateResult.status === "rejected") {
-      setError(
-        ar
-          ? "تعذر التحقق من هذا الموقع. حرّك العلامة قليلاً وحاول مرة أخرى."
-          : "We couldn't validate this location. Move the pin slightly and try again.",
-      );
+      setError(copy.validationError);
     } else if (addressResult.status === "rejected") {
-      setError(
-        ar
-          ? "تم تحديد الموقع، لكن تعذر تحديث العنوان. راجع العنوان قبل التأكيد."
-          : "The location is selected, but we couldn't update the address. Check it before confirming.",
-      );
+      setError(copy.addressRefreshError);
     }
   }
 
@@ -340,12 +338,7 @@ export function LocationMapPicker({
         markerElement.type = "button";
         markerElement.className = "location-map-marker";
         markerElement.append(document.createElement("span"));
-        markerElement.setAttribute(
-          "aria-label",
-          ar
-            ? "موقع الفرع. استخدم مفاتيح الأسهم لتحريك العلامة بدقة."
-            : "Branch location. Use the arrow keys to fine-tune the marker.",
-        );
+        markerElement.setAttribute("aria-label", copy.markerAria);
         markerElement.addEventListener("keydown", (event) => {
           if (!markerRef.current || !event.key.startsWith("Arrow")) return;
           event.preventDefault();
@@ -385,18 +378,14 @@ export function LocationMapPicker({
         });
         map.on("error", () => {
           if (active && !loaded) {
-            setError(
-              ar ? "تعذر تحميل الخريطة. حاول مرة أخرى." : "We couldn't load the map. Try again.",
-            );
+            setError(copy.mapLoadError);
           }
         });
         mapRef.current = map;
       })
       .catch(() => {
         if (active) {
-          setError(
-            ar ? "تعذر تحميل الخريطة. حاول مرة أخرى." : "We couldn't load the map. Try again.",
-          );
+          setError(copy.mapLoadError);
         }
       });
     return () => {
@@ -408,7 +397,7 @@ export function LocationMapPicker({
       mapRef.current = null;
     };
     // The ref keeps form callbacks current without recreating the WebGL context.
-  }, [ar, token, tokenStatus]);
+  }, [copy, token, tokenStatus]);
 
   useEffect(() => {
     if (tokenStatus !== "SET" || query.trim().length < 2) {
@@ -422,7 +411,7 @@ export function LocationMapPicker({
       const common = {
         q: query.trim(),
         access_token: token,
-        language: locale,
+        language: contentLocale,
         limit: "6",
         ...(value.countryCode ? { country: value.countryCode.toLocaleLowerCase("en-US") } : {}),
       };
@@ -452,11 +441,7 @@ export function LocationMapPicker({
           setResults([]);
           setResultsOpen(true);
           setSearching(false);
-          setError(
-            ar
-              ? "تعذر البحث عن المواقع الآن. تحقق من الاتصال وحاول مرة أخرى."
-              : "Location search is unavailable. Check your connection and try again.",
-          );
+          setError(copy.searchUnavailable);
           return;
         }
         const searchBox = searchBoxPayload ? normalizeSearchBoxSuggestions(searchBoxPayload) : [];
@@ -477,7 +462,7 @@ export function LocationMapPicker({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [ar, locale, query, token, tokenStatus, value.countryCode]);
+  }, [contentLocale, copy, query, token, tokenStatus, value.countryCode]);
 
   async function chooseResult(result: SearchResult) {
     setQuery([result.label, result.description].filter(Boolean).join(", "));
@@ -505,19 +490,13 @@ export function LocationMapPicker({
         sessionTokenRef.current = createSessionToken();
       } catch {
         setResolving(false);
-        setError(
-          ar ? "تعذر فتح نتيجة البحث. حاول مرة أخرى." : "We couldn't open that result. Try again.",
-        );
+        setError(copy.openResultError);
         return;
       }
     }
     if (latitude === undefined || longitude === undefined) {
       setResolving(false);
-      setError(
-        ar
-          ? "لا تحتوي هذه النتيجة على موقع دقيق."
-          : "That result does not include an exact location.",
-      );
+      setError(copy.resultMissingLocation);
       return;
     }
     const map = mapRef.current;
@@ -558,32 +537,21 @@ export function LocationMapPicker({
     >
       <div className="location-picker__intro">
         <div>
-          <span className="location-picker__step">{ar ? "الموقع الدقيق" : "Exact location"}</span>
-          <h3 id={`${listboxId}-heading`}>
-            {ar ? "ضع العلامة على مدخل الفرع" : "Place the pin on the storefront"}
-          </h3>
-          <p>
-            {ar
-              ? "ابحث عن النشاط أو العنوان، ثم حرّك العلامة وحدد موقع الفرع بدقة على الخريطة."
-              : "Search for the business or address, then move the pin to the exact entrance."}
-          </p>
+          <span className="location-picker__step">{copy.exactLocation}</span>
+          <h3 id={`${listboxId}-heading`}>{copy.placePin}</h3>
+          <p>{copy.description}</p>
         </div>
         {value.coordinatesConfirmed ? (
           <span className="location-picker__confirmed">
             <CheckCircle2 size={18} aria-hidden="true" />
-            {ar ? "تم تأكيد الموقع" : "Location confirmed"}
+            {copy.confirmed}
           </span>
         ) : null}
       </div>
 
       {tokenStatus !== "SET" ? (
-        <Alert
-          tone="warning"
-          title={ar ? "الخريطة غير متاحة الآن" : "The map is unavailable right now"}
-        >
-          {ar
-            ? "جرّب مرة أخرى لاحقاً. لن يتم حفظ فرع من دون تحديد موقعه بدقة."
-            : "Try again later. A branch cannot be saved without an exact confirmed location."}
+        <Alert tone="warning" title={copy.unavailableTitle}>
+          {copy.unavailableDescription}
         </Alert>
       ) : (
         <>
@@ -593,8 +561,8 @@ export function LocationMapPicker({
               type="search"
               className="wf-input location-search__input"
               value={query}
-              placeholder={ar ? "ابحث باسم النشاط أو العنوان" : "Search business or address"}
-              aria-label={ar ? "البحث عن موقع الفرع" : "Search for the branch location"}
+              placeholder={copy.searchPlaceholder}
+              aria-label={copy.searchAria}
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={resultsOpen}
@@ -611,10 +579,7 @@ export function LocationMapPicker({
               onKeyDown={onSearchKeyDown}
             />
             {searching ? (
-              <LoaderCircle
-                className="location-search__spinner"
-                aria-label={ar ? "جارٍ البحث" : "Searching"}
-              />
+              <LoaderCircle className="location-search__spinner" aria-label={copy.searching} />
             ) : null}
             {resultsOpen ? (
               <div className="location-search__results" id={listboxId} role="listbox">
@@ -639,11 +604,7 @@ export function LocationMapPicker({
                     </button>
                   ))
                 ) : searching ? null : (
-                  <p>
-                    {ar
-                      ? "لا توجد نتائج. جرّب كتابة عنوان مختلف."
-                      : "No results. Try a different address."}
-                  </p>
+                  <p>{copy.noResults}</p>
                 )}
               </div>
             ) : null}
@@ -652,12 +613,12 @@ export function LocationMapPicker({
             <section
               ref={mapContainerRef}
               className="location-map-canvas"
-              aria-label={ar ? "خريطة اختيار موقع الفرع" : "Branch location selection map"}
+              aria-label={copy.mapAria}
             />
             {!mapReady ? (
               <div className="location-map-loading" role="status">
                 <LoaderCircle aria-hidden="true" />
-                {ar ? "جارٍ تحميل الخريطة" : "Loading map"}
+                {copy.loadingMap}
               </div>
             ) : null}
           </div>
@@ -668,8 +629,10 @@ export function LocationMapPicker({
       {value.latitude !== null && value.longitude !== null ? (
         <div className="location-picker__selection" aria-live="polite">
           <div>
-            <span>{ar ? "العنوان المحدد" : "Selected address"}</span>
-            <strong>{displayAddress(value, ar)}</strong>
+            <span>{copy.selectedAddress}</span>
+            <strong>
+              {displayAddress(value, locale === "en" ? ", " : "، ", copy.noWrittenAddress)}
+            </strong>
             <small dir="ltr">
               {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)} · {value.timezone || "—"}
             </small>
@@ -681,7 +644,7 @@ export function LocationMapPicker({
             onClick={() => onChange({ ...value, coordinatesConfirmed: true })}
           >
             <MapPin size={17} aria-hidden="true" />
-            {ar ? "تأكيد هذا الموقع" : "Confirm this location"}
+            {copy.confirmLocation}
           </Button>
         </div>
       ) : null}

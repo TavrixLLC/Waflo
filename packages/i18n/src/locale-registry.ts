@@ -40,11 +40,6 @@ export interface InterfaceLocaleDefinition {
   readonly enabled: true;
   /** Fallback for customer-authored and Wallet content constrained to the existing API locale union. */
   readonly contentFallback: Locale;
-  /**
-   * Transitional selection for routes whose interface copy has not yet moved
-   * to `messages`. Loyalty surfaces must not use this fallback.
-   */
-  readonly interfaceTextLocale: Locale;
   readonly dateFormattingLocale: string;
   readonly numberFormattingLocale: string;
   readonly messages: InterfaceMessages;
@@ -60,7 +55,6 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     typography: "default",
     enabled: true,
     contentFallback: "en",
-    interfaceTextLocale: "en",
     dateFormattingLocale: "en-US-u-nu-latn",
     numberFormattingLocale: "en-US-u-nu-latn",
     messages: en,
@@ -75,7 +69,6 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     typography: "cairo",
     enabled: true,
     contentFallback: "en",
-    interfaceTextLocale: "ar",
     dateFormattingLocale: "ar-IQ-u-nu-latn",
     numberFormattingLocale: "ar-IQ-u-nu-latn",
     messages: ar,
@@ -91,7 +84,6 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     languageGroup: "kurdish",
     enabled: true,
     contentFallback: "en",
-    interfaceTextLocale: "en",
     dateFormattingLocale: "ckb-IQ-u-nu-latn",
     numberFormattingLocale: "ckb-IQ-u-nu-latn",
     messages: kuBadini,
@@ -107,7 +99,6 @@ export const localeRegistry: Readonly<Record<InterfaceLocale, InterfaceLocaleDef
     languageGroup: "kurdish",
     enabled: true,
     contentFallback: "en",
-    interfaceTextLocale: "en",
     dateFormattingLocale: "ckb-IQ-u-nu-latn",
     numberFormattingLocale: "ckb-IQ-u-nu-latn",
     messages: kuSorani,
@@ -130,12 +121,9 @@ export function directionForInterface(locale: InterfaceLocale): TextDirection {
   return localeRegistry[locale].direction;
 }
 
-/**
- * Transitional selection for legacy routes only. New interface text must use
- * `localeRegistry[interfaceLocale].messages` directly.
- */
-export function interfaceTextLocaleFor(locale: InterfaceLocale): Locale {
-  return localeRegistry[locale].interfaceTextLocale;
+/** Interface text always follows the route-selected interface locale. */
+export function interfaceTextLocaleFor(locale: InterfaceLocale): InterfaceLocale {
+  return locale;
 }
 
 export function interfaceLocalePath(locale: InterfaceLocale, path = ""): string {

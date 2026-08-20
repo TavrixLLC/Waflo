@@ -1,7 +1,6 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
-import { isInterfaceLocale } from "@waflo/i18n";
+import { isInterfaceLocale, messages, type InterfaceLocale } from "@waflo/i18n";
 import { Alert } from "@waflo/ui";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -13,68 +12,57 @@ export default function OAuthCallbackPage() {
   const params = useParams<{ locale: string }>();
   const search = useSearchParams();
   const router = useRouter();
-  const interfaceLocale = isInterfaceLocale(params.locale) ? params.locale : "en";
-  const locale: Locale = interfaceLocale === "ar" ? "ar" : "en";
-  const ar = locale === "ar";
+  const routeLocale: InterfaceLocale = isInterfaceLocale(params.locale) ? params.locale : "en";
   const initialResult = search.get("result");
   const [result, setResult] = useState(initialResult ?? "failed");
+  const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale | null>(null);
 
   useEffect(() => {
-    if (search.get("result") !== "authenticated") return;
+    const storedLocale = sessionStorage.getItem("waflo:oauth-interface-locale") ?? "";
+    if (isInterfaceLocale(storedLocale) && storedLocale !== routeLocale) {
+      const query = initialResult ? `?result=${encodeURIComponent(initialResult)}` : "";
+      router.replace(`/${storedLocale}/oauth/callback${query}`);
+      return;
+    }
+    sessionStorage.removeItem("waflo:oauth-interface-locale");
+    setInterfaceLocale(routeLocale);
+  }, [initialResult, routeLocale, router]);
+
+  useEffect(() => {
+    if (!interfaceLocale || search.get("result") !== "authenticated") return;
     window.history.replaceState(null, "", `/${interfaceLocale}/oauth/callback`);
-    void destinationAfterLogin(locale)
-      .then((destination) =>
-        router.replace(destination.replace(/^\/(?:en|ar)(?=\/|$)/, `/${interfaceLocale}`)),
-      )
+    void destinationAfterLogin(interfaceLocale)
+      .then((destination) => router.replace(destination))
       .catch(() => setResult("failed"));
-  }, [interfaceLocale, locale, router, search]);
+  }, [interfaceLocale, router, search]);
+
+  if (!interfaceLocale) return null;
+  const copy = messages[interfaceLocale].auth;
 
   if (result !== "authenticated") {
     const noAccount = result === "no_account";
     return (
-      <AuthLayout locale={locale} interfaceLocale={interfaceLocale} routePath="/oauth/callback">
+      <AuthLayout locale={interfaceLocale} routePath="/oauth/callback">
         <Alert
           tone={noAccount ? "info" : "danger"}
-          title={
-            noAccount
-              ? ar
-                ? "لا يوجد حساب Waflo مرتبط"
-                : "No Waflo account found"
-              : ar
-                ? "تعذر إكمال تسجيل الدخول"
-                : "Sign-in could not be completed"
-          }
+          title={noAccount ? copy.oauth.noAccountTitle : copy.oauth.failedTitle}
         >
-          {noAccount
-            ? ar
-              ? "أنشئ حساباً أولاً، ثم يمكنك استخدام حساب Google هذا لتسجيل الدخول."
-              : "Create an account first, then you can use this Google account to sign in."
-            : ar
-              ? "استخدم طريقة تسجيل دخول أخرى أو تواصل مع الدعم إذا استمرت المشكلة."
-              : "Use another sign-in method, or contact support if this continues."}
+          {noAccount ? copy.oauth.noAccountDescription : copy.oauth.failedDescription}
         </Alert>
         <Link
           className="wf-button wf-button--primary auth-oauth-action"
           href={noAccount ? `/${interfaceLocale}/signup` : `/${interfaceLocale}/login`}
         >
-          {noAccount
-            ? ar
-              ? "إنشاء حساب"
-              : "Create account"
-            : ar
-              ? "العودة إلى تسجيل الدخول"
-              : "Back to sign in"}
+          {noAccount ? copy.oauth.createAccount : copy.common.backToSignIn}
         </Link>
       </AuthLayout>
     );
   }
 
   return (
-    <AuthLayout locale={locale} interfaceLocale={interfaceLocale} routePath="/oauth/callback">
-      <h2>{ar ? "جارٍ تأمين جلستك…" : "Securing your session…"}</h2>
-      <p className="auth-card__intro">
-        {ar ? "لحظة واحدة بينما نفتح مساحة عملك." : "One moment while we open your workspace."}
-      </p>
+    <AuthLayout locale={interfaceLocale} routePath="/oauth/callback">
+      <h2>{copy.oauth.securingTitle}</h2>
+      <p className="auth-card__intro">{copy.oauth.securingDescription}</p>
     </AuthLayout>
   );
 }

@@ -1,12 +1,16 @@
+import { authInterfaceCopy } from "./auth-interface-copy.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
 import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
 import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js";
 import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
+import { onboardingInterfaceCopy } from "./onboarding-interface-copy.js";
 
 export const en = {
   brandTagline: "Loyalty that flows.",
+  auth: authInterfaceCopy.en,
+  onboarding: onboardingInterfaceCopy.en,
   navigation: {
     home: "Home",
     pricing: "Pricing",

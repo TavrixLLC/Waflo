@@ -2,9 +2,15 @@
 
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
-import { type BillingCadence, countryOptions, type Locale, type PlanCode } from "@waflo/contracts";
-import { messages, type InterfaceLocale } from "@waflo/i18n";
+import { billingCadenceCatalog, cadencePrice } from "@waflo/billing";
+import { type BillingCadence, countryOptions, type PlanCode } from "@waflo/contracts";
+import {
+  contentLocaleForInterface,
+  localeRegistry,
+  messages,
+  type InterfaceLocale,
+  type InterfaceMessages,
+} from "@waflo/i18n";
 import {
   Alert,
   Button,
@@ -131,50 +137,70 @@ function writeWizard(update: Partial<WizardDraft>) {
   window.sessionStorage.setItem(WIZARD_KEY, JSON.stringify({ ...readWizard(), ...update }));
 }
 
-function localizedError(caught: unknown, ar: boolean, fallback: string): string {
-  if (caught instanceof ApiClientError) return caught.message;
-  return ar ? "تعذر إكمال هذه الخطوة. حاول مرة أخرى." : fallback;
+type OnboardingCopy = InterfaceMessages["onboarding"];
+
+function localizedError(_caught: unknown, fallback: string): string {
+  return fallback;
 }
 
-function money(amount: number, currency: string, _locale: Locale): string {
+function money(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(amount / 100);
 }
 
-function dateLabel(value: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-IQ-u-nu-latn" : "en-US", {
+function dateLabel(value: string, locale: InterfaceLocale): string {
+  return new Intl.DateTimeFormat(localeRegistry[locale].dateFormattingLocale, {
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(new Date(value));
 }
 
-function cadenceLabel(cadence: BillingCadence, locale: Locale): string {
-  if (locale === "en") return billingCadenceCatalog[cadence].label;
-  return cadence === "monthly" ? "شهري" : cadence === "quarterly" ? "كل 3 أشهر" : "سنوي";
+function cadenceLabel(cadence: BillingCadence, copy: OnboardingCopy): string {
+  return cadence === "monthly"
+    ? copy.plan.monthly
+    : cadence === "quarterly"
+      ? copy.plan.quarterly
+      : copy.plan.yearly;
+}
+
+function formatMessage(template: string, values: Readonly<Record<string, string>>): string {
+  return Object.entries(values).reduce(
+    (result, [key, value]) => result.replace(`{${key}}`, value),
+    template,
+  );
 }
 
 function cadenceDiscountLabel(cadence: BillingCadence): string {
   return cadence === "quarterly" ? "8.33%" : cadence === "yearly" ? "16.67%" : "";
 }
 
+function planName(plan: PlanCode, copy: OnboardingCopy): string {
+  return plan === "starter"
+    ? copy.plan.starterName
+    : plan === "growth"
+      ? copy.plan.growthName
+      : copy.plan.scaleName;
+}
+
 function OnboardingShell({
   locale,
-  interfaceLocale,
   step,
   children,
 }: {
-  locale: Locale;
-  interfaceLocale: InterfaceLocale;
+  locale: InterfaceLocale;
   step: OnboardingStep;
   children: ReactNode;
 }) {
-  const ar = locale === "ar";
-  const languageCopy = messages[interfaceLocale].language;
-  const steps = ar
-    ? ["المؤسسة", "الباقة", "بيانات الدفع", "البطاقة", "التأكيد"]
-    : ["Organization", "Plan", "Billing", "Card", "Confirm"];
+  const copy = messages[locale];
+  const steps = [
+    copy.onboarding.progress.organization,
+    copy.onboarding.progress.plan,
+    copy.onboarding.progress.billing,
+    copy.onboarding.progress.card,
+    copy.onboarding.progress.confirm,
+  ];
   return (
     <main className="onboarding-shell">
       <header className="onboarding-header">
@@ -186,17 +212,14 @@ function OnboardingShell({
           priority
         />
         <InterfaceLanguagePicker
-          locale={interfaceLocale}
+          locale={locale}
           routePath="/onboarding/business"
           persistSelection
-          label={languageCopy.label}
+          label={copy.language.label}
         />
       </header>
       <div className="onboarding-main">
-        <nav
-          className="onboarding-progress"
-          aria-label={ar ? "خطوات إنشاء الحساب" : "Signup progress"}
-        >
+        <nav className="onboarding-progress" aria-label={copy.onboarding.progress.ariaLabel}>
           {steps.map((label, index) => {
             const number = (index + 1) as OnboardingStep;
             const complete = number < step;
@@ -232,41 +255,32 @@ function PlanStep({
   onCadence,
   onContinue,
 }: {
-  locale: Locale;
+  locale: InterfaceLocale;
   plan: PlanCode;
   cadence: BillingCadence;
   onPlan: (value: PlanCode) => void;
   onCadence: (value: BillingCadence) => void;
   onContinue: () => void;
 }) {
-  const ar = locale === "ar";
-  const planBenefits: Record<PlanCode, string> = ar
-    ? {
-        starter: "موقع واحد، 3 أعضاء فريق، بطاقة ولاء واحدة",
-        growth: "3 مواقع، 10 أعضاء فريق، بطاقات وتحليلات متقدمة",
-        scale: "حدود مرنة، تصدير متقدم، ودعم للنمو",
-      }
-    : {
-        starter: "1 location, 3 team members, 1 active loyalty card",
-        growth: "3 locations, 10 team members, unlimited cards and advanced analytics",
-        scale: "Flexible limits, advanced exports, and room to grow",
-      };
+  const copy = messages[locale].onboarding;
+  const planBenefits: Record<PlanCode, string> = {
+    starter: copy.plan.starterBenefits,
+    growth: copy.plan.growthBenefits,
+    scale: copy.plan.scaleBenefits,
+  };
+  const planNames: Record<PlanCode, string> = {
+    starter: copy.plan.starterName,
+    growth: copy.plan.growthName,
+    scale: copy.plan.scaleName,
+  };
   return (
     <>
       <div className="onboarding-heading">
-        <span>{ar ? "الخطوة 2 من 5" : "Step 2 of 5"}</span>
-        <h1>{ar ? "اختر الباقة المناسبة" : "Choose your plan"}</h1>
-        <p>
-          {ar
-            ? "يمكنك تغيير الباقة لاحقاً. جميع تصاميم البطاقات متاحة في كل الباقات."
-            : "You can change later. Every loyalty card template is included with every plan."}
-        </p>
+        <span>{copy.plan.step}</span>
+        <h1>{copy.plan.title}</h1>
+        <p>{copy.plan.description}</p>
       </div>
-      <div
-        className="onboarding-cadence"
-        role="radiogroup"
-        aria-label={ar ? "دورة الفوترة" : "Billing cadence"}
-      >
+      <div className="onboarding-cadence" role="radiogroup" aria-label={copy.plan.billingCadence}>
         {(["monthly", "quarterly", "yearly"] as const).map((value) => {
           const definition = billingCadenceCatalog[value];
           return (
@@ -279,18 +293,18 @@ function PlanStep({
                 checked={cadence === value}
                 onChange={() => onCadence(value)}
               />
-              <strong>{cadenceLabel(value, locale)}</strong>
+              <strong>{cadenceLabel(value, copy)}</strong>
               {definition.discountRate ? (
                 <small>
-                  {value === "yearly" ? (ar ? "شهران مجاناً · " : "2 months free · ") : null}
-                  {ar ? "توفير" : "Save"} <bdi dir="ltr">{cadenceDiscountLabel(value)}</bdi>
+                  {value === "yearly" ? `${copy.plan.twoMonthsFree} ` : null}
+                  {copy.plan.save} <bdi dir="ltr">{cadenceDiscountLabel(value)}</bdi>
                 </small>
               ) : null}
             </label>
           );
         })}
       </div>
-      <div className="onboarding-plan-grid" role="radiogroup" aria-label={ar ? "الباقة" : "Plan"}>
+      <div className="onboarding-plan-grid" role="radiogroup" aria-label={copy.plan.planLabel}>
         {(["starter", "growth", "scale"] as const).map((value) => {
           const pricing = cadencePrice(value, cadence);
           const savings = pricing.undiscountedAmountUsd - pricing.billedAmountUsd;
@@ -310,25 +324,18 @@ function PlanStep({
               <span className="onboarding-plan-option__check" aria-hidden="true">
                 <Check size={16} />
               </span>
-              <strong>
-                <bdi dir="ltr">{planCatalog[value].name}</bdi>
-              </strong>
+              <strong>{planNames[value]}</strong>
               <span className="onboarding-plan-option__price">
-                <bdi dir="ltr">
-                  {money(Math.round(pricing.billedAmountUsd * 100), "USD", locale)}
-                </bdi>
+                <bdi dir="ltr">{money(Math.round(pricing.billedAmountUsd * 100), "USD")}</bdi>
               </span>
               <small>
-                {ar
-                  ? `إجمالي ${cadenceLabel(cadence, locale)}`
-                  : `${cadenceLabel(cadence, locale)} total`}
+                {formatMessage(copy.plan.cadenceTotal, { cadence: cadenceLabel(cadence, copy) })}
               </small>
               {cadence !== "monthly" ? (
                 <small className="onboarding-plan-option__savings">
-                  <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>/
-                  {ar ? "شهر" : "month"}
+                  <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>/{copy.plan.month}
                   {" · "}
-                  {ar ? "وفّر" : "Save"} <bdi dir="ltr">${savings.toFixed(2)}</bdi>
+                  {copy.plan.save} <bdi dir="ltr">${savings.toFixed(2)}</bdi>
                 </small>
               ) : null}
               <p>{planBenefits[value]}</p>
@@ -337,7 +344,7 @@ function PlanStep({
         })}
       </div>
       <div className="onboarding-actions">
-        <Button onClick={onContinue}>{ar ? "متابعة" : "Continue"}</Button>
+        <Button onClick={onContinue}>{copy.plan.continue}</Button>
       </div>
     </>
   );
@@ -345,20 +352,18 @@ function PlanStep({
 
 function SecurePaymentForm({
   locale,
-  interfaceLocale,
   organizationId,
   billingIdentity,
   billingCommand,
   onReady,
 }: {
-  locale: Locale;
-  interfaceLocale: InterfaceLocale;
+  locale: InterfaceLocale;
   organizationId: string;
   billingIdentity: BillingIdentityDraft;
   billingCommand: string;
   onReady: (preview: TrialPreview) => void;
 }) {
-  const ar = locale === "ar";
+  const copy = messages[locale].onboarding;
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
@@ -388,16 +393,13 @@ function SecurePaymentForm({
     if (!returnedSecret) return;
     returnedIntentChecked.current = true;
     void stripe.retrieveSetupIntent(returnedSecret).then(({ setupIntent, error: stripeError }) => {
-      if (stripeError)
-        setError(
-          stripeError.message ?? (ar ? "تعذر التحقق من البطاقة." : "Unable to verify the card."),
-        );
+      if (stripeError) setError(copy.payment.verifyCardError);
       else if (setupIntent?.status === "succeeded")
         void loadPreview(setupIntent.id).catch((caught) =>
-          setError(localizedError(caught, ar, "Unable to review your trial.")),
+          setError(localizedError(caught, copy.payment.reviewTrialError)),
         );
     });
-  }, [ar, loadPreview, stripe]);
+  }, [copy, loadPreview, stripe]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -407,7 +409,7 @@ function SecurePaymentForm({
     const result = await stripe.confirmSetup({
       elements,
       confirmParams: {
-        return_url: `${window.location.origin}/${interfaceLocale}/onboarding/business?organization=${organizationId}`,
+        return_url: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}`,
         payment_method_data: {
           billing_details: {
             name: billingIdentity.name,
@@ -426,19 +428,19 @@ function SecurePaymentForm({
       redirect: "if_required",
     });
     if (result.error) {
-      setError(result.error.message ?? (ar ? "تعذر حفظ البطاقة." : "Unable to save the card."));
+      setError(copy.payment.saveCardError);
       setLoading(false);
       return;
     }
     if (result.setupIntent?.status !== "succeeded") {
-      setError(ar ? "أكمل التحقق من البطاقة للمتابعة." : "Complete card verification to continue.");
+      setError(copy.payment.completeVerification);
       setLoading(false);
       return;
     }
     try {
       await loadPreview(result.setupIntent.id);
     } catch (caught) {
-      setError(localizedError(caught, ar, "Unable to review your trial."));
+      setError(localizedError(caught, copy.payment.reviewTrialError));
     } finally {
       setLoading(false);
     }
@@ -449,11 +451,7 @@ function SecurePaymentForm({
       {error ? <Alert tone="danger" title={error} /> : null}
       <div className="onboarding-payment__secure">
         <LockKeyhole size={18} aria-hidden="true" />
-        <span>
-          {ar
-            ? "تتم معالجة بيانات البطاقة بأمان بواسطة Stripe. لا تحفظ Waflo رقم البطاقة أو رمز CVC."
-            : "Stripe securely handles your card details. Waflo never stores the card number or CVC."}
-        </span>
+        <span>{copy.payment.secureDescription}</span>
       </div>
       <div className="onboarding-payment__element">
         <PaymentElement
@@ -464,7 +462,7 @@ function SecurePaymentForm({
         />
       </div>
       <Button type="submit" loading={loading} disabled={!stripe || !elements}>
-        {ar ? "حفظ البطاقة ومراجعة التجربة" : "Save card and review trial"}
+        {copy.payment.saveAndReview}
       </Button>
     </form>
   );
@@ -472,16 +470,15 @@ function SecurePaymentForm({
 
 export function BusinessOnboarding({
   locale,
-  interfaceLocale = locale,
   organizationId: initialOrganizationId,
   resumeState,
 }: {
-  locale: Locale;
-  interfaceLocale?: InterfaceLocale;
+  locale: InterfaceLocale;
   organizationId?: string;
   resumeState?: string;
 }) {
-  const ar = locale === "ar";
+  const copy = messages[locale].onboarding;
+  const contentLocale = contentLocaleForInterface(locale);
   const router = useRouter();
   const [step, setStep] = useState<OnboardingStep>(1);
   const [organizationId, setOrganizationId] = useState(initialOrganizationId ?? "");
@@ -502,8 +499,9 @@ export function BusinessOnboarding({
     [setup?.publishableKey],
   );
   const countries = useMemo(
-    () => countryOptions(locale).map((option) => ({ value: option.code, label: option.name })),
-    [locale],
+    () =>
+      countryOptions(contentLocale).map((option) => ({ value: option.code, label: option.name })),
+    [contentLocale],
   );
 
   const finishCompletedTrial = useCallback(
@@ -521,11 +519,9 @@ export function BusinessOnboarding({
       });
       window.sessionStorage.setItem(TRIAL_RESULT_KEY, JSON.stringify(result));
       writeWizard({ step: 5 });
-      router.replace(
-        `/${interfaceLocale}/onboarding/complete?organization=${currentOrganizationId}`,
-      );
+      router.replace(`/${locale}/onboarding/complete?organization=${currentOrganizationId}`);
     },
-    [interfaceLocale, router],
+    [locale, router],
   );
 
   const preparePayment = useCallback(
@@ -553,10 +549,7 @@ export function BusinessOnboarding({
         return;
       }
       if (!response.clientSecret) {
-        throw new ApiClientError(
-          "BILLING_SETUP_INVALID",
-          ar ? "تعذر فتح نموذج البطاقة." : "Unable to open secure card setup.",
-        );
+        throw new ApiClientError("BILLING_SETUP_INVALID", copy.payment.setupUnavailable);
       }
       setSetup(response);
       setStep(4);
@@ -568,7 +561,7 @@ export function BusinessOnboarding({
         step: 4,
       });
     },
-    [ar, finishCompletedTrial],
+    [copy.payment.setupUnavailable, finishCompletedTrial],
   );
 
   useEffect(() => {
@@ -587,7 +580,7 @@ export function BusinessOnboarding({
       void preparePayment(currentOrganizationId, currentPlan, currentCadence, draft.billingIdentity)
         .catch((caught) => {
           setStep(3);
-          setError(localizedError(caught, ar, "Unable to resume secure payment setup."));
+          setError(localizedError(caught, copy.payment.resumeError));
         })
         .finally(() => setLoading(false));
     } else if (currentOrganizationId) {
@@ -603,7 +596,7 @@ export function BusinessOnboarding({
             : 2;
       setStep(authoritativeResumeStep as OnboardingStep);
     }
-  }, [ar, initialOrganizationId, preparePayment, resumeState]);
+  }, [copy.payment.resumeError, initialOrganizationId, preparePayment, resumeState]);
 
   useEffect(() => {
     if (slug.length < 3) {
@@ -616,19 +609,13 @@ export function BusinessOnboarding({
       )
         .then((result) =>
           setAvailability(
-            result.available
-              ? ar
-                ? "الرابط متاح"
-                : "URL is available"
-              : ar
-                ? "الرابط غير متاح"
-                : "URL is unavailable",
+            result.available ? copy.organization.urlAvailable : copy.organization.urlUnavailable,
           ),
         )
         .catch(() => setAvailability(""));
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [ar, slug]);
+  }, [copy.organization.urlAvailable, copy.organization.urlUnavailable, slug]);
 
   async function createOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -639,11 +626,7 @@ export function BusinessOnboarding({
       !firstLocation.countryCode ||
       !firstLocation.timezone
     ) {
-      setError(
-        ar
-          ? "حدّد موقع الفرع الأول بدقة على الخريطة ثم أكّده."
-          : "Choose the exact first location on the map and confirm it.",
-      );
+      setError(copy.organization.exactLocationRequired);
       return;
     }
     setLoading(true);
@@ -677,7 +660,7 @@ export function BusinessOnboarding({
           name: String(form.get("name") ?? ""),
           merchantSlug: slug,
           businessCategory: String(form.get("category") ?? "") || undefined,
-          defaultLocale: String(form.get("defaultLocale") ?? locale),
+          defaultLocale: String(form.get("defaultLocale") ?? contentLocale),
           timezone: firstLocation.timezone,
           selectedPlan: "starter",
           commandId: sessionCommand(ORGANIZATION_COMMAND_KEY),
@@ -702,10 +685,10 @@ export function BusinessOnboarding({
       window.history.replaceState(
         null,
         "",
-        `/${interfaceLocale}/onboarding/business?organization=${organization.id}`,
+        `/${locale}/onboarding/business?organization=${organization.id}`,
       );
     } catch (caught) {
-      setError(localizedError(caught, ar, "Unable to create your organization."));
+      setError(localizedError(caught, copy.organization.createError));
     } finally {
       setLoading(false);
     }
@@ -731,7 +714,7 @@ export function BusinessOnboarding({
     try {
       await preparePayment(organizationId, plan, cadence, identity);
     } catch (caught) {
-      setError(localizedError(caught, ar, "Unable to start secure payment setup."));
+      setError(localizedError(caught, copy.payment.startSetupError));
     } finally {
       setLoading(false);
     }
@@ -748,7 +731,7 @@ export function BusinessOnboarding({
         sessionCommand(BILLING_COMMAND_KEY),
       );
     } catch (caught) {
-      setError(localizedError(caught, ar, "Unable to start your trial."));
+      setError(localizedError(caught, copy.payment.startTrialError));
     } finally {
       setLoading(false);
     }
@@ -757,33 +740,25 @@ export function BusinessOnboarding({
   if (step === 1) {
     const recoveringLocation = Boolean(organizationId && resumeState === "location_required");
     return (
-      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={1}>
+      <OnboardingShell locale={locale} step={1}>
         <div className="onboarding-heading">
-          <span>{ar ? "الخطوة 1 من 5" : "Step 1 of 5"}</span>
+          <span>{copy.organization.step}</span>
           <h1>
             {recoveringLocation
-              ? ar
-                ? "أكمل إعداد موقعك"
-                : "Finish setting up your location"
-              : ar
-                ? "أخبرنا عن نشاطك"
-                : "Set up your organization"}
+              ? copy.organization.finishLocationTitle
+              : copy.organization.setupTitle}
           </h1>
           <p>
             {recoveringLocation
-              ? ar
-                ? "أضف أول فرع للمتابعة إلى إعداد الفوترة."
-                : "Add your first location to continue to billing setup."
-              : ar
-                ? "أضف المعلومات الأساسية وأول فرع. يمكنك تعديلها لاحقاً."
-                : "Add the essentials and your first location. You can edit them later."}
+              ? copy.organization.finishLocationDescription
+              : copy.organization.setupDescription}
           </p>
         </div>
         {error ? <Alert tone="danger" title={error} /> : null}
         <form className="onboarding-form" onSubmit={createOrganization}>
           {!recoveringLocation ? (
             <div className="dashboard-form__row">
-              <FormField label={ar ? "اسم النشاط" : "Business name"} required>
+              <FormField label={copy.organization.businessName} required>
                 <TextInput
                   name="name"
                   minLength={2}
@@ -792,31 +767,22 @@ export function BusinessOnboarding({
                   required
                 />
               </FormField>
-              <FormField label={ar ? "نوع النشاط" : "Business type"}>
+              <FormField label={copy.organization.businessType}>
                 <SearchableSelect
                   name="category"
-                  options={
-                    ar
-                      ? [
-                          { value: "Cafe", label: "مقهى" },
-                          { value: "Restaurant", label: "مطعم" },
-                          { value: "Retail", label: "متجر" },
-                          { value: "Other", label: "أخرى" },
-                        ]
-                      : [
-                          { value: "Cafe", label: "Cafe" },
-                          { value: "Restaurant", label: "Restaurant" },
-                          { value: "Retail", label: "Retail" },
-                          { value: "Other", label: "Other" },
-                        ]
-                  }
-                  placeholder={ar ? "اختر النوع" : "Choose a type"}
+                  options={[
+                    { value: "Cafe", label: copy.organization.categoryCafe },
+                    { value: "Restaurant", label: copy.organization.categoryRestaurant },
+                    { value: "Retail", label: copy.organization.categoryRetail },
+                    { value: "Other", label: copy.organization.categoryOther },
+                  ]}
+                  placeholder={copy.organization.chooseType}
                 />
               </FormField>
             </div>
           ) : null}
           {!recoveringLocation ? (
-            <FormField label={ar ? "رابط نشاطك" : "Merchant URL"} hint={availability} required>
+            <FormField label={copy.organization.merchantUrl} hint={availability} required>
               <TextInput
                 name="slug"
                 value={slug}
@@ -835,15 +801,15 @@ export function BusinessOnboarding({
           {!recoveringLocation ? (
             <div className="onboarding-url" dir="ltr">
               <Link2 size={17} aria-hidden="true" />
-              https://{slug || "your-business"}.waflo.app
+              https://{slug || copy.organization.urlPreviewPlaceholder}.waflo.app
             </div>
           ) : null}
           <div className="dashboard-form__row">
-            <FormField label={ar ? "اسم الفرع الأول" : "First location"} required>
+            <FormField label={copy.organization.firstLocation} required>
               <TextInput
                 name="locationName"
                 minLength={2}
-                placeholder={ar ? "مثلاً: فرع المنصور" : "e.g. Downtown"}
+                placeholder={copy.organization.firstLocationPlaceholder}
                 required
               />
             </FormField>
@@ -854,9 +820,9 @@ export function BusinessOnboarding({
             value={firstLocation}
             onChange={setFirstLocation}
           />
-          <input type="hidden" name="defaultLocale" value={locale} />
+          <input type="hidden" name="defaultLocale" value={contentLocale} />
           <Button type="submit" loading={loading} disabled={!firstLocation.coordinatesConfirmed}>
-            {ar ? "حفظ ومتابعة" : "Save and continue"}
+            {copy.organization.saveAndContinue}
           </Button>
         </form>
       </OnboardingShell>
@@ -865,7 +831,7 @@ export function BusinessOnboarding({
 
   if (step === 2) {
     return (
-      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={2}>
+      <OnboardingShell locale={locale} step={2}>
         <PlanStep
           locale={locale}
           plan={plan}
@@ -883,23 +849,16 @@ export function BusinessOnboarding({
 
   if (step === 3) {
     return (
-      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={3}>
+      <OnboardingShell locale={locale} step={3}>
         <div className="onboarding-heading">
-          <span>{ar ? "الخطوة 3 من 5" : "Step 3 of 5"}</span>
-          <h1>{ar ? "بيانات الفوترة" : "Billing details"}</h1>
-          <p>
-            {ar
-              ? "تظهر هذه المعلومات في فواتيرك ويمكنك تعديلها لاحقاً."
-              : "These details appear on your invoices and can be updated later."}
-          </p>
+          <span>{copy.billing.step}</span>
+          <h1>{copy.billing.title}</h1>
+          <p>{copy.billing.description}</p>
         </div>
         {error ? <Alert tone="danger" title={error} /> : null}
         <form className="onboarding-form" onSubmit={saveBilling}>
           <div className="dashboard-form__row">
-            <FormField
-              label={ar ? "اسم المؤسسة أو العميل" : "Customer or organization name"}
-              required
-            >
+            <FormField label={copy.billing.customerName} required>
               <TextInput
                 name="billingName"
                 defaultValue={billingIdentity?.name}
@@ -907,7 +866,7 @@ export function BusinessOnboarding({
                 required
               />
             </FormField>
-            <FormField label={ar ? "بريد الفوترة" : "Billing email"} required>
+            <FormField label={copy.billing.email} required>
               <TextInput
                 name="billingEmail"
                 type="email"
@@ -917,16 +876,16 @@ export function BusinessOnboarding({
               />
             </FormField>
           </div>
-          <FormField label={ar ? "البلد" : "Billing country"} required>
+          <FormField label={copy.billing.country} required>
             <SearchableSelect
               name="billingCountry"
               options={countries}
               defaultValue={billingIdentity?.countryCode ?? "IQ"}
-              placeholder={ar ? "ابحث عن بلد" : "Search countries"}
+              placeholder={copy.billing.searchCountries}
               required
             />
           </FormField>
-          <FormField label={ar ? "العنوان" : "Address line 1"} required>
+          <FormField label={copy.billing.addressLine1} required>
             <TextInput
               name="addressLine1"
               defaultValue={billingIdentity?.addressLine1}
@@ -934,7 +893,7 @@ export function BusinessOnboarding({
               required
             />
           </FormField>
-          <FormField label={ar ? "العنوان الإضافي (اختياري)" : "Address line 2 (optional)"}>
+          <FormField label={copy.billing.addressLine2}>
             <TextInput
               name="addressLine2"
               defaultValue={billingIdentity?.addressLine2}
@@ -942,7 +901,7 @@ export function BusinessOnboarding({
             />
           </FormField>
           <div className="dashboard-form__row dashboard-form__row--three">
-            <FormField label={ar ? "المدينة" : "City"} required>
+            <FormField label={copy.billing.city} required>
               <TextInput
                 name="billingCity"
                 defaultValue={billingIdentity?.city}
@@ -950,14 +909,14 @@ export function BusinessOnboarding({
                 required
               />
             </FormField>
-            <FormField label={ar ? "المحافظة / المنطقة" : "State / region"}>
+            <FormField label={copy.billing.region}>
               <TextInput
                 name="billingRegion"
                 defaultValue={billingIdentity?.region}
                 autoComplete="address-level1"
               />
             </FormField>
-            <FormField label={ar ? "الرمز البريدي" : "Postal code"}>
+            <FormField label={copy.billing.postalCode}>
               <TextInput
                 name="postalCode"
                 defaultValue={billingIdentity?.postalCode}
@@ -966,7 +925,7 @@ export function BusinessOnboarding({
             </FormField>
           </div>
           <Button type="submit" loading={loading}>
-            {ar ? "متابعة إلى البطاقة" : "Continue to payment"}
+            {copy.billing.continue}
           </Button>
         </form>
       </OnboardingShell>
@@ -976,27 +935,23 @@ export function BusinessOnboarding({
   if (step === 4) {
     const clientSecret = setup?.clientSecret ?? null;
     return (
-      <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={4}>
+      <OnboardingShell locale={locale} step={4}>
         <div className="onboarding-heading">
-          <span>{ar ? "الخطوة 4 من 5" : "Step 4 of 5"}</span>
-          <h1>{ar ? "أضف طريقة الدفع" : "Add your payment method"}</h1>
-          <p>
-            {ar
-              ? "لن يتم خصم أي مبلغ اليوم. نحتاج البطاقة لبدء التجربة المجانية وإجراء الدفعات المستقبلية."
-              : "You will not be charged today. A card is required for the free trial and future subscription payments."}
-          </p>
+          <span>{copy.payment.step}</span>
+          <h1>{copy.payment.title}</h1>
+          <p>{copy.payment.description}</p>
         </div>
         {error ? <Alert tone="danger" title={error} /> : null}
         {loading || !setup || !billingIdentity || !stripePromise || !clientSecret ? (
           <div className="onboarding-local-loading" role="status">
-            {ar ? "جارٍ فتح نموذج الدفع الآمن…" : "Opening secure payment form…"}
+            {copy.payment.opening}
           </div>
         ) : (
           <Elements
             stripe={stripePromise}
             options={{
               clientSecret,
-              locale: ar ? "ar" : "en",
+              locale: contentLocale,
               appearance: {
                 theme: "stripe",
                 variables: {
@@ -1004,9 +959,10 @@ export function BusinessOnboarding({
                   colorText: "#241916",
                   colorBackground: "#FFFFFF",
                   colorDanger: "#C93C2B",
-                  fontFamily: ar
-                    ? "Cairo, system-ui, sans-serif"
-                    : "Manrope, system-ui, sans-serif",
+                  fontFamily:
+                    contentLocale === "ar"
+                      ? "Cairo, system-ui, sans-serif"
+                      : "Manrope, system-ui, sans-serif",
                   borderRadius: "8px",
                   spacingUnit: "4px",
                 },
@@ -1022,7 +978,6 @@ export function BusinessOnboarding({
           >
             <SecurePaymentForm
               locale={locale}
-              interfaceLocale={interfaceLocale}
               organizationId={organizationId}
               billingIdentity={billingIdentity}
               billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
@@ -1039,51 +994,46 @@ export function BusinessOnboarding({
   }
 
   return (
-    <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={5}>
+    <OnboardingShell locale={locale} step={5}>
       <div className="onboarding-heading">
-        <span>{ar ? "الخطوة 5 من 5" : "Step 5 of 5"}</span>
-        <h1>{ar ? "راجع تجربتك المجانية" : "Review your free trial"}</h1>
-        <p>
-          {ar
-            ? "راجع المبلغ والتاريخ قبل البدء. يمكنك الإلغاء من صفحة الفوترة."
-            : "Check the amount and date before you start. You can cancel from Billing."}
-        </p>
+        <span>{copy.trial.step}</span>
+        <h1>{copy.trial.title}</h1>
+        <p>{copy.trial.description}</p>
       </div>
       {error ? <Alert tone="danger" title={error} /> : null}
       {preview ? (
         <div className="onboarding-trial-review">
           <div className="onboarding-trial-review__promise">
-            <strong>{ar ? "7 أيام مجاناً" : "7 days free"}</strong>
+            <strong>{copy.trial.free}</strong>
             <span>
-              {ar
-                ? `ثم ${money(preview.amount, preview.currency, locale)} ابتداءً من ${dateLabel(preview.expectedFirstChargeAt, locale)}`
-                : `Then ${money(preview.amount, preview.currency, locale)} starting ${dateLabel(preview.expectedFirstChargeAt, locale)}`}
+              {formatMessage(copy.trial.thenStarting, {
+                amount: money(preview.amount, preview.currency),
+                date: dateLabel(preview.expectedFirstChargeAt, locale),
+              })}
             </span>
           </div>
           <dl>
             <div>
-              <dt>{ar ? "الباقة" : "Plan"}</dt>
-              <dd>
-                <bdi dir="ltr">{planCatalog[preview.plan].name}</bdi>
-              </dd>
+              <dt>{copy.trial.plan}</dt>
+              <dd>{planName(preview.plan, copy)}</dd>
             </div>
             <div>
-              <dt>{ar ? "دورة الفوترة" : "Cadence"}</dt>
-              <dd>{cadenceLabel(preview.cadence, locale)}</dd>
+              <dt>{copy.trial.cadence}</dt>
+              <dd>{cadenceLabel(preview.cadence, copy)}</dd>
             </div>
             <div>
-              <dt>{ar ? "بداية التجربة" : "Trial starts"}</dt>
+              <dt>{copy.trial.trialStarts}</dt>
               <dd>{dateLabel(preview.expectedTrialStart, locale)}</dd>
             </div>
             <div>
-              <dt>{ar ? "أول دفعة" : "First charge"}</dt>
+              <dt>{copy.trial.firstCharge}</dt>
               <dd>
                 {dateLabel(preview.expectedFirstChargeAt, locale)} ·{" "}
-                {money(preview.amount, preview.currency, locale)}
+                {money(preview.amount, preview.currency)}
               </dd>
             </div>
             <div>
-              <dt>{ar ? "طريقة الدفع" : "Payment method"}</dt>
+              <dt>{copy.trial.paymentMethod}</dt>
               <dd className="onboarding-card-summary">
                 <CreditCard size={17} aria-hidden="true" />
                 {preview.paymentMethod.brand.toUpperCase()} •••• {preview.paymentMethod.last4} ·{" "}
@@ -1091,43 +1041,36 @@ export function BusinessOnboarding({
               </dd>
             </div>
           </dl>
-          <p className="onboarding-trial-review__policy">
-            {ar
-              ? "لن يتم خصم أي مبلغ اليوم. إذا لم تُلغِ قبل نهاية التجربة، سيتم تحصيل المبلغ الموضح أعلاه تلقائياً."
-              : "Nothing is charged today. Unless you cancel before the trial ends, the amount above will be charged automatically."}
-          </p>
+          <p className="onboarding-trial-review__policy">{copy.trial.policy}</p>
           <div className="onboarding-policy-links">
             <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${locale}/refunds`}
+              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/refunds`}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {ar ? "سياسة الفوترة والاسترداد" : "Billing & Refund Policy"}
+              {copy.trial.billingRefundPolicy}
             </a>
             <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${locale}/terms`}
+              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/terms`}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {ar ? "الشروط" : "Terms"}
+              {copy.trial.terms}
             </a>
             <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${locale}/privacy`}
+              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/privacy`}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {ar ? "الخصوصية" : "Privacy"}
+              {copy.trial.privacy}
             </a>
           </div>
           <Button onClick={() => void startTrial()} loading={loading}>
-            {ar ? "ابدأ التجربة المجانية لمدة 7 أيام" : "Start 7-day free trial"}
+            {copy.trial.start}
           </Button>
         </div>
       ) : (
-        <Alert
-          tone="danger"
-          title={ar ? "تعذر تحميل ملخص التجربة." : "Trial review is unavailable."}
-        />
+        <Alert tone="danger" title={copy.trial.unavailable} />
       )}
     </OnboardingShell>
   );
@@ -1135,14 +1078,12 @@ export function BusinessOnboarding({
 
 export function CompletionOnboarding({
   locale,
-  interfaceLocale = locale,
   organizationId,
 }: {
-  locale: Locale;
-  interfaceLocale?: InterfaceLocale;
+  locale: InterfaceLocale;
   organizationId?: string;
 }) {
-  const ar = locale === "ar";
+  const copy = messages[locale].onboarding;
   const [result, setResult] = useState<TrialResult | null>(null);
   useEffect(() => {
     try {
@@ -1153,31 +1094,27 @@ export function CompletionOnboarding({
     }
   }, []);
   return (
-    <OnboardingShell locale={locale} interfaceLocale={interfaceLocale} step={5}>
+    <OnboardingShell locale={locale} step={5}>
       <div className="onboarding-success-mark" aria-hidden="true">
         <Check size={30} />
       </div>
       <div className="onboarding-heading onboarding-heading--center">
-        <span>{ar ? "تم إعداد حسابك" : "Setup complete"}</span>
-        <h1>{ar ? "بدأت تجربتك المجانية" : "Your free trial has started"}</h1>
-        <p>
-          {ar
-            ? "أصبح حساب Waflo جاهزاً. سنرسل تذكيراً قبل أول دفعة بيومين."
-            : "Waflo is ready. We will remind you two days before the first charge."}
-        </p>
+        <span>{copy.completion.label}</span>
+        <h1>{copy.completion.title}</h1>
+        <p>{copy.completion.description}</p>
       </div>
       {result ? (
         <div className="onboarding-success-summary">
           <div>
-            <span>{ar ? "تنتهي التجربة" : "Trial ends"}</span>
+            <span>{copy.completion.trialEnds}</span>
             <strong>{dateLabel(result.trialEnd, locale)}</strong>
           </div>
           <div>
-            <span>{ar ? "أول دفعة" : "First charge"}</span>
-            <strong>{money(result.amount, result.currency, locale)}</strong>
+            <span>{copy.completion.firstCharge}</span>
+            <strong>{money(result.amount, result.currency)}</strong>
           </div>
           <div>
-            <span>{ar ? "البطاقة" : "Card"}</span>
+            <span>{copy.completion.card}</span>
             <strong>
               {result.paymentMethod.brand.toUpperCase()} •••• {result.paymentMethod.last4}
             </strong>
@@ -1185,22 +1122,14 @@ export function CompletionOnboarding({
         </div>
       ) : null}
       <div className="onboarding-success-actions">
-        <Link className="wf-button wf-button--primary" href={`/${interfaceLocale}/dashboard`}>
-          {ar ? "فتح لوحة التحكم" : "Open dashboard"}
+        <Link className="wf-button wf-button--primary" href={`/${locale}/dashboard`}>
+          {copy.completion.openDashboard}
         </Link>
-        <Link
-          className="wf-button wf-button--secondary"
-          href={`/${interfaceLocale}/dashboard/programs/new`}
-        >
-          {ar ? "إنشاء بطاقة ولاء" : "Create loyalty card"}
+        <Link className="wf-button wf-button--secondary" href={`/${locale}/dashboard/programs/new`}>
+          {copy.completion.createLoyaltyCard}
         </Link>
       </div>
-      {!organizationId ? (
-        <Alert
-          tone="danger"
-          title={ar ? "تعذر العثور على المؤسسة." : "Organization context is missing."}
-        />
-      ) : null}
+      {!organizationId ? <Alert tone="danger" title={copy.completion.missingOrganization} /> : null}
     </OnboardingShell>
   );
 }

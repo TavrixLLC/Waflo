@@ -1,6 +1,11 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
+import {
+  contentLocaleForInterface,
+  messages,
+  type InterfaceLocale,
+  type InterfaceMessages,
+} from "@waflo/i18n";
 import {
   Alert,
   Button,
@@ -16,8 +21,34 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { apiFetch, ApiClientError, apiUrl, resetCsrf } from "../lib/api-client";
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof ApiClientError ? error.message : fallback;
+type AuthCopy = InterfaceMessages["auth"];
+
+const authErrorKeys = {
+  NETWORK_ERROR: "network",
+  RATE_LIMITED: "rateLimited",
+  ACCOUNT_NOT_CREATED: "accountNotCreated",
+  AUTHENTICATION_FAILED: "invalidCredentials",
+  INVALID_CREDENTIALS: "invalidCredentials",
+  EMAIL_DELIVERY_UNAVAILABLE: "deliveryUnavailable",
+  EMAIL_VERIFICATION_REQUIRED: "verificationRequired",
+  VERIFICATION_LINK_INVALID: "verificationInvalid",
+  RESET_LINK_INVALID: "resetInvalid",
+  LEGAL_ACCEPTANCE_REQUIRED: "legalRequired",
+  EXTERNAL_AUTH_FAILED: "externalFailed",
+  EXTERNAL_AUTH_INVALID: "externalFailed",
+  EXTERNAL_AUTH_ACTION_REQUIRED: "externalFailed",
+  INVITATION_UNAVAILABLE: "invitationUnavailable",
+  INVITATION_CANCELED: "invitationUnavailable",
+  INVITATION_NOT_FOUND: "invitationUnavailable",
+  INVITATION_EXPIRED: "invitationExpired",
+  INVITATION_ALREADY_ACCEPTED: "invitationAccepted",
+  INVITATION_EMAIL_MISMATCH: "invitationEmailMismatch",
+} as const satisfies Record<string, keyof AuthCopy["apiErrors"]>;
+
+function errorMessage(error: unknown, copy: AuthCopy, fallback: string): string {
+  if (!(error instanceof ApiClientError)) return fallback;
+  const key = authErrorKeys[error.code as keyof typeof authErrorKeys];
+  return key ? copy.apiErrors[key] : copy.apiErrors.generic;
 }
 
 interface MeResponse {
@@ -48,7 +79,7 @@ interface MeResponse {
   }[];
 }
 
-export async function destinationAfterLogin(locale: Locale): Promise<string> {
+export async function destinationAfterLogin(locale: InterfaceLocale): Promise<string> {
   const me = await apiFetch<MeResponse>("/v1/auth/me");
   if (me.accountState?.email === "unverified") return `/${locale}/verify-email`;
   if (me.memberships.length === 0) return `/${locale}/onboarding/business`;
@@ -98,11 +129,12 @@ function ExternalAuthRail({
   registration = false,
   legalAccepted = true,
 }: {
-  locale: Locale;
+  locale: InterfaceLocale;
   registration?: boolean;
   legalAccepted?: boolean;
 }) {
-  const ar = locale === "ar";
+  const copy = messages[locale].auth;
+  const contentLocale = contentLocaleForInterface(locale);
   const [capabilities, setCapabilities] = useState<ExternalCapabilities | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -123,36 +155,24 @@ function ExternalAuthRail({
         {
           method: "POST",
           body: JSON.stringify({
-            locale,
+            locale: contentLocale,
             termsAccepted: true,
             privacyAccepted: true,
           }),
         },
       );
+      sessionStorage.setItem("waflo:oauth-interface-locale", locale);
       window.location.assign(result.authorizationUrl);
     } catch (caught) {
-      setError(
-        errorMessage(
-          caught,
-          ar ? "تعذر بدء التسجيل باستخدام Google." : "Unable to start Google signup.",
-        ),
-      );
+      setError(errorMessage(caught, copy, copy.external.signupError));
       setWorking(false);
     }
   }
 
-  const label = registration
-    ? ar
-      ? "المتابعة باستخدام Google"
-      : "Continue with Google"
-    : ar
-      ? "تسجيل الدخول باستخدام Google"
-      : "Sign in with Google";
+  const label = registration ? copy.external.continueWithGoogle : copy.external.signInWithGoogle;
   return (
     <fieldset className="external-auth">
-      <legend className="external-auth__legend">
-        {ar ? "خيارات تسجيل الدخول" : "Sign-in options"}
-      </legend>
+      <legend className="external-auth__legend">{copy.external.options}</legend>
       <div className="external-auth__providers">
         {registration ? (
           <button
@@ -165,12 +185,13 @@ function ExternalAuthRail({
             <span className="external-auth__mark external-auth__mark--google">
               <GoogleMark />
             </span>
-            {working ? (ar ? "جارٍ المتابعة…" : "Continuing…") : label}
+            {working ? copy.external.continuing : label}
           </button>
         ) : (
           <a
             className="external-auth__button"
-            href={`${apiUrl}/v1/auth/external/google/start?${new URLSearchParams({ locale }).toString()}`}
+            href={`${apiUrl}/v1/auth/external/google/start?${new URLSearchParams({ locale: contentLocale }).toString()}`}
+            onClick={() => sessionStorage.setItem("waflo:oauth-interface-locale", locale)}
           >
             <span className="external-auth__mark external-auth__mark--google">
               <GoogleMark />
@@ -185,21 +206,18 @@ function ExternalAuthRail({
         </p>
       ) : null}
       {registration && !legalAccepted ? (
-        <p className="external-auth__hint">
-          {ar
-            ? "وافق على الشروط وسياسة الخصوصية للمتابعة."
-            : "Accept the Terms and Privacy Policy to continue."}
-        </p>
+        <p className="external-auth__hint">{copy.external.acceptLegal}</p>
       ) : null}
       <div className="external-auth__separator">
-        <span>{ar ? "أو" : "or"}</span>
+        <span>{copy.external.separator}</span>
       </div>
     </fieldset>
   );
 }
 
-export function SignupForm({ locale }: { locale: Locale }) {
-  const ar = locale === "ar";
+export function SignupForm({ locale }: { locale: InterfaceLocale }) {
+  const copy = messages[locale].auth;
+  const contentLocale = contentLocaleForInterface(locale);
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -215,7 +233,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
     const password = String(form.get("password") ?? "");
     const confirm = String(form.get("confirmPassword") ?? "");
     if (password !== confirm) {
-      setError(ar ? "كلمتا المرور غير متطابقتين." : "Passwords do not match.");
+      setError(copy.signup.passwordsDoNotMatch);
       setLoading(false);
       return;
     }
@@ -227,7 +245,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
           displayName: String(form.get("displayName") ?? ""),
           email,
           password,
-          locale,
+          locale: contentLocale,
           termsAccepted: form.get("terms") === "on",
           privacyAccepted: form.get("privacy") === "on",
         }),
@@ -241,7 +259,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
         sessionStorage.removeItem("waflo:verification-delivery-accepted");
         setVerificationRecoveryAvailable(true);
       }
-      setError(errorMessage(caught, ar ? "تعذر إنشاء الحساب." : "Unable to create account."));
+      setError(errorMessage(caught, copy, copy.signup.createError));
     } finally {
       setLoading(false);
     }
@@ -249,16 +267,12 @@ export function SignupForm({ locale }: { locale: Locale }) {
 
   return (
     <>
-      <h2>{ar ? "أنشئ حساب التاجر" : "Create your merchant account"}</h2>
-      <p className="auth-card__intro">
-        {ar
-          ? "أنشئ حسابك، ثم اختر باقتك وابدأ 7 أيام مجاناً بعد إضافة طريقة الدفع."
-          : "Create your account, choose a plan, and start 7 days free after adding a payment method."}
-      </p>
+      <h2>{copy.signup.title}</h2>
+      <p className="auth-card__intro">{copy.signup.intro}</p>
       {error ? <Alert tone="danger" title={error} /> : null}
       {verificationRecoveryAvailable ? (
         <Link className="auth-link" href={`/${locale}/verify-email`}>
-          {ar ? "حاول إرسال رسالة التأكيد مرة أخرى" : "Try sending the verification email again"}
+          {copy.signup.verificationRecovery}
         </Link>
       ) : null}
       <ExternalAuthRail
@@ -267,7 +281,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
         legalAccepted={termsAccepted && privacyAccepted}
       />
       <form className="auth-form" onSubmit={submit}>
-        <FormField label={ar ? "الاسم الكامل" : "Full name"} required>
+        <FormField label={copy.common.fullName} required>
           <TextInput
             name="displayName"
             autoComplete="name"
@@ -276,18 +290,10 @@ export function SignupForm({ locale }: { locale: Locale }) {
             required
           />
         </FormField>
-        <FormField label={ar ? "البريد الإلكتروني" : "Email address"} required>
+        <FormField label={copy.common.emailAddress} required>
           <EmailInput name="email" required />
         </FormField>
-        <FormField
-          label={ar ? "كلمة المرور" : "Password"}
-          hint={
-            ar
-              ? "12 حرفاً على الأقل. يمكنك استخدام مدير كلمات المرور."
-              : "At least 12 characters. Password managers are welcome."
-          }
-          required
-        >
+        <FormField label={copy.common.password} hint={copy.signup.passwordHint} required>
           <PasswordInput
             name="password"
             minLength={12}
@@ -296,7 +302,7 @@ export function SignupForm({ locale }: { locale: Locale }) {
             required
           />
         </FormField>
-        <FormField label={ar ? "تأكيد كلمة المرور" : "Confirm password"} required>
+        <FormField label={copy.common.confirmPassword} required>
           <PasswordInput
             name="confirmPassword"
             minLength={12}
@@ -311,31 +317,13 @@ export function SignupForm({ locale }: { locale: Locale }) {
           checked={termsAccepted}
           onChange={(event) => setTermsAccepted(event.currentTarget.checked)}
           label={
-            ar ? (
-              <>
-                أوافق على{" "}
-                <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/ar/terms`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  شروط الاستخدام
-                </a>
-                .
-              </>
-            ) : (
-              <>
-                I agree to the{" "}
-                <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/en/terms`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Terms of Service
-                </a>
-                .
-              </>
-            )
+            <a
+              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/terms`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {copy.signup.termsAgreement}
+            </a>
           }
         />
         <Checkbox
@@ -344,64 +332,38 @@ export function SignupForm({ locale }: { locale: Locale }) {
           checked={privacyAccepted}
           onChange={(event) => setPrivacyAccepted(event.currentTarget.checked)}
           label={
-            ar ? (
-              <>
-                قرأت{" "}
-                <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/ar/privacy`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  سياسة الخصوصية
-                </a>
-                .
-              </>
-            ) : (
-              <>
-                I have read the{" "}
-                <a
-                  href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/en/privacy`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Privacy Policy
-                </a>
-                .
-              </>
-            )
+            <a
+              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/privacy`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {copy.signup.privacyAgreement}
+            </a>
           }
         />
         <p className="auth-form__legal-support">
-          {ar ? "توضح " : "The "}
           <a
-            href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${locale}/refunds`}
+            href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/refunds`}
             target="_blank"
             rel="noopener noreferrer"
           >
-            {ar ? "سياسة الفوترة والاسترداد" : "Billing & Refund Policy"}
+            {copy.signup.refundPolicy}
           </a>{" "}
-          {ar
-            ? "الفرق بين الإلغاء والتخفيض والاسترداد."
-            : "explains cancellation, downgrades, and refund review."}
+          <span>{copy.signup.refundExplanation}</span>
         </p>
-        <Button
-          type="submit"
-          loading={loading}
-          loadingLabel={ar ? "جارٍ إنشاء الحساب…" : "Creating account…"}
-        >
-          {ar ? "إنشاء الحساب" : "Create account"}
+        <Button type="submit" loading={loading} loadingLabel={copy.signup.creating}>
+          {copy.signup.create}
         </Button>
       </form>
       <p className="auth-form__footer">
-        {ar ? "لديك حساب؟" : "Already have an account?"}{" "}
-        <Link href={`/${locale}/login`}>{ar ? "سجّل الدخول" : "Log in"}</Link>
+        {copy.signup.existingAccount} <Link href={`/${locale}/login`}>{copy.signup.logIn}</Link>
       </p>
     </>
   );
 }
 
-export function LoginForm({ locale }: { locale: Locale }) {
-  const ar = locale === "ar";
+export function LoginForm({ locale }: { locale: InterfaceLocale }) {
+  const copy = messages[locale].auth;
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -427,7 +389,7 @@ export function LoginForm({ locale }: { locale: Locale }) {
         router.replace(`/${locale}/verify-email`);
         return;
       }
-      setError(errorMessage(caught, ar ? "تعذر تسجيل الدخول." : "Unable to sign in."));
+      setError(errorMessage(caught, copy, copy.login.error));
     } finally {
       setLoading(false);
     }
@@ -435,45 +397,36 @@ export function LoginForm({ locale }: { locale: Locale }) {
 
   return (
     <>
-      <h2>{ar ? "مرحباً بعودتك" : "Welcome back"}</h2>
-      <p className="auth-card__intro">
-        {ar
-          ? "سجّل الدخول لإدارة مؤسستك وفروعك وفريقك."
-          : "Sign in to manage your organization, locations, and team."}
-      </p>
+      <h2>{copy.login.title}</h2>
+      <p className="auth-card__intro">{copy.login.intro}</p>
       {error ? <Alert tone="danger" title={error} /> : null}
       <ExternalAuthRail locale={locale} />
       <form className="auth-form" onSubmit={submit}>
-        <FormField label={ar ? "البريد الإلكتروني" : "Email address"} required>
+        <FormField label={copy.common.emailAddress} required>
           <EmailInput name="email" required />
         </FormField>
-        <FormField label={ar ? "كلمة المرور" : "Password"} required>
+        <FormField label={copy.common.password} required>
           <PasswordInput name="password" required />
         </FormField>
         <div style={{ textAlign: "end" }}>
           <a className="auth-link" href={`/${locale}/forgot-password`}>
-            {ar ? "نسيت كلمة المرور؟" : "Forgot password?"}
+            {copy.login.forgotPassword}
           </a>
         </div>
-        <Button
-          type="submit"
-          loading={loading}
-          loadingLabel={ar ? "جارٍ تسجيل الدخول…" : "Signing in…"}
-        >
-          {ar ? "تسجيل الدخول" : "Sign in"}
+        <Button type="submit" loading={loading} loadingLabel={copy.login.signingIn}>
+          {copy.common.signIn}
         </Button>
       </form>
       <p className="auth-form__footer">
-        {ar ? "ليس لديك حساب؟" : "New to Waflo?"}{" "}
-        <a href={`/${locale}/signup`}>{ar ? "أنشئ حساباً" : "Create an account"}</a>
+        {copy.login.newToWaflo} <a href={`/${locale}/signup`}>{copy.login.createAccount}</a>
       </p>
     </>
   );
 }
 
-export function VerificationForm({ locale }: { locale: Locale }) {
+export function VerificationForm({ locale }: { locale: InterfaceLocale }) {
   const router = useRouter();
-  const ar = locale === "ar";
+  const copy = messages[locale].auth;
   const [state, setState] = useState<"pending" | "verifying" | "verified" | "error">("pending");
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "danger">("success");
@@ -497,7 +450,7 @@ export function VerificationForm({ locale }: { locale: Locale }) {
     if (legacyUrl.searchParams.get("token")) {
       legacyUrl.searchParams.delete("token");
       window.history.replaceState(null, "", `${legacyUrl.pathname}${legacyUrl.search}`);
-      setMessage(ar ? "رابط غير صالح أو منتهي." : "This link is invalid or has expired.");
+      setMessage(copy.verification.invalidOrExpired);
       setState("error");
       return;
     }
@@ -518,15 +471,10 @@ export function VerificationForm({ locale }: { locale: Locale }) {
     })
       .then(() => setState("verified"))
       .catch((caught: unknown) => {
-        setMessage(
-          errorMessage(
-            caught,
-            ar ? "الرابط غير صالح أو منتهي." : "The link is invalid or expired.",
-          ),
-        );
+        setMessage(errorMessage(caught, copy, copy.verification.invalidOrExpiredShort));
         setState("error");
       });
-  }, [ar]);
+  }, [copy]);
 
   async function resend() {
     if (!email) {
@@ -539,14 +487,10 @@ export function VerificationForm({ locale }: { locale: Locale }) {
         method: "POST",
         body: JSON.stringify({ email }),
       });
-      setMessage(
-        ar
-          ? "إذا كان العنوان مؤهلاً، فقد قُبل طلب إرسال رسالة تأكيد جديدة."
-          : "If the address is eligible, the verification request was accepted.",
-      );
+      setMessage(copy.verification.accepted);
       setMessageTone("success");
     } catch (caught) {
-      setMessage(errorMessage(caught, ar ? "تعذرت إعادة الإرسال." : "Unable to resend."));
+      setMessage(errorMessage(caught, copy, copy.verification.resendError));
       setMessageTone("danger");
     } finally {
       setResending(false);
@@ -559,17 +503,13 @@ export function VerificationForm({ locale }: { locale: Locale }) {
         <div className="auth-verify__icon-box auth-verify__icon-box--success">
           <CheckCircle2 size={28} aria-hidden="true" />
         </div>
-        <h2>{ar ? "تم تأكيد بريدك" : "Email verified"}</h2>
-        <p className="auth-card__intro">
-          {ar
-            ? "يمكنك الآن تسجيل الدخول وإكمال إعداد مؤسستك."
-            : "You can now sign in and complete your organization setup."}
-        </p>
+        <h2>{copy.verification.verifiedTitle}</h2>
+        <p className="auth-card__intro">{copy.verification.verifiedIntro}</p>
         <Link
           className="wf-button wf-button--primary auth-primary-action"
           href={`/${locale}/login`}
         >
-          {ar ? "متابعة إلى تسجيل الدخول" : "Continue to sign in"}
+          {copy.verification.continueToSignIn}
         </Link>
       </div>
     );
@@ -580,22 +520,12 @@ export function VerificationForm({ locale }: { locale: Locale }) {
         <Mail size={28} aria-hidden="true" />
       </div>
       <h2>
-        {state === "verifying"
-          ? ar
-            ? "جارٍ تأكيد البريد…"
-            : "Verifying your email…"
-          : ar
-            ? "تحقق من بريدك"
-            : "Check your email"}
+        {state === "verifying" ? copy.verification.verifyingTitle : copy.verification.checkTitle}
       </h2>
-      <p className="auth-card__intro">
-        {ar
-          ? "أكّد بريدك الإلكتروني للمتابعة إلى إعداد مؤسستك."
-          : "Verify your email to continue setting up your business."}
-      </p>
+      <p className="auth-card__intro">{copy.verification.intro}</p>
       {deliveryAccepted && email ? (
         <div className="auth-verify__recipient">
-          <span>{ar ? "أرسلنا رسالة التأكيد إلى:" : "Verification email sent to:"}</span>
+          <span>{copy.verification.sentTo}</span>
           <strong dir="ltr">{email.replace(/^(.{2}).*(@.*)$/, "$1•••$2")}</strong>
         </div>
       ) : null}
@@ -609,24 +539,20 @@ export function VerificationForm({ locale }: { locale: Locale }) {
             onClick={() => void resend()}
             loading={resending}
           >
-            {ar ? "إعادة إرسال الرسالة" : "Resend verification email"}
+            {copy.verification.resend}
           </Button>
           <Link className="auth-link auth-verify__back-link" href={`/${locale}/login`}>
-            {ar ? "العودة إلى تسجيل الدخول" : "Back to sign in"}
+            {copy.common.backToSignIn}
           </Link>
         </div>
       ) : null}
-      <p className="auth-form__footer auth-verify__help">
-        {ar
-          ? "لم تصلك الرسالة؟ تحقّق من مجلد الرسائل غير المرغوب فيها."
-          : "Didn’t receive it? Check your spam or junk folder."}
-      </p>
+      <p className="auth-form__footer auth-verify__help">{copy.verification.help}</p>
     </div>
   );
 }
 
-export function ForgotPasswordForm({ locale }: { locale: Locale }) {
-  const ar = locale === "ar";
+export function ForgotPasswordForm({ locale }: { locale: InterfaceLocale }) {
+  const copy = messages[locale].auth;
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -641,44 +567,36 @@ export function ForgotPasswordForm({ locale }: { locale: Locale }) {
         method: "POST",
         body: JSON.stringify({ email: String(form.get("email") ?? "") }),
       });
-      setMessage(
-        ar
-          ? "إذا كان الحساب موجوداً، أرسلنا تعليمات إعادة التعيين."
-          : "If the account exists, reset instructions have been sent.",
-      );
+      setMessage(copy.forgotPassword.accepted);
     } catch (caught) {
-      setError(errorMessage(caught, ar ? "تعذر إرسال الطلب." : "Unable to submit the request."));
+      setError(errorMessage(caught, copy, copy.forgotPassword.error));
     } finally {
       setLoading(false);
     }
   }
   return (
     <>
-      <h2>{ar ? "إعادة تعيين كلمة المرور" : "Reset your password"}</h2>
-      <p className="auth-card__intro">
-        {ar
-          ? "أدخل بريدك وسنرسل تعليمات آمنة إذا كان الحساب موجوداً."
-          : "Enter your email and we’ll send secure instructions if the account exists."}
-      </p>
+      <h2>{copy.forgotPassword.title}</h2>
+      <p className="auth-card__intro">{copy.forgotPassword.intro}</p>
       {message ? <Alert tone="success" title={message} /> : null}
       {error ? <Alert tone="danger" title={error} /> : null}
       <form className="auth-form" onSubmit={submit}>
-        <FormField label={ar ? "البريد الإلكتروني" : "Email address"} required>
+        <FormField label={copy.common.emailAddress} required>
           <EmailInput name="email" required />
         </FormField>
         <Button type="submit" loading={loading}>
-          {ar ? "إرسال التعليمات" : "Send instructions"}
+          {copy.forgotPassword.send}
         </Button>
       </form>
       <p className="auth-form__footer">
-        <a href={`/${locale}/login`}>{ar ? "العودة إلى تسجيل الدخول" : "Back to sign in"}</a>
+        <a href={`/${locale}/login`}>{copy.common.backToSignIn}</a>
       </p>
     </>
   );
 }
 
-export function ResetPasswordForm({ locale }: { locale: Locale }) {
-  const ar = locale === "ar";
+export function ResetPasswordForm({ locale }: { locale: InterfaceLocale }) {
+  const copy = messages[locale].auth;
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [complete, setComplete] = useState(false);
@@ -693,7 +611,7 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
     if (legacyUrl.searchParams.get("token")) {
       legacyUrl.searchParams.delete("token");
       window.history.replaceState(null, "", `${legacyUrl.pathname}${legacyUrl.search}`);
-      setError(ar ? "رابط غير صالح أو منتهي." : "This link is invalid or has expired.");
+      setError(copy.resetPassword.invalidOrExpired);
       return;
     }
 
@@ -705,18 +623,18 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
       ? decodeURIComponent(hash.slice("#token=".length))
       : "";
     setToken(fragmentToken);
-  }, [ar]);
+  }, [copy]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token) {
-      setError(ar ? "رابط إعادة التعيين غير صالح." : "The reset link is invalid.");
+      setError(copy.resetPassword.invalid);
       return;
     }
     setLoading(true);
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") ?? "");
     if (password !== String(form.get("confirmPassword") ?? "")) {
-      setError(ar ? "كلمتا المرور غير متطابقتين." : "Passwords do not match.");
+      setError(copy.signup.passwordsDoNotMatch);
       setLoading(false);
       return;
     }
@@ -728,7 +646,7 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
       resetCsrf();
       setComplete(true);
     } catch (caught) {
-      setError(errorMessage(caught, ar ? "تعذر تغيير كلمة المرور." : "Unable to reset password."));
+      setError(errorMessage(caught, copy, copy.resetPassword.error));
     } finally {
       setLoading(false);
     }
@@ -736,27 +654,23 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
   if (complete) {
     return (
       <>
-        <Alert tone="success" title={ar ? "تم تغيير كلمة المرور" : "Password changed"} />
+        <Alert tone="success" title={copy.resetPassword.changed} />
         <Link
           className="wf-button wf-button--primary auth-primary-action"
           href={`/${locale}/login`}
         >
-          {ar ? "تسجيل الدخول" : "Sign in"}
+          {copy.common.signIn}
         </Link>
       </>
     );
   }
   return (
     <>
-      <h2>{ar ? "اختر كلمة مرور جديدة" : "Choose a new password"}</h2>
-      <p className="auth-card__intro">
-        {ar
-          ? "سيتم إنهاء الجلسات الحالية بعد نجاح إعادة التعيين."
-          : "Existing sessions will be revoked after a successful reset."}
-      </p>
+      <h2>{copy.resetPassword.title}</h2>
+      <p className="auth-card__intro">{copy.resetPassword.intro}</p>
       {error ? <Alert tone="danger" title={error} /> : null}
       <form className="auth-form" onSubmit={submit}>
-        <FormField label={ar ? "كلمة المرور الجديدة" : "New password"} required>
+        <FormField label={copy.resetPassword.newPassword} required>
           <PasswordInput
             name="password"
             minLength={12}
@@ -765,7 +679,7 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
             required
           />
         </FormField>
-        <FormField label={ar ? "تأكيد كلمة المرور" : "Confirm password"} required>
+        <FormField label={copy.common.confirmPassword} required>
           <PasswordInput
             name="confirmPassword"
             minLength={12}
@@ -775,39 +689,31 @@ export function ResetPasswordForm({ locale }: { locale: Locale }) {
           />
         </FormField>
         <Button type="submit" loading={loading}>
-          {ar ? "حفظ كلمة المرور" : "Save password"}
+          {copy.resetPassword.save}
         </Button>
       </form>
     </>
   );
 }
 
-export function LoggedOutState({ locale, expired = false }: { locale: Locale; expired?: boolean }) {
-  const ar = locale === "ar";
+export function LoggedOutState({
+  locale,
+  expired = false,
+}: {
+  locale: InterfaceLocale;
+  expired?: boolean;
+}) {
+  const copy = messages[locale].auth;
   return (
     <>
       <Alert
         tone={expired ? "warning" : "success"}
-        title={
-          expired
-            ? ar
-              ? "انتهت جلستك"
-              : "Your session expired"
-            : ar
-              ? "تم تسجيل الخروج"
-              : "You’re signed out"
-        }
+        title={expired ? copy.loggedOut.expiredTitle : copy.loggedOut.signedOutTitle}
       >
-        {expired
-          ? ar
-            ? "سجّل الدخول مجدداً لمتابعة العمل بأمان."
-            : "Sign in again to continue securely."
-          : ar
-            ? "تم إنهاء الجلسة بأمان."
-            : "Your session ended securely."}
+        {expired ? copy.loggedOut.expiredDescription : copy.loggedOut.signedOutDescription}
       </Alert>
       <Link className="wf-button wf-button--primary auth-primary-action" href={`/${locale}/login`}>
-        {ar ? "تسجيل الدخول" : "Sign in"}
+        {copy.common.signIn}
       </Link>
     </>
   );
