@@ -1,4 +1,5 @@
 import type { InterfaceMessages } from "./en.js";
+import { assetUploaderInterfaceCopy } from "./asset-uploader-interface-copy.js";
 import { authInterfaceCopy } from "./auth-interface-copy.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
@@ -7,6 +8,7 @@ import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js
 import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 import { onboardingInterfaceCopy } from "./onboarding-interface-copy.js";
+import { overviewInterfaceCopy } from "./overview-interface-copy.js";
 
 export const kuBadini: InterfaceMessages = {
   auth: authInterfaceCopy.kuBadini,
@@ -37,6 +39,8 @@ export const kuBadini: InterfaceMessages = {
     unavailable: "ئەم پەڕەیە کاتێک بەردەست نییە.",
   },
   merchant: {
+    assetUploader: assetUploaderInterfaceCopy.kuBadini,
+    overview: overviewInterfaceCopy.kuBadini,
     shell: {
       overview: "دەربارەیا گشتی",
       programs: "کارتێن دڵسۆزیێ",
@@ -124,7 +128,7 @@ export const kuBadini: InterfaceMessages = {
         sectionDescriptions: {
           basics: "ناڤێ کارتێ بنڤیسە و ڕێکا بەدەستهێنانی مۆران پشتڕاست بکە.",
           reward: "دیار بکە کڕیار ل گەهاندنا ئامانجێ چ دگرێت.",
-          languages: "ئینگلیزی و عەرەبی پێکڤە بەڕێوەببە و ماوە دیار بکە.",
+          languages: "زمانێن کڕیاران زێدە بکە و ناڤەڕۆکا کارتێ بۆ هەر زمانەکێ تەواو بکە.",
           locations: "شوێنێن بەدەستهێنان و بەکارئینانا خەلاتێ هەلبژێرە.",
           appearance: "ناسنامەیا قالبێ بپارێزە و کۆنترۆلێن دیاری یێن دیمنێ بگۆهڕە.",
           review: "کێشەیێن ئامادەیی بەرێ بڵاوکرنێ چارەسەر بکە.",
@@ -160,7 +164,7 @@ export const kuBadini: InterfaceMessages = {
         mode: "شێوازی دەستکاریکرنێ",
         basicsSummary: "ناڤێ کارتێ، یاسایا بەدەستهێنانێ و ئامانج",
         rewardSummary: "خەلاتا دوماهی ل ئامانجا مۆران",
-        languageSummary: "ناڤەڕۆکا کڕیار ب ئینگلیزی و عەرەبی",
+        languageSummary: "زمانێن چالاک یێن کڕیاران و ناڤەڕۆکا وان یا وەرگێڕدراو",
         locationSummary: "شوێنێن چالاک یێن بەشدار",
         appearanceSummary: "قالب، ڕەنگ، لۆگۆ و وێنێن مۆران",
         ui: {

@@ -1,13 +1,13 @@
 "use client";
 
 import { planCatalog } from "@waflo/billing";
-import type { Locale } from "@waflo/contracts";
 import {
-  directionFor,
-  directionForInterface,
-  localeRegistry,
-  type InterfaceLocale,
-} from "@waflo/i18n";
+  cardLocaleMetadata,
+  cardLocaleRegistry,
+  directionForCardLocale,
+  type Locale,
+} from "@waflo/contracts";
+import { directionForInterface, type InterfaceLocale, localeRegistry } from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -18,6 +18,7 @@ import {
   ColorInput,
   FormField,
   Modal,
+  SearchableSelect,
   Select,
   TextArea,
   TextInput,
@@ -60,8 +61,8 @@ import {
   builderReadinessWithValidation,
   builderSectionForIssue,
   builderSections,
+  cardLocaleCompleteness,
   isNeutralBuilderDraft,
-  languageCompleteness,
   shouldScheduleBuilderAutosave,
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
@@ -73,6 +74,7 @@ import {
   type PreviewProfile,
   type ProgramDetail,
   type ProgramDraftInput,
+  type ProgramTranslationInput,
   type ProgramVersion,
   type TemplateItem,
   type ValidationResult,
@@ -86,7 +88,6 @@ import {
 } from "./template-gallery-presentation";
 
 const previewProfiles = ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
-const previewContentLocales = { EN: "en", AR: "ar" } as const;
 
 interface PreviewResult {
   svg: string;
@@ -108,6 +109,22 @@ interface ConflictState {
 }
 
 type DraftUpdate = (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
+
+function withProgramTranslationField(
+  value: ProgramTranslationInput,
+  key: keyof ProgramTranslationInput,
+  next: string,
+): ProgramTranslationInput {
+  if (key === "programName") return { ...value, programName: next };
+  if (key === "shortDescription") return { ...value, shortDescription: next };
+  if (key === "fullDescription") return { ...value, fullDescription: next };
+  if (key === "rewardSummary") return { ...value, rewardSummary: next };
+  if (key === "joinInstructions") return { ...value, joinInstructions: next };
+  if (key === "termsAndConditions") return { ...value, termsAndConditions: next };
+  if (key === "completionMessage") return { ...value, completionMessage: next };
+  if (key === "rewardUnlockedMessage") return { ...value, rewardUnlockedMessage: next };
+  return { ...value, pausedMessage: next };
+}
 
 const sectionIcons = {
   basics: Sparkles,
@@ -195,9 +212,9 @@ export function ProgramCardBuilder({
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [saveState, setSaveState] = useState<BuilderSaveState>("saved");
-  const [activeSection, setActiveSection] = useState<BuilderSection>("basics");
-  const [language, setLanguage] = useState<"en" | "ar">(ar ? "ar" : "en");
-  const [previewLocale, setPreviewLocale] = useState<"EN" | "AR">(ar ? "AR" : "EN");
+  const [activeSection, setActiveSection] = useState<BuilderSection>("languages");
+  const [language, setLanguage] = useState<string>(ar ? "ar" : "en");
+  const [previewLocale, setPreviewLocale] = useState<string>(ar ? "ar" : "en");
   const [profile, setProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
   const [progress, setProgress] = useState(0);
   const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewState>>>({});
@@ -231,6 +248,11 @@ export function ProgramCardBuilder({
       return;
     }
     const next = versionToDraft(program, program.currentDraftVersion);
+    const nextLocale = next.enabledLocales.includes(next.defaultLocale)
+      ? next.defaultLocale
+      : (next.enabledLocales[0] ?? "en");
+    setLanguage(nextLocale);
+    setPreviewLocale(nextLocale);
     const serialized = JSON.stringify(apiDraft(next));
     draftRef.current = next;
     revisionRef.current = program.currentDraftVersion.revision;
@@ -368,7 +390,7 @@ export function ProgramCardBuilder({
       setPreviewError(false);
       try {
         const result = await apiFetch<PreviewResult>(
-          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${nextProfile}&locale=${previewLocale}`,
+          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${nextProfile}&locale=${encodeURIComponent(previewLocale)}`,
         );
         previewCacheRef.current.set(key, result);
         setPreviews((current) => ({ ...current, [nextProfile]: { key, result } }));
@@ -508,8 +530,6 @@ export function ProgramCardBuilder({
 
   const localReadiness = builderReadiness(draft);
   const readiness = builderReadinessWithValidation(draft, validation);
-  const enCompleteness = languageCompleteness(draft.translations.en);
-  const arCompleteness = languageCompleteness(draft.translations.ar);
   const blank = isNeutralBuilderDraft(draft);
   const selectedName = blank
     ? builderText(interfaceLocale).ui.startFromScratch
@@ -644,7 +664,16 @@ export function ProgramCardBuilder({
               <BasicsSection draft={draft} update={update} interfaceLocale={interfaceLocale} />
             ) : null}
             {activeSection === "reward" ? (
-              <RewardSection draft={draft} update={update} interfaceLocale={interfaceLocale} />
+              <RewardSection
+                draft={draft}
+                update={update}
+                interfaceLocale={interfaceLocale}
+                language={language}
+                setLanguage={(next) => {
+                  setLanguage(next);
+                  setPreviewLocale(next);
+                }}
+              />
             ) : null}
             {activeSection === "languages" ? (
               <LanguagesSection
@@ -654,10 +683,8 @@ export function ProgramCardBuilder({
                 language={language}
                 setLanguage={(next) => {
                   setLanguage(next);
-                  setPreviewLocale(next === "ar" ? "AR" : "EN");
+                  setPreviewLocale(next);
                 }}
-                enCompleteness={enCompleteness}
-                arCompleteness={arCompleteness}
               />
             ) : null}
             {activeSection === "locations" ? (
@@ -689,6 +716,7 @@ export function ProgramCardBuilder({
             ) : null}
             {activeSection === "review" ? (
               <ReviewSection
+                draft={draft}
                 readiness={readiness}
                 validation={validation}
                 canRunChecks={localReadiness.ready}
@@ -898,16 +926,29 @@ function RewardSection({
   draft,
   update,
   interfaceLocale,
+  language,
+  setLanguage,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   interfaceLocale: InterfaceLocale;
+  language: string;
+  setLanguage: (language: string) => void;
 }) {
   const index = finalRewardIndex(draft);
   const reward = draft.rewards[index];
   if (!reward) return null;
+  const translation = draft.translations[language];
+  const metadata = cardLocaleMetadata(language);
+  if (!translation || !metadata) return null;
   return (
     <div className="builder-form-stack">
+      <ContentLocaleTabs
+        draft={draft}
+        value={language}
+        onValueChange={setLanguage}
+        interfaceLocale={interfaceLocale}
+      />
       <div className="builder-reward-callout">
         <span>{builderText(interfaceLocale).ui.unlockedAt}</span>
         <strong>
@@ -915,32 +956,18 @@ function RewardSection({
         </strong>
         <small>{builderText(interfaceLocale).ui.rewardReadinessAppearsOutsideTheStampGrid}</small>
       </div>
-      <div className="builder-form-grid">
-        <FormField label={builderText(interfaceLocale).ui.whatDoesTheCustomerGet} required>
-          <TextInput
-            dir="ltr"
-            lang="en"
-            name="builder-reward-en"
-            value={draft.translations.en.rewardSummary}
-            maxLength={120}
-            onChange={(event) =>
-              update((current) => updateBuilderRewardCopy(current, "en", event.target.value))
-            }
-          />
-        </FormField>
-        <FormField label={builderText(interfaceLocale).ui.arabicReward} required>
-          <TextInput
-            dir="rtl"
-            lang="ar"
-            name="builder-reward-ar"
-            value={draft.translations.ar.rewardSummary}
-            maxLength={120}
-            onChange={(event) =>
-              update((current) => updateBuilderRewardCopy(current, "ar", event.target.value))
-            }
-          />
-        </FormField>
-      </div>
+      <FormField label={builderText(interfaceLocale).ui.whatDoesTheCustomerGet} required>
+        <TextInput
+          dir={metadata.direction}
+          lang={language}
+          name={`builder-reward-${language}`}
+          value={translation.rewardSummary}
+          maxLength={120}
+          onChange={(event) =>
+            update((current) => updateBuilderRewardCopy(current, language, event.target.value))
+          }
+        />
+      </FormField>
       <details className="builder-disclosure">
         <summary>{builderText(interfaceLocale).ui.rewardOptions}</summary>
         <div className="builder-form-grid">
@@ -980,39 +1007,88 @@ function RewardSection({
   );
 }
 
+function ContentLocaleTabs({
+  draft,
+  value,
+  onValueChange,
+  interfaceLocale,
+}: {
+  draft: ProgramDraftInput;
+  value: string;
+  onValueChange: (locale: string) => void;
+  interfaceLocale: InterfaceLocale;
+}) {
+  return (
+    <div
+      className="builder-language-tabs"
+      role="tablist"
+      aria-label={builderText(interfaceLocale).ui.contentLanguage}
+    >
+      {draft.enabledLocales.map((locale) => {
+        const metadata = cardLocaleMetadata(locale);
+        if (!metadata) return null;
+        return (
+          <button
+            type="button"
+            role="tab"
+            key={locale}
+            aria-selected={value === locale}
+            tabIndex={value === locale ? 0 : -1}
+            onClick={() => onValueChange(locale)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const current = draft.enabledLocales.indexOf(locale);
+              const nextIndex =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? draft.enabledLocales.length - 1
+                    : (current +
+                        (event.key === "ArrowRight" ? 1 : -1) +
+                        draft.enabledLocales.length) %
+                      draft.enabledLocales.length;
+              const next = draft.enabledLocales[nextIndex];
+              if (next) onValueChange(next);
+            }}
+          >
+            <span>{metadata.nativeName}</span>
+            <small>{metadata.englishName}</small>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function LanguagesSection({
   draft,
   update,
   interfaceLocale,
   language,
   setLanguage,
-  enCompleteness,
-  arCompleteness,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   interfaceLocale: InterfaceLocale;
-  language: "en" | "ar";
-  setLanguage: (language: "en" | "ar") => void;
-  enCompleteness: ReturnType<typeof languageCompleteness>;
-  arCompleteness: ReturnType<typeof languageCompleteness>;
+  language: string;
+  setLanguage: (language: string) => void;
 }) {
   const text = builderText(interfaceLocale);
   const value = draft.translations[language];
-  const completeness = language === "en" ? enCompleteness : arCompleteness;
-  const contentDirection = directionFor(language);
-  const languageOptions = ["en", "ar"] as const;
+  const metadata = cardLocaleMetadata(language);
+  if (!value || !metadata) return null;
+  const completeness = cardLocaleCompleteness(draft, language);
+  const contentDirection = metadata.direction;
+  const languageOptions = draft.enabledLocales;
 
-  function selectLanguage(next: "en" | "ar"): void {
+  function selectLanguage(next: string): void {
     setLanguage(next);
     requestAnimationFrame(() => document.getElementById(`builder-language-tab-${next}`)?.focus());
   }
 
-  function handleLanguageTabKey(
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    item: "en" | "ar",
-  ): void {
-    let next: "en" | "ar" | undefined;
+  function handleLanguageTabKey(event: React.KeyboardEvent<HTMLButtonElement>, item: string): void {
+    let next: string | undefined;
     if (event.key === "Home") next = languageOptions[0];
     if (event.key === "End") next = languageOptions[languageOptions.length - 1];
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
@@ -1026,24 +1102,158 @@ function LanguagesSection({
     selectLanguage(next);
   }
 
-  function setField(key: keyof typeof value, next: string) {
+  function setField(key: keyof ProgramTranslationInput, next: string) {
+    update((current) => {
+      const currentValue =
+        current.translations[language] ??
+        current.translations[current.defaultLocale] ??
+        current.translations.en;
+      return {
+        ...current,
+        translations: {
+          ...current.translations,
+          [language]: withProgramTranslationField(currentValue, key, next),
+        },
+      };
+    });
+  }
+
+  function addLanguage(locale: string): void {
+    if (!cardLocaleMetadata(locale) || draft.enabledLocales.includes(locale)) return;
     update((current) => ({
       ...current,
+      enabledLocales: [...current.enabledLocales, locale],
       translations: {
         ...current.translations,
-        [language]: { ...current.translations[language], [key]: next },
+        [locale]: current.translations[locale] ?? {
+          programName: "",
+          shortDescription: "",
+          rewardSummary: "",
+          termsAndConditions: "",
+          completionMessage: "",
+          rewardUnlockedMessage: "",
+        },
       },
+      rewards: current.rewards.map((reward) => ({
+        ...reward,
+        translations: {
+          ...reward.translations,
+          [locale]: reward.translations[locale] ?? { name: "", description: "" },
+        },
+      })),
+    }));
+    setLanguage(locale);
+  }
+
+  function removeLanguage(locale: string): void {
+    if (locale === draft.defaultLocale || draft.enabledLocales.length === 1) return;
+    update((current) => ({
+      ...current,
+      enabledLocales: current.enabledLocales.filter((item) => item !== locale),
+    }));
+    if (language === locale) setLanguage(draft.defaultLocale);
+  }
+
+  function changeDefault(locale: string): void {
+    if (!draft.enabledLocales.includes(locale)) return;
+    update((current) => ({
+      ...current,
+      defaultLocale: locale,
+      enabledLocales: [locale, ...current.enabledLocales.filter((item) => item !== locale)],
     }));
   }
+
+  const pickerOptions = cardLocaleRegistry
+    .filter((locale) => !draft.enabledLocales.includes(locale.id))
+    .toSorted(
+      (left, right) =>
+        Number(right.popular) - Number(left.popular) ||
+        left.englishName.localeCompare(right.englishName, "en"),
+    )
+    .map((locale) => ({
+      value: locale.id,
+      label: `${locale.englishName} — ${locale.nativeName}`,
+      group: locale.popular ? text.ui.popularLanguages : text.ui.allLanguages,
+      searchText: locale.aliases.join(" "),
+    }));
+
   return (
     <div className="builder-form-stack">
+      <Card className="builder-language-configuration">
+        <div className="builder-subheading">
+          <div>
+            <h3>{text.ui.cardLanguages}</h3>
+            <p>{text.ui.chooseCardLanguagesDescription}</p>
+          </div>
+        </div>
+        <div className="builder-form-grid">
+          <FormField label={text.ui.defaultLanguage} hint={text.ui.defaultLanguageHelp} required>
+            <SearchableSelect
+              value={draft.defaultLocale}
+              options={draft.enabledLocales.flatMap((locale) => {
+                const item = cardLocaleMetadata(locale);
+                return item
+                  ? [{ value: item.id, label: `${item.englishName} — ${item.nativeName}` }]
+                  : [];
+              })}
+              onValueChange={changeDefault}
+              ariaLabel={text.ui.defaultLanguage}
+            />
+          </FormField>
+          <FormField label={text.ui.addLanguage} hint={text.ui.searchLanguages}>
+            <SearchableSelect
+              key={draft.enabledLocales.join(":")}
+              options={pickerOptions}
+              placeholder={text.ui.searchLanguages}
+              onValueChange={addLanguage}
+              ariaLabel={text.ui.addLanguage}
+            />
+          </FormField>
+        </div>
+        <ul className="builder-enabled-languages" aria-label={text.ui.enabledLanguages}>
+          {draft.enabledLocales.map((locale) => {
+            const item = cardLocaleMetadata(locale);
+            const translation = draft.translations[locale];
+            if (!item || !translation) return null;
+            const status = cardLocaleCompleteness(draft, locale);
+            return (
+              <li key={locale} dir={item.direction}>
+                <span>
+                  <strong>{item.englishName}</strong>
+                  <small lang={locale}>{item.nativeName}</small>
+                </span>
+                <span>
+                  {locale === draft.defaultLocale ? (
+                    <Badge tone="brand">{text.ui.defaultBadge}</Badge>
+                  ) : null}
+                  <Badge tone={status.complete ? "success" : "warning"}>
+                    {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={locale === draft.defaultLocale || draft.enabledLocales.length === 1}
+                    title={locale === draft.defaultLocale ? text.ui.cannotRemoveDefault : undefined}
+                    onClick={() => removeLanguage(locale)}
+                  >
+                    {text.ui.removeLanguage}
+                  </Button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
       <div
         className="builder-language-tabs"
         role="tablist"
         aria-label={builderText(interfaceLocale).ui.cardLanguages}
       >
         {languageOptions.map((item) => {
-          const status = item === "en" ? enCompleteness : arCompleteness;
+          const localeMetadata = cardLocaleMetadata(item);
+          const localeTranslation = draft.translations[item];
+          if (!localeMetadata || !localeTranslation) return null;
+          const status = cardLocaleCompleteness(draft, item);
           return (
             <button
               type="button"
@@ -1056,7 +1266,7 @@ function LanguagesSection({
               onClick={() => setLanguage(item)}
               onKeyDown={(event) => handleLanguageTabKey(event, item)}
             >
-              <span>{item === "en" ? "English" : "العربية"}</span>
+              <span>{localeMetadata.nativeName}</span>
               <small>
                 {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
               </small>
@@ -1076,15 +1286,11 @@ function LanguagesSection({
           tone={completeness.complete ? "success" : "warning"}
           title={
             completeness.complete
-              ? language === "ar"
-                ? "المحتوى العربي مكتمل"
-                : "English content is complete"
-              : language === "ar"
-                ? `${completeness.missing} حقول عربية متبقية`
-                : `${completeness.missing} English fields remaining`
+              ? `${metadata.englishName}: ${text.complete}`
+              : `${metadata.englishName}: ${completeness.missing} ${text.fieldsRemaining}`
           }
         />
-        <FormField label={language === "ar" ? "اسم البطاقة" : "Card name"} required>
+        <FormField label={text.ui.customerCardName} required>
           <TextInput
             dir={contentDirection}
             lang={language}
@@ -1092,7 +1298,7 @@ function LanguagesSection({
             onChange={(event) => setField("programName", event.target.value)}
           />
         </FormField>
-        <FormField label={language === "ar" ? "الوصف القصير" : "Short description"} required>
+        <FormField label={text.ui.shortDescription} required>
           <TextInput
             dir={contentDirection}
             lang={language}
@@ -1102,10 +1308,8 @@ function LanguagesSection({
           />
         </FormField>
         <details className="builder-disclosure">
-          <summary>
-            {language === "ar" ? "المحتوى التفصيلي والرسائل" : "Detailed content and messages"}
-          </summary>
-          <FormField label={language === "ar" ? "الوصف الكامل" : "Full description"}>
+          <summary>{text.ui.detailedContentAndMessages}</summary>
+          <FormField label={text.ui.fullDescription}>
             <TextArea
               dir={contentDirection}
               lang={language}
@@ -1113,7 +1317,7 @@ function LanguagesSection({
               onChange={(event) => setField("fullDescription", event.target.value)}
             />
           </FormField>
-          <FormField label={language === "ar" ? "تعليمات الانضمام" : "Join instructions"}>
+          <FormField label={text.ui.joinInstructions}>
             <TextArea
               dir={contentDirection}
               lang={language}
@@ -1121,10 +1325,7 @@ function LanguagesSection({
               onChange={(event) => setField("joinInstructions", event.target.value)}
             />
           </FormField>
-          <FormField
-            label={language === "ar" ? "الشروط والأحكام" : "Terms and conditions"}
-            required
-          >
+          <FormField label={text.ui.termsAndConditions} required>
             <TextArea
               dir={contentDirection}
               lang={language}
@@ -1133,10 +1334,7 @@ function LanguagesSection({
             />
           </FormField>
           <div className="builder-form-grid">
-            <FormField
-              label={language === "ar" ? "رسالة اكتمال الهدف" : "Goal completion message"}
-              required
-            >
+            <FormField label={text.ui.goalCompletionMessage} required>
               <TextInput
                 dir={contentDirection}
                 lang={language}
@@ -1144,10 +1342,7 @@ function LanguagesSection({
                 onChange={(event) => setField("completionMessage", event.target.value)}
               />
             </FormField>
-            <FormField
-              label={language === "ar" ? "رسالة جاهزية المكافأة" : "Reward-ready message"}
-              required
-            >
+            <FormField label={text.ui.rewardReadyMessage} required>
               <TextInput
                 dir={contentDirection}
                 lang={language}
@@ -1156,7 +1351,7 @@ function LanguagesSection({
               />
             </FormField>
           </div>
-          <FormField label={language === "ar" ? "رسالة الإيقاف المؤقت" : "Paused-card message"}>
+          <FormField label={text.ui.pausedCardMessage}>
             <TextInput
               dir={contentDirection}
               lang={language}
@@ -1311,6 +1506,7 @@ function AppearanceSection({
           }
           onUploaded={onAssetUploaded}
           ar={interfaceLocale === "ar"}
+          interfaceLocale={interfaceLocale}
         />
         <ProgramAssetPicker
           organizationId={organizationId}
@@ -1326,6 +1522,7 @@ function AppearanceSection({
           }
           onUploaded={onAssetUploaded}
           ar={interfaceLocale === "ar"}
+          interfaceLocale={interfaceLocale}
         />
       </div>
     </div>
@@ -1660,6 +1857,7 @@ function AdvancedSection({
 }
 
 function ReviewSection({
+  draft,
   readiness,
   validation,
   canRunChecks,
@@ -1668,6 +1866,7 @@ function ReviewSection({
   onSection,
   onRunChecks,
 }: {
+  draft: ProgramDraftInput;
   readiness: ReturnType<typeof builderReadiness>;
   validation: ValidationResult | null;
   canRunChecks: boolean;
@@ -1744,6 +1943,46 @@ function ReviewSection({
           </button>
         ))}
       </div>
+      <Card className="builder-language-review">
+        <div className="builder-subheading">
+          <div>
+            <h3>{text.ui.cardLanguages}</h3>
+            <p>{text.ui.providerReadiness}</p>
+          </div>
+        </div>
+        <ul className="builder-enabled-languages" aria-label={text.ui.enabledLanguages}>
+          {draft.enabledLocales.map((locale) => {
+            const metadata = cardLocaleMetadata(locale);
+            if (!metadata) return null;
+            const status = cardLocaleCompleteness(draft, locale);
+            return (
+              <li key={locale} dir={metadata.direction}>
+                <span>
+                  <strong lang={locale}>{metadata.nativeName}</strong>
+                  <small>{metadata.englishName}</small>
+                </span>
+                <span>
+                  {locale === draft.defaultLocale ? (
+                    <Badge tone="brand">{text.ui.defaultBadge}</Badge>
+                  ) : null}
+                  <Badge tone={status.complete ? "success" : "warning"}>
+                    {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
+                  </Badge>
+                  <small dir={directionForInterface(interfaceLocale)}>
+                    Customer Web ✓ · Apple Wallet {text.ui.normalizedSupport} · Google Wallet{" "}
+                    {text.ui.limitedSupport}
+                  </small>
+                  {!status.complete ? (
+                    <Button type="button" variant="ghost" onClick={() => onSection("languages")}>
+                      {text.fix}
+                    </Button>
+                  ) : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
       <Card className="builder-checks">
         <div className="builder-subheading">
           <div>
@@ -1813,8 +2052,8 @@ function PreviewPanel({
   idPrefix: string;
   draft: ProgramDraftInput;
   interfaceLocale: InterfaceLocale;
-  previewLocale: "EN" | "AR";
-  setPreviewLocale: Dispatch<SetStateAction<"EN" | "AR">>;
+  previewLocale: string;
+  setPreviewLocale: Dispatch<SetStateAction<string>>;
   profile: PreviewProfile;
   setProfile: Dispatch<SetStateAction<PreviewProfile>>;
   progress: number;
@@ -1833,23 +2072,21 @@ function PreviewPanel({
           <span className="dashboard-card__label">{text.previewOnly}</span>
           <h2>{text.preview}</h2>
         </div>
-        <fieldset className="builder-preview-language">
-          <legend className="wf-sr-only">{text.ui.previewLanguage}</legend>
-          <button
-            type="button"
-            aria-pressed={previewLocale === "EN"}
-            onClick={() => setPreviewLocale("EN")}
-          >
-            EN
-          </button>
-          <button
-            type="button"
-            aria-pressed={previewLocale === "AR"}
-            onClick={() => setPreviewLocale("AR")}
-          >
-            AR
-          </button>
-        </fieldset>
+        <div className="builder-preview-language">
+          <SearchableSelect
+            ariaLabel={text.ui.previewLanguage}
+            value={previewLocale}
+            onValueChange={setPreviewLocale}
+            options={draft.enabledLocales.map((locale) => {
+              const metadata = cardLocaleMetadata(locale);
+              return {
+                value: locale,
+                label: metadata ? `${metadata.englishName} · ${metadata.nativeName}` : locale,
+                ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+              };
+            })}
+          />
+        </div>
       </div>
       <div className="builder-preview-tabs" role="tablist" aria-label={text.preview}>
         {previewProfiles.map((item) => (
@@ -1891,8 +2128,8 @@ function PreviewPanel({
       <p className="builder-preview-provider-note">{text.walletPreviewNote}</p>
       <div
         id={`${idPrefix}-panel`}
-        dir={directionFor(previewContentLocales[previewLocale])}
-        lang={previewContentLocales[previewLocale]}
+        dir={directionForCardLocale(previewLocale)}
+        lang={previewLocale}
         role="tabpanel"
         aria-labelledby={`${idPrefix}-${profile}`}
         aria-busy={previewLoading}

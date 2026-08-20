@@ -233,6 +233,7 @@ export interface SearchableSelectOption {
   label: string;
   group?: string;
   disabled?: boolean;
+  searchText?: string;
 }
 
 export function SearchableSelect({
@@ -300,7 +301,7 @@ export function SearchableSelect({
     const normalized = query.normalize("NFKC").trim().toLocaleLowerCase();
     if (!normalized) return options;
     return options.filter((option) =>
-      `${option.label} ${option.value} ${option.group ?? ""}`
+      `${option.label} ${option.value} ${option.group ?? ""} ${option.searchText ?? ""}`
         .normalize("NFKC")
         .toLocaleLowerCase()
         .includes(normalized),

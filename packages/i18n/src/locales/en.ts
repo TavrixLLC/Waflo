@@ -1,4 +1,5 @@
 import { authInterfaceCopy } from "./auth-interface-copy.js";
+import { assetUploaderInterfaceCopy } from "./asset-uploader-interface-copy.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
 import { studioEditorInterfaceCopy } from "./loyalty-studio-editor-interface-copy.js";
@@ -6,6 +7,7 @@ import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js
 import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 import { onboardingInterfaceCopy } from "./onboarding-interface-copy.js";
+import { overviewInterfaceCopy } from "./overview-interface-copy.js";
 
 export const en = {
   brandTagline: "Loyalty that flows.",
@@ -36,6 +38,8 @@ export const en = {
     unavailable: "This page is temporarily unavailable.",
   },
   merchant: {
+    assetUploader: assetUploaderInterfaceCopy.en,
+    overview: overviewInterfaceCopy.en,
     shell: {
       overview: "Overview",
       programs: "Loyalty Cards",
@@ -124,7 +128,7 @@ export const en = {
         sectionDescriptions: {
           basics: "Name the card and confirm how customers earn stamps.",
           reward: "Describe what the customer receives at the goal.",
-          languages: "Keep English and Arabic together and see what remains.",
+          languages: "Add customer languages and complete their card content.",
           locations: "Choose where earning and redemption are available.",
           appearance: "Keep the template identity, then adjust supported visual controls.",
           review: "Resolve readiness issues before publishing.",
@@ -160,7 +164,7 @@ export const en = {
         mode: "Editing mode",
         basicsSummary: "Card name, earning rule, and goal",
         rewardSummary: "Final reward at the stamp goal",
-        languageSummary: "English and Arabic customer content",
+        languageSummary: "Enabled customer languages and localized content",
         locationSummary: "Participating active locations",
         appearanceSummary: "Template, colors, logo, and stamp artwork",
         ui: { ...loyaltyInterfaceCopy.en.builder.ui, ...loyaltyProgramsExtractedCopy.en.builder },

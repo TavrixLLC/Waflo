@@ -125,8 +125,18 @@ describe("Next.js Content-Security-Policy", () => {
 
     expect(policy).toContain("connect-src 'self'");
     expect(policy).toContain(" http://localhost:4000");
+    expect(policy).toContain("img-src 'self' data: blob: http://localhost:4000");
     expect(policy).not.toContain("https://api.waflo.app");
     expect(policy).not.toContain("'unsafe-eval'");
+  });
+
+  it("allows merchant-hosted image assets only from the validated API origin", () => {
+    const policy = createNextContentSecurityPolicy("production", {
+      apiUrl: "https://api-staging.waflo.app/v1",
+    });
+
+    expect(policy).toContain("img-src 'self' data: blob: https://api-staging.waflo.app");
+    expect(policy).not.toContain("https://api.waflo.app");
   });
 
   it("rejects unsafe or malformed configured API origins", () => {

@@ -1,4 +1,5 @@
 import type { InterfaceMessages } from "./en.js";
+import { assetUploaderInterfaceCopy } from "./asset-uploader-interface-copy.js";
 import { authInterfaceCopy } from "./auth-interface-copy.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
@@ -7,6 +8,7 @@ import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js
 import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 import { onboardingInterfaceCopy } from "./onboarding-interface-copy.js";
+import { overviewInterfaceCopy } from "./overview-interface-copy.js";
 
 export const kuSorani: InterfaceMessages = {
   auth: authInterfaceCopy.kuSorani,
@@ -37,6 +39,8 @@ export const kuSorani: InterfaceMessages = {
     unavailable: "ئەم پەڕەیە بە کاتی بەردەست نییە.",
   },
   merchant: {
+    assetUploader: assetUploaderInterfaceCopy.kuSorani,
+    overview: overviewInterfaceCopy.kuSorani,
     shell: {
       overview: "سەرەکی",
       programs: "کارتەکانی دڵسۆزی",
@@ -125,7 +129,7 @@ export const kuSorani: InterfaceMessages = {
         sectionDescriptions: {
           basics: "ناوی کارت دیاری بکە و ڕێگای بەدەستهێنانی مۆر لەلایەن کڕیارەوە پشتڕاست بکە.",
           reward: "ڕوون بکەوە کڕیار لە گەیشتن بە ئامانج چی وەردەگرێت.",
-          languages: "ئینگلیزی و عەرەبی پێکەوە بەڕێوەببە و ئەوەی ماوە ببینە.",
+          languages: "زمانەکانی کڕیار زیاد بکە و ناوەڕۆکی کارت بۆ هەر زمانێک تەواو بکە.",
           locations: "شوێنەکانی بەدەستهێنان و بەکارهێنانی خەڵات هەڵبژێرە.",
           appearance: "ناسنامەی قاڵب بپارێزە و کۆنترۆڵە پشتگیریکراوەکانی ڕووکار بگۆڕە.",
           review: "کێشەکانی ئامادەیی پێش بڵاوکردنەوە چارەسەر بکە.",
@@ -162,7 +166,7 @@ export const kuSorani: InterfaceMessages = {
         mode: "شێوازی دەستکاری",
         basicsSummary: "ناوی کارت، یاسای بەدەستهێنان و ئامانج",
         rewardSummary: "خەڵاتی کۆتایی لە ئامانجی مۆرەکان",
-        languageSummary: "ناوەڕۆکی کڕیار بە ئینگلیزی و عەرەبی",
+        languageSummary: "زمانە چالاکەکانی کڕیار و ناوەڕۆکی وەرگێڕدراویان",
         locationSummary: "شوێنە چالاکە بەشدارەکان",
         appearanceSummary: "قاڵب، ڕەنگ، لۆگۆ و هونەری مۆرەکان",
         ui: {

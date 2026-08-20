@@ -1,10 +1,14 @@
+import { resolveCardLocale } from "@waflo/contracts";
+
 export interface PublicProgram {
   slug: string;
   status: string;
   enrollmentStatus: "OPEN" | "CLOSED" | "PROGRAM_UNAVAILABLE" | "MERCHANT_UNAVAILABLE";
   versionFingerprint: string;
+  defaultLocale: string;
+  enabledLocales: string[];
   translations: Record<
-    "en" | "ar",
+    string,
     {
       programName: string;
       shortDescription: string;
@@ -23,11 +27,11 @@ export interface PublicProgram {
     width: number;
     height: number;
   };
-  stampPreviews: Record<"en" | "ar", PublicProgram["stampPreview"]>;
+  stampPreviews: Record<string, PublicProgram["stampPreview"]>;
   earningDescription: string;
   rewards: Array<{
     thresholdStampCount: number;
-    translations: Record<"en" | "ar", { name: string; description: string }>;
+    translations: Record<string, { name: string; description: string }>;
   }>;
   locations: Array<{ name: string; city?: string | null; region?: string | null }>;
   theme: {
@@ -69,6 +73,19 @@ export function localeForRequest(
   fallback: "en" | "ar" | undefined,
 ): "en" | "ar" {
   return requested === "en" || requested === "ar" ? requested : (fallback ?? "en");
+}
+
+export function cardLocaleForRequest(
+  requested: string | undefined,
+  program: Pick<PublicProgram, "defaultLocale" | "enabledLocales">,
+  acceptLanguage?: string | null,
+): string {
+  return resolveCardLocale({
+    enabledLocales: program.enabledLocales,
+    defaultLocale: program.defaultLocale,
+    ...(requested !== undefined ? { explicitLocale: requested } : {}),
+    ...(acceptLanguage !== undefined ? { acceptedLanguages: acceptLanguage } : {}),
+  });
 }
 
 export async function fetchCustomerApi<T>(path: string, host: string, tenant?: string): Promise<T> {

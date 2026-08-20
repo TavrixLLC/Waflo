@@ -34,9 +34,9 @@ const locations: LocationItem[] = [
 describe("merchant loyalty-card Builder state", () => {
   it("collapses the seven-page wizard into six merchant-intent sections", () => {
     expect(builderSections).toEqual([
+      "languages",
       "basics",
       "reward",
-      "languages",
       "locations",
       "appearance",
       "review",

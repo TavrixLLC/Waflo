@@ -1,4 +1,5 @@
 import type { InterfaceMessages } from "./en.js";
+import { assetUploaderInterfaceCopy } from "./asset-uploader-interface-copy.js";
 import { authInterfaceCopy } from "./auth-interface-copy.js";
 import { loyaltyInterfaceCopy } from "./loyalty-interface-copy.js";
 import { loyaltyProgramsExtractedCopy } from "./loyalty-programs-extracted-copy.js";
@@ -7,6 +8,7 @@ import { studioEditorRuntimeCopy } from "./loyalty-studio-editor-runtime-copy.js
 import { studioContentExtractedCopy } from "./loyalty-studio-content-extracted-copy.js";
 import { studioInterfaceCopy } from "./loyalty-studio-interface-copy.js";
 import { onboardingInterfaceCopy } from "./onboarding-interface-copy.js";
+import { overviewInterfaceCopy } from "./overview-interface-copy.js";
 
 export const ar: InterfaceMessages = {
   auth: authInterfaceCopy.ar,
@@ -36,6 +38,8 @@ export const ar: InterfaceMessages = {
     unavailable: "هذه الصفحة غير متاحة مؤقتاً.",
   },
   merchant: {
+    assetUploader: assetUploaderInterfaceCopy.ar,
+    overview: overviewInterfaceCopy.ar,
     shell: {
       overview: "نظرة عامة",
       programs: "بطاقات الولاء",
@@ -123,7 +127,7 @@ export const ar: InterfaceMessages = {
         sectionDescriptions: {
           basics: "سمّ البطاقة وأكّد طريقة حصول العملاء على الأختام.",
           reward: "وضّح ما الذي سيحصل عليه العميل عند بلوغ الهدف.",
-          languages: "أدر الإنجليزية والعربية معًا واعرف ما تبقى.",
+          languages: "أضف لغات العملاء وأكمل محتوى البطاقة لكل لغة.",
           locations: "اختر المواقع التي يتاح فيها الكسب والاسترداد.",
           appearance: "حافظ على هوية القالب وعدّل عناصر المظهر المدعومة.",
           review: "عالج ملاحظات الجاهزية قبل النشر.",
@@ -159,7 +163,7 @@ export const ar: InterfaceMessages = {
         mode: "وضع التحرير",
         basicsSummary: "اسم البطاقة وقاعدة الكسب والهدف",
         rewardSummary: "المكافأة النهائية عند هدف الأختام",
-        languageSummary: "محتوى العميل بالإنجليزية والعربية",
+        languageSummary: "لغات العملاء المفعّلة ومحتواها المترجم",
         locationSummary: "المواقع النشطة المشاركة",
         appearanceSummary: "القالب والألوان والشعار ورسومات الأختام",
         ui: { ...loyaltyInterfaceCopy.ar.builder.ui, ...loyaltyProgramsExtractedCopy.ar.builder },

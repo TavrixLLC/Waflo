@@ -29,16 +29,16 @@ export function shouldScheduleBuilderAutosave(
 export function builderPreviewCacheKey(
   revision: number,
   profile: PreviewProfile,
-  locale: "EN" | "AR",
+  locale: string,
   progress: number,
 ): string {
   return `${revision}:${profile}:${locale}:${progress}`;
 }
 
 export const builderSections = [
+  "languages",
   "basics",
   "reward",
-  "languages",
   "locations",
   "appearance",
   "review",
@@ -59,7 +59,7 @@ const requiredLanguageFields = [
 export interface LanguageCompleteness {
   complete: boolean;
   missing: number;
-  missingFields: readonly (typeof requiredLanguageFields)[number][];
+  missingFields: readonly string[];
 }
 
 export interface BuilderReadiness {
@@ -105,6 +105,35 @@ export function languageCompleteness(
   };
 }
 
+export function cardLocaleCompleteness(
+  draft: ProgramDraftInput,
+  locale: string,
+): LanguageCompleteness {
+  const translation = draft.translations[locale];
+  if (!translation) {
+    return {
+      complete: false,
+      missing: requiredLanguageFields.length + 2,
+      missingFields: ["translation"],
+    };
+  }
+  const program = languageCompleteness(translation);
+  const finalReward = draft.rewards.find(
+    (reward) => reward.thresholdStampCount === draft.requiredStampCount,
+  );
+  const rewardTranslation = finalReward?.translations[locale];
+  const rewardMissing = [
+    ...(!rewardTranslation?.name.trim() ? ["reward.name"] : []),
+    ...(!rewardTranslation?.description.trim() ? ["reward.description"] : []),
+  ];
+  const missingFields = [...program.missingFields, ...rewardMissing];
+  return {
+    complete: missingFields.length === 0,
+    missing: missingFields.length,
+    missingFields,
+  };
+}
+
 export function builderReadiness(draft: ProgramDraftInput): BuilderReadiness {
   const finalReward = draft.rewards.find(
     (reward) => reward.thresholdStampCount === draft.requiredStampCount,
@@ -115,14 +144,15 @@ export function builderReadiness(draft: ProgramDraftInput): BuilderReadiness {
     draft.requiredStampCount <= 30 &&
     draft.earningDescription.trim().length > 0;
   const reward = Boolean(
-    finalReward?.translations.en.name.trim() &&
-      finalReward.translations.ar.name.trim() &&
-      draft.translations.en.rewardSummary.trim() &&
-      draft.translations.ar.rewardSummary.trim(),
+    finalReward &&
+      draft.enabledLocales.every((locale) => cardLocaleCompleteness(draft, locale).complete),
   );
   const languages =
-    languageCompleteness(draft.translations.en).complete &&
-    languageCompleteness(draft.translations.ar).complete;
+    draft.enabledLocales.length > 0 &&
+    draft.enabledLocales.includes(draft.defaultLocale) &&
+    draft.enabledLocales.every((locale) => {
+      return cardLocaleCompleteness(draft, locale).complete;
+    });
   const locations = draft.locationIds.length > 0;
   const appearance = Boolean(
     draft.templateCode &&
@@ -263,21 +293,26 @@ export function updateBuilderStampGoal(
 
 export function updateBuilderRewardCopy(
   current: ProgramDraftInput,
-  locale: "en" | "ar",
+  locale: string,
   value: string,
 ): ProgramDraftInput {
   const finalIndex = finalRewardIndex(current);
+  const currentTranslation =
+    current.translations[locale] ??
+    current.translations[current.defaultLocale] ??
+    current.translations.en;
   return {
     ...current,
     translations: {
       ...current.translations,
-      [locale]: { ...current.translations[locale], rewardSummary: value },
+      [locale]: { ...currentTranslation, rewardSummary: value },
     },
     rewards: current.rewards.map((reward, index) =>
       index === finalIndex
         ? {
             ...reward,
-            internalName: locale === "en" && value.trim() ? value : reward.internalName,
+            internalName:
+              locale === current.defaultLocale && value.trim() ? value : reward.internalName,
             translations: {
               ...reward.translations,
               [locale]: {
@@ -305,8 +340,7 @@ function finalRewardIndex(current: ProgramDraftInput): number {
 }
 
 export function builderSectionForIssue(issue: ValidationIssue): BuilderSection {
-  if (issue.path.startsWith("content.en") || issue.path.startsWith("content.ar"))
-    return "languages";
+  if (issue.path.startsWith("content.")) return "languages";
   if (issue.path.startsWith("locations")) return "locations";
   if (issue.path.startsWith("rewards")) return "reward";
   if (issue.path.startsWith("earning")) return "basics";

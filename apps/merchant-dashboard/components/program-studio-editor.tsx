@@ -1,7 +1,10 @@
 "use client";
 
 import {
+  cardLocaleMetadata,
   decideProgramPublicationState,
+  directionForCardLocale,
+  fontStackForCardLocale,
   type ProgramOperationalStatus,
   type ProgramPreviewPlatform,
   programPlatformCapabilities,
@@ -307,6 +310,7 @@ function ProgramStudioEditorContent({
   const [revision, setRevision] = useState(1);
   const [activeArea, setActiveArea] = useState<StudioArea>(initialArea);
   const [selectedProfile, setSelectedProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
+  const [previewLocale, setPreviewLocale] = useState("en");
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState("");
@@ -390,6 +394,9 @@ function ProgramStudioEditorContent({
     if (program.currentDraftVersion) {
       const next = versionToDraft(program, program.currentDraftVersion);
       setDraft(next);
+      setPreviewLocale((current) =>
+        next.enabledLocales.includes(current) ? current : next.defaultLocale,
+      );
       setRevision(program.currentDraftVersion.revision);
       persistedRef.current = JSON.stringify(apiDraft(next));
       setSaveState("saved");
@@ -473,7 +480,7 @@ function ProgramStudioEditorContent({
       for (const profile of ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const) {
         results.push(
           await apiFetch<PreviewResult>(
-            `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${profile}&locale=${ar ? "AR" : "EN"}`,
+            `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${profile}&locale=${encodeURIComponent(previewLocale)}`,
           ),
         );
       }
@@ -484,7 +491,7 @@ function ProgramStudioEditorContent({
       setPreviewLoadState("unavailable");
       setError(studioOperationError("preview", interfaceLocale));
     }
-  }, [ar, draft, interfaceLocale, organizationId, programId, progress, saveState]);
+  }, [draft, interfaceLocale, organizationId, previewLocale, programId, progress, saveState]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void generatePreviews(), 250);
@@ -883,6 +890,8 @@ function ProgramStudioEditorContent({
             validation={validation}
             validating={working}
             selectedProfile={selectedProfile}
+            previewLocale={previewLocale}
+            onPreviewLocale={setPreviewLocale}
             selectedPreview={selectedPreview}
             previewLoadState={previewLoadState}
             progress={progress}
@@ -1184,6 +1193,8 @@ function StudioAreaContent({
   validation,
   validating,
   selectedProfile,
+  previewLocale,
+  onPreviewLocale,
   selectedPreview,
   previewLoadState,
   progress,
@@ -1230,6 +1241,8 @@ function StudioAreaContent({
   validation: ValidationResult | null;
   validating: boolean;
   selectedProfile: PreviewProfile;
+  previewLocale: string;
+  onPreviewLocale: (locale: string) => void;
   selectedPreview: PreviewResult | undefined;
   previewLoadState: PreviewLoadState;
   progress: number;
@@ -1268,6 +1281,7 @@ function StudioAreaContent({
         onAssetUploaded={onAssetUploaded}
         plan={plan}
         ar={ar}
+        interfaceLocale={interfaceLocale}
         validation={validation}
         onValidate={onValidate}
         validating={validating}
@@ -1292,6 +1306,8 @@ function StudioAreaContent({
         editable={Boolean(editableDraft)}
         ar={ar}
         selectedProfile={selectedProfile}
+        previewLocale={previewLocale}
+        onPreviewLocale={onPreviewLocale}
         selectedPreview={selectedPreview}
         previewLoadState={previewLoadState}
         progress={progress}
@@ -1414,6 +1430,8 @@ function StudioOverview({
   editable,
   ar,
   selectedProfile,
+  previewLocale,
+  onPreviewLocale,
   selectedPreview,
   previewLoadState,
   progress,
@@ -1439,6 +1457,8 @@ function StudioOverview({
   editable: boolean;
   ar: boolean;
   selectedProfile: PreviewProfile;
+  previewLocale: string;
+  onPreviewLocale: (locale: string) => void;
   selectedPreview: PreviewResult | undefined;
   previewLoadState: PreviewLoadState;
   progress: number;
@@ -1459,9 +1479,10 @@ function StudioOverview({
   const finalReward = [...displayDraft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
-  const customerContent = selectStudioLocalizedProgramContent(displayDraft, ar ? "ar" : "en");
+  const customerContent = selectStudioLocalizedProgramContent(displayDraft, previewLocale);
   const rewardName = finalReward
-    ? selectStudioLocalizedRewardContent(finalReward, ar ? "ar" : "en").name
+    ? selectStudioLocalizedRewardContent(finalReward, previewLocale, displayDraft.defaultLocale)
+        .name
     : customerContent.rewardSummary;
   const activeLocations = locations.filter((location) =>
     displayDraft.locationIds.includes(location.id),
@@ -1530,9 +1551,10 @@ function StudioOverview({
         <StudioPreview
           draft={customerPreviewDraft}
           savedDraft={hasUnpublishedChanges ? displayDraft : null}
-          ar={ar}
           interfaceLocale={interfaceLocale}
           selectedProfile={selectedProfile}
+          previewLocale={previewLocale}
+          onPreviewLocale={onPreviewLocale}
           preview={
             customerPreview.source === "draft" || hasUnpublishedChanges
               ? selectedPreview
@@ -1672,9 +1694,10 @@ function StudioOverview({
 function StudioPreview({
   draft,
   savedDraft,
-  ar,
   interfaceLocale,
   selectedProfile,
+  previewLocale,
+  onPreviewLocale,
   preview,
   loadState,
   source,
@@ -1686,9 +1709,10 @@ function StudioPreview({
 }: {
   draft: ProgramDraftInput;
   savedDraft?: ProgramDraftInput | null | undefined;
-  ar: boolean;
   interfaceLocale: InterfaceLocale;
   selectedProfile: PreviewProfile;
+  previewLocale: string;
+  onPreviewLocale: (locale: string) => void;
   preview: PreviewResult | undefined;
   loadState: PreviewLoadState;
   source: "published" | "draft" | "unavailable";
@@ -1784,6 +1808,23 @@ function StudioPreview({
           </button>
         </div>
       ) : null}
+      <SearchableSelect
+        ariaLabel={ui.cardPreview}
+        value={previewLocale}
+        onValueChange={onPreviewLocale}
+        options={activeDraft.enabledLocales.flatMap((locale) => {
+          const metadata = cardLocaleMetadata(locale);
+          return metadata
+            ? [
+                {
+                  value: locale,
+                  label: `${metadata.englishName} · ${metadata.nativeName}`,
+                  ...(metadata.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+                },
+              ]
+            : [];
+        })}
+      />
       {activeSource === "draft" ? (
         <div className="studio-preview-tabs" role="tablist" aria-label={ui.previewSurfaces}>
           {(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map((profile) => (
@@ -1804,13 +1845,14 @@ function StudioPreview({
         </div>
       ) : null}
       <div
-        dir={directionForInterface(interfaceLocale)}
-        lang={localeRegistry[interfaceLocale].htmlLang}
+        dir={directionForCardLocale(previewLocale)}
+        lang={previewLocale}
+        style={{ fontFamily: fontStackForCardLocale(previewLocale) }}
         className={`studio-device-frame studio-device-frame--${showingPublishedVersion ? "published" : selectedProfile.toLowerCase()}`}
       >
         {activeSource === "published" ? (
           <PublishedCardSummary
-            ar={ar}
+            contentLocale={previewLocale}
             brandLogoUrl={brandLogoUrl}
             draft={activeDraft}
             progress={progress}
@@ -1861,21 +1903,21 @@ function StudioPreview({
 function PublishedCardSummary({
   draft,
   progress,
-  ar,
+  contentLocale,
   brandLogoUrl,
 }: {
   draft: ProgramDraftInput;
   progress: number;
-  ar: boolean;
+  contentLocale: string;
   brandLogoUrl?: string | undefined;
 }) {
   const ui = useStudioUi();
-  const content = selectStudioLocalizedProgramContent(draft, ar ? "ar" : "en");
+  const content = selectStudioLocalizedProgramContent(draft, contentLocale);
   const reward = [...draft.rewards].sort(
     (left, right) => right.thresholdStampCount - left.thresholdStampCount,
   )[0];
   const rewardName = reward
-    ? selectStudioLocalizedRewardContent(reward, ar ? "ar" : "en").name
+    ? selectStudioLocalizedRewardContent(reward, contentLocale, draft.defaultLocale).name
     : content.rewardSummary;
   const stampSlots = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"].slice(
     0,
@@ -2298,6 +2340,7 @@ function StudioSectionContent({
   onAssetUploaded,
   plan,
   ar,
+  interfaceLocale,
   validation,
   onValidate,
   validating,
@@ -2317,6 +2360,7 @@ function StudioSectionContent({
   onAssetUploaded: (asset: AssetItem) => void;
   plan: "STARTER" | "GROWTH" | "SCALE";
   ar: boolean;
+  interfaceLocale: InterfaceLocale;
   validation: ValidationResult | null;
   onValidate: () => void;
   validating: boolean;
@@ -2425,6 +2469,7 @@ function StudioSectionContent({
         onAssetUploaded={onAssetUploaded}
         plan={plan}
         ar={ar}
+        interfaceLocale={interfaceLocale}
       />
     );
 
@@ -2562,6 +2607,7 @@ function StudioSectionContent({
               }
               onUploaded={onAssetUploaded}
               ar={ar}
+              interfaceLocale={interfaceLocale}
             />
             {key === "backgroundAssetId" ? (
               <p className="field-help">
@@ -2699,6 +2745,7 @@ function RewardsEditor({
   onAssetUploaded,
   plan,
   ar,
+  interfaceLocale,
 }: {
   draft: ProgramDraftInput;
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
@@ -2707,6 +2754,7 @@ function RewardsEditor({
   onAssetUploaded: (asset: AssetItem) => void;
   plan: "STARTER" | "GROWTH" | "SCALE";
   ar: boolean;
+  interfaceLocale: InterfaceLocale;
 }) {
   const ui = useStudioUi();
   function updateReward(clientId: string, transform: (reward: RewardInput) => RewardInput) {
@@ -2939,6 +2987,7 @@ function RewardsEditor({
             }
             onUploaded={onAssetUploaded}
             ar={ar}
+            interfaceLocale={interfaceLocale}
           />
         </Card>
       ))}

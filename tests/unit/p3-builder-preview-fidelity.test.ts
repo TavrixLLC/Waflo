@@ -20,7 +20,11 @@ function required<T>(value: T | undefined, label: string): T {
   return value;
 }
 
-function preview(profile: "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET", progress: number) {
+function preview(
+  profile: "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET",
+  progress: number,
+  locale = "en",
+) {
   const template = required(findProgramTemplate("COFFEE"), "Classic Roast template");
   const filled = required(artworkFor(template.artwork.filled), "filled coffee artwork");
   const empty = required(artworkFor(template.artwork.empty), "empty coffee artwork");
@@ -48,7 +52,7 @@ function preview(profile: "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET", pro
   });
   return composeProgramPreview({
     profile,
-    locale: "EN",
+    locale,
     organizationName,
     programName,
     shortDescription: "A warm reward for regular coffee visits.",
@@ -111,6 +115,21 @@ function providerInput(progress: number): WalletMembershipInput {
 }
 
 describe("P3 Builder preview fidelity", () => {
+  it.each([
+    ["ar", true],
+    ["ckb", true],
+    ["ku-Arab-IQ", true],
+    ["ja", false],
+  ] as const)(
+    "keeps the %s script-aware font stack valid inside SVG attributes",
+    (locale, hasQuotedFamily) => {
+      const localized = preview("CUSTOMER_WEB", 0, locale);
+
+      expect(localized.svg).not.toMatch(/font-family="[^"]*"Noto/u);
+      expect(localized.svg.includes("&quot;")).toBe(hasQuotedFamily);
+    },
+  );
+
   it.each([0, 4, 8])(
     "renders exactly two stamp states at %i/8 on every Builder surface",
     (progress) => {
@@ -127,6 +146,36 @@ describe("P3 Builder preview fidelity", () => {
       }
     },
   );
+
+  it.each([
+    ["en", "ltr"],
+    ["ar", "rtl"],
+    ["ckb", "rtl"],
+    ["ku-Arab-IQ", "rtl"],
+  ])("keeps the %s Google stamp counter inside the branded card", (locale, direction) => {
+    const composition = preview("GOOGLE_WALLET", 0, locale);
+    const counter = composition.svg.match(/data-stamp-counter="true"[^>]*x="([0-9.]+)"[^>]*>/u);
+    expect(counter, locale).not.toBeNull();
+    const counterCenter = Number(counter?.[1]);
+    const estimatedHalfWidth = 22;
+    expect(counterCenter - estimatedHalfWidth, locale).toBeGreaterThanOrEqual(24);
+    expect(counterCenter + estimatedHalfWidth, locale).toBeLessThanOrEqual(436);
+    expect(composition.svg).toContain(`direction="${direction}"`);
+    expect(composition.svg).toContain('text-anchor="middle" direction="ltr"');
+    if (locale === "ckb" || locale === "ku-Arab-IQ") {
+      expect(composition.svg).not.toContain("للمعاينة فقط");
+      expect(composition.svg).not.toContain("عميل تجريبي");
+    }
+  });
+
+  it("uses the Google provider background color for the complete main card surface", () => {
+    const composition = preview("GOOGLE_WALLET", 4);
+    expect(composition.svg).toContain('data-card-surface-color="#FFF8EE"');
+    expect(composition.svg).toContain(
+      'data-google-card-surface="true" x="24" y="40" width="412" height="626"',
+    );
+    expect(composition.svg).toContain('height="626" rx="28" fill="#FFF8EE"');
+  });
 
   it("retains the selected template composition and keeps readiness outside the grid", () => {
     const customer = preview("CUSTOMER_WEB", 8);

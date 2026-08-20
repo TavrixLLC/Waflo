@@ -8,9 +8,14 @@ import {
   Checkbox,
   EmailInput,
   FormField,
-  Select,
+  SearchableSelect,
   TextInput,
 } from "@waflo/ui";
+import {
+  cardLocaleMetadata,
+  directionForCardLocale,
+  fontStackForCardLocale,
+} from "@waflo/contracts";
 import { Check, MapPin, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -28,14 +33,16 @@ export function EnrollmentForm({
   merchant,
   program,
   initialLocale,
+  interfaceLocale,
   tenant,
 }: {
   merchant: PublicMerchant;
   program: PublicProgram;
-  initialLocale: "en" | "ar";
+  initialLocale: string;
+  interfaceLocale: "en" | "ar";
   tenant?: string;
 }) {
-  const [locale, setLocale] = useState(initialLocale);
+  const [cardLocale, setCardLocale] = useState(initialLocale);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [terms, setTerms] = useState(false);
@@ -56,10 +63,10 @@ export function EnrollmentForm({
   } | null>(null);
   const startedAt = useRef(Date.now());
   const idempotencyKey = useRef(customerCommandId("enroll"));
-  const ar = locale === "ar";
-  const copy = program.translations[locale] ?? program.translations.en;
-  const reward = program.rewards[program.rewards.length - 1]?.translations[locale];
-  const stampPreview = program.stampPreviews[locale] ?? program.stampPreview;
+  const ar = interfaceLocale === "ar";
+  const copy = program.translations[cardLocale] ?? program.translations[program.defaultLocale];
+  const reward = program.rewards[program.rewards.length - 1]?.translations[cardLocale];
+  const stampPreview = program.stampPreviews[cardLocale] ?? program.stampPreview;
   const emailRequired = program.policy.emailCollectionMode === "REQUIRED";
   const enrollable = program.enrollmentStatus === "OPEN";
   const unavailableTitle =
@@ -96,10 +103,19 @@ export function EnrollmentForm({
   );
 
   useEffect(() => {
-    const page = document.querySelector("main.join-page");
-    page?.setAttribute("lang", locale);
-    page?.setAttribute("dir", locale === "ar" ? "rtl" : "ltr");
-  }, [locale]);
+    const storageKey = `waflo:card-locale:${program.slug}`;
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved && program.enabledLocales.includes(saved)) setCardLocale(saved);
+  }, [program.enabledLocales, program.slug]);
+
+  function chooseCardLocale(nextLocale: string) {
+    if (!program.enabledLocales.includes(nextLocale)) return;
+    setCardLocale(nextLocale);
+    window.localStorage.setItem(`waflo:card-locale:${program.slug}`, nextLocale);
+    const url = new URL(window.location.href);
+    url.searchParams.set("lang", nextLocale);
+    window.history.replaceState(null, "", url);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -116,7 +132,7 @@ export function EnrollmentForm({
         body: JSON.stringify({
           displayName,
           ...(program.policy.emailCollectionMode === "HIDDEN" ? {} : { email }),
-          preferredLocale: locale,
+          preferredLocale: interfaceLocale,
           programTermsAccepted: true,
           wafloPrivacyAccepted: true,
           marketingEmailConsent: marketing,
@@ -166,10 +182,15 @@ export function EnrollmentForm({
 
   return (
     <div className="join-layout">
-      <section className="program-story">
+      <section
+        className="program-story"
+        lang={cardLocale}
+        dir={directionForCardLocale(cardLocale)}
+        style={{ fontFamily: fontStackForCardLocale(cardLocale) }}
+      >
         <CustomerMerchantIdentity
           className="program-story__merchant"
-          locale={locale}
+          locale={interfaceLocale}
           logoDataUri={merchant.brandLogoDataUri}
           name={merchant.name}
         />
@@ -218,14 +239,21 @@ export function EnrollmentForm({
           <span className="customer-kicker">{ar ? "انضم الآن" : "JOIN NOW"}</span>
           <h2>{ar ? "أنشئ بطاقة الولاء" : "Create your loyalty card"}</h2>
           {program.policy.allowLocaleSelection ? (
-            <Select
-              aria-label={ar ? "اللغة" : "Language"}
-              value={locale}
-              onChange={(event) => setLocale(event.target.value as "en" | "ar")}
-            >
-              <option value="en">English</option>
-              <option value="ar">العربية</option>
-            </Select>
+            <SearchableSelect
+              ariaLabel={ar ? "لغة محتوى البطاقة" : "Card content language"}
+              value={cardLocale}
+              onValueChange={chooseCardLocale}
+              options={program.enabledLocales.map((enabledLocale) => {
+                const metadata = cardLocaleMetadata(enabledLocale);
+                return {
+                  value: enabledLocale,
+                  label: metadata
+                    ? `${metadata.englishName} · ${metadata.nativeName}`
+                    : enabledLocale,
+                  ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+                };
+              })}
+            />
           ) : null}
         </div>
         {!enrollable ? (

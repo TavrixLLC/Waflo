@@ -1082,6 +1082,48 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
   margin-top: 1.5rem;
 }
 
+.onboarding-logo-panel {
+  display: grid;
+  margin-bottom: 2rem;
+  padding: 1.25rem;
+  gap: 1rem;
+  background: var(--waflo-soft);
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-md);
+}
+
+.onboarding-logo-panel__heading {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.onboarding-logo-panel__heading > div {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.onboarding-logo-panel__heading h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.onboarding-logo-panel__heading span {
+  padding: 0.2rem 0.5rem;
+  color: var(--waflo-muted);
+  background: white;
+  border: 1px solid var(--waflo-border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.onboarding-logo-panel__heading p {
+  max-width: 62ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
 .onboarding-cadence {
   display: grid;
   margin-top: 1.75rem;
@@ -3175,6 +3217,13 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
   line-height: 1;
   flex-shrink: 0;
   margin-top: 1px;
+  overflow: hidden;
+}
+
+.loyalty-card-real-preview__brand-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .loyalty-card-real-preview__title {
@@ -5842,6 +5891,55 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
   gap: 0.9rem;
 }
 
+.builder-language-configuration,
+.builder-language-review {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  box-shadow: none;
+}
+
+.builder-enabled-languages {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.builder-enabled-languages > li {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.75rem 0.8rem;
+  background: color-mix(in srgb, var(--waflo-cloud) 78%, white);
+  border: 1px solid var(--waflo-border);
+  border-radius: 0.75rem;
+}
+
+.builder-enabled-languages > li > span {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.builder-enabled-languages strong,
+.builder-enabled-languages small {
+  overflow-wrap: anywhere;
+}
+
+.builder-enabled-languages li > span:first-child small,
+.builder-language-review li > span:last-child > small {
+  color: var(--waflo-muted);
+}
+
+.builder-language-review li > span:last-child > small {
+  flex-basis: 100%;
+  line-height: 1.45;
+}
+
 .builder-artwork-grid {
   display: grid;
   gap: 1rem;
@@ -5971,7 +6069,6 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
 
 .builder-language-tabs,
 .builder-preview-tabs,
-.builder-preview-language,
 .builder-layout-options {
   display: grid;
   gap: 0.4rem;
@@ -5983,7 +6080,6 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
 
 .builder-language-tabs button,
 .builder-preview-tabs button,
-.builder-preview-language button,
 .builder-layout-options button {
   min-height: 44px;
   padding: 0.65rem 0.75rem;
@@ -6004,7 +6100,6 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
 
 .builder-language-tabs button[aria-selected="true"],
 .builder-preview-tabs button[aria-selected="true"],
-.builder-preview-language button[aria-pressed="true"],
 .builder-layout-options button[aria-pressed="true"] {
   color: var(--waflo-ink);
   background: white;
@@ -6236,18 +6331,14 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
 }
 
 .builder-preview-language {
-  grid-template-columns: repeat(2, auto);
+  width: min(13.5rem, 56%);
   min-width: 0;
-  padding: 0;
-  margin: 0;
-  border: 0;
 }
 
-.builder-preview-language button {
-  min-width: 2.4rem;
-  padding: 0.45rem 0.55rem;
-  text-align: center;
-  font-size: 0.72rem;
+.builder-preview-language .wf-search-select__input {
+  min-height: 44px;
+  padding-block: 0.55rem;
+  font-size: 0.78rem;
 }
 
 .builder-preview-tabs {
@@ -6410,7 +6501,6 @@ html[data-interface-typography="kurdistan24"] [dir="rtl"] {
 .builder-section-nav button:focus-visible,
 .builder-language-tabs button:focus-visible,
 .builder-preview-tabs button:focus-visible,
-.builder-preview-language button:focus-visible,
 .builder-layout-options button:focus-visible,
 .builder-readiness-list button:focus-visible,
 .builder-validation-list button:focus-visible,

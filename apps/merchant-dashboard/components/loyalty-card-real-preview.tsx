@@ -2,8 +2,10 @@
 
 import type { Locale } from "@waflo/contracts";
 import { renderStampSvg } from "@waflo/stamp-engine";
+import Image from "next/image";
 import type { CSSProperties } from "react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { apiUrl } from "../lib/api-client";
 
 export interface LoyaltyCardRealPreviewProps {
   programName: string;
@@ -21,6 +23,7 @@ export interface LoyaltyCardRealPreviewProps {
     | null
     | undefined;
   locale: Locale;
+  brandLogoUrl?: string | null | undefined;
   className?: string | undefined;
 }
 
@@ -31,6 +34,7 @@ export function LoyaltyCardRealPreview({
   rewardSummary,
   visualTheme,
   locale,
+  brandLogoUrl,
   className = "",
 }: LoyaltyCardRealPreviewProps) {
   const ar = locale === "ar";
@@ -43,6 +47,7 @@ export function LoyaltyCardRealPreview({
   const foregroundColor = visualTheme?.foregroundColor || "#241916";
   const accentColor = visualTheme?.accentColor || "#e4572E";
   const secondaryColor = visualTheme?.secondaryColor || "#f2e8dc";
+  const [unavailableLogoUrl, setUnavailableLogoUrl] = useState<string | null>(null);
 
   const stampSvgDataUri = useMemo(() => {
     try {
@@ -82,9 +87,22 @@ export function LoyaltyCardRealPreview({
       <div className="loyalty-card-real-preview__surface">
         {/* Header with initial brand badge & program name */}
         <div className="loyalty-card-real-preview__header">
-          <span className="loyalty-card-real-preview__brand-badge" aria-hidden="true">
-            {initial}
-          </span>
+          {brandLogoUrl && unavailableLogoUrl !== brandLogoUrl ? (
+            <span className="loyalty-card-real-preview__brand-badge" aria-hidden="true">
+              <Image
+                src={`${apiUrl}${brandLogoUrl}`}
+                alt=""
+                width={20}
+                height={20}
+                unoptimized
+                onError={() => setUnavailableLogoUrl(brandLogoUrl)}
+              />
+            </span>
+          ) : (
+            <span className="loyalty-card-real-preview__brand-badge" aria-hidden="true">
+              {initial}
+            </span>
+          )}
           <span className="loyalty-card-real-preview__title" title={displayName}>
             {displayName}
           </span>
@@ -93,11 +111,13 @@ export function LoyaltyCardRealPreview({
         {/* Real Stamp Artwork Seal */}
         <div className="loyalty-card-real-preview__body" aria-hidden="true">
           {stampSvgDataUri ? (
-            <img
+            <Image
               className="loyalty-card-real-preview__stamps-img"
               src={stampSvgDataUri}
               alt=""
-              loading="lazy"
+              width={216}
+              height={104}
+              unoptimized
             />
           ) : (
             <div className="loyalty-card-real-preview__stamps-fallback">

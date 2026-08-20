@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { directionFor } from "@waflo/i18n";
 import { CustomerHeader, StateCard } from "../../page";
 import {
+  cardLocaleForRequest,
   CustomerPublicApiError,
   fetchCustomerApi,
   localeForRequest,
@@ -50,17 +51,20 @@ export default async function JoinProgramPage({
         : new CustomerPublicApiError(503, undefined, "The customer service is unavailable.");
   }
 
-  const locale = localeForRequest(
-    query.lang,
+  const interfaceLocale = localeForRequest(
+    query.lang === "en" || query.lang === "ar" ? query.lang : undefined,
     result?.program?.policy.primaryCustomerLocale ?? result?.merchant?.defaultLocale,
   );
-  const ar = locale === "ar";
-  const direction = directionFor(locale);
+  const cardLocale = result?.program
+    ? cardLocaleForRequest(query.lang, result.program, requestHeaders.get("accept-language"))
+    : interfaceLocale;
+  const ar = interfaceLocale === "ar";
+  const direction = directionFor(interfaceLocale);
   if (requestFailure) {
     const programMissing =
       requestFailure.status === 404 && requestFailure.code === "PUBLIC_PROGRAM_NOT_FOUND";
     return (
-      <main className="customer-page customer-centered" lang={locale} dir={direction}>
+      <main className="customer-page customer-centered" lang={interfaceLocale} dir={direction}>
         <StateCard
           title={
             programMissing
@@ -98,13 +102,13 @@ export default async function JoinProgramPage({
       `/join/${encodeURIComponent(programSlug)}`,
       `https://${result.merchant.slug}.waflo.app`,
     );
-    if (query.lang === "en" || query.lang === "ar") canonical.searchParams.set("lang", query.lang);
+    canonical.searchParams.set("lang", cardLocale);
     redirect(canonical.toString());
   }
   if (result.status !== "active" || !result.merchant || !result.program) {
     const merchantUnknown = result.status === "unknown";
     return (
-      <main className="customer-page customer-centered" lang={locale} dir={direction}>
+      <main className="customer-page customer-centered" lang={interfaceLocale} dir={direction}>
         <StateCard
           title={
             merchantUnknown
@@ -132,7 +136,7 @@ export default async function JoinProgramPage({
   return (
     <main
       className="customer-page join-page"
-      lang={locale}
+      lang={interfaceLocale}
       dir={direction}
       style={
         {
@@ -143,7 +147,7 @@ export default async function JoinProgramPage({
       }
     >
       <CustomerHeader
-        locale={locale}
+        locale={interfaceLocale}
         merchantName={result.merchant.name}
         merchantLogoDataUri={result.merchant.brandLogoDataUri}
         {...(tenant ? { tenant } : {})}
@@ -151,7 +155,8 @@ export default async function JoinProgramPage({
       <EnrollmentForm
         merchant={result.merchant}
         program={result.program}
-        initialLocale={locale}
+        initialLocale={cardLocale}
+        interfaceLocale={interfaceLocale}
         {...(tenant ? { tenant } : {})}
       />
     </main>

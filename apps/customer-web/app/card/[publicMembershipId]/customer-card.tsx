@@ -1,6 +1,11 @@
 "use client";
 
-import { Alert, Badge, Button, Card } from "@waflo/ui";
+import {
+  cardLocaleMetadata,
+  directionForCardLocale,
+  fontStackForCardLocale,
+} from "@waflo/contracts";
+import { Alert, Badge, Button, Card, SearchableSelect } from "@waflo/ui";
 import { ArrowRightLeft, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
@@ -18,6 +23,9 @@ interface CardView {
   };
   merchant: { name: string; slug: string; brandLogoDataUri?: string | null | undefined };
   program: {
+    defaultLocale: string;
+    enabledLocales: string[];
+    contentLocale: string;
     name: string;
     description: string;
     rewardSummary: string;
@@ -86,29 +94,48 @@ export function CustomerCard({
   const [error, setError] = useState("");
   const [walletBusy, setWalletBusy] = useState<"apple" | "google" | null>(null);
   const [platform, setPlatform] = useState<WalletPlatform>("desktop");
+  const [selectedCardLocale, setSelectedCardLocale] = useState<string | undefined>();
   const tenantQuery = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
 
   useEffect(() => {
     setPlatform(walletPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints));
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      setCard(
-        await customerApi<CardView>(`/v1/customer/card/${encodeURIComponent(publicMembershipId)}`),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof CustomerApiError ? caught.message : "This card could not be opened.",
-      );
-    }
-  }, [publicMembershipId]);
+  const load = useCallback(
+    async (localeOverride?: string) => {
+      try {
+        const query = new URLSearchParams();
+        if (tenant) query.set("tenant", tenant);
+        if (localeOverride) query.set("locale", localeOverride);
+        setCard(
+          await customerApi<CardView>(
+            `/v1/customer/card/${encodeURIComponent(publicMembershipId)}${query.size ? `?${query.toString()}` : ""}`,
+          ),
+        );
+      } catch (caught) {
+        setError(
+          caught instanceof CustomerApiError ? caught.message : "This card could not be opened.",
+        );
+      }
+    },
+    [publicMembershipId, tenant],
+  );
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 15_000);
+    const saved =
+      window.localStorage.getItem(`waflo:card-locale:${publicMembershipId}`) ?? undefined;
+    setSelectedCardLocale(saved);
+    void load(saved);
+    const timer = window.setInterval(() => void load(saved), 15_000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, publicMembershipId]);
+
+  function chooseCardLocale(locale: string) {
+    if (!card?.program.enabledLocales.includes(locale)) return;
+    setSelectedCardLocale(locale);
+    window.localStorage.setItem(`waflo:card-locale:${publicMembershipId}`, locale);
+    void load(locale);
+  }
 
   useEffect(() => {
     if (!card?.membershipQr) {
@@ -168,17 +195,37 @@ export function CustomerCard({
           logoDataUri={card.merchant.brandLogoDataUri}
           name={card.merchant.name}
         />
-        <button type="button" className="customer-language" onClick={() => void logout()}>
-          <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
-        </button>
+        <div className="customer-card-actions">
+          {card.program.enabledLocales.length > 1 ? (
+            <SearchableSelect
+              ariaLabel={ar ? "لغة محتوى البطاقة" : "Card content language"}
+              value={selectedCardLocale ?? card.program.contentLocale}
+              onValueChange={chooseCardLocale}
+              options={card.program.enabledLocales.map((locale) => {
+                const metadata = cardLocaleMetadata(locale);
+                return {
+                  value: locale,
+                  label: metadata ? `${metadata.englishName} · ${metadata.nativeName}` : locale,
+                  ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+                };
+              })}
+            />
+          ) : null}
+          <button type="button" className="customer-language" onClick={() => void logout()}>
+            <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
+          </button>
+        </div>
       </header>
       <section
         className={`digital-card ${active ? "" : "digital-card--inactive"}`}
+        lang={card.program.contentLocale}
+        dir={directionForCardLocale(card.program.contentLocale)}
         style={
           {
             "--card-bg": card.theme.backgroundColor,
             "--card-ink": card.theme.foregroundColor,
             "--card-accent": card.theme.accentColor,
+            fontFamily: fontStackForCardLocale(card.program.contentLocale),
           } as React.CSSProperties
         }
       >
