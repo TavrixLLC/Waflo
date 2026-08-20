@@ -21,6 +21,7 @@ import {
   timezoneSchema,
 } from "../../packages/contracts/src/index.js";
 import { parseEnvironment } from "../../packages/config/src/index.js";
+import { messages } from "../../packages/i18n/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
 import { walletPlatform } from "../../apps/customer-web/app/wallet-platform.js";
@@ -485,8 +486,10 @@ describe("production-v1 UX and billing repair", () => {
     expect(signup).toContain('name="privacy"');
     expect(signup.match(/target="_blank"/g)?.length).toBeGreaterThanOrEqual(3);
     expect(signup.match(/rel="noopener noreferrer"/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(signup).toContain("Terms of Service");
-    expect(signup).toContain("Privacy Policy");
+    expect(signup).toContain("copy.signup.termsAgreement");
+    expect(signup).toContain("copy.signup.privacyAgreement");
+    expect(messages.en.auth.signup.termsAgreement).toContain("Terms of Service");
+    expect(messages.en.auth.signup.privacyAgreement).toContain("Privacy Policy");
     expect(auth).toContain("legalAcceptedAt");
     expect(auth).toContain("termsVersion");
     expect(auth).toContain("privacyVersion");
@@ -516,10 +519,20 @@ describe("production-v1 UX and billing repair", () => {
     const forms = readFileSync("apps/merchant-dashboard/components/auth-forms.tsx", "utf8");
     const layout = readFileSync("apps/merchant-dashboard/components/auth-layout.tsx", "utf8");
     const styles = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
-    expect(forms).toContain("If the address is eligible, the verification request was accepted.");
-    expect(forms).toContain("Didn’t receive it? Check your spam or junk folder.");
-    expect(forms).toContain("إذا كان العنوان مؤهلاً، فقد قُبل طلب إرسال رسالة تأكيد جديدة.");
-    expect(forms).toContain("لم تصلك الرسالة؟ تحقّق من مجلد الرسائل غير المرغوب فيها.");
+    expect(forms).toContain("copy.verification.accepted");
+    expect(forms).toContain("copy.verification.help");
+    expect(messages.en.auth.verification.accepted).toBe(
+      "If the address is eligible, the verification request was accepted.",
+    );
+    expect(messages.en.auth.verification.help).toBe(
+      "Didn’t receive it? Check your spam or junk folder.",
+    );
+    expect(messages.ar.auth.verification.accepted).toBe(
+      "إذا كان العنوان مؤهلاً، فقد قُبل طلب إرسال رسالة تأكيد جديدة.",
+    );
+    expect(messages.ar.auth.verification.help).toBe(
+      "لم تصلك الرسالة؟ تحقّق من مجلد الرسائل غير المرغوب فيها.",
+    );
     expect(forms).not.toContain("localhost:8025");
     expect(forms).not.toContain("open Mailpit");
     expect(forms).toContain('const [email, setEmail] = useState("")');
