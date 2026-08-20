@@ -215,7 +215,7 @@ test("captures the final published customer preview repair evidence", async ({ p
   await mkdir(finalPreviewEvidenceDirectory, { recursive: true });
 
   await openScenario(page, { studioState: "LIVE", billingStatus: "ACTIVE" });
-  const livePreview = page.getByLabel("Card preview");
+  const livePreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     livePreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -259,7 +259,9 @@ test("captures the final published customer preview repair evidence", async ({ p
   });
 
   await openScenario(page, { studioState: "PAUSED", billingStatus: "ACTIVE" });
-  await expect(page.getByLabel("Card preview").getByText("Paused", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Card preview" }).getByText("Paused", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("img", { name: "Current published card summary" })).toBeVisible();
   await page.screenshot({
     path: path.join(finalPreviewEvidenceDirectory, "03-paused-published-preview.png"),

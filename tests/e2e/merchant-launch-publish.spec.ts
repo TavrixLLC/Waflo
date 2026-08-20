@@ -290,7 +290,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(page.getByText("Available to customers", { exact: true })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "LIVE", billingStatus: "ACTIVE" }, desktop);
-  const livePreview = page.getByLabel("Card preview");
+  const livePreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     livePreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -308,7 +308,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   ).toBeVisible();
 
   await resetScenario(page, { studioState: "LIVE_WITH_CHANGES", billingStatus: "ACTIVE" }, desktop);
-  const pendingPreview = page.getByLabel("Card preview");
+  const pendingPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     pendingPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -329,7 +329,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(page.getByText("Preview will appear here", { exact: true })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "PAUSED", billingStatus: "ACTIVE" }, desktop);
-  const pausedPreview = page.getByLabel("Card preview");
+  const pausedPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     pausedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -348,7 +348,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(pausedShare.getByRole("button", { name: /Download enrollment QR/u })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "ARCHIVED", billingStatus: "ACTIVE" }, desktop);
-  const archivedPreview = page.getByLabel("Card preview");
+  const archivedPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     archivedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -374,7 +374,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
     },
     desktop,
   );
-  const unavailableArchivedPreview = page.getByLabel("Card preview");
+  const unavailableArchivedPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     unavailableArchivedPreview.getByText("Preview unavailable", { exact: true }),
   ).toBeVisible();
@@ -389,7 +389,7 @@ test("distinguishes a loading customer preview from a confirmed unavailable prev
   const desktop = { width: 1440, height: 900 };
   await resetScenario(page, { studioState: "READY", previewDelayMs: 600 }, desktop);
 
-  const loadingPreview = page.getByLabel("Card preview");
+  const loadingPreview = page.getByRole("region", { name: "Card preview" });
   await expect(loadingPreview.getByText("Loading preview…", { exact: true })).toBeVisible();
   await expect(loadingPreview.getByText("Preview unavailable", { exact: true })).toHaveCount(0);
   await expect(loadingPreview.getByRole("img", { name: "Customer card preview" })).toBeVisible({

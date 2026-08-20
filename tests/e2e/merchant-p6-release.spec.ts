@@ -92,6 +92,7 @@ async function openSeededStudio(
   options: {
     locale?: "en" | "ar";
     state?: "DRAFT" | "READY" | "LIVE";
+    previewLocale?: "English" | "Arabic";
     area?:
       | "overview"
       | "how-it-works"
@@ -106,6 +107,7 @@ async function openSeededStudio(
   const {
     locale = "en",
     state = "LIVE",
+    previewLocale,
     area = "overview",
     viewport = { width: 1440, height: 900 },
   } = options;
@@ -119,6 +121,11 @@ async function openSeededStudio(
     `/${locale}/dashboard/programs/${programId}${area === "overview" ? "" : `/${area}`}`,
   );
   await expect(page.locator(".studio-shell--p4")).toBeVisible();
+  if (previewLocale) {
+    const picker = page.locator(".studio-preview-panel").getByRole("combobox");
+    await picker.fill(previewLocale);
+    await page.getByRole("option", { name: new RegExp(`^${previewLocale}\\b`, "u") }).click();
+  }
 }
 
 async function capture(page: Page, filename: (typeof visualFiles)[number]): Promise<void> {
@@ -206,6 +213,10 @@ test("completes the final English merchant release journey", async ({ page }) =>
   );
 
   await chooseFirstTemplate(page);
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("P6 release coffee card");
   await expect.poll(() => patchCount).toBeGreaterThan(0);
   await expect(page.locator(".builder-save-state")).toContainText("Saved");
@@ -316,7 +327,11 @@ test("keeps Arabic preview and Studio summaries localized with an honest English
   const arabicEarningCopy = "اجمع ختم كوب مع كل طلب قهوة مؤهل.";
 
   const localized = await context.newPage();
-  await openSeededStudio(localized, { locale: "ar", state: "LIVE" });
+  await openSeededStudio(localized, {
+    locale: "ar",
+    state: "LIVE",
+    previewLocale: "Arabic",
+  });
   const localizedPreview = localized.locator(".studio-published-customer-preview");
   const localizedSummary = localized.locator(".studio-overview__summary > section").first();
   await expect(localizedPreview).toContainText(arabicEarningCopy);
@@ -333,6 +348,9 @@ test("keeps Arabic preview and Studio summaries localized with an honest English
   });
   await fallback.goto(`/ar/dashboard/programs/${programId}`);
   await expect(fallback.locator(".studio-shell--p4")).toBeVisible();
+  const fallbackPicker = fallback.locator(".studio-preview-panel").getByRole("combobox");
+  await fallbackPicker.fill("Arabic");
+  await fallback.getByRole("option", { name: /^Arabic\b/u }).click();
   const fallbackSummary = fallback.locator(".studio-overview__summary > section").first();
   await expect(fallbackSummary).toContainText(englishEarningCopy);
   await expect(fallbackSummary).not.toContainText(arabicEarningCopy);
@@ -466,6 +484,7 @@ async function captureFinalReleaseVisuals(context: BrowserContext): Promise<void
   await openSeededStudio(arabic, {
     locale: "ar",
     state: "LIVE",
+    previewLocale: "Arabic",
     viewport: { width: 1440, height: 900 },
   });
   await expect(arabic.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");
@@ -498,6 +517,7 @@ test("updates only the repaired Arabic RTL and release contact-sheet evidence", 
   await openSeededStudio(page, {
     locale: "ar",
     state: "LIVE",
+    previewLocale: "Arabic",
     viewport: { width: 1440, height: 900 },
   });
   await expect(page.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");

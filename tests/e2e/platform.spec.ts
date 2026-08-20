@@ -186,6 +186,7 @@ async function finishQuickWizard(page: Page, name: string): Promise<void> {
     await expect(builderHeading).toBeVisible();
   }
   if ((await builderHeading.count()) > 0) {
+    await page.getByRole("button", { name: /^Basics/u }).click();
     await page.getByLabel("Card name in your dashboard").fill(name);
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Review card" }).click();
@@ -407,6 +408,10 @@ test.describe
       ).toBeVisible();
       await page.getByRole("button", { name: "Create loyalty card" }).click();
       await chooseGalleryTemplate(page, "Simple Visits");
+      await page
+        .getByRole("button", { name: /^Basics/u })
+        .first()
+        .click();
       await page.getByLabel("Card name in your dashboard").fill("Browser Studio Rewards Updated");
       await expect(page.getByText("Saved", { exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Review card" }).click();

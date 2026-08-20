@@ -92,6 +92,12 @@ async function openBuilder(
   }
 }
 
+async function addBuilderLanguage(page: Page, englishName: string): Promise<void> {
+  const picker = page.locator(".builder-language-configuration").getByRole("combobox").nth(1);
+  await picker.fill(englishName);
+  await page.getByRole("option", { name: new RegExp(`^${englishName}\\b`, "u") }).click();
+}
+
 async function continueToStudio(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Review card" }).click();
   const continueButton = page.getByRole("button", { name: "Continue to Studio" });
@@ -228,6 +234,7 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
     },
   });
   await page.getByRole("button", { name: /اللغات/u }).click();
+  await addBuilderLanguage(page, "Arabic");
   const arabicTab = page.getByRole("tab", { name: /العربية/u });
   await arabicTab.click();
   const localizedName = "بطاقة القهوة العربية";
@@ -236,7 +243,7 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
   await expect
     .poll(() =>
       previewResponses.some(
-        (response) => response.locale === "AR" && response.svg.includes(localizedName),
+        (response) => response.locale === "ar" && response.svg.includes(localizedName),
       ),
     )
     .toBe(true);
@@ -305,7 +312,7 @@ test("keeps Studio summary semantics truthful and the template dialog centered a
   page,
 }) => {
   await openStudio(page, "LIVE");
-  const preview = page.getByLabel("Card preview");
+  const preview = page.getByRole("region", { name: "Card preview" });
   await expect(preview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(preview.getByRole("img", { name: "Current published card summary" })).toBeVisible();
   await expect(preview.getByText("Published customer view", { exact: true })).toHaveCount(0);
@@ -386,6 +393,7 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   const arabicBuilder = await context.newPage();
   await openBuilder(arabicBuilder, { locale: "ar" });
   await arabicBuilder.getByRole("button", { name: /اللغات/u }).click();
+  await addBuilderLanguage(arabicBuilder, "Arabic");
   await arabicBuilder.getByRole("tab", { name: /العربية/u }).click();
   await expect(arabicBuilder.locator(".builder-preview-desktop img")).toBeVisible();
   await screenshot(arabicBuilder, "04-builder-arabic-localized-content.png");
@@ -424,7 +432,9 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   await openStudio(studioPanel, "LIVE");
   semanticPanels.push(
     await labeledPanel(
-      await studioPanel.getByLabel("Card preview").screenshot({ animations: "disabled" }),
+      await studioPanel
+        .getByRole("region", { name: "Card preview" })
+        .screenshot({ animations: "disabled" }),
       "Studio · published card summary",
       500,
       430,

@@ -234,6 +234,10 @@ test("preserves selected stable code and version through one Program draft and r
   await expect(page).toHaveURL(/\/en\/dashboard\/programs\/created-program-id\/edit$/u);
   await expect(page.getByText("Clean Blue", { exact: true })).toBeVisible();
 
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("Gallery car wash");
   await expect(page.getByText("Saving…", { exact: true })).toBeVisible();
   await expect.poll(() => patchBodies.length).toBe(1);

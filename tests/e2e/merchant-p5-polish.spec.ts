@@ -189,7 +189,9 @@ async function createPreviewConsistencySheet(context: BrowserContext): Promise<v
   await openStudio(studio, { state: "LIVE" });
   panels.push(
     await labeledPanel(
-      await studio.getByLabel("Card preview").screenshot({ animations: "disabled" }),
+      await studio
+        .getByRole("region", { name: "Card preview" })
+        .screenshot({ animations: "disabled" }),
       "Studio · current published card",
     ),
   );

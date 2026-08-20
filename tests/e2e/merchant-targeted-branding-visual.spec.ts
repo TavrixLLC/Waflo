@@ -124,7 +124,7 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
   expect(programId).toBeTruthy();
 
   await page.goto(`/en/dashboard/programs/${programId}`);
-  await expect(page.getByLabel("Card preview")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Card preview" })).toBeVisible();
   await capture(page, "merchant-logo-fallback-studio-preview-desktop-en.png");
 
   await page.goto("/en/dashboard/settings");
@@ -166,7 +166,7 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
   await capture(page, "merchant-logo-builder-preview-desktop-ar.png");
 
   await page.goto(`/en/dashboard/programs/${programId}`);
-  const preview = page.getByLabel("Card preview");
+  const preview = page.getByRole("region", { name: "Card preview" });
   await expect(preview).toBeVisible();
   await expect(preview.locator(".studio-published-customer-preview__issuer-mark")).toHaveAttribute(
     "src",

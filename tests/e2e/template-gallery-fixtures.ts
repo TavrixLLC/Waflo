@@ -8,7 +8,11 @@ import {
 import { createBuilderDraft } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
 import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { apiDraft } from "../../apps/merchant-dashboard/components/program-studio-types.js";
-import { findProgramTemplate, latestProgramTemplates } from "../../packages/contracts/src/index.js";
+import {
+  canonicalizeCardLocale,
+  findProgramTemplate,
+  latestProgramTemplates,
+} from "../../packages/contracts/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
 export const templateGalleryOrganizationId = "merchant-template-gallery-fixture";
@@ -170,9 +174,15 @@ export async function mockTemplateGalleryApi(
   const seededTemplate = templateGalleryFixtures()[0];
   let storedDraft: Record<string, unknown> | null =
     seededProgram && seededTemplate
-      ? apiDraft(
-          createBuilderDraft(seededTemplate, fixtureLocations, { locale: "en", blank: false }),
-        )
+      ? {
+          ...apiDraft(
+            createBuilderDraft(seededTemplate, fixtureLocations, { locale: "en", blank: false }),
+          ),
+          // Seeded programs represent legacy EN/AR cards whose authored Arabic
+          // content was already customer-visible before the dynamic locale model.
+          // Newly created fixture cards still start with English only.
+          enabledLocales: ["en", "ar"],
+        }
       : null;
   if (storedDraft && arabicEarningCopy === "missing") {
     const translations = storedDraft.translations as Record<"en" | "ar", Record<string, string>>;
@@ -256,10 +266,14 @@ export async function mockTemplateGalleryApi(
   function programDetail() {
     if (!storedDraft) return null;
     const translations = storedDraft.translations as Record<
-      "en" | "ar",
+      string,
       Record<string, string | undefined>
     >;
     const rewards = storedDraft.rewards as Array<Record<string, unknown>>;
+    const defaultCardLocale = String(storedDraft.defaultLocale ?? "en");
+    const enabledLocales = Array.isArray(storedDraft.enabledLocales)
+      ? (storedDraft.enabledLocales as string[])
+      : ["en"];
     const visualTheme = storedDraft.visualTheme as Record<string, unknown>;
     const requiredStampCount = Number(storedDraft.requiredStampCount ?? 8);
     const publishedLifecycle = [
@@ -310,6 +324,26 @@ export async function mockTemplateGalleryApi(
       staffOwnReversalWindowSeconds: storedDraft.staffOwnReversalWindowSeconds,
       managerReversalWindowMinutes: storedDraft.managerReversalWindowMinutes,
       managerOverrideAllowed: storedDraft.managerOverrideAllowed,
+      defaultCardLocale,
+      cardLocales: Object.entries(translations).map(([locale, content], localeIndex) => ({
+        id: `88888888-8888-4888-8888-${String(localeIndex + 1).padStart(12, "0")}`,
+        locale,
+        enabled: enabledLocales.includes(locale),
+        position:
+          enabledLocales.indexOf(locale) < 0 ? localeIndex + 100 : enabledLocales.indexOf(locale),
+        ...content,
+        rewardTranslations: rewards.map((reward, rewardIndex) => {
+          const localized = (
+            reward.translations as Record<string, Record<string, string | undefined>>
+          )[locale];
+          return {
+            id: `99999999-9999-4999-8999-${String(localeIndex * 100 + rewardIndex + 1).padStart(12, "0")}`,
+            rewardId: `44444444-4444-4444-8444-${String(rewardIndex + 1).padStart(12, "0")}`,
+            locale,
+            ...localized,
+          };
+        }),
+      })),
       translations: (["en", "ar"] as const).map((locale) => ({
         locale: locale.toUpperCase(),
         ...translations[locale],
@@ -392,14 +426,15 @@ export async function mockTemplateGalleryApi(
 
   function builderPreview(url: URL) {
     if (!storedDraft) return null;
-    const locale = url.searchParams.get("locale") === "AR" ? "AR" : "EN";
+    const locale = canonicalizeCardLocale(url.searchParams.get("locale") ?? "en") ?? "en";
     const requestedProfile = url.searchParams.get("profile");
     const profile =
       requestedProfile === "APPLE_WALLET" || requestedProfile === "GOOGLE_WALLET"
         ? requestedProfile
         : "CUSTOMER_WEB";
-    const translations = storedDraft.translations as Record<"en" | "ar", Record<string, string>>;
-    const content = translations[locale === "AR" ? "ar" : "en"];
+    const translations = storedDraft.translations as Record<string, Record<string, string>>;
+    const defaultLocale = canonicalizeCardLocale(String(storedDraft.defaultLocale ?? "en")) ?? "en";
+    const content = translations[locale] ?? translations[defaultLocale] ?? translations.en;
     const goal = Number(storedDraft.requiredStampCount ?? 8);
     const progress = Math.max(0, Math.min(goal, Number(url.searchParams.get("progress") ?? 0)));
     const template = findProgramTemplate(
@@ -444,7 +479,7 @@ export async function mockTemplateGalleryApi(
       emptyArtwork: { kind: "svg", content: empty.content, trusted: true },
       label: `${progress}/${goal}`,
       rewardLabel: rewardReady
-        ? locale === "AR"
+        ? locale === "ar"
           ? `المكافأة جاهزة: ${content.rewardSummary}`
           : `Reward ready: ${content.rewardSummary}`
         : content.rewardSummary,
@@ -455,7 +490,7 @@ export async function mockTemplateGalleryApi(
     const result = composeProgramPreview({
       profile,
       locale,
-      organizationName: locale === "AR" ? "مقهى المعرض" : "Gallery Coffee",
+      organizationName: locale === "ar" ? "مقهى المعرض" : "Gallery Coffee",
       programName: content.programName,
       shortDescription: content.shortDescription,
       rewardSummary: content.rewardSummary,
@@ -560,7 +595,15 @@ export async function mockTemplateGalleryApi(
     if (path === `/v1/organizations/${templateGalleryOrganizationId}`) {
       await fulfill(route, {
         id: templateGalleryOrganizationId,
+        name: "Gallery Coffee",
+        merchantSlug: "gallery-coffee",
         businessCategory,
+        defaultLocale: "EN",
+        timezone: "Asia/Baghdad",
+        status: "ACTIVE",
+        selectedPlan,
+        onboardingState: "COMPLETE",
+        onboardingCompletedAt: "2026-08-01T10:00:00.000Z",
         brandLogoAsset: merchantBrandLogoDataUri
           ? {
               id: merchantBrandLogoAssetId,
@@ -576,6 +619,9 @@ export async function mockTemplateGalleryApi(
           trialStart: null,
           trialEnd: null,
         },
+        domains: [],
+        locations: [{ name: "Gallery Main Branch" }],
+        _count: { locations: 1, members: 1 },
       });
       return;
     }
