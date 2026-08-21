@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { devicePairingClaimSchema } from "../../packages/contracts/src/w4.js";
 import {
+  createManualPairingCode,
   createPairingToken,
+  formatManualPairingCode,
+  hashManualPairingCode,
+  normalizeManualPairingCode,
   parsePairingToken,
 } from "../../packages/staff-device-security/src/index.js";
 
@@ -130,5 +135,48 @@ describe("Staff device pairing environment isolation contract", () => {
     // Assert env only does not contain secret or UUID
     expect(envOnly).not.toContain(pairing.publicId);
     expect(envOnly).not.toContain(pairing.secret);
+  });
+
+  it("creates an 80-bit manual code and stores only a keyed digest", () => {
+    const deviceSecret = "staff-device-test-secret-that-is-at-least-32-bytes";
+    const first = createManualPairingCode(deviceSecret);
+    const second = createManualPairingCode(deviceSecret);
+
+    expect(first.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+    expect(first.codeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.code).not.toBe(second.code);
+    expect(first.codeHash).not.toBe(second.codeHash);
+    expect(hashManualPairingCode(first.code, deviceSecret)).toBe(first.codeHash);
+    expect(first.codeHash).not.toContain(normalizeManualPairingCode(first.code));
+  });
+
+  it("normalizes readable manual-code aliases without weakening its fixed length", () => {
+    expect(normalizeManualPairingCode("0abc-1def-ghjk-mnpq")).toBe("0ABC1DEFGHJKMNPQ");
+    expect(normalizeManualPairingCode("OABC-IDEF-GHJK-MNPQ")).toBe("0ABC1DEFGHJKMNPQ");
+    expect(formatManualPairingCode("0ABC1DEFGHJKMNPQ")).toBe("0ABC-1DEF-GHJK-MNPQ");
+    expect(() => normalizeManualPairingCode("TOO-SHORT")).toThrow();
+  });
+
+  it("accepts exactly one QR token or manual code at the public claim boundary", () => {
+    const device = {
+      installationId: "installation-identifier-0001",
+      publicKey: "A".repeat(40),
+      platform: "ANDROID" as const,
+      appVersion: "1.0.0",
+    };
+    expect(
+      devicePairingClaimSchema.safeParse({ ...device, pairingToken: "x".repeat(80) }).success,
+    ).toBe(true);
+    expect(
+      devicePairingClaimSchema.safeParse({ ...device, manualCode: "0ABC-1DEF-GHJK-MNPQ" }).success,
+    ).toBe(true);
+    expect(devicePairingClaimSchema.safeParse(device).success).toBe(false);
+    expect(
+      devicePairingClaimSchema.safeParse({
+        ...device,
+        pairingToken: "x".repeat(80),
+        manualCode: "0ABC-1DEF-GHJK-MNPQ",
+      }).success,
+    ).toBe(false);
   });
 });

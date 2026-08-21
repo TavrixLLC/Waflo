@@ -21,14 +21,10 @@ import {
 } from "lucide-react";
 import {
   type ButtonHTMLAttributes,
-  Children,
-  type ChangeEvent,
   Fragment,
   type HTMLAttributes,
   type InputHTMLAttributes,
-  isValidElement,
   type KeyboardEvent,
-  type ReactElement,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
@@ -133,98 +129,19 @@ export function TextArea({ className = "", error = false, ...props }: TextAreaPr
   );
 }
 
-interface SelectProps
-  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "children" | "multiple" | "size"> {
+interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   error?: boolean;
-  children: ReactNode;
 }
 
-function optionText(children: ReactNode): string {
-  return Children.toArray(children)
-    .map((child) => {
-      if (typeof child === "string" || typeof child === "number") return String(child);
-      if (!isValidElement(child)) return "";
-      const element = child as ReactElement<{ children?: ReactNode }>;
-      return optionText(element.props.children);
-    })
-    .join("")
-    .trim();
-}
-
-function optionsFromChildren(children: ReactNode, group?: string): SearchableSelectOption[] {
-  return Children.toArray(children).flatMap<SearchableSelectOption>((child) => {
-    if (!isValidElement(child)) return [];
-
-    const element = child as ReactElement<{
-      children?: ReactNode;
-      disabled?: boolean;
-      label?: string;
-      value?: string | number;
-    }>;
-    if (element.type === "option") {
-      const label = optionText(element.props.children);
-      return [
-        {
-          value: String(element.props.value ?? label),
-          label,
-          ...(group ? { group } : {}),
-          disabled: Boolean(element.props.disabled),
-        },
-      ];
-    }
-
-    if (element.type === "optgroup") {
-      return optionsFromChildren(element.props.children, element.props.label);
-    }
-
-    return [];
-  });
-}
-
-function selectValue(value: string | number | readonly string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  return value === undefined ? undefined : String(value);
-}
-
-export function Select({
-  className = "",
-  error = false,
-  children,
-  value,
-  defaultValue,
-  onChange,
-  name,
-  required,
-  disabled,
-  id,
-  "aria-label": ariaLabel,
-  "aria-describedby": ariaDescribedBy,
-  ...props
-}: SelectProps) {
-  const options = useMemo(() => optionsFromChildren(children), [children]);
-  const selectedValue = selectValue(value);
-  const initialValue =
-    selectValue(defaultValue) ?? options.find((option) => !option.disabled)?.value ?? "";
-
+export function Select({ className = "", error = false, children, ...props }: SelectProps) {
   return (
-    <SearchableSelect
+    <select
       {...props}
-      id={id}
-      name={name}
-      options={options}
-      value={selectedValue}
-      defaultValue={initialValue}
-      required={required}
-      disabled={disabled}
-      className={`wf-select ${error ? "wf-input--error" : ""} ${className}`}
-      ariaLabel={ariaLabel}
-      ariaDescribedBy={ariaDescribedBy}
-      invalid={error}
-      onValueChange={(nextValue) => {
-        const target = { value: nextValue, name } as HTMLSelectElement;
-        onChange?.({ target, currentTarget: target } as ChangeEvent<HTMLSelectElement>);
-      }}
-    />
+      className={`wf-input wf-select ${error ? "wf-input--error" : ""} ${className}`}
+      aria-invalid={error || undefined}
+    >
+      {children}
+    </select>
   );
 }
 

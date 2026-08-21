@@ -919,6 +919,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
       organizationAId,
       next,
       currentPassword,
+      ownerSessionId,
       request,
     );
     expect(changed.merchantSlug).toBe(next);

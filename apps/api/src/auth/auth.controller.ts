@@ -122,6 +122,12 @@ export class AuthController {
     return { status: "password_changed", sessionId: session.sessionId };
   }
 
+  @Post("password/setup-request")
+  @RateLimit(5, 300)
+  requestPasswordSetup(@CurrentUser() user: AuthenticatedUser, @Req() request: WafloRequest) {
+    return this.auth.requestPasswordSetup(user.id, request);
+  }
+
   @Get("me")
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.auth.me(user.id);

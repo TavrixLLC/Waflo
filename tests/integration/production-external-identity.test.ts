@@ -406,6 +406,105 @@ describe.sequential("production external identity and lifecycle", () => {
     ).toBe("external_identity_link_rotation");
   });
 
+  it("re-verifies an OAuth-only account with its already linked Google identity", async () => {
+    const email = `${randomUUID()}@reauth.example`;
+    const subject = `reauth-${randomUUID()}`;
+    const user = await prisma.client.user.create({
+      data: {
+        email,
+        normalizedEmail: email,
+        displayName: "Google reauthentication merchant",
+        passwordHash: null,
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
+        externalIdentities: {
+          create: {
+            provider: "GOOGLE",
+            issuer: GOOGLE_ISSUER,
+            providerSubject: subject,
+            providerEmail: email,
+            emailVerified: true,
+          },
+        },
+      },
+    });
+    const sourceSession = await auth.createSession(user.id, request);
+    const started = await external.startReauthentication(
+      "google",
+      user.id,
+      sourceSession.sessionId,
+      "en",
+    );
+    const flowUrl = new URL(started.authorizationUrl);
+    returnToken(
+      await idToken({
+        issuer: GOOGLE_ISSUER,
+        audience: GOOGLE_CLIENT_ID,
+        subject,
+        nonce: requiredQueryParameter(flowUrl, "nonce"),
+        email,
+        emailVerified: true,
+      }),
+    );
+    const completed = await external.complete(
+      {
+        provider: "google",
+        state: requiredQueryParameter(flowUrl, "state"),
+        code: "reauthentication-code",
+        browserBinding: started.browserBinding.value,
+      },
+      request,
+    );
+    expect(completed.session.sessionId).not.toBe(sourceSession.sessionId);
+    expect(
+      (await prisma.client.session.findUniqueOrThrow({ where: { id: sourceSession.sessionId } }))
+        .revocationReason,
+    ).toBe("external_identity_reauthentication");
+    expect(await external.identities(user.id)).toMatchObject({
+      accountEmail: email,
+      passwordEnabled: false,
+      identities: [expect.objectContaining({ provider: "GOOGLE", providerEmail: email })],
+    });
+  });
+
+  it("issues a single-use password setup flow without inventing a Google password", async () => {
+    const email = `${randomUUID()}@password-setup.example`;
+    const user = await prisma.client.user.create({
+      data: {
+        email,
+        normalizedEmail: email,
+        displayName: "Password setup merchant",
+        passwordHash: null,
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
+        externalIdentities: {
+          create: {
+            provider: "GOOGLE",
+            issuer: GOOGLE_ISSUER,
+            providerSubject: `password-setup-${randomUUID()}`,
+            providerEmail: email,
+            emailVerified: true,
+          },
+        },
+      },
+    });
+    await expect(auth.requestPasswordSetup(user.id, request)).resolves.toMatchObject({
+      status: "accepted",
+    });
+    expect(
+      (await prisma.client.user.findUniqueOrThrow({ where: { id: user.id } })).passwordHash,
+    ).toBeNull();
+    expect(
+      await prisma.client.passwordResetToken.count({
+        where: { userId: user.id, consumedAt: null, expiresAt: { gt: new Date() } },
+      }),
+    ).toBe(1);
+  });
+
   it("rejects a link callback after its reauthenticated session is revoked", async () => {
     const password = "Revoked link session 2026!";
     const email = `${randomUUID()}@revoked-link.example`;
@@ -658,7 +757,7 @@ describe.sequential("production external identity and lifecycle", () => {
       {
         commandId,
         sessionId: merchant.completed.session.sessionId,
-        confirmation: "REQUEST DELETION",
+        confirmation: merchant.identity.providerEmail ?? "",
         currentPassword: merchant.password,
       },
       request,
@@ -793,7 +892,7 @@ describe.sequential("production external identity and lifecycle", () => {
       {
         commandId: randomUUID(),
         sessionId: activeSession.sessionId,
-        confirmation: "REQUEST DELETION",
+        confirmation: email,
         currentPassword: password,
       },
       request,
@@ -857,10 +956,15 @@ describe.sequential("production external identity and lifecycle", () => {
         expiresAt: new Date(Date.now() + 86_400_000),
       },
     });
+    const activeSession = await auth.createSession(owner.id, request);
     const result = await organizations.close(
       owner.id,
       organization.id,
-      { confirmation: "CLOSE ORGANIZATION", currentPassword: password, sessionId: randomUUID() },
+      {
+        confirmation: organization.name,
+        currentPassword: password,
+        sessionId: activeSession.sessionId,
+      },
       request,
     );
     expect(result).toEqual({ status: "ARCHIVED", replayed: false });

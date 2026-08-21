@@ -7,6 +7,11 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { destinationAfterLogin } from "../../../../components/auth-forms";
 import { AuthLayout } from "../../../../components/auth-layout";
+import {
+  oauthInterfaceLocaleKey,
+  oauthReturnPathKey,
+  safeOAuthReturnPath,
+} from "../../../../lib/oauth-reauthentication";
 
 export default function OAuthCallbackPage() {
   const params = useParams<{ locale: string }>();
@@ -18,23 +23,37 @@ export default function OAuthCallbackPage() {
   const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale | null>(null);
 
   useEffect(() => {
-    const storedLocale = sessionStorage.getItem("waflo:oauth-interface-locale") ?? "";
+    const storedLocale = sessionStorage.getItem(oauthInterfaceLocaleKey) ?? "";
     if (isInterfaceLocale(storedLocale) && storedLocale !== routeLocale) {
       const query = initialResult ? `?result=${encodeURIComponent(initialResult)}` : "";
       router.replace(`/${storedLocale}/oauth/callback${query}`);
       return;
     }
-    sessionStorage.removeItem("waflo:oauth-interface-locale");
+    sessionStorage.removeItem(oauthInterfaceLocaleKey);
     setInterfaceLocale(routeLocale);
   }, [initialResult, routeLocale, router]);
 
   useEffect(() => {
     if (!interfaceLocale || search.get("result") !== "authenticated") return;
     window.history.replaceState(null, "", `/${interfaceLocale}/oauth/callback`);
+    const returnPath = safeOAuthReturnPath(
+      sessionStorage.getItem(oauthReturnPathKey),
+      interfaceLocale,
+    );
+    sessionStorage.removeItem(oauthReturnPathKey);
+    if (returnPath) {
+      router.replace(returnPath);
+      return;
+    }
     void destinationAfterLogin(interfaceLocale)
       .then((destination) => router.replace(destination))
       .catch(() => setResult("failed"));
   }, [interfaceLocale, router, search]);
+
+  useEffect(() => {
+    if (!interfaceLocale || result === "authenticated") return;
+    sessionStorage.removeItem(oauthReturnPathKey);
+  }, [interfaceLocale, result]);
 
   if (!interfaceLocale) return null;
   const copy = messages[interfaceLocale].auth;

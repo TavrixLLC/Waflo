@@ -19,7 +19,7 @@ import {
   TextArea,
   TextInput,
 } from "@waflo/ui";
-import { Activity, Download, MonitorSmartphone, Search, UserRound } from "lucide-react";
+import { Activity, Copy, Download, MonitorSmartphone, Search, UserRound } from "lucide-react";
 import Image from "next/image";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
@@ -430,21 +430,19 @@ export function CustomersOperationsScreen({
               />
             </FormField>
             <FormField label={ar ? "حالة العضوية" : "Membership status"}>
-              <SearchableSelect
+              <Select
                 name="customer-status"
                 value={status}
-                onValueChange={(val) => {
-                  setStatus(val);
+                onChange={(event) => {
+                  setStatus(event.currentTarget.value);
                 }}
-                options={[
-                  { value: "", label: ar ? "كل الحالات" : "All statuses" },
-                  { value: "ACTIVE", label: ar ? "نشطة" : "Active" },
-                  { value: "SUSPENDED", label: ar ? "موقوفة" : "Suspended" },
-                  { value: "EXPIRED", label: ar ? "منتهية" : "Expired" },
-                  { value: "REVOKED", label: ar ? "ملغاة" : "Revoked" },
-                ]}
-                placeholder={ar ? "كل الحالات" : "All statuses"}
-              />
+              >
+                <option value="">{ar ? "كل الحالات" : "All statuses"}</option>
+                <option value="ACTIVE">{ar ? "نشطة" : "Active"}</option>
+                <option value="SUSPENDED">{ar ? "موقوفة" : "Suspended"}</option>
+                <option value="EXPIRED">{ar ? "منتهية" : "Expired"}</option>
+                <option value="REVOKED">{ar ? "ملغاة" : "Revoked"}</option>
+              </Select>
             </FormField>
           </div>
           <Button type="submit" loading={searching}>
@@ -822,6 +820,7 @@ interface PairingResult {
   status: string;
   expiresAt: string;
   staffDisplayName: string;
+  manualPairingCode: string;
   pairingQrSvg: string;
   accessibleLabel: string;
 }
@@ -840,6 +839,7 @@ export function DevicesOperationsScreen({
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [pairingOpen, setPairingOpen] = useState(false);
   const [pairing, setPairing] = useState<PairingResult | null>(null);
+  const [pairingCodeCopied, setPairingCodeCopied] = useState(false);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
 
@@ -883,6 +883,7 @@ export function DevicesOperationsScreen({
           }),
         },
       );
+      setPairingCodeCopied(false);
       setPairing(result);
     } catch (caught) {
       setError(apiMessage(caught, ar ? "تعذر إنشاء الاقتران." : "Unable to create pairing."));
@@ -898,6 +899,7 @@ export function DevicesOperationsScreen({
       { method: "POST" },
     );
     setPairing(null);
+    setPairingCodeCopied(false);
     setPairingOpen(false);
   }
 
@@ -992,6 +994,7 @@ export function DevicesOperationsScreen({
         onClose={() => {
           setPairingOpen(false);
           setPairing(null);
+          setPairingCodeCopied(false);
         }}
       >
         {pairing ? (
@@ -1011,6 +1014,32 @@ export function DevicesOperationsScreen({
               height={360}
               unoptimized
             />
+            <div className="dashboard-pairing-manual">
+              <div>
+                <span>{ar ? "رمز الإدخال اليدوي" : "Manual pairing code"}</span>
+                <strong dir="ltr">{pairing.manualPairingCode}</strong>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  void navigator.clipboard.writeText(pairing.manualPairingCode).then(() => {
+                    setPairingCodeCopied(true);
+                  })
+                }
+              >
+                <Copy size={17} aria-hidden="true" />
+                {ar ? "نسخ الرمز" : "Copy code"}
+              </Button>
+              <p>
+                {ar
+                  ? "أدخل هذا الرمز في تطبيق الموظف إذا تعذر مسح رمز QR. تنتهي صلاحية الطريقتين في الوقت نفسه."
+                  : "Enter this code in the Staff app if the QR cannot be scanned. Both methods expire at the same time."}
+              </p>
+              <span className="wf-sr-only" role="status" aria-live="polite">
+                {pairingCodeCopied ? (ar ? "تم نسخ الرمز." : "Code copied.") : ""}
+              </span>
+            </div>
             <p>
               {pairing.staffDisplayName} · {formattedDate(pairing.expiresAt, ar)}
             </p>
@@ -1483,15 +1512,17 @@ export function ExportsOperationsScreen({
         </div>
         <div className="export-composer__controls">
           <FormField label={ar ? "نوع التصدير" : "Export type"}>
-            <SearchableSelect
+            <Select
               name="export-type"
               value={exportType}
-              onValueChange={(value) => setExportType(value as VisibleExportType)}
-              options={(Object.keys(exportLabels) as VisibleExportType[]).map((value) => ({
-                value,
-                label: exportLabels[value],
-              }))}
-            />
+              onChange={(event) => setExportType(event.currentTarget.value as VisibleExportType)}
+            >
+              {(Object.keys(exportLabels) as VisibleExportType[]).map((value) => (
+                <option key={value} value={value}>
+                  {exportLabels[value]}
+                </option>
+              ))}
+            </Select>
           </FormField>
           <Button onClick={() => void createExport()} loading={working}>
             <Download size={17} /> {ar ? "إنشاء ملف" : "Create export"}

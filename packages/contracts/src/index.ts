@@ -255,6 +255,14 @@ export const selectedPlanSchema = z
   .object({ plan: planCodeSchema, cadence: billingCadenceSchema.optional() })
   .strict();
 
+export const billingSubscriptionChangeSchema = z
+  .object({ plan: planCodeSchema, cadence: billingCadenceSchema })
+  .strict();
+
+export const billingSubscriptionCancellationSchema = z
+  .object({ reason: z.string().trim().max(500).optional() })
+  .strict();
+
 export const billingCheckoutSchema = z
   .object({ cadence: billingCadenceSchema.default("monthly") })
   .strict();
@@ -299,6 +307,10 @@ export const billingTrialCompleteSchema = z
 
 export type BillingIdentityInput = z.infer<typeof billingIdentitySchema>;
 export type BillingTrialSetupInput = z.infer<typeof billingTrialSetupSchema>;
+export type BillingSubscriptionChangeInput = z.infer<typeof billingSubscriptionChangeSchema>;
+export type BillingSubscriptionCancellationInput = z.infer<
+  typeof billingSubscriptionCancellationSchema
+>;
 
 export const refundReasons = [
   "duplicate_charge",
@@ -329,7 +341,7 @@ export const refundReviewSchema = z
 export type RefundReviewInput = z.infer<typeof refundReviewSchema>;
 
 export const slugChangeSchema = z
-  .object({ slug: z.string().min(3).max(40), password: z.string().min(1).max(128) })
+  .object({ slug: z.string().min(3).max(40), password: z.string().max(128).optional() })
   .strict();
 
 export type RegisterInput = z.infer<typeof registerSchema>;

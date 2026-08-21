@@ -63,6 +63,7 @@ export class OrganizationsController {
   @Patch(":organizationId/slug")
   changeSlug(
     @CurrentUser() user: AuthenticatedUser,
+    @CurrentSession() sessionId: string,
     @Param("organizationId") organizationId: string,
     @Body() body: unknown,
     @Req() request: WafloRequest,
@@ -72,7 +73,8 @@ export class OrganizationsController {
       user.id,
       parseUuid(organizationId),
       input.slug,
-      input.password,
+      input.password ?? "",
+      sessionId,
       request,
     );
   }

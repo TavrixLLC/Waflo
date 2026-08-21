@@ -986,7 +986,7 @@ test.describe
       await page.locator('input[name="currentPassword"]').fill(initialPassword);
       await page.locator('input[name="newPassword"]').fill(changedPassword);
       await page.locator('input[name="confirmPassword"]').fill(changedPassword);
-      await page.getByRole("button", { name: "Change password" }).click();
+      await page.getByRole("button", { name: "Change Waflo password" }).click();
       await expect(page.getByText("Password changed and session rotated.")).toBeVisible();
       await otherContext.close();
     });
@@ -1252,6 +1252,10 @@ test.describe
         );
         await page.mouse.up();
         await cropDialog.getByRole("slider").fill("1.5");
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1.5");
+        await cropDialog.getByRole("button", { name: "Zoom in" }).click();
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1.7");
+        await cropDialog.getByRole("button", { name: "Zoom out" }).click();
         await expect(cropDialog.getByRole("slider")).toHaveValue("1.5");
         const uploaded = page.waitForResponse(
           (response) =>

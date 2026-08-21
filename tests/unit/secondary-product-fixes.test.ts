@@ -6,14 +6,19 @@ function source(path: string): string {
 }
 
 describe("secondary product corrections", () => {
-  it("feeds every loyalty-list thumbnail from one organization brand context", () => {
+  it("renders each loyalty-list thumbnail from its selected logo with an organization fallback", () => {
     const programs = source("apps/merchant-dashboard/components/programs-screen.tsx");
     const preview = source("apps/merchant-dashboard/components/loyalty-card-real-preview.tsx");
+    const brandMark = source("apps/merchant-dashboard/components/merchant-brand-mark.tsx");
     expect(programs.match(/apiFetch<OrganizationPresentationView>/gu)).toHaveLength(1);
     expect(programs).toContain('brandLogoAsset: Pick<AssetItem, "contentUrl"> | null');
-    expect(programs).toContain("brandLogoUrl={brandLogoUrl}");
+    expect(programs).toContain("const logoUrl = theme?.logoAssetId");
+    expect(programs).toContain(": brandLogoUrl;");
+    expect(programs).toContain("brandLogoUrl={logoUrl}");
     expect(preview).toContain("brandLogoUrl?: string | null | undefined");
-    expect(preview).toContain("unavailableLogoUrl !== brandLogoUrl");
+    expect(preview).toContain("<MerchantBrandMark");
+    expect(brandMark).toContain('credentials: "include"');
+    expect(brandMark).toContain("privateImageCache");
   });
 
   it("offers organization branding without adding a required onboarding step", () => {

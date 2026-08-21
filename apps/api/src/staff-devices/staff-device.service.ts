@@ -11,9 +11,11 @@ import { hasPermission } from "@waflo/permissions";
 import { createQrSvg } from "@waflo/qr-core";
 import {
   assertStaffMobileAppVersion,
+  createManualPairingCode,
   createOpaqueDeviceSessionToken,
   createPairingToken,
   hashOpaqueDeviceToken,
+  hashManualPairingCode,
   hashPairingToken,
   normalizeEd25519PublicKey,
   parsePairingToken,
@@ -501,6 +503,7 @@ export class StaffDeviceService {
       publicId,
       environmentId: this.environment.values.DEPLOYMENT_ENVIRONMENT,
     });
+    const manualPairing = createManualPairingCode(this.environment.values.DEVICE_SESSION_SECRET);
     const expiresInMinutes = Math.min(
       input.expiresInMinutes,
       this.environment.values.DEVICE_PAIRING_TTL_MINUTES,
@@ -578,6 +581,7 @@ export class StaffDeviceService {
             organizationId,
             intendedStaffMemberId: intended.id,
             pairingTokenHash: pairing.tokenHash,
+            pairingManualCodeHash: manualPairing.codeHash,
             requestedLocationAssignments: input.locations,
             deviceLabelSuggestion:
               input.deviceLabelSuggestion ?? `${intended.user.displayName}'s device`,
@@ -612,6 +616,7 @@ export class StaffDeviceService {
       status: created.status,
       expiresAt: created.expiresAt,
       staffDisplayName: intended.user.displayName,
+      manualPairingCode: manualPairing.code,
       pairingQrSvg: await createQrSvg(pairing.token, {
         width: 360,
         margin: 3,
@@ -681,20 +686,62 @@ export class StaffDeviceService {
   }
 
   async claim(input: DevicePairingClaimInput) {
-    let parsed: ReturnType<typeof parsePairingToken>;
-    try {
-      parsed = parsePairingToken(input.pairingToken);
-    } catch {
+    let publicId: string;
+    let credentialFilter: { pairingTokenHash: string } | { pairingManualCodeHash: string };
+    let claimMethod: "QR" | "MANUAL";
+    if (input.pairingToken) {
+      let parsed: ReturnType<typeof parsePairingToken>;
+      try {
+        parsed = parsePairingToken(input.pairingToken);
+      } catch {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      if (parsed.environmentId !== this.environment.values.DEPLOYMENT_ENVIRONMENT) {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      publicId = parsed.publicId;
+      credentialFilter = { pairingTokenHash: hashPairingToken(input.pairingToken) };
+      claimMethod = "QR";
+    } else if (input.manualCode) {
+      let pairingManualCodeHash: string;
+      try {
+        pairingManualCodeHash = hashManualPairingCode(
+          input.manualCode,
+          this.environment.values.DEVICE_SESSION_SECRET,
+        );
+      } catch {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      const pairing = await this.prisma.client.devicePairingSession.findUnique({
+        where: { pairingManualCodeHash },
+        select: { publicId: true },
+      });
+      if (!pairing) {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      publicId = pairing.publicId;
+      credentialFilter = { pairingManualCodeHash };
+      claimMethod = "MANUAL";
+    } else {
       throw new AppError(
         "DEVICE_PAIRING_INVALID",
-        "Pairing token is invalid.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    if (parsed.environmentId !== this.environment.values.DEPLOYMENT_ENVIRONMENT) {
-      throw new AppError(
-        "DEVICE_PAIRING_INVALID",
-        "Pairing token is for another environment.",
+        "Pairing code is invalid.",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -726,18 +773,18 @@ export class StaffDeviceService {
     }
     const publicKey = normalizeEd25519PublicKey(input.publicKey);
     const pairing = await this.prisma.client.devicePairingSession.findUnique({
-      where: { publicId: parsed.publicId },
+      where: { publicId },
       select: { organizationId: true },
     });
     if (pairing) await this.accountAccess.requireOperationalAccess(pairing.organizationId);
     return withOrderedInvariantLocks(
       this.prisma.client,
-      [`pairing:${parsed.publicId}`],
+      [`pairing:${publicId}`],
       async (transaction) => {
         const session = await transaction.devicePairingSession.findFirst({
           where: {
-            publicId: parsed.publicId,
-            pairingTokenHash: hashPairingToken(input.pairingToken),
+            publicId,
+            ...credentialFilter,
           },
         });
         if (!session) {
@@ -853,7 +900,7 @@ export class StaffDeviceService {
           action: "device.pairing_claimed",
           targetType: "device_pairing_session",
           targetId: session.id,
-          metadata: { platform: input.platform, appVersion: input.appVersion },
+          metadata: { platform: input.platform, appVersion: input.appVersion, claimMethod },
         });
         return {
           pairingPublicId: session.publicId,

@@ -666,6 +666,24 @@ test("captures live Mapbox location review states when configured", async ({ pag
   const clickedMarker = dialog.locator(".location-map-marker");
   await expect(clickedMarker).toBeVisible({ timeout: 20_000 });
   await expect(clickedMarker).toHaveCSS("position", "absolute");
+  const canvasAfterClick = await canvas.boundingBox();
+  const markerAfterClick = await clickedMarker.boundingBox();
+  expect(canvasAfterClick).not.toBeNull();
+  expect(markerAfterClick).not.toBeNull();
+  expect(
+    Math.abs(
+      (markerAfterClick?.x ?? 0) +
+        (markerAfterClick?.width ?? 0) / 2 -
+        ((canvasAfterClick?.x ?? 0) + 420),
+    ),
+  ).toBeLessThan(8);
+  expect(
+    Math.abs(
+      (markerAfterClick?.y ?? 0) +
+        (markerAfterClick?.height ?? 0) -
+        ((canvasAfterClick?.y ?? 0) + 210),
+    ),
+  ).toBeLessThan(8);
   await expect(dialog.locator(".location-picker__selection")).toBeVisible();
 
   const search = dialog.getByRole("combobox", { name: "Search for the branch location" });

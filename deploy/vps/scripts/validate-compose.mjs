@@ -110,6 +110,7 @@ function render(environment) {
     NEXT_PUBLIC_API_URL: staging ? "https://api-staging.waflo.app" : "https://api.waflo.app",
     NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app-staging.waflo.app" : "https://app.waflo.app",
     NEXT_PUBLIC_MARKETING_URL: marketingOrigin,
+    NEXT_PUBLIC_CUSTOMER_URL: customerOrigin,
     NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: "pk.compose_validation.public",
   };
   const result = spawnSync(

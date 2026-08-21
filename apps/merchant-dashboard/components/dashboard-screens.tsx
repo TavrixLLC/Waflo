@@ -2,7 +2,7 @@
 
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { billingCadenceCatalog, cadencePrice } from "@waflo/billing";
+import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
 import {
   type BillingCadence,
   countryOptions,
@@ -49,6 +49,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
+import { merchantPublicUrl } from "../lib/merchant-public-url";
+import { beginGoogleReauthentication } from "../lib/oauth-reauthentication";
 import { billingPriceTruth, canPersistCatalogSelection } from "./billing-presentation";
 import type { DashboardSection, MembershipView } from "./dashboard";
 import { ProgramAssetPicker } from "./program-asset-uploader";
@@ -171,6 +173,7 @@ export function OverviewScreen({
     },
     archived: { description: copy.archivedDescription, action: copy.archivedAction },
   }[nextStep];
+  const publicMerchantUrl = merchantPublicUrl(organization.merchantSlug);
   return (
     <>
       <PageHeader
@@ -238,16 +241,14 @@ export function OverviewScreen({
             </div>
             <p>{copy.businessLinkDescription}</p>
             <div className="dashboard-url" dir="ltr">
-              <span>https://{organization.merchantSlug}.waflo.app</span>
+              <a href={publicMerchantUrl} rel="noreferrer" target="_blank">
+                {publicMerchantUrl}
+              </a>
               <button
                 type="button"
                 className="wf-icon-button wf-button--ghost"
                 aria-label={copy.copyUrl}
-                onClick={() =>
-                  void navigator.clipboard.writeText(
-                    `https://${organization.merchantSlug}.waflo.app`,
-                  )
-                }
+                onClick={() => void navigator.clipboard.writeText(publicMerchantUrl)}
               >
                 <Copy size={18} />
               </button>
@@ -718,6 +719,7 @@ interface StaffPairingResult {
   status: string;
   expiresAt: string;
   staffDisplayName: string;
+  manualPairingCode: string;
   pairingQrSvg: string;
   accessibleLabel: string;
 }
@@ -741,6 +743,7 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
   const [open, setOpen] = useState(false);
   const [pairingMemberId, setPairingMemberId] = useState<string | null>(null);
   const [pairing, setPairing] = useState<StaffPairingResult | null>(null);
+  const [pairingCodeCopied, setPairingCodeCopied] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const canManage = membership.role === "OWNER" || membership.role === "MANAGER";
@@ -811,6 +814,7 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
           }),
         },
       );
+      setPairingCodeCopied(false);
       setPairing(result);
       await load();
     } catch (caught) {
@@ -829,6 +833,7 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
       );
     }
     setPairing(null);
+    setPairingCodeCopied(false);
     setPairingMemberId(null);
   }
   async function cancel(id: string) {
@@ -1092,17 +1097,12 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
             <TextInput name="name" minLength={2} maxLength={100} required autoFocus />
           </FormField>
           <FormField label={ar ? "الدور" : "Role"} required>
-            <SearchableSelect
-              name="role"
-              defaultValue="STAFF"
-              options={[
-                { value: "STAFF", label: ar ? "موظف" : "Staff" },
-                ...(membership.role === "OWNER"
-                  ? [{ value: "MANAGER", label: ar ? "مدير" : "Manager" }]
-                  : []),
-              ]}
-              required
-            />
+            <Select name="role" defaultValue="STAFF" required>
+              <option value="STAFF">{ar ? "موظف" : "Staff"}</option>
+              {membership.role === "OWNER" ? (
+                <option value="MANAGER">{ar ? "مدير" : "Manager"}</option>
+              ) : null}
+            </Select>
           </FormField>
           <p className="dashboard-form__hint">
             {ar
@@ -1142,6 +1142,32 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
                 unoptimized
                 alt={pairing.accessibleLabel}
               />
+            </div>
+            <div className="dashboard-pairing-manual">
+              <div>
+                <span>{ar ? "رمز الإدخال اليدوي" : "Manual pairing code"}</span>
+                <strong dir="ltr">{pairing.manualPairingCode}</strong>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  void navigator.clipboard.writeText(pairing.manualPairingCode).then(() => {
+                    setPairingCodeCopied(true);
+                  })
+                }
+              >
+                <Copy size={17} aria-hidden="true" />
+                {ar ? "نسخ الرمز" : "Copy code"}
+              </Button>
+              <p>
+                {ar
+                  ? "أدخل هذا الرمز في تطبيق الموظف إذا تعذر مسح رمز QR. تنتهي صلاحية الطريقتين في الوقت نفسه."
+                  : "Enter this code in the Staff app if the QR cannot be scanned. Both methods expire at the same time."}
+              </p>
+              <span className="wf-sr-only" role="status" aria-live="polite">
+                {pairingCodeCopied ? (ar ? "تم نسخ الرمز." : "Code copied.") : ""}
+              </span>
             </div>
             <div className="dashboard-pairing-meta">
               <strong>{pairing.staffDisplayName}</strong>
@@ -1314,6 +1340,17 @@ interface BillingView {
   }>;
 }
 
+interface SubscriptionChangePreview {
+  currentPlan: PlanCode;
+  currentCadence: BillingCadence;
+  targetPlan: PlanCode;
+  targetCadence: BillingCadence;
+  amountDue: number;
+  currency: string;
+  effective: "IMMEDIATE" | "NO_CHANGE";
+  renewalDate: string | null;
+}
+
 interface PaymentMethodSetup {
   clientSecret: string;
   setupIntentId: string;
@@ -1404,7 +1441,15 @@ export function BillingScreen({
   const [data, setData] = useState<BillingView | null>(null);
   const [cadence, setCadence] = useState<BillingCadence>("monthly");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState<PlanCode | null>(null);
+  const [subscriptionChange, setSubscriptionChange] = useState<SubscriptionChangePreview | null>(
+    null,
+  );
+  const [subscriptionAction, setSubscriptionAction] = useState<
+    "change" | "cancel" | "resume" | null
+  >(null);
+  const [cancelSubscriptionOpen, setCancelSubscriptionOpen] = useState(false);
   const [paymentSetup, setPaymentSetup] = useState<PaymentMethodSetup | null>(null);
   const [paymentCommandId, setPaymentCommandId] = useState("");
   const [paymentSetupLoading, setPaymentSetupLoading] = useState(false);
@@ -1558,13 +1603,133 @@ export function BillingScreen({
     }
   }
   async function chooseCadence(nextCadence: BillingCadence) {
-    setCadence(nextCadence);
-    if (!data || !canPersistCatalogSelection(data.authoritativeState.subscriptionStatus)) return;
-    const selected = await select(
+    if (!data) return;
+    if (canPersistCatalogSelection(data.authoritativeState.subscriptionStatus)) {
+      setCadence(nextCadence);
+      const selected = await select(
+        data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
+        nextCadence,
+      );
+      if (!selected) setCadence(data.selectedCadence);
+      return;
+    }
+    await previewSubscriptionChange(
       data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
       nextCadence,
     );
-    if (!selected) setCadence(data.selectedCadence);
+  }
+  async function previewSubscriptionChange(plan: PlanCode, selectedCadence = cadence) {
+    if (!data?.canManageBilling || !["ACTIVE", "TRIALING"].includes(subscriptionStatus)) return;
+    setSaving(plan);
+    setError("");
+    setNotice("");
+    try {
+      const preview = await apiFetch<SubscriptionChangePreview>(
+        `/v1/organizations/${membership.organization.id}/billing/subscription/change/preview`,
+        {
+          method: "POST",
+          body: JSON.stringify({ plan, cadence: selectedCadence }),
+        },
+      );
+      if (preview.effective === "NO_CHANGE") return;
+      setCadence(selectedCadence);
+      setSubscriptionChange(preview);
+    } catch (caught) {
+      if (caught instanceof ApiClientError && caught.code === "PLAN_DOWNGRADE_BLOCKED") {
+        const violations = Array.isArray(caught.details?.violations)
+          ? (caught.details.violations as Array<{ message?: string }>)
+          : [];
+        setError(
+          violations
+            .map((violation) => violation.message)
+            .filter(Boolean)
+            .join(" · ") || caught.message,
+        );
+      } else {
+        setError(message(caught, ar ? "تعذرت معاينة التغيير." : "Unable to preview the change."));
+      }
+      setCadence(data.selectedCadence);
+    } finally {
+      setSaving(null);
+    }
+  }
+  async function confirmSubscriptionChange() {
+    if (!subscriptionChange) return;
+    setSubscriptionAction("change");
+    setError("");
+    try {
+      await apiFetch(
+        `/v1/organizations/${membership.organization.id}/billing/subscription/change`,
+        {
+          method: "POST",
+          headers: { "x-idempotency-key": globalThis.crypto.randomUUID() },
+          body: JSON.stringify({
+            plan: subscriptionChange.targetPlan,
+            cadence: subscriptionChange.targetCadence,
+          }),
+        },
+      );
+      setSubscriptionChange(null);
+      setNotice(ar ? "تم تحديث اشتراكك عبر Stripe." : "Your Stripe subscription was updated.");
+      await load();
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar
+            ? "تعذر تغيير الاشتراك. لم يتم تطبيق أي تغيير."
+            : "Unable to change the subscription. No change was applied.",
+        ),
+      );
+    } finally {
+      setSubscriptionAction(null);
+    }
+  }
+  async function cancelSubscription(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubscriptionAction("cancel");
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiFetch(
+        `/v1/organizations/${membership.organization.id}/billing/subscription/cancel`,
+        {
+          method: "POST",
+          headers: { "x-idempotency-key": globalThis.crypto.randomUUID() },
+          body: JSON.stringify({ reason: String(form.get("reason") ?? "").trim() || undefined }),
+        },
+      );
+      setCancelSubscriptionOpen(false);
+      setNotice(
+        ar
+          ? "تم جدولة الإلغاء لنهاية فترة الفوترة الحالية. يمكنك التراجع قبل ذلك."
+          : "Cancellation is scheduled for the end of the current billing period. You can undo it before then.",
+      );
+      await load();
+    } catch (caught) {
+      setError(message(caught, ar ? "تعذر جدولة الإلغاء." : "Unable to schedule cancellation."));
+    } finally {
+      setSubscriptionAction(null);
+    }
+  }
+  async function resumeSubscription() {
+    setSubscriptionAction("resume");
+    setError("");
+    try {
+      await apiFetch(
+        `/v1/organizations/${membership.organization.id}/billing/subscription/resume`,
+        {
+          method: "POST",
+          headers: { "x-idempotency-key": globalThis.crypto.randomUUID() },
+        },
+      );
+      setNotice(ar ? "سيستمر اشتراكك في التجدد." : "Your subscription will continue renewing.");
+      await load();
+    } catch (caught) {
+      setError(message(caught, ar ? "تعذر استئناف التجديد." : "Unable to resume renewal."));
+    } finally {
+      setSubscriptionAction(null);
+    }
   }
   async function replacePaymentMethod() {
     if (paymentSetupLoading) return;
@@ -1667,7 +1832,6 @@ export function BillingScreen({
       })
     : null;
   const selectedCatalogPrice = priceTruth?.catalog ?? null;
-  const activeRenewalDiffersFromCatalog = priceTruth?.currentSubscriptionPriceDiffers ?? false;
   const subscriptionStatus = data?.authoritativeState.subscriptionStatus ?? "PENDING_ACTIVATION";
   const subscriptionStatusTone =
     subscriptionStatus === "ACTIVE" || subscriptionStatus === "TRIALING"
@@ -1686,6 +1850,7 @@ export function BillingScreen({
         }
       />
       {error ? <Alert tone="danger" title={error} /> : null}
+      {notice ? <Alert tone="success" title={notice} /> : null}
       {saving ? (
         <Alert
           tone="info"
@@ -1829,20 +1994,6 @@ export function BillingScreen({
               </div>
             </dl>
           </section>
-          {activeRenewalDiffersFromCatalog ? (
-            <Alert
-              tone="info"
-              title={
-                ar
-                  ? "سعر الاشتراك الحالي يختلف عن السعر المعلن"
-                  : "Your current subscription price differs from the catalog"
-              }
-            >
-              {ar
-                ? "الدفعة أعلاه هي توقع Stripe للاشتراك الحالي. السعر المعلن أدناه يطبق على اختيارات الخطة أو الوتيرة الجديدة ولا يغيّر فاتورتك القادمة تلقائياً."
-                : "The renewal above is Stripe’s current forecast for this active subscription. The catalog below applies to a new plan or cadence selection and does not rewrite your next invoice."}
-            </Alert>
-          ) : null}
           {data.authoritativeState.outstandingInvoice ? (
             <Alert tone="danger" title={ar ? "دفعة تحتاج إجراء" : "A payment needs attention"}>
               {ar ? "الفاتورة" : "Invoice"}{" "}
@@ -1898,7 +2049,11 @@ export function BillingScreen({
                       name="billing-cadence"
                       value={option}
                       checked={cadence === option}
-                      disabled={!data.cadenceAvailability[option] || saving !== null}
+                      disabled={
+                        !data.cadenceAvailability[option] ||
+                        saving !== null ||
+                        !data.canManageBilling
+                      }
                       onChange={() => void chooseCadence(option)}
                     />
                     <span>
@@ -1975,7 +2130,12 @@ export function BillingScreen({
                   cadence={cadence}
                   {...(data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION"
                     ? { onSelect: (value: PlanCode) => void select(value) }
-                    : {})}
+                    : data.canManageBilling && ["ACTIVE", "TRIALING"].includes(subscriptionStatus)
+                      ? {
+                          onSelect: (value: PlanCode) =>
+                            void previewSubscriptionChange(value, cadence),
+                        }
+                      : {})}
                 />
               ))}
             </div>
@@ -2007,6 +2167,22 @@ export function BillingScreen({
               <RefreshCcw size={16} />
               {ar ? "تحديث الفوترة" : "Refresh billing"}
             </Button>
+            {data.canManageBilling &&
+            ["ACTIVE", "TRIALING", "PAST_DUE"].includes(subscriptionStatus) ? (
+              data.subscriptions[0]?.cancelAtPeriodEnd ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => void resumeSubscription()}
+                  loading={subscriptionAction === "resume"}
+                >
+                  {ar ? "التراجع عن الإلغاء" : "Keep subscription"}
+                </Button>
+              ) : (
+                <Button variant="ghost" onClick={() => setCancelSubscriptionOpen(true)}>
+                  {ar ? "إلغاء الاشتراك" : "Cancel subscription"}
+                </Button>
+              )
+            ) : null}
           </div>
           <div className="billing-detail-grid billing-detail-grid--single">
             <section className="billing-identity-card">
@@ -2314,6 +2490,102 @@ export function BillingScreen({
         <Skeleton height="20rem" />
       )}
       <Modal
+        open={Boolean(subscriptionChange)}
+        title={ar ? "تأكيد تغيير الاشتراك" : "Confirm subscription change"}
+        onClose={() => {
+          if (subscriptionAction) return;
+          setSubscriptionChange(null);
+          if (data) setCadence(data.selectedCadence);
+        }}
+      >
+        {subscriptionChange ? (
+          <div className="dashboard-form">
+            <div className="billing-change-summary">
+              <div>
+                <span>{ar ? "الاشتراك الحالي" : "Current"}</span>
+                <strong>
+                  {planCatalog[subscriptionChange.currentPlan].name} ·{" "}
+                  {cadenceLabel(subscriptionChange.currentCadence)}
+                </strong>
+              </div>
+              <div>
+                <span>{ar ? "الاشتراك الجديد" : "New"}</span>
+                <strong>
+                  {planCatalog[subscriptionChange.targetPlan].name} ·{" "}
+                  {cadenceLabel(subscriptionChange.targetCadence)}
+                </strong>
+              </div>
+              <div>
+                <span>{ar ? "المبلغ المستحق الآن" : "Due now"}</span>
+                <strong dir="ltr">
+                  {formatMoney(subscriptionChange.amountDue, subscriptionChange.currency)}
+                </strong>
+              </div>
+            </div>
+            <Alert tone="warning" title={ar ? "يُطبق التغيير فوراً" : "This change is immediate"}>
+              {ar
+                ? "يعيد Stripe حساب الفترة الحالية. لن يُطبق التغيير إذا تعذر تحصيل أي مبلغ مستحق."
+                : "Stripe recalculates the current period. If any amount due cannot be collected, the change is not applied."}
+            </Alert>
+            <div className="dashboard-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={subscriptionAction !== null}
+                onClick={() => {
+                  setSubscriptionChange(null);
+                  if (data) setCadence(data.selectedCadence);
+                }}
+              >
+                {ar ? "رجوع" : "Go back"}
+              </Button>
+              <Button
+                type="button"
+                loading={subscriptionAction === "change"}
+                onClick={() => void confirmSubscriptionChange()}
+              >
+                {ar ? "تأكيد التغيير" : "Confirm change"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+      <Modal
+        open={cancelSubscriptionOpen}
+        title={ar ? "إلغاء الاشتراك" : "Cancel subscription"}
+        onClose={() => {
+          if (!subscriptionAction) setCancelSubscriptionOpen(false);
+        }}
+      >
+        <form className="dashboard-form" onSubmit={(event) => void cancelSubscription(event)}>
+          <Alert tone="warning" title={ar ? "راجع ما سيحدث" : "Review what happens next"}>
+            {ar
+              ? `سيبقى اشتراكك متاحاً حتى ${formatBillingDate(data?.subscriptions[0]?.currentPeriodEnd ?? null)}، ثم يتوقف التجديد. لن يُحذف نشاطك، ويمكنك التراجع قبل هذا التاريخ.`
+              : `Your subscription remains available until ${formatBillingDate(data?.subscriptions[0]?.currentPeriodEnd ?? null)}, then renewal stops. Your business is not deleted, and you can undo this before that date.`}
+          </Alert>
+          <FormField label={ar ? "سبب الإلغاء (اختياري)" : "Reason (optional)"}>
+            <TextArea
+              name="reason"
+              maxLength={500}
+              placeholder={ar ? "ساعدنا على تحسين وافلو" : "Help us improve Waflo"}
+            />
+          </FormField>
+          <div className="dashboard-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={subscriptionAction !== null}
+              onClick={() => setCancelSubscriptionOpen(false)}
+            >
+              {ar ? "الاحتفاظ بالاشتراك" : "Keep subscription"}
+            </Button>
+            <Button type="submit" variant="danger" loading={subscriptionAction === "cancel"}>
+              {ar ? "إلغاء عند نهاية الفترة" : "Cancel at period end"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+      <Modal
         open={Boolean(paymentSetup)}
         title={
           data?.paymentMethod.status === "saved"
@@ -2478,6 +2750,7 @@ export function SettingsScreen({
 }) {
   const ar = locale === "ar";
   const [organization, setOrganization] = useState<OrganizationView | null>(null);
+  const [identitySettings, setIdentitySettings] = useState<ExternalIdentitySettings | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [logoSaving, setLogoSaving] = useState(false);
@@ -2490,9 +2763,15 @@ export function SettingsScreen({
       })),
     [locale],
   );
+  const publicMerchantUrl = organization ? merchantPublicUrl(organization.merchantSlug) : "";
   const load = useCallback(async () => {
     try {
-      setOrganization(await apiFetch(`/v1/organizations/${membership.organization.id}`));
+      const [organizationData, identityData] = await Promise.all([
+        apiFetch<OrganizationView>(`/v1/organizations/${membership.organization.id}`),
+        apiFetch<ExternalIdentitySettings>("/v1/auth/external/identities"),
+      ]);
+      setOrganization(organizationData);
+      setIdentitySettings(identityData);
     } catch (caught) {
       setError(message(caught, ar ? "تعذر تحميل الإعدادات." : "Unable to load settings."));
     }
@@ -2539,7 +2818,13 @@ export function SettingsScreen({
       await load();
       await onOrganizationChanged();
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر تغيير الرابط." : "Unable to change URL."));
+      setError(
+        caught instanceof ApiClientError && caught.code === "REAUTHENTICATION_REQUIRED"
+          ? ar
+            ? "تحقق من هويتك أولاً، ثم حاول تغيير الرابط مرة أخرى."
+            : "Verify your identity first, then try changing the URL again."
+          : message(caught, ar ? "تعذر تغيير الرابط." : "Unable to change URL."),
+      );
     }
   }
   async function updateBrandLogo(brandLogoAssetId: string | null) {
@@ -2553,21 +2838,16 @@ export function SettingsScreen({
       setNotice(
         brandLogoAssetId
           ? ar
-            ? "ØªÙ… Ø­ÙØ¸ Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ. Ø³ÙŠØªÙ… ØªØ­Ø¯ÙŠØ« Ø¨Ø·Ø§Ù‚Ø§Øª Wallet Ø¨Ø´ÙƒÙ„ Ø¢Ù…Ù† ÙÙŠ Ø§Ù„Ø®Ù„ÙÙŠØ©."
+            ? "تم حفظ شعار نشاطك. ستتحدث بطاقات Wallet بأمان في الخلفية."
             : "Your merchant logo is saved. Existing Wallet passes will refresh safely in the background."
           : ar
-            ? "ØªÙ…Øª Ø¥Ø²Ø§Ù„Ø© Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ."
+            ? "تمت إزالة شعار نشاطك."
             : "Your merchant logo has been removed.",
       );
       await load();
       await onOrganizationChanged();
     } catch (caught) {
-      setError(
-        message(
-          caught,
-          ar ? "ØªØ¹Ø°Ø± Ø­ÙØ¸ Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ." : "Unable to save your merchant logo.",
-        ),
-      );
+      setError(message(caught, ar ? "تعذر حفظ شعار نشاطك." : "Unable to save your merchant logo."));
     } finally {
       setLogoSaving(false);
     }
@@ -2596,14 +2876,13 @@ export function SettingsScreen({
                 <TextInput name="category" defaultValue={organization.businessCategory ?? ""} />
               </FormField>
               <FormField label={ar ? "اللغة الافتراضية" : "Default language"}>
-                <SearchableSelect
+                <Select
                   name="locale"
                   defaultValue={organization.defaultLocale.toLocaleLowerCase("en-US")}
-                  options={[
-                    { value: "en", label: "English" },
-                    { value: "ar", label: "العربية" },
-                  ]}
-                />
+                >
+                  <option value="en">English</option>
+                  <option value="ar">العربية</option>
+                </Select>
               </FormField>
               <FormField label={ar ? "المنطقة الزمنية" : "Timezone"}>
                 <SearchableSelect
@@ -2620,10 +2899,10 @@ export function SettingsScreen({
           <Card className="dashboard-form-card merchant-branding-card">
             <div className="dashboard-section-heading">
               <div>
-                <h2>{ar ? "Ø§Ù„Ù‡ÙˆÙŠØ© Ø§Ù„Ø¨ØµØ±ÙŠØ©" : "Branding"}</h2>
+                <h2>{ar ? "الهوية البصرية" : "Branding"}</h2>
                 <p>
                   {ar
-                    ? "Ø´Ø¹Ø§Ø± Ù†Ø´Ø§Ø·Ùƒ ÙŠØ¸Ù‡Ø± ÙÙŠ ØªØ¬Ø±Ø¨Ø© Ø§Ù„Ø¹Ù…ÙŠÙ„ ÙˆWallet Ø­ÙŠØ«Ù…Ø§ ÙŠØ¯Ø¹Ù… Ø§Ù„Ù…Ø²ÙˆØ¯ Ø°Ù„Ùƒ."
+                    ? "يظهر شعار نشاطك في تجربة العميل وWallet عندما يدعم مزود المحفظة ذلك."
                     : "Your merchant logo appears in the customer experience and Wallet where the provider supports it."}
                 </p>
               </div>
@@ -2631,7 +2910,7 @@ export function SettingsScreen({
             <ProgramAssetPicker
               organizationId={membership.organization.id}
               category="LOGO"
-              label={ar ? "Ø´Ø¹Ø§Ø± Ø§Ù„Ù†Ø´Ø§Ø·" : "Merchant logo"}
+              label={ar ? "شعار النشاط" : "Merchant logo"}
               assets={organization.brandLogoAsset ? [organization.brandLogoAsset] : []}
               selectedId={organization.brandLogoAsset?.id}
               onSelected={(assetId) => void updateBrandLogo(assetId)}
@@ -2640,7 +2919,7 @@ export function SettingsScreen({
             />
             <p className="dashboard-form__hint">
               {ar
-                ? "PNG Ø£Ùˆ JPEG Ø£Ùˆ WebP Ø¨Ø­Ø¬Ù… Ø£Ù‚Ù„ Ù…Ù† 2 MB. Ù†ÙØ­Øµ Ø§Ù„ØµÙˆØ±Ø© ÙˆÙ†Ø¹ÙŠØ¯ ØªØ±Ù…ÙŠØ²Ù‡Ø§ Ø¨Ø£Ù…Ø§Ù†."
+                ? "PNG أو JPEG أو WebP بحجم أقل من 2 MB. يفحص Waflo الصورة ويحذف بياناتها الوصفية ويعيد ترميزها بأمان."
                 : "PNG, JPEG, or WebP under 2 MB. Waflo verifies, strips metadata, and safely normalizes every upload."}
             </p>
             {organization.brandLogoAsset ? (
@@ -2650,16 +2929,20 @@ export function SettingsScreen({
                 onClick={() => void updateBrandLogo(null)}
                 loading={logoSaving}
               >
-                {ar ? "Ø¥Ø²Ø§Ù„Ø© Ø§Ù„Ø´Ø¹Ø§Ø±" : "Remove logo"}
+                {ar ? "إزالة الشعار" : "Remove logo"}
               </Button>
             ) : null}
           </Card>
           <Card className="dashboard-form-card">
             <h2>{ar ? "رابط التاجر" : "Merchant URL"}</h2>
-            <Alert tone="warning" title={ar ? "تأكيد مطلوب" : "Confirmation required"}>
-              {ar
-                ? "سنطلب كلمة المرور لحماية رابط نشاطك. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
-                : "Your password protects this change. The previous URL stays reserved for 90 days."}
+            <Alert tone="warning" title={ar ? "تحقق من هويتك" : "Verify your identity"}>
+              {identitySettings?.passwordEnabled
+                ? ar
+                  ? "أدخل كلمة مرور Waflo لحماية هذا التغيير. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
+                  : "Enter your Waflo password to protect this change. The previous URL stays reserved for 90 days."
+                : ar
+                  ? "تحقق باستخدام Google قبل تغيير الرابط. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
+                  : "Verify with Google before changing the URL. The previous URL stays reserved for 90 days."}
             </Alert>
             <form className="dashboard-form" onSubmit={changeSlug}>
               <FormField label={ar ? "الرابط الجديد" : "New slug"} required>
@@ -2672,11 +2955,50 @@ export function SettingsScreen({
                 />
               </FormField>
               <div className="dashboard-url" dir="ltr">
-                https://{organization.merchantSlug}.waflo.app
+                <a href={publicMerchantUrl} rel="noreferrer" target="_blank">
+                  {publicMerchantUrl}
+                </a>
+                <button
+                  type="button"
+                  className="wf-icon-button wf-button--ghost"
+                  aria-label={ar ? "نسخ رابط التاجر" : "Copy merchant URL"}
+                  onClick={() => void navigator.clipboard.writeText(publicMerchantUrl)}
+                >
+                  <Copy size={18} aria-hidden="true" />
+                </button>
               </div>
-              <FormField label={ar ? "تأكيد كلمة المرور" : "Confirm password"} required>
-                <PasswordInput name="password" required />
-              </FormField>
+              {identitySettings?.passwordEnabled ? (
+                <FormField label={ar ? "تأكيد كلمة المرور" : "Confirm password"} required>
+                  <PasswordInput name="password" autoComplete="current-password" required />
+                </FormField>
+              ) : (
+                <div className="security-step-up-callout">
+                  <p>
+                    {ar
+                      ? "بعد التحقق، عد إلى هنا وأرسل التغيير خلال خمس دقائق."
+                      : "After verification, return here and submit the change within five minutes."}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      void beginGoogleReauthentication(locale, window.location.pathname).catch(
+                        (caught) =>
+                          setError(
+                            message(
+                              caught,
+                              ar
+                                ? "تعذر بدء التحقق عبر Google."
+                                : "Unable to start Google verification.",
+                            ),
+                          ),
+                      )
+                    }
+                  >
+                    {ar ? "التحقق باستخدام Google" : "Verify with Google"}
+                  </Button>
+                </div>
+              )}
               <Button type="submit">{ar ? "تغيير رابط التاجر" : "Change merchant URL"}</Button>
             </form>
           </Card>
@@ -2712,6 +3034,7 @@ interface ExternalIdentityView {
 }
 
 interface ExternalIdentitySettings {
+  accountEmail: string;
   passwordEnabled: boolean;
   identities: ExternalIdentityView[];
 }
@@ -2719,6 +3042,8 @@ interface ExternalIdentitySettings {
 interface ExternalProviderCapabilities {
   googleSignInAvailable: boolean;
 }
+
+type SensitiveAction = "deactivate" | "deletion-request" | "close-organization";
 
 function securityEventLabel(value: string, ar: boolean): string {
   if (value.includes("password")) return ar ? "تم تحديث كلمة المرور" : "Password updated";
@@ -2744,7 +3069,11 @@ export function SecurityScreen({
     googleSignInAvailable: false,
   });
   const [identityPassword, setIdentityPassword] = useState("");
-  const [dangerConfirmation, setDangerConfirmation] = useState("");
+  const [sensitiveAction, setSensitiveAction] = useState<SensitiveAction | null>(null);
+  const [sensitiveConfirmation, setSensitiveConfirmation] = useState("");
+  const [sensitivePassword, setSensitivePassword] = useState("");
+  const [sensitiveError, setSensitiveError] = useState("");
+  const [sensitiveWorking, setSensitiveWorking] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const load = useCallback(async () => {
@@ -2818,6 +3147,37 @@ export function SecurityScreen({
       setError(message(caught, ar ? "تعذر تغيير كلمة المرور." : "Unable to change password."));
     }
   }
+  async function requestPasswordSetup() {
+    setError("");
+    try {
+      await apiFetch("/v1/auth/password/setup-request", { method: "POST" });
+      setNotice(
+        ar
+          ? "أرسلنا رابطاً آمناً لإنشاء كلمة مرور Waflo إلى بريدك الإلكتروني."
+          : "We sent a secure Waflo password setup link to your email address.",
+      );
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar ? "تعذر إرسال رابط إنشاء كلمة المرور." : "Unable to send the password setup link.",
+        ),
+      );
+    }
+  }
+  async function verifyWithGoogle() {
+    setError("");
+    try {
+      await beginGoogleReauthentication(locale, window.location.pathname);
+    } catch (caught) {
+      setError(
+        message(
+          caught,
+          ar ? "تعذر بدء التحقق عبر Google." : "Unable to start Google verification.",
+        ),
+      );
+    }
+  }
   async function linkIdentity() {
     setError("");
     try {
@@ -2854,48 +3214,92 @@ export function SecurityScreen({
       );
     }
   }
-  async function accountLifecycle(type: "deactivate" | "deletion-request") {
-    const confirmation = type === "deactivate" ? "DEACTIVATE" : "REQUEST DELETION";
-    if (dangerConfirmation !== confirmation) return;
-    setError("");
+  function openSensitiveAction(action: SensitiveAction) {
+    setSensitiveAction(action);
+    setSensitiveConfirmation("");
+    setSensitivePassword("");
+    setSensitiveError("");
+  }
+  async function performSensitiveAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!sensitiveAction || !identitySettings) return;
+    const expected =
+      sensitiveAction === "deactivate"
+        ? "DEACTIVATE"
+        : sensitiveAction === "deletion-request"
+          ? identitySettings.accountEmail
+          : membership.organization.name;
+    const entered = sensitiveConfirmation.normalize("NFKC").trim();
+    const matches =
+      sensitiveAction === "deletion-request"
+        ? entered.toLocaleLowerCase("en-US") === expected.toLocaleLowerCase("en-US")
+        : entered === expected.normalize("NFKC").trim();
+    if (!matches) {
+      setSensitiveError(
+        ar ? "اكتب عبارة التأكيد كما تظهر تماماً." : "Enter the confirmation text exactly as shown.",
+      );
+      return;
+    }
+    setSensitiveWorking(true);
+    setSensitiveError("");
     try {
-      await apiFetch(`/v1/auth/me/${type}`, {
+      if (sensitiveAction === "close-organization") {
+        await apiFetch(`/v1/organizations/${membership.organization.id}/close`, {
+          method: "POST",
+          body: JSON.stringify({
+            confirmation: entered,
+            currentPassword: sensitivePassword,
+          }),
+        });
+        window.location.assign(`/${locale}`);
+        return;
+      }
+      await apiFetch(`/v1/auth/me/${sensitiveAction}`, {
         method: "POST",
         body: JSON.stringify({
           commandId: crypto.randomUUID(),
-          confirmation,
-          currentPassword: identityPassword,
+          confirmation: entered,
+          currentPassword: sensitivePassword,
         }),
       });
       resetCsrf();
       window.location.assign(`/${locale}/logged-out`);
     } catch (caught) {
-      setError(
-        message(
-          caught,
-          ar ? "تعذر إكمال طلب دورة حياة الحساب." : "Unable to complete the account request.",
-        ),
+      setSensitiveError(
+        caught instanceof ApiClientError && caught.code === "REAUTHENTICATION_REQUIRED"
+          ? ar
+            ? "تحقق باستخدام Google أو أعد إدخال كلمة مرور Waflo، ثم حاول مرة أخرى."
+            : "Verify with Google or re-enter your Waflo password, then try again."
+          : message(
+              caught,
+              sensitiveAction === "close-organization"
+                ? ar
+                  ? "تعذر إغلاق المؤسسة. لم يتغير شيء."
+                  : "Unable to close the organization. Nothing was changed."
+                : ar
+                  ? "تعذر إكمال الطلب. لم يتغير شيء."
+                  : "Unable to complete the request. Nothing was changed.",
+            ),
       );
-    }
-  }
-  async function closeOrganization() {
-    if (dangerConfirmation !== "CLOSE ORGANIZATION") return;
-    setError("");
-    try {
-      await apiFetch(`/v1/organizations/${membership.organization.id}/close`, {
-        method: "POST",
-        body: JSON.stringify({
-          confirmation: dangerConfirmation,
-          currentPassword: identityPassword,
-        }),
-      });
-      window.location.assign(`/${locale}`);
-    } catch (caught) {
-      setError(message(caught, ar ? "تعذر إغلاق المؤسسة." : "Unable to close the organization."));
+    } finally {
+      setSensitiveWorking(false);
     }
   }
   const currentSession = sessions.find((session) => session.current) ?? null;
   const otherSessions = sessions.filter((session) => !session.current);
+  const googleIdentity =
+    identitySettings?.identities.find((item) => item.provider === "GOOGLE") ?? null;
+  const canDisconnectGoogle = Boolean(
+    identitySettings?.passwordEnabled || (identitySettings?.identities.length ?? 0) > 1,
+  );
+  const sensitiveExpected =
+    sensitiveAction === "deactivate"
+      ? "DEACTIVATE"
+      : sensitiveAction === "deletion-request"
+        ? (identitySettings?.accountEmail ?? "")
+        : sensitiveAction === "close-organization"
+          ? membership.organization.name
+          : "";
   return (
     <>
       <PageHeader
@@ -2973,31 +3377,61 @@ export function SecurityScreen({
           </details>
         </Card>
         <Card className="dashboard-form-card">
-          <h2>{ar ? "تغيير كلمة المرور" : "Change password"}</h2>
-          <form className="dashboard-form" onSubmit={changePassword}>
-            <FormField label={ar ? "كلمة المرور الحالية" : "Current password"} required>
-              <PasswordInput name="currentPassword" required />
-            </FormField>
-            <FormField label={ar ? "كلمة المرور الجديدة" : "New password"} required>
-              <PasswordInput
-                name="newPassword"
-                minLength={12}
-                maxLength={128}
-                autoComplete="new-password"
-                required
-              />
-            </FormField>
-            <FormField label={ar ? "التأكيد" : "Confirm"} required>
-              <PasswordInput
-                name="confirmPassword"
-                minLength={12}
-                maxLength={128}
-                autoComplete="new-password"
-                required
-              />
-            </FormField>
-            <Button type="submit">{ar ? "تغيير كلمة المرور" : "Change password"}</Button>
-          </form>
+          <h2>
+            {identitySettings?.passwordEnabled
+              ? ar
+                ? "تغيير كلمة مرور Waflo"
+                : "Change Waflo password"
+              : ar
+                ? "إنشاء كلمة مرور Waflo"
+                : "Set a Waflo password"}
+          </h2>
+          {!identitySettings ? (
+            <Skeleton height="12rem" />
+          ) : identitySettings.passwordEnabled ? (
+            <form className="dashboard-form" onSubmit={changePassword}>
+              <FormField label={ar ? "كلمة المرور الحالية" : "Current password"} required>
+                <PasswordInput name="currentPassword" autoComplete="current-password" required />
+              </FormField>
+              <FormField label={ar ? "كلمة المرور الجديدة" : "New password"} required>
+                <PasswordInput
+                  name="newPassword"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  required
+                />
+              </FormField>
+              <FormField label={ar ? "تأكيد كلمة المرور الجديدة" : "Confirm new password"} required>
+                <PasswordInput
+                  name="confirmPassword"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  required
+                />
+              </FormField>
+              <Button type="submit">
+                {ar ? "تغيير كلمة مرور Waflo" : "Change Waflo password"}
+              </Button>
+            </form>
+          ) : (
+            <div className="security-password-setup">
+              <p>
+                {ar
+                  ? "حساب Google لا يشارك كلمة مروره مع Waflo. أنشئ كلمة مرور Waflo مستقلة لتسجيل الدخول بالبريد نفسه."
+                  : "Google never shares its password with Waflo. Set a separate Waflo password to sign in with the same email address."}
+              </p>
+              <p>
+                {ar
+                  ? "سنرسل رابطاً آمناً صالحاً للاستخدام مرة واحدة إلى بريدك الموثق."
+                  : "We’ll send a secure, single-use setup link to your verified email address."}
+              </p>
+              <Button type="button" onClick={() => void requestPasswordSetup()}>
+                {ar ? "إرسال رابط إنشاء كلمة المرور" : "Send password setup link"}
+              </Button>
+            </div>
+          )}
         </Card>
         <section className="dashboard-form-card dashboard-card--full security-section">
           <h2>{ar ? "حساب Google" : "Google account"}</h2>
@@ -3014,25 +3448,31 @@ export function SecurityScreen({
                 autoComplete="current-password"
               />
             </FormField>
-          ) : (
-            <p style={{ color: "var(--waflo-muted)" }}>
-              {ar
-                ? "يلزم تسجيل دخول حديث لإجراء هذا التغيير."
-                : "A recent sign-in is required for this change."}
-            </p>
-          )}
+          ) : null}
           <div className="security-provider-row">
-            <div>
+            <div className="security-provider-row__identity">
               <strong>Google</strong>
-              <span>
-                {identitySettings?.identities.find((item) => item.provider === "GOOGLE")
-                  ?.providerEmail ?? (ar ? "غير مرتبط" : "Not connected")}
-              </span>
+              {googleIdentity?.providerEmail ? (
+                <bdi dir="ltr">{googleIdentity.providerEmail}</bdi>
+              ) : (
+                <span>{ar ? "غير مرتبط" : "Not connected"}</span>
+              )}
             </div>
-            {identitySettings?.identities.some((item) => item.provider === "GOOGLE") ? (
-              <Button variant="tertiary" onClick={() => void unlinkIdentity()}>
-                {ar ? "فصل" : "Disconnect"}
-              </Button>
+            {googleIdentity ? (
+              <div className="security-provider-row__actions">
+                {!identitySettings?.passwordEnabled ? (
+                  <Button variant="secondary" onClick={() => void verifyWithGoogle()}>
+                    {ar ? "التحقق باستخدام Google" : "Verify with Google"}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="tertiary"
+                  disabled={!canDisconnectGoogle}
+                  onClick={() => void unlinkIdentity()}
+                >
+                  {ar ? "فصل" : "Disconnect"}
+                </Button>
+              </div>
             ) : (
               <Button
                 variant="secondary"
@@ -3046,6 +3486,13 @@ export function SecurityScreen({
               </Button>
             )}
           </div>
+          {googleIdentity && !canDisconnectGoogle ? (
+            <p className="security-provider-help">
+              {ar
+                ? "أنشئ كلمة مرور Waflo قبل فصل Google حتى لا تفقد الوصول إلى حسابك."
+                : "Set a Waflo password before disconnecting Google so you don’t lose access."}
+            </p>
+          ) : null}
         </section>
         <Card className="dashboard-form-card dashboard-card--full">
           <h2>{ar ? "النشاط الأخير" : "Recent activity"}</h2>
@@ -3079,45 +3526,154 @@ export function SecurityScreen({
         </Card>
         <Card className="dashboard-form-card dashboard-card--full dashboard-danger-zone">
           <h2>{ar ? "إجراءات حساسة" : "Sensitive account actions"}</h2>
-          <p style={{ color: "var(--waflo-muted)", maxWidth: "72ch" }}>
+          <p className="security-sensitive-intro">
             {ar
-              ? "تتطلب هذه الإجراءات عبارة تأكيد وكلمة المرور. قد تستغرق طلبات الحذف وقتاً للمراجعة."
-              : "These actions require a confirmation phrase and your password. Deletion requests may take time to review."}
+              ? "كل إجراء له تأكيد مستقل. لن ينفذ Waflo أي إجراء ما لم تؤكد النص وتتحقق من هويتك."
+              : "Each action has its own confirmation. Waflo won’t proceed until you confirm the text and verify your identity."}
           </p>
-          <FormField label={ar ? "عبارة التأكيد" : "Confirmation phrase"}>
-            <TextInput
-              value={dangerConfirmation}
-              onChange={(event) => setDangerConfirmation(event.currentTarget.value)}
-              autoComplete="off"
-            />
-          </FormField>
-          <div className="dashboard-form__row">
-            <Button
-              variant="destructive"
-              disabled={dangerConfirmation !== "DEACTIVATE"}
-              onClick={() => void accountLifecycle("deactivate")}
-            >
-              {ar ? "تعطيل الحساب" : "Deactivate account"}
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={dangerConfirmation !== "REQUEST DELETION"}
-              onClick={() => void accountLifecycle("deletion-request")}
-            >
-              {ar ? "طلب حذف الحساب" : "Request account deletion"}
-            </Button>
-            {membership.role === "OWNER" ? (
-              <Button
-                variant="destructive"
-                disabled={dangerConfirmation !== "CLOSE ORGANIZATION"}
-                onClick={() => void closeOrganization()}
-              >
-                {ar ? "إغلاق المؤسسة" : "Close organization"}
+          <div className="security-sensitive-actions">
+            <div className="security-sensitive-action">
+              <div>
+                <strong>{ar ? "تعطيل الحساب" : "Deactivate account"}</strong>
+                <p>
+                  {ar
+                    ? "ينهي جلساتك ويوقف وصولك إلى Waflo فوراً."
+                    : "Ends your sessions and immediately stops access to Waflo."}
+                </p>
+              </div>
+              <Button variant="destructive" onClick={() => openSensitiveAction("deactivate")}>
+                {ar ? "تعطيل الحساب" : "Deactivate account"}
               </Button>
+            </div>
+            <div className="security-sensitive-action">
+              <div>
+                <strong>{ar ? "طلب حذف الحساب" : "Request account deletion"}</strong>
+                <p>
+                  {ar
+                    ? "يعطل الحساب فوراً ويرسل بياناته للمراجعة وفق سياسة الاحتفاظ."
+                    : "Deactivates the account immediately and submits its data for policy review."}
+                </p>
+              </div>
+              <Button variant="destructive" onClick={() => openSensitiveAction("deletion-request")}>
+                {ar ? "طلب حذف الحساب" : "Request account deletion"}
+              </Button>
+            </div>
+            {membership.role === "OWNER" ? (
+              <div className="security-sensitive-action">
+                <div>
+                  <strong>{ar ? "إغلاق المؤسسة" : "Close organization"}</strong>
+                  <p>
+                    {ar
+                      ? "يؤرشف المؤسسة والمواقع والبرامج ويلغي وصول الفريق مع الاحتفاظ بالسجلات المطلوبة."
+                      : "Archives the organization, locations, and programs; removes team access; and retains required records."}
+                  </p>
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={() => openSensitiveAction("close-organization")}
+                >
+                  {ar ? "إغلاق المؤسسة" : "Close organization"}
+                </Button>
+              </div>
             ) : null}
           </div>
         </Card>
       </div>
+      <Modal
+        open={Boolean(sensitiveAction)}
+        title={
+          sensitiveAction === "deactivate"
+            ? ar
+              ? "تعطيل الحساب؟"
+              : "Deactivate account?"
+            : sensitiveAction === "deletion-request"
+              ? ar
+                ? "طلب حذف الحساب؟"
+                : "Request account deletion?"
+              : ar
+                ? "إغلاق المؤسسة؟"
+                : "Close organization?"
+        }
+        onClose={() => setSensitiveAction(null)}
+      >
+        <form className="dashboard-form sensitive-confirmation" onSubmit={performSensitiveAction}>
+          <Alert
+            tone="danger"
+            title={ar ? "راجع العواقب قبل المتابعة" : "Review the consequences before continuing"}
+          >
+            {sensitiveAction === "deactivate"
+              ? ar
+                ? "سيتم تسجيل خروجك وتعطيل حسابك فوراً."
+                : "You will be signed out and your account will be deactivated immediately."
+              : sensitiveAction === "deletion-request"
+                ? ar
+                  ? "سيتم تعطيل حسابك فوراً. تخضع إزالة البيانات لسياسة الاحتفاظ والمراجعة القانونية."
+                  : "Your account will be deactivated immediately. Data removal remains subject to retention and legal review."
+                : ar
+                  ? "ستؤرشف المؤسسة وتُلغى جلسات الفريق والأجهزة النشطة. لا يمكن التراجع عن ذلك من لوحة التحكم."
+                  : "The organization will be archived and active team/device access will be revoked. This can’t be undone from the dashboard."}
+          </Alert>
+          <p className="sensitive-confirmation__instruction">
+            {ar ? "اكتب النص التالي للتأكيد:" : "Enter the following text to confirm:"}{" "}
+            <code dir={sensitiveAction === "deletion-request" ? "ltr" : "auto"}>
+              {sensitiveExpected}
+            </code>
+          </p>
+          <FormField label={ar ? "عبارة التأكيد" : "Confirmation text"} required>
+            <TextInput
+              value={sensitiveConfirmation}
+              onChange={(event) => setSensitiveConfirmation(event.currentTarget.value)}
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />
+          </FormField>
+          {identitySettings?.passwordEnabled ? (
+            <FormField label={ar ? "كلمة مرور Waflo" : "Waflo password"} required>
+              <PasswordInput
+                value={sensitivePassword}
+                onChange={(event) => setSensitivePassword(event.currentTarget.value)}
+                autoComplete="current-password"
+                required
+              />
+            </FormField>
+          ) : (
+            <div className="security-step-up-callout">
+              <p>
+                {ar
+                  ? "تحقق باستخدام Google قبل تنفيذ هذا الإجراء. أكمل الإجراء خلال خمس دقائق من التحقق."
+                  : "Verify with Google before performing this action. Complete it within five minutes of verification."}
+              </p>
+              <Button type="button" variant="secondary" onClick={() => void verifyWithGoogle()}>
+                {ar ? "التحقق باستخدام Google" : "Verify with Google"}
+              </Button>
+            </div>
+          )}
+          {sensitiveError ? (
+            <p className="wf-form-error" role="alert">
+              {sensitiveError}
+            </p>
+          ) : null}
+          <div className="wf-dialog__actions">
+            <Button type="button" variant="secondary" onClick={() => setSensitiveAction(null)}>
+              {ar ? "إلغاء" : "Cancel"}
+            </Button>
+            <Button type="submit" variant="destructive" loading={sensitiveWorking}>
+              {sensitiveAction === "deactivate"
+                ? ar
+                  ? "تعطيل الحساب"
+                  : "Deactivate account"
+                : sensitiveAction === "deletion-request"
+                  ? ar
+                    ? "طلب حذف الحساب"
+                    : "Request account deletion"
+                  : ar
+                    ? "إغلاق المؤسسة"
+                    : "Close organization"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </>
   );
 }

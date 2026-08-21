@@ -38,7 +38,8 @@ export const createDevicePairingSessionSchema = z
 
 export const devicePairingClaimSchema = z
   .object({
-    pairingToken: z.string().min(80).max(512),
+    pairingToken: z.string().min(80).max(512).optional(),
+    manualCode: z.string().trim().min(16).max(32).optional(),
     installationId: z.string().trim().min(16).max(160),
     publicKey: z.string().min(40).max(1024),
     platform: z.enum(["IOS", "ANDROID", "TEST_CLIENT"]),
@@ -46,7 +47,16 @@ export const devicePairingClaimSchema = z
     osVersion: z.string().trim().max(80).optional(),
     model: z.string().trim().max(120).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (Boolean(value.pairingToken) === Boolean(value.manualCode)) {
+      context.addIssue({
+        code: "custom",
+        message: "Provide exactly one pairing token or manual code.",
+        path: ["pairingToken"],
+      });
+    }
+  });
 
 export const devicePairingChallengeSchema = z
   .object({

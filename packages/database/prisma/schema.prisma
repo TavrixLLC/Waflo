@@ -2448,6 +2448,7 @@ model DevicePairingSession {
   organizationId               String              @map("organization_id") @db.Uuid
   intendedStaffMemberId        String              @map("intended_staff_member_id") @db.Uuid
   pairingTokenHash             String              @unique @map("pairing_token_hash") @db.Char(64)
+  pairingManualCodeHash        String?             @unique @map("pairing_manual_code_hash") @db.Char(64)
   requestedLocationAssignments Json                @map("requested_location_assignments") @db.JsonB
   deviceLabelSuggestion        String?             @map("device_label_suggestion") @db.VarChar(120)
   createdByUserId              String              @map("created_by_user_id") @db.Uuid

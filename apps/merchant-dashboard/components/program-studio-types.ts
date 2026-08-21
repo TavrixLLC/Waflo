@@ -142,6 +142,7 @@ export interface ProgramItem {
       foregroundColor: string;
       accentColor: string;
       layoutType: StampLayout;
+      logoAssetId?: string | null;
     } | null;
   } | null;
   currentPublishedVersion: {
@@ -156,6 +157,7 @@ export interface ProgramItem {
       foregroundColor: string;
       accentColor: string;
       layoutType: StampLayout;
+      logoAssetId?: string | null;
     } | null;
   } | null;
   _count?: { versions: number };

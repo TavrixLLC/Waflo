@@ -21,6 +21,7 @@ import {
   NotificationService,
 } from "../notifications/notification.service.js";
 import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycle.js";
+import { requireSensitiveReauthentication } from "./sensitive-reauthentication.js";
 
 interface SessionResult {
   rawToken: string;
@@ -449,6 +450,22 @@ export class AuthService {
     };
   }
 
+  async requestPasswordSetup(userId: string, request: WafloRequest) {
+    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.passwordHash) {
+      throw new AppError(
+        "PASSWORD_ALREADY_ENABLED",
+        "This account already has a Waflo password.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    await this.forgotPassword(user.email, request);
+    return {
+      status: "accepted",
+      message: "Password setup instructions have been sent to your verified email address.",
+    };
+  }
+
   async resetPassword(rawToken: string, password: string, request: WafloRequest) {
     const passwordHash = await hashPassword(password);
     const changedAt = new Date();
@@ -746,39 +763,25 @@ export class AuthService {
     },
     request: WafloRequest,
   ) {
-    const expected = requestType === "DELETION" ? "REQUEST DELETION" : "DEACTIVATE";
-    if (input.confirmation !== expected) {
+    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
+    const expected = requestType === "DELETION" ? normalizeEmail(user.email) : "DEACTIVATE";
+    const submitted =
+      requestType === "DELETION"
+        ? normalizeEmail(input.confirmation)
+        : input.confirmation.normalize("NFKC").trim();
+    if (submitted !== expected) {
       throw new AppError(
         "SENSITIVE_ACTION_CONFIRMATION_FAILED",
         "Account confirmation did not match.",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    const recentExternalSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: input.sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !input.currentPassword ||
-          !(await verifyPassword(user.passwordHash, input.currentPassword))
-        : !recentExternalSession
-    ) {
-      throw new AppError(
-        "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password to continue.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId: input.sessionId,
+      currentPassword: input.currentPassword,
+      message: "Re-enter your password or verify with your connected sign-in method to continue.",
+    });
     const existing = await this.prisma.client.merchantAccountLifecycleRequest.findUnique({
       where: { userId_idempotencyKey: { userId, idempotencyKey: input.commandId } },
     });

@@ -4,8 +4,8 @@ import type { Locale } from "@waflo/contracts";
 import { renderStampSvg } from "@waflo/stamp-engine";
 import Image from "next/image";
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
-import { apiUrl } from "../lib/api-client";
+import { useMemo } from "react";
+import { MerchantBrandMark } from "./merchant-brand-mark";
 
 export interface LoyaltyCardRealPreviewProps {
   programName: string;
@@ -47,8 +47,6 @@ export function LoyaltyCardRealPreview({
   const foregroundColor = visualTheme?.foregroundColor || "#241916";
   const accentColor = visualTheme?.accentColor || "#e4572E";
   const secondaryColor = visualTheme?.secondaryColor || "#f2e8dc";
-  const [unavailableLogoUrl, setUnavailableLogoUrl] = useState<string | null>(null);
-
   const stampSvgDataUri = useMemo(() => {
     try {
       const rendered = renderStampSvg({
@@ -87,22 +85,12 @@ export function LoyaltyCardRealPreview({
       <div className="loyalty-card-real-preview__surface">
         {/* Header with initial brand badge & program name */}
         <div className="loyalty-card-real-preview__header">
-          {brandLogoUrl && unavailableLogoUrl !== brandLogoUrl ? (
-            <span className="loyalty-card-real-preview__brand-badge" aria-hidden="true">
-              <Image
-                src={`${apiUrl}${brandLogoUrl}`}
-                alt=""
-                width={20}
-                height={20}
-                unoptimized
-                onError={() => setUnavailableLogoUrl(brandLogoUrl)}
-              />
-            </span>
-          ) : (
-            <span className="loyalty-card-real-preview__brand-badge" aria-hidden="true">
-              {initial}
-            </span>
-          )}
+          <MerchantBrandMark
+            className="loyalty-card-real-preview__brand-badge"
+            contentUrl={brandLogoUrl}
+            fallback={initial}
+            size={20}
+          />
           <span className="loyalty-card-real-preview__title" title={displayName}>
             {displayName}
           </span>

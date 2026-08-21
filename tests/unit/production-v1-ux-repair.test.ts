@@ -84,7 +84,8 @@ describe("production-v1 UX and billing repair", () => {
     expect(studio).toContain("savedDraft={hasUnpublishedChanges ? displayDraft : null}");
     expect(launch).toContain("MerchantBrandMark");
     expect(brandMark).toContain('credentials: "include"');
-    expect(brandMark).toContain("URL.createObjectURL");
+    expect(brandMark).toContain("reader.readAsDataURL(blob)");
+    expect(brandMark).toContain("privateImageCache");
     const capabilities = readFileSync("packages/contracts/src/platform-capabilities.ts", "utf8");
     expect(capabilities).toContain('support: "SUPPORTED"');
     expect(capabilities).toContain(
@@ -322,17 +323,21 @@ describe("production-v1 UX and billing repair", () => {
       "apps/merchant-dashboard/components/program-asset-uploader.tsx",
       "utf8",
     );
+    const styles = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
     expect(source).toContain("onPointerDown={beginPan}");
     expect(source).toContain("setPointerCapture(event.pointerId)");
     expect(source).toContain("releasePointerCapture(event.pointerId)");
     expect(source).toContain("onLostPointerCapture");
     expect(source).toContain("onWheel=");
     expect(source).toContain("onKeyDown={keyboardPan}");
+    expect(source).toContain("copy.zoomOut");
+    expect(source).toContain("copy.zoomIn");
+    expect(styles).toContain("transform-origin: top left");
     expect(source).not.toContain("Horizontal position");
     expect(source).not.toContain("Vertical position");
   });
 
-  it("uses the shared accessible listbox instead of browser-native product selects", () => {
+  it("uses native selects for bounded choices and the accessible listbox for searchable choices", () => {
     const primitive = readFileSync("packages/ui/src/index.tsx", "utf8");
     const styles = readFileSync("packages/ui/src/styles.css", "utf8");
     const builder = readFileSync(
@@ -340,7 +345,8 @@ describe("production-v1 UX and billing repair", () => {
       "utf8",
     );
 
-    expect(primitive).not.toContain("<select");
+    expect(primitive).toContain("<select");
+    expect(primitive).toContain("SelectHTMLAttributes<HTMLSelectElement>");
     expect(primitive).toContain('role="combobox"');
     expect(primitive).toContain('role="listbox"');
     expect(primitive).toContain('role="option"');
@@ -469,6 +475,14 @@ describe("production-v1 UX and billing repair", () => {
     expect(styles).toContain(".wf-color-input:focus-within");
     expect(controls).toContain("export function ColorInput");
     expect(controls).toContain('type="color"');
+  });
+
+  it("keeps merchant branding copy as valid Arabic instead of mojibake", () => {
+    const source = readFileSync("apps/merchant-dashboard/components/dashboard-screens.tsx", "utf8");
+    expect(source).toContain("الهوية البصرية");
+    expect(source).toContain("شعار النشاط");
+    expect(source).toContain("إزالة الشعار");
+    expect(source).not.toMatch(/(?:Ã|Â|Ø|Ù|ðŸ|â€|ï¿½)/u);
   });
 
   it("declares every template available to every plan without a plan filter", () => {

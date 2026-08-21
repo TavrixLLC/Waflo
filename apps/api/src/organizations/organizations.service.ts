@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { verifyPassword } from "@waflo/auth";
 import type { OrganizationInput } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { AuditService } from "../audit/audit.service.js";
@@ -10,6 +9,7 @@ import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { validateBusinessCoordinate } from "../locations/location-coordinate.js";
+import { requireSensitiveReauthentication } from "../auth/sensitive-reauthentication.js";
 import { oldSlugReservedUntil, validateSlug } from "../tenancy/slug.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 
@@ -369,17 +369,16 @@ export class OrganizationsService {
     organizationId: string,
     slugInput: string,
     password: string,
+    sessionId: string,
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "organization.slug.change");
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
-      throw new AppError(
-        "SENSITIVE_ACTION_CONFIRMATION_FAILED",
-        "Password confirmation failed.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId,
+      currentPassword: password,
+      message: "Re-enter your password or verify with Google before changing the merchant URL.",
+    });
     const availability = await this.slugAvailability(slugInput, organizationId);
     if (!availability.available) {
       throw new AppError(
@@ -482,37 +481,26 @@ export class OrganizationsService {
     request: WafloRequest,
   ) {
     await this.tenant.requireOwner(userId, organizationId);
-    if (input.confirmation !== "CLOSE ORGANIZATION") {
+    const confirmationTarget = await this.prisma.client.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+    if (
+      input.confirmation.normalize("NFKC").trim() !==
+      confirmationTarget.name.normalize("NFKC").trim()
+    ) {
       throw new AppError(
         "SENSITIVE_ACTION_CONFIRMATION_FAILED",
         "Organization confirmation did not match.",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    const recentExternalSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: input.sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !(await verifyPassword(user.passwordHash, input.currentPassword))
-        : !recentExternalSession
-    ) {
-      throw new AppError(
-        "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password to close this organization.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId: input.sessionId,
+      currentPassword: input.currentPassword,
+      message: "Re-enter your password or verify with Google to close this organization.",
+    });
     const now = new Date();
     return withOrganizationInvariantLock(
       this.prisma.client,

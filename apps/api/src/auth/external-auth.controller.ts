@@ -106,6 +106,27 @@ export class ExternalAuthController {
     return { authorizationUrl: started.authorizationUrl };
   }
 
+  @Post(":provider/reauthenticate")
+  @RateLimit(10, 300)
+  async reauthenticate(
+    @Param("provider") providerValue: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentSession() sessionId: string,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const value = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const provider = parseEnabledProvider(providerValue);
+    const started = await this.externalAuth.startReauthentication(
+      provider,
+      user.id,
+      sessionId,
+      parseLocale(value.locale),
+    );
+    this.setBrowserBindingCookie(reply, provider, started.browserBinding);
+    return { authorizationUrl: started.authorizationUrl };
+  }
+
   @Get("identities")
   identities(@CurrentUser() user: AuthenticatedUser) {
     return this.externalAuth.identities(user.id);

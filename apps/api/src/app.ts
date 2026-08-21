@@ -61,6 +61,7 @@ export async function createApiApplication(
                 "req.headers['x-waflo-body-sha256']",
                 "*.qrPayload",
                 "*.pairingToken",
+                "*.manualCode",
                 "*.refreshToken",
                 "*.signature",
                 "*.nonce",

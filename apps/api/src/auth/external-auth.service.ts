@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { hashOpaqueToken, normalizeEmail, verifyPassword } from "@waflo/auth";
+import { hashOpaqueToken, normalizeEmail } from "@waflo/auth";
 import { type ExternalIdentityProvider, type Locale, type Prisma } from "@waflo/database";
 import {
   APPLE_IDENTITY_ISSUER,
@@ -19,6 +19,7 @@ import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycle.js";
 import { AuthService } from "./auth.service.js";
+import { requireSensitiveReauthentication } from "./sensitive-reauthentication.js";
 
 type PublicProvider = "google" | "apple";
 type CapabilityStatus = "AVAILABLE" | "NOT_CONFIGURED" | "REMOVED";
@@ -198,27 +199,49 @@ export class ExternalAuthService {
     locale: "en" | "ar",
   ) {
     if (provider === "apple") this.appleSignInRemoved();
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    const recentSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !(await verifyPassword(user.passwordHash, currentPassword))
-        : !recentSession
-    ) {
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId,
+      currentPassword,
+      message: "Re-enter your password before linking an identity.",
+    });
+    return this.start(provider, {
+      locale,
+      allowRegistration: false,
+      legalAccepted: false,
+      linkUserId: userId,
+      reauthenticatedSessionId: sessionId,
+    });
+  }
+
+  async startReauthentication(
+    provider: PublicProvider,
+    userId: string,
+    sessionId: string,
+    locale: "en" | "ar",
+  ) {
+    if (provider === "apple") this.appleSignInRemoved();
+    const [identity, session] = await Promise.all([
+      this.prisma.client.externalIdentity.findUnique({
+        where: { userId_provider: { userId, provider: providerCode(provider) } },
+        select: { id: true },
+      }),
+      this.prisma.client.session.findFirst({
+        where: { id: sessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
+        select: { id: true },
+      }),
+    ]);
+    if (!identity) {
+      throw new AppError(
+        "IDENTITY_NOT_LINKED",
+        "Connect this sign-in method before using it for verification.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (!session) {
       throw new AppError(
         "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password before linking an identity.",
+        "Sign in again before continuing.",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -267,23 +290,26 @@ export class ExternalAuthService {
           );
     }
 
-    const user =
+    const linkedIdentity =
       flow.intent === "LINK"
         ? await this.linkIdentity(flow.userId, flow.provider, identity, request)
-        : await this.signInIdentity(
-            flow.intent === "SIGN_UP",
-            flow.provider,
-            identity,
-            flow.locale,
-            flow.intent === "SIGN_UP"
-              ? {
-                  termsVersion: flow.termsVersion,
-                  privacyVersion: flow.privacyVersion,
-                  acceptedAt: flow.legalAcceptedAt,
-                }
-              : null,
-            request,
-          );
+        : null;
+    const user = linkedIdentity
+      ? linkedIdentity.user
+      : await this.signInIdentity(
+          flow.intent === "SIGN_UP",
+          flow.provider,
+          identity,
+          flow.locale,
+          flow.intent === "SIGN_UP"
+            ? {
+                termsVersion: flow.termsVersion,
+                privacyVersion: flow.privacyVersion,
+                acceptedAt: flow.legalAcceptedAt,
+              }
+            : null,
+          request,
+        );
     const session = await this.auth.createSession(
       user.id,
       request,
@@ -292,13 +318,23 @@ export class ExternalAuthService {
     if (flow.intent === "LINK" && flow.reauthenticatedSessionId) {
       await this.prisma.client.session.updateMany({
         where: { id: flow.reauthenticatedSessionId, userId: user.id, revokedAt: null },
-        data: { revokedAt: new Date(), revocationReason: "external_identity_link_rotation" },
+        data: {
+          revokedAt: new Date(),
+          revocationReason: linkedIdentity?.identityCreated
+            ? "external_identity_link_rotation"
+            : "external_identity_reauthentication",
+        },
       });
     }
     await this.audit.record(
       {
         actorUserId: user.id,
-        action: flow.intent === "LINK" ? "external_identity.linked" : "external_login.succeeded",
+        action:
+          flow.intent !== "LINK"
+            ? "external_login.succeeded"
+            : linkedIdentity?.identityCreated
+              ? "external_identity.linked"
+              : "external_identity.reauthenticated",
         targetType: "user",
         targetId: user.id,
         metadata: { provider: flow.provider },
@@ -448,6 +484,7 @@ export class ExternalAuthService {
     const user = await this.prisma.client.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
+        email: true,
         passwordHash: true,
         externalIdentities: {
           select: { provider: true, providerEmail: true, createdAt: true, lastUsedAt: true },
@@ -456,6 +493,7 @@ export class ExternalAuthService {
       },
     });
     return {
+      accountEmail: user.email,
       passwordEnabled: Boolean(user.passwordHash),
       identities: user.externalIdentities,
     };
@@ -487,29 +525,12 @@ export class ExternalAuthService {
         HttpStatus.CONFLICT,
       );
     }
-    const recentExternalSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !currentPassword || !(await verifyPassword(user.passwordHash, currentPassword))
-        : !recentExternalSession
-    ) {
-      throw new AppError(
-        "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password before disconnecting this identity.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId,
+      currentPassword,
+      message: "Re-enter your password before disconnecting this identity.",
+    });
     const unlinked = await withInvariantLock(
       this.prisma.client,
       `user-auth-lifecycle:${userId}`,
@@ -826,7 +847,7 @@ export class ExternalAuthService {
             await this.upsertAppleCredential(transaction, attached.id, identity.appleTokens);
           }
         }
-        return { user, conflict: false } as const;
+        return { user, conflict: false, identityCreated: !attached } as const;
       },
     );
     if (result.conflict) {
@@ -841,7 +862,7 @@ export class ExternalAuthService {
       );
       this.deniedIdentity();
     }
-    return result.user;
+    return { user: result.user, identityCreated: result.identityCreated };
   }
 
   private encryptAppleTokenMaterial(

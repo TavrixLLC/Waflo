@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from "@nestjs/common";
 import {
   billingIdentitySchema,
+  billingSubscriptionCancellationSchema,
+  billingSubscriptionChangeSchema,
   billingTrialCompleteSchema,
   billingTrialSetupSchema,
   refundRequestSchema,
@@ -39,6 +41,72 @@ export class BillingController {
       parseUuid(organizationId),
       input.plan,
       input.cadence ?? "monthly",
+      request,
+    );
+  }
+
+  @Post("subscription/change/preview")
+  @RateLimit(10, 300)
+  previewSubscriptionChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+  ) {
+    return this.billing.previewSubscriptionChange(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingSubscriptionChangeSchema, body),
+    );
+  }
+
+  @Post("subscription/change")
+  @RateLimit(5, 300)
+  changeSubscription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.changeSubscription(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingSubscriptionChangeSchema, body),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+      request,
+    );
+  }
+
+  @Post("subscription/cancel")
+  @RateLimit(5, 300)
+  cancelSubscription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.cancelSubscription(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingSubscriptionCancellationSchema, body),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+      request,
+    );
+  }
+
+  @Post("subscription/resume")
+  @RateLimit(5, 300)
+  resumeSubscription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.resumeSubscription(
+      user.id,
+      parseUuid(organizationId),
+      parseCheckoutIdempotencyKey(idempotencyKey),
       request,
     );
   }

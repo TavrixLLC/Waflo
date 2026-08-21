@@ -9,6 +9,10 @@ import {
 
 export const DEVICE_REQUEST_ENVELOPE_VERSION = "waflo-device-request-v1" as const;
 export const DEVICE_PAIRING_TOKEN_VERSION = "waflo-pair-v1" as const;
+export const DEVICE_PAIRING_MANUAL_CODE_VERSION = "waflo-pair-manual-v1" as const;
+
+const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const MANUAL_PAIRING_CODE_LENGTH = 16;
 
 export class StaffDeviceSecurityError extends Error {
   readonly code:
@@ -148,6 +152,55 @@ export function parsePairingToken(token: string): PairingTokenPayload {
 
 export function hashPairingToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+export function normalizeManualPairingCode(value: string): string {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]/g, "")
+    .replace(/[O]/g, "0")
+    .replace(/[IL]/g, "1");
+  if (
+    normalized.length !== MANUAL_PAIRING_CODE_LENGTH ||
+    [...normalized].some((character) => !CROCKFORD_BASE32.includes(character))
+  ) {
+    throw new StaffDeviceSecurityError("DEVICE_PAIRING_INVALID", "Invalid manual pairing code.");
+  }
+  return normalized;
+}
+
+export function formatManualPairingCode(value: string): string {
+  const normalized = normalizeManualPairingCode(value);
+  return normalized.match(/.{1,4}/g)?.join("-") ?? normalized;
+}
+
+export function hashManualPairingCode(value: string, secret: string): string {
+  if (secret.length < 32) {
+    throw new StaffDeviceSecurityError(
+      "DEVICE_PAIRING_INVALID",
+      "Device session secret is too short.",
+    );
+  }
+  const normalized = normalizeManualPairingCode(value);
+  return createHmac("sha256", secret)
+    .update(`${DEVICE_PAIRING_MANUAL_CODE_VERSION}\n${normalized}`, "utf8")
+    .digest("hex");
+}
+
+export function createManualPairingCode(secret: string): {
+  readonly code: string;
+  readonly codeHash: string;
+} {
+  const entropy = randomBytes(10);
+  let encodedValue = BigInt(`0x${entropy.toString("hex")}`);
+  const characters = new Array<string>(MANUAL_PAIRING_CODE_LENGTH);
+  for (let index = MANUAL_PAIRING_CODE_LENGTH - 1; index >= 0; index -= 1) {
+    characters[index] = CROCKFORD_BASE32[Number(encodedValue & 31n)] ?? "0";
+    encodedValue >>= 5n;
+  }
+  const code = characters.join("");
+  return { code: formatManualPairingCode(code), codeHash: hashManualPairingCode(code, secret) };
 }
 
 export function hashOpaqueDeviceToken(token: string, secret: string): string {

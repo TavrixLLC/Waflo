@@ -11,7 +11,7 @@ import {
   localeRegistry,
   messages,
 } from "@waflo/i18n";
-import { Alert, Button, FormField, SearchableSelect, TextInput } from "@waflo/ui";
+import { Alert, Button, FormField, SearchableSelect, Select, TextInput } from "@waflo/ui";
 import { Check, CreditCard, Link2, LockKeyhole } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -26,6 +26,7 @@ import {
   useState,
 } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
+import { merchantPublicUrl } from "../lib/merchant-public-url";
 import {
   LocationAddressFields,
   LocationMapPicker,
@@ -814,16 +815,15 @@ export function BusinessOnboarding({
                 />
               </FormField>
               <FormField label={copy.organization.businessType}>
-                <SearchableSelect
-                  name="category"
-                  options={[
-                    { value: "Cafe", label: copy.organization.categoryCafe },
-                    { value: "Restaurant", label: copy.organization.categoryRestaurant },
-                    { value: "Retail", label: copy.organization.categoryRetail },
-                    { value: "Other", label: copy.organization.categoryOther },
-                  ]}
-                  placeholder={copy.organization.chooseType}
-                />
+                <Select name="category" defaultValue="">
+                  <option value="" disabled>
+                    {copy.organization.chooseType}
+                  </option>
+                  <option value="Cafe">{copy.organization.categoryCafe}</option>
+                  <option value="Restaurant">{copy.organization.categoryRestaurant}</option>
+                  <option value="Retail">{copy.organization.categoryRetail}</option>
+                  <option value="Other">{copy.organization.categoryOther}</option>
+                </Select>
               </FormField>
             </div>
           ) : null}
@@ -847,7 +847,7 @@ export function BusinessOnboarding({
           {!recoveringLocation ? (
             <div className="onboarding-url" dir="ltr">
               <Link2 size={17} aria-hidden="true" />
-              https://{slug || copy.organization.urlPreviewPlaceholder}.waflo.app
+              {merchantPublicUrl(slug || copy.organization.urlPreviewPlaceholder)}
             </div>
           ) : null}
           <div className="dashboard-form__row">

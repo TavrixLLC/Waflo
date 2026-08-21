@@ -2,7 +2,7 @@
 
 import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Button, FormField, Modal } from "@waflo/ui";
-import { Crop, ImagePlus, Upload } from "lucide-react";
+import { Crop, ImagePlus, Upload, ZoomIn, ZoomOut } from "lucide-react";
 import Image from "next/image";
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiUrl } from "../lib/api-client";
@@ -347,14 +347,39 @@ export function ProgramAssetPicker({
                   : copy.resolutionGood}
               </p>
               <FormField label={copy.zoom}>
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  step={0.1}
-                  value={crop.zoom}
-                  onChange={(event) => zoomTo(Number(event.target.value))}
-                />
+                <div className="studio-crop-zoom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="studio-crop-zoom__button"
+                    aria-label={copy.zoomOut}
+                    title={copy.zoomOut}
+                    disabled={crop.zoom <= 1}
+                    onClick={() => zoomTo(crop.zoom - 0.2)}
+                  >
+                    <ZoomOut size={18} aria-hidden="true" />
+                  </Button>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    step={0.1}
+                    value={crop.zoom}
+                    aria-label={copy.zoom}
+                    onChange={(event) => zoomTo(Number(event.target.value))}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="studio-crop-zoom__button"
+                    aria-label={copy.zoomIn}
+                    title={copy.zoomIn}
+                    disabled={crop.zoom >= 4}
+                    onClick={() => zoomTo(crop.zoom + 0.2)}
+                  >
+                    <ZoomIn size={18} aria-hidden="true" />
+                  </Button>
+                </div>
               </FormField>
               <div className="studio-crop-control-row">
                 <p>{copy.cropHelp}</p>

@@ -563,6 +563,9 @@ export function ProgramsScreen({
               const translation = version?.translations?.find(
                 (item) => item.locale === (ar ? "AR" : "EN"),
               );
+              const logoUrl = theme?.logoAssetId
+                ? `/v1/organizations/${organizationId}/assets/${theme.logoAssetId}/content?variant=THUMBNAIL_96`
+                : brandLogoUrl;
 
               return (
                 <article className="wf-card program-list__card" key={program.id}>
@@ -573,7 +576,7 @@ export function ProgramsScreen({
                     rewardSummary={translation?.rewardSummary ?? copy.visualSummary}
                     visualTheme={theme}
                     locale={locale}
-                    brandLogoUrl={brandLogoUrl}
+                    brandLogoUrl={logoUrl}
                   />
                   <div className="program-list__content">
                     <div className="program-list__heading">

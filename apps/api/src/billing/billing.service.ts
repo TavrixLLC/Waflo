@@ -13,6 +13,8 @@ import type { PlanDowngradeViolation } from "@waflo/billing";
 import type {
   BillingCadence,
   BillingIdentityInput,
+  BillingSubscriptionCancellationInput,
+  BillingSubscriptionChangeInput,
   BillingTrialSetupInput,
   BillingStatus,
   PlanCode,
@@ -1268,6 +1270,245 @@ export class BillingService {
       request,
     );
     return { reconciled: true, reason: "APPLIED" as const };
+  }
+
+  async previewSubscriptionChange(
+    userId: string,
+    organizationId: string,
+    input: BillingSubscriptionChangeInput,
+  ) {
+    await this.requireBillingOwner(userId, organizationId);
+    const stripe = this.requireStripe();
+    const context = await this.activeSubscriptionContext(organizationId);
+    const current = this.planForPrice(context.item.price.id);
+    await this.assertSubscriptionChangeAllowed(organizationId, current.plan, input.plan);
+    const targetPriceId = this.priceId(input.plan, input.cadence);
+    const targetPrice = await stripe.prices.retrieve(targetPriceId);
+    const targetCharge = this.assertTrialPrice(targetPrice, input.plan, input.cadence);
+    const unchanged = current.plan === input.plan && current.cadence === input.cadence;
+    if (unchanged) {
+      return {
+        currentPlan: current.plan,
+        currentCadence: current.cadence,
+        targetPlan: input.plan,
+        targetCadence: input.cadence,
+        amountDue: 0,
+        currency: targetCharge.currency,
+        effective: "NO_CHANGE" as const,
+        renewalDate: context.item.current_period_end
+          ? new Date(context.item.current_period_end * 1000)
+          : null,
+      };
+    }
+    const prorationDate = Math.floor(Date.now() / 1000);
+    let invoice: Stripe.Invoice;
+    try {
+      invoice = await stripe.invoices.createPreview({
+        customer: context.customerId,
+        subscription: context.snapshot.id,
+        subscription_details: {
+          items: [
+            {
+              id: context.item.id,
+              price: targetPriceId,
+              quantity: context.item.quantity ?? 1,
+            },
+          ],
+          proration_behavior: "always_invoice",
+          proration_date: prorationDate,
+        },
+      });
+    } catch {
+      throw new AppError(
+        "BILLING_CHANGE_PREVIEW_UNAVAILABLE",
+        "The exact Stripe total could not be previewed. Try again before confirming.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    return {
+      currentPlan: current.plan,
+      currentCadence: current.cadence,
+      targetPlan: input.plan,
+      targetCadence: input.cadence,
+      amountDue: invoice.amount_due,
+      currency: invoice.currency.toUpperCase(),
+      effective: "IMMEDIATE" as const,
+      renewalDate: context.item.current_period_end
+        ? new Date(context.item.current_period_end * 1000)
+        : null,
+    };
+  }
+
+  async changeSubscription(
+    userId: string,
+    organizationId: string,
+    input: BillingSubscriptionChangeInput,
+    idempotencyKey: string,
+    request: WafloRequest,
+  ) {
+    await this.requireBillingOwner(userId, organizationId);
+    const stripe = this.requireStripe();
+    const context = await this.activeSubscriptionContext(organizationId);
+    const current = this.planForPrice(context.item.price.id);
+    await this.assertSubscriptionChangeAllowed(organizationId, current.plan, input.plan);
+    if (current.plan === input.plan && current.cadence === input.cadence) {
+      return { changed: false, reason: "NO_CHANGE" as const };
+    }
+    const targetPriceId = this.priceId(input.plan, input.cadence);
+    const targetPrice = await stripe.prices.retrieve(targetPriceId);
+    this.assertTrialPrice(targetPrice, input.plan, input.cadence);
+    const prorationDate = Math.floor(Date.now() / 1000);
+    let updated: Stripe.Subscription;
+    try {
+      updated = await stripe.subscriptions.update(
+        context.snapshot.id,
+        {
+          items: [
+            {
+              id: context.item.id,
+              price: targetPriceId,
+              quantity: context.item.quantity ?? 1,
+            },
+          ],
+          metadata: {
+            ...context.snapshot.metadata,
+            organizationId,
+            wafloOrganizationId: organizationId,
+            plan: input.plan,
+            cadence: input.cadence,
+          },
+          payment_behavior: "error_if_incomplete",
+          proration_behavior: "always_invoice",
+          proration_date: prorationDate,
+          expand: ["items.data.price"],
+        },
+        { idempotencyKey: `waflo:org:${organizationId}:subscription-change:${idempotencyKey}` },
+      );
+    } catch (error) {
+      if (
+        error instanceof Stripe.errors.StripeCardError ||
+        (error instanceof Stripe.errors.StripeInvalidRequestError && error.statusCode === 402)
+      ) {
+        throw new AppError(
+          "BILLING_CHANGE_PAYMENT_FAILED",
+          "Stripe could not collect the plan-change payment. Update the payment method and try again.",
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+      throw error;
+    }
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "billing.subscription_changed",
+        targetType: "subscription",
+        targetId: updated.id,
+        metadata: {
+          previousPlan: current.plan,
+          previousCadence: current.cadence,
+          selectedPlan: input.plan,
+          selectedCadence: input.cadence,
+        },
+      },
+      request,
+    );
+    await this.reconcileOrganization(userId, organizationId, request);
+    return { changed: true, reason: "APPLIED" as const };
+  }
+
+  async cancelSubscription(
+    userId: string,
+    organizationId: string,
+    input: BillingSubscriptionCancellationInput,
+    idempotencyKey: string,
+    request: WafloRequest,
+  ) {
+    await this.requireBillingOwner(userId, organizationId);
+    const stripe = this.requireStripe();
+    const context = await this.activeSubscriptionContext(organizationId, true);
+    if (context.snapshot.cancel_at_period_end) {
+      return {
+        changed: false,
+        reason: "ALREADY_SCHEDULED" as const,
+        effectiveAt: context.item.current_period_end
+          ? new Date(context.item.current_period_end * 1000)
+          : null,
+      };
+    }
+    const updated = await stripe.subscriptions.update(
+      context.snapshot.id,
+      {
+        cancel_at_period_end: true,
+        ...(input.reason ? { cancellation_details: { comment: input.reason } } : {}),
+        metadata: {
+          ...context.snapshot.metadata,
+          organizationId,
+          wafloOrganizationId: organizationId,
+        },
+      },
+      { idempotencyKey: `waflo:org:${organizationId}:cancel:${idempotencyKey}` },
+    );
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "billing.subscription_cancellation_scheduled",
+        targetType: "subscription",
+        targetId: updated.id,
+        metadata: {
+          effectiveAt: context.item.current_period_end ?? null,
+          reasonProvided: Boolean(input.reason),
+        },
+      },
+      request,
+    );
+    await this.reconcileOrganization(userId, organizationId, request);
+    return {
+      changed: true,
+      reason: "CANCELLATION_SCHEDULED" as const,
+      effectiveAt: context.item.current_period_end
+        ? new Date(context.item.current_period_end * 1000)
+        : null,
+    };
+  }
+
+  async resumeSubscription(
+    userId: string,
+    organizationId: string,
+    idempotencyKey: string,
+    request: WafloRequest,
+  ) {
+    await this.requireBillingOwner(userId, organizationId);
+    const stripe = this.requireStripe();
+    const context = await this.activeSubscriptionContext(organizationId, true);
+    if (!context.snapshot.cancel_at_period_end) {
+      return { changed: false, reason: "NOT_SCHEDULED" as const };
+    }
+    const updated = await stripe.subscriptions.update(
+      context.snapshot.id,
+      {
+        cancel_at_period_end: false,
+        metadata: {
+          ...context.snapshot.metadata,
+          organizationId,
+          wafloOrganizationId: organizationId,
+        },
+      },
+      { idempotencyKey: `waflo:org:${organizationId}:resume:${idempotencyKey}` },
+    );
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "billing.subscription_cancellation_reversed",
+        targetType: "subscription",
+        targetId: updated.id,
+      },
+      request,
+    );
+    await this.reconcileOrganization(userId, organizationId, request);
+    return { changed: true, reason: "RENEWAL_RESUMED" as const };
   }
 
   async selectPlan(
@@ -3158,7 +3399,7 @@ export class BillingService {
     if (membership.role !== "OWNER") {
       throw new AppError(
         "PERMISSION_DENIED",
-        "Only an organization Owner can authorize billing refunds.",
+        "Only an organization Owner can authorize billing changes.",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -3515,6 +3756,87 @@ export class BillingService {
       });
     });
     return authoritativeCustomerId;
+  }
+
+  private async activeSubscriptionContext(organizationId: string, allowPastDue = false) {
+    const [local, profile] = await Promise.all([
+      this.prisma.client.subscription.findFirst({
+        where: {
+          organizationId,
+          status: { in: ["TRIALING", "ACTIVE", "PAST_DUE", "GRACE_PERIOD"] },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      }),
+      this.prisma.client.organizationBillingProfile.findUniqueOrThrow({
+        where: { organizationId },
+      }),
+    ]);
+    if (!local) {
+      throw new AppError(
+        "BILLING_SUBSCRIPTION_UNAVAILABLE",
+        "An active subscription is required for this billing action.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const snapshot = await this.subscriptionProvider.retrieveSubscription(
+      local.stripeSubscriptionId,
+    );
+    const customerId =
+      typeof snapshot.customer === "string" ? snapshot.customer : snapshot.customer.id;
+    const metadataOrganizationId =
+      snapshot.metadata.wafloOrganizationId ?? snapshot.metadata.organizationId;
+    if (
+      snapshot.id !== local.stripeSubscriptionId ||
+      !profile.stripeCustomerId ||
+      customerId !== profile.stripeCustomerId ||
+      metadataOrganizationId !== organizationId
+    ) {
+      throw new AppError(
+        "STRIPE_RECONCILIATION_OWNERSHIP_MISMATCH",
+        "The Stripe subscription does not belong to this organization.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const allowedStatus =
+      snapshot.status === "trialing" ||
+      snapshot.status === "active" ||
+      (allowPastDue && (snapshot.status === "past_due" || snapshot.status === "unpaid"));
+    if (!allowedStatus) {
+      throw new AppError(
+        "BILLING_SUBSCRIPTION_ACTION_UNAVAILABLE",
+        "Resolve the current subscription status before changing or canceling it.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const item = snapshot.items.data[0];
+    if (!item || snapshot.items.data.length !== 1) {
+      throw new AppError(
+        "STRIPE_SUBSCRIPTION_ITEMS_INVALID",
+        "The Stripe subscription does not have the expected Waflo plan item.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    this.planForPrice(item.price.id);
+    return { local, profile, snapshot, item, customerId };
+  }
+
+  private async assertSubscriptionChangeAllowed(
+    organizationId: string,
+    currentPlan: PlanCode,
+    targetPlan: PlanCode,
+  ) {
+    if (planRank[targetPlan] >= planRank[currentPlan]) return;
+    const violations = await this.prisma.client.$transaction((transaction) =>
+      this.downgradeViolations(transaction, organizationId, targetPlan),
+    );
+    if (violations.length) {
+      throw new AppError(
+        "PLAN_DOWNGRADE_BLOCKED",
+        "Reduce usage before switching to this plan.",
+        HttpStatus.CONFLICT,
+        { requestedPlan: targetPlan, violations },
+      );
+    }
   }
 
   private assertTrialPrice(price: Stripe.Price, plan: PlanCode, cadence: BillingCadence) {

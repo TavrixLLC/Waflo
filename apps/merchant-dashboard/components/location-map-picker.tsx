@@ -61,6 +61,44 @@ interface CoordinateResponse {
 
 const defaultCenter: [number, number] = [44.3661, 33.3152];
 
+const fastGeolocationOptions: PositionOptions = {
+  enableHighAccuracy: false,
+  maximumAge: 5 * 60_000,
+  timeout: 4_000,
+};
+
+const preciseGeolocationOptions: PositionOptions = {
+  enableHighAccuracy: true,
+  maximumAge: 0,
+  timeout: 8_000,
+};
+
+function browserPosition(options: PositionOptions): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+function placeMarker(
+  map: MapboxMap,
+  marker: MapboxMarker,
+  latitude: number,
+  longitude: number,
+): void {
+  // A custom Mapbox marker must have a coordinate before it enters the map DOM.
+  // Otherwise its absolute-positioned element can appear at the container origin.
+  marker.setLngLat([longitude, latitude]);
+  if (!marker.getElement().isConnected) marker.addTo(map);
+  marker.getElement().hidden = false;
+}
+
+function zoomForGeolocationAccuracy(accuracy: number): number {
+  if (accuracy <= 40) return 18;
+  if (accuracy <= 150) return 17;
+  if (accuracy <= 500) return 15;
+  return 13;
+}
+
 function displayAddress(
   value: LocationMapSelection,
   separator: string,
@@ -290,7 +328,13 @@ export function LocationMapPicker({
     };
     valueRef.current = base;
     onChange(base);
-    markerRef.current?.setLngLat([roundedLongitude, roundedLatitude]);
+    const map = mapRef.current;
+    const marker = markerRef.current;
+    if (map && marker) {
+      placeMarker(map, marker, roundedLatitude, roundedLongitude);
+    } else {
+      marker?.setLngLat([roundedLongitude, roundedLatitude]);
+    }
     setResolving(true);
     setError("");
     const [coordinateResult, addressResult] = await Promise.allSettled([
@@ -351,13 +395,23 @@ export function LocationMapPicker({
             : defaultCenter,
           zoom: hasCoordinate ? 16 : 11,
           attributionControl: true,
-          cooperativeGestures: true,
+          boxZoom: false,
+          cooperativeGestures: false,
+          doubleClickZoom: false,
+          dragRotate: false,
           language: contentLocale,
+          maxPitch: 0,
+          pitchWithRotate: false,
           respectPrefersReducedMotion: true,
+          scrollZoom: false,
+          touchPitch: false,
         });
+        map.touchZoomRotate.disableRotation();
         const markerElement = document.createElement("button");
         markerElement.type = "button";
         markerElement.className = "location-map-marker";
+        markerElement.hidden = true;
+        markerElement.setAttribute("role", "button");
         const markerBody = document.createElement("span");
         const markerBrand = document.createElement("img");
         markerBrand.src = "/brand/waflo-mark-primary.svg";
@@ -366,6 +420,7 @@ export function LocationMapPicker({
         markerBody.append(markerBrand);
         markerElement.append(markerBody);
         markerElement.setAttribute("aria-label", copy.markerAria);
+        markerElement.addEventListener("click", (event) => event.stopPropagation());
         markerElement.addEventListener("keydown", (event) => {
           if (!markerRef.current || !event.key.startsWith("Arrow")) return;
           event.preventDefault();
@@ -387,7 +442,7 @@ export function LocationMapPicker({
         });
         markerRef.current = marker;
         if (hasCoordinate) {
-          marker.setLngLat([current.longitude as number, current.latitude as number]).addTo(map);
+          placeMarker(map, marker, current.latitude as number, current.longitude as number);
         }
         marker.on("dragend", () => {
           geolocationRequestRef.current += 1;
@@ -404,14 +459,19 @@ export function LocationMapPicker({
           geolocationRequestRef.current += 1;
           setLocating(false);
           setResultsOpen(false);
-          if (!markerRef.current.getElement().isConnected) markerRef.current.addTo(map);
-          map.easeTo({ center: event.lngLat, duration: 180 });
+          placeMarker(map, markerRef.current, event.lngLat.lat, event.lngLat.lng);
           void selectCoordinateRef.current(event.lngLat.lat, event.lngLat.lng);
         };
         map.on("click", clickHandler);
         map.on("load", () => {
           loaded = true;
-          if (active) setMapReady(true);
+          if (active) {
+            const selected = valueRef.current;
+            if (selected.latitude !== null && selected.longitude !== null) {
+              placeMarker(map, marker, selected.latitude, selected.longitude);
+            }
+            setMapReady(true);
+          }
         });
         map.on("error", () => {
           if (active && !loaded) {
@@ -559,7 +619,8 @@ export function LocationMapPicker({
     }
     const map = mapRef.current;
     if (map && markerRef.current) {
-      if (!markerRef.current.getElement().isConnected) markerRef.current.addTo(map);
+      placeMarker(map, markerRef.current, latitude, longitude);
+      map.stop();
       map.easeTo({ center: [longitude, latitude], zoom: 17, duration: 320 });
     }
     // Search results are temporary discovery data. Only the permanent reverse-geocode
@@ -567,7 +628,7 @@ export function LocationMapPicker({
     await selectCoordinate(latitude, longitude);
   }
 
-  function chooseCurrentLocation() {
+  async function chooseCurrentLocation() {
     if (!("geolocation" in navigator)) {
       setError(copy.currentLocationUnavailable);
       return;
@@ -576,35 +637,67 @@ export function LocationMapPicker({
     setLocating(true);
     setResultsOpen(false);
     setError("");
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        if (requestId !== geolocationRequestRef.current) return;
-        setLocating(false);
-        const map = mapRef.current;
-        const marker = markerRef.current;
-        if (!map || !marker) {
-          setError(copy.currentLocationUnavailable);
-          return;
-        }
-        const latitude = position.coords.latitude;
-        const longitude = position.coords.longitude;
-        if (!marker.getElement().isConnected) marker.addTo(map);
-        map.easeTo({ center: [longitude, latitude], zoom: 17, duration: 320 });
-        void selectCoordinate(latitude, longitude);
-      },
-      (locationError) => {
-        if (requestId !== geolocationRequestRef.current) return;
-        setLocating(false);
-        if (locationError.code === locationError.PERMISSION_DENIED) {
-          setError(copy.currentLocationPermissionDenied);
-        } else if (locationError.code === locationError.TIMEOUT) {
-          setError(copy.currentLocationTimeout);
-        } else {
-          setError(copy.currentLocationUnavailable);
-        }
-      },
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 12_000 },
-    );
+    const errors: GeolocationPositionError[] = [];
+    const fastRequest = browserPosition(fastGeolocationOptions).catch((locationError) => {
+      errors.push(locationError);
+      throw locationError;
+    });
+    const preciseRequest = browserPosition(preciseGeolocationOptions).catch((locationError) => {
+      errors.push(locationError);
+      throw locationError;
+    });
+
+    const applyPosition = (position: GeolocationPosition) => {
+      if (requestId !== geolocationRequestRef.current) return;
+      const map = mapRef.current;
+      const marker = markerRef.current;
+      if (!map || !marker) return;
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+      placeMarker(map, marker, latitude, longitude);
+      map.stop();
+      map.easeTo({
+        center: [longitude, latitude],
+        zoom: zoomForGeolocationAccuracy(position.coords.accuracy),
+        duration: 320,
+      });
+      void selectCoordinateRef.current(latitude, longitude);
+    };
+
+    try {
+      const firstPosition = await Promise.any([fastRequest, preciseRequest]);
+      if (requestId !== geolocationRequestRef.current) return;
+      setLocating(false);
+      if (!mapRef.current || !markerRef.current) {
+        setError(copy.currentLocationUnavailable);
+        return;
+      }
+      applyPosition(firstPosition);
+
+      // Desktop browsers often return a quick network-based estimate first. Keep
+      // listening to the parallel high-accuracy request and refine only when it is
+      // materially better; any later manual map action invalidates this request.
+      void preciseRequest
+        .then((precisePosition) => {
+          if (
+            requestId === geolocationRequestRef.current &&
+            precisePosition.coords.accuracy + 10 < firstPosition.coords.accuracy
+          ) {
+            applyPosition(precisePosition);
+          }
+        })
+        .catch(() => undefined);
+    } catch {
+      if (requestId !== geolocationRequestRef.current) return;
+      setLocating(false);
+      if (errors.some((locationError) => locationError.code === locationError.PERMISSION_DENIED)) {
+        setError(copy.currentLocationPermissionDenied);
+      } else if (errors.every((locationError) => locationError.code === locationError.TIMEOUT)) {
+        setError(copy.currentLocationTimeout);
+      } else {
+        setError(copy.currentLocationUnavailable);
+      }
+    }
   }
 
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -722,7 +815,7 @@ export function LocationMapPicker({
               loading={locating}
               loadingLabel={copy.locatingCurrentLocation}
               disabled={!mapReady || resolving}
-              onClick={chooseCurrentLocation}
+              onClick={() => void chooseCurrentLocation()}
             >
               <LocateFixed size={18} aria-hidden="true" />
               {copy.useCurrentLocation}
