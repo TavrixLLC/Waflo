@@ -258,8 +258,10 @@ export class StaffDevicePairingController {
     if (!context) throw new AppError("STAFF_DEVICE_NOT_ACTIVE", "Device context missing.", 401);
     return {
       organizationId: context.organizationId,
+      organization: context.organization,
       role: context.role,
       locationId: context.locationId,
+      currentLocation: context.currentLocation,
       devicePublicId: context.devicePublicId,
       deviceSessionId: context.deviceSessionId,
       platform: context.platform,

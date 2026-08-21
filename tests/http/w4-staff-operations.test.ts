@@ -8,6 +8,7 @@ import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import { LoyaltyOperationService } from "../../apps/api/src/loyalty/loyalty-operation.service.js";
 import type { WafloRequest } from "../../apps/api/src/common/request-context.js";
 import { createOpaqueToken, hashOpaqueToken, hashPassword } from "../../packages/auth/src/index.js";
+import { staffDeviceContextResultSchema } from "../../packages/contracts/src/index.js";
 import { createPairingToken } from "../../packages/staff-device-security/src/index.js";
 import {
   createEphemeralStaffDeviceKeypair,
@@ -406,21 +407,40 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
   }
 
   it("pairs an ephemeral key and resolves localized mobile-safe operational data", async () => {
+    const [organization, location] = await Promise.all([
+      prisma.client.organization.findUniqueOrThrow({
+        where: { id: ORGANIZATION_ID },
+        select: { name: true },
+      }),
+      prisma.client.location.findUniqueOrThrow({
+        where: { id: LOCATION_ID },
+        select: { name: true },
+      }),
+    ]);
     const context = await signedStaffInject(app, client, {
       method: "GET",
       url: "/v1/staff/device-context",
     });
     expect(context.statusCode).toBe(200);
-    expect(responseData<Record<string, unknown>>(context)).toMatchObject({
+    const contextData = responseData<Record<string, unknown>>(context);
+    expect(contextData).toMatchObject({
+      organizationId: ORGANIZATION_ID,
+      organization: {
+        id: ORGANIZATION_ID,
+        displayName: organization.name,
+      },
       locationId: LOCATION_ID,
+      currentLocation: {
+        id: LOCATION_ID,
+        displayName: location.name,
+      },
       appVersion: "1.0.0",
       minimumSupportedAppVersion: "1.0.0",
       appVersionSupported: true,
     });
-    expect(responseData<Record<string, unknown>>(context)).not.toHaveProperty("deviceId");
-    expect(responseData<Record<string, unknown>>(context)).not.toHaveProperty(
-      "organizationMemberId",
-    );
+    expect(staffDeviceContextResultSchema.parse(contextData)).toEqual(contextData);
+    expect(contextData).not.toHaveProperty("deviceId");
+    expect(contextData).not.toHaveProperty("organizationMemberId");
 
     for (const locale of ["EN", "AR"] as const) {
       await prisma.client.customer.update({

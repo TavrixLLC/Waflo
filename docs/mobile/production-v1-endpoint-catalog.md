@@ -133,7 +133,7 @@ Safe shape:
 ### `GET /v1/staff/device-context`
 
 - **Use/auth:** post-pair/relaunch context validation. Signed GET with SHA-256 of empty body. No query/path parameters.
-- **Success 200:** `{ organizationId: UUID, role: "OWNER"|"MANAGER"|"STAFF", locationId: UUID, devicePublicId: UUID, deviceSessionId: UUID, platform: "IOS"|"ANDROID"|"TEST_CLIENT", appVersion: string(1..40), minimumSupportedAppVersion: strict semver, appVersionSupported: true, requestId: string(1..160) }`.
+- **Success 200:** `{ organizationId: UUID, organization: { id: UUID, displayName: string(1..120) }, role: "OWNER"|"MANAGER"|"STAFF", locationId: UUID, currentLocation: { id: UUID, displayName: string(1..120) }, devicePublicId: UUID, deviceSessionId: UUID, platform: "IOS"|"ANDROID"|"TEST_CLIENT", appVersion: string(1..40), minimumSupportedAppVersion: strict semver, appVersionSupported: true, requestId: string(1..160) }`.
 - **Side effects:** updates activity/nonce bookkeeping only; it does not switch context.
 - **Errors:** `SIGNED_COMMON`, including `STAFF_APP_VERSION_UNSUPPORTED` 426.
 - **Retry/cache/test:** read-only and retriable with a new signed envelope. Keep only short-lived UI context; physical relaunch/revocation/version tests required.

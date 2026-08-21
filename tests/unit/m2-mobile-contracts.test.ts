@@ -4,6 +4,7 @@ import {
   membershipResolveResultSchema,
   operationCommandStatusResultSchema,
   purchaseCurrencySchema,
+  staffDeviceContextResultSchema,
   stampOperationResultSchema,
 } from "../../packages/contracts/src/index.js";
 import {
@@ -61,6 +62,43 @@ function resolveFixture(locale: "en" | "ar") {
 }
 
 describe("M2 mobile contract compatibility", () => {
+  it("requires display-ready organization and current Location context", () => {
+    const context = {
+      organizationId: "10000000-0000-4000-8000-000000000001",
+      organization: {
+        id: "10000000-0000-4000-8000-000000000001",
+        displayName: "Today Coffee",
+      },
+      role: "STAFF",
+      locationId: "20000000-0000-4000-8000-000000000001",
+      currentLocation: {
+        id: "20000000-0000-4000-8000-000000000001",
+        displayName: "Today Coffee — Karrada",
+      },
+      devicePublicId: "30000000-0000-4000-8000-000000000001",
+      deviceSessionId: "40000000-0000-4000-8000-000000000001",
+      platform: "ANDROID",
+      appVersion: "1.0.0",
+      minimumSupportedAppVersion: "1.0.0",
+      appVersionSupported: true,
+      requestId: "device-context-request",
+    } as const;
+
+    expect(staffDeviceContextResultSchema.parse(context)).toEqual(context);
+    expect(
+      staffDeviceContextResultSchema.safeParse({
+        ...context,
+        organization: { ...context.organization, displayName: "   " },
+      }).success,
+    ).toBe(false);
+    expect(
+      staffDeviceContextResultSchema.safeParse({
+        ...context,
+        currentLocation: { ...context.currentLocation, displayName: "" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("normalizes a three-letter currency string and rejects malformed runtime values", () => {
     expect(purchaseCurrencySchema.parse(" iqd ")).toBe("IQD");
     for (const invalid of [{ code: "IQD" }, ["IQD"], "12A", "US$", "EURO", ""]) {

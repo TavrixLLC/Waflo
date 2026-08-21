@@ -25,9 +25,17 @@ export interface WafloRequest extends FastifyRequest {
   currentSessionToken?: string;
   staffDeviceContext?: {
     organizationId: string;
+    organization: {
+      id: string;
+      displayName: string;
+    };
     organizationMemberId: string;
     role: "OWNER" | "MANAGER" | "STAFF";
     locationId: string;
+    currentLocation: {
+      id: string;
+      displayName: string;
+    };
     deviceId: string;
     devicePublicId: string;
     deviceSessionId: string;

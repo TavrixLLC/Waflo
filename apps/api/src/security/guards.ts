@@ -396,7 +396,11 @@ export class StaffDeviceSignatureGuard implements CanActivate {
           organizationId: session.organizationId,
           status: "ACTIVE",
         },
-        select: { id: true },
+        select: {
+          id: true,
+          name: true,
+          organization: { select: { id: true, name: true } },
+        },
       }),
       this.prisma.client.staffLocationAssignment.findFirst({
         where: {
@@ -446,6 +450,22 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         request,
       );
       throw new AppError(principalFailure.code, principalFailure.message, HttpStatus.UNAUTHORIZED);
+    }
+    if (!location) {
+      throw new AppError(
+        "STAFF_LOCATION_ASSIGNMENT_INVALID",
+        "The Staff Location assignment is no longer active.",
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const organizationDisplayName = location.organization.name.trim();
+    const currentLocationDisplayName = location.name.trim();
+    if (!organizationDisplayName || !currentLocationDisplayName) {
+      throw new AppError(
+        "STAFF_DEVICE_CONTEXT_INVALID",
+        "Staff device context is unavailable.",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
     try {
       assertDeviceOperational({
@@ -600,9 +620,17 @@ export class StaffDeviceSignatureGuard implements CanActivate {
 
     request.staffDeviceContext = {
       organizationId: session.organizationId,
+      organization: {
+        id: location.organization.id,
+        displayName: organizationDisplayName,
+      },
       organizationMemberId: session.organizationMemberId,
       role: session.organizationMember.role,
       locationId: session.locationId,
+      currentLocation: {
+        id: location.id,
+        displayName: currentLocationDisplayName,
+      },
       deviceId: session.staffDeviceId,
       devicePublicId: session.staffDevice.publicId,
       deviceSessionId: session.id,

@@ -166,7 +166,7 @@ Organization ID in the envelope is the server-stored context known from pairing/
 
 ## Organization and location context
 
-`GET /v1/staff/device-context` is the authoritative current context. It returns organization, staff role, current location, device/session public identifiers, platform/app version, minimum supported version, support flag, and request ID. It does not return assignment or billing records. The current organization/location are derived from the signed session, and mutations independently re-evaluate assignments and billing.
+`GET /v1/staff/device-context` is the authoritative current context. It returns the existing organization and Location IDs plus display-ready `organization` and `currentLocation` objects, staff role, device/session public identifiers, platform/app version, minimum supported version, support flag, and request ID. Both nested objects contain the corresponding ID and a non-empty `displayName`. It does not return assignment or billing records. The current organization/location are derived from the signed session, and mutations independently re-evaluate assignments and billing.
 
 Operational eligibility additionally verifies current organization `ACTIVE`, organization membership `ACTIVE`, device and staff location assignments active, device earning/redemption flag, program lifecycle, membership, and billing. There is no current location-switch API. Cross-organization credentials are deliberately indistinguishable from invalid credentials.
 
