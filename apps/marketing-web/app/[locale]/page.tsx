@@ -57,7 +57,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
               {copy.hero.eyebrow}
             </span>
             <h1 id="landing-title" className="landing-enter landing-enter--two">
-              <span>{copy.hero.titleLine1}</span>
+              <span>{copy.hero.titleLine1} </span>
               <strong>{copy.hero.titleLine2}</strong>
             </h1>
             <p className="landing-hero__lede landing-enter landing-enter--three">
