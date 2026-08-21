@@ -32,7 +32,7 @@ export async function generateMetadata({
     },
     manifest: "/site.webmanifest",
     icons: {
-      icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],
+      icon: [{ url: "/brand/favicon.svg?v=2", type: "image/svg+xml" }, { url: "/favicon.ico?v=2" }],
       apple: "/apple-touch-icon-180.png",
     },
   };

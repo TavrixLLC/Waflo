@@ -225,6 +225,14 @@ describe("public launch surfaces", () => {
         const image = readFileSync(iconPath);
         expect(`${image.readUInt32BE(16)}x${image.readUInt32BE(20)}`).toBe(icon.sizes);
       }
+      const vectorFavicon = readFileSync(resolve(publicRoot, "brand/favicon.svg"), "utf8");
+      expect(vectorFavicon).toContain('viewBox="8 8 304 304"');
+      expect(vectorFavicon).not.toContain('fill="#241916"');
+
+      const fallbackFavicon = readFileSync(resolve(publicRoot, "favicon.ico"));
+      expect(fallbackFavicon.readUInt16LE(0)).toBe(0);
+      expect(fallbackFavicon.readUInt16LE(2)).toBe(1);
+      expect(fallbackFavicon.readUInt16LE(4)).toBe(4);
       expect(existsSync(resolve(publicRoot, "artifacts"))).toBe(false);
     }
 
