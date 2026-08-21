@@ -9,6 +9,8 @@ export interface CanonicalAddress {
 }
 
 export const wafloMapStyleUrl = "mapbox://styles/mapbox/standard";
+export const mapboxRtlTextPluginUrl =
+  "https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-rtl-text/v0.4.0/mapbox-gl-rtl-text.js";
 
 /**
  * Mapbox Standard exposes these basemap color controls directly, which keeps the
@@ -16,7 +18,6 @@ export const wafloMapStyleUrl = "mapbox://styles/mapbox/standard";
  * bundle or a brittle list of provider layer ids.
  */
 export const wafloBasemapConfig = {
-  theme: "monochrome",
   lightPreset: "day",
   show3dObjects: false,
   showPedestrianRoads: true,
@@ -24,6 +25,9 @@ export const wafloBasemapConfig = {
   showPointOfInterestLabels: true,
   showRoadLabels: true,
   showTransitLabels: false,
+  densityPointOfInterestLabels: 2,
+  backgroundPointOfInterestLabels: "none",
+  colorModePointOfInterestLabels: "single",
   colorLand: "#fffdfc",
   colorWater: "#eef4f5",
   colorGreenspace: "#f1f3e9",

@@ -3,7 +3,7 @@
 import { countryOptions } from "@waflo/contracts";
 import { contentLocaleForInterface, type InterfaceLocale, messages } from "@waflo/i18n";
 import { Alert, Button, FormField, SearchableSelect, TextInput } from "@waflo/ui";
-import { CheckCircle2, LoaderCircle, MapPin, Search } from "lucide-react";
+import { CheckCircle2, LoaderCircle, LocateFixed, MapPin, Search } from "lucide-react";
 import type { Map as MapboxMap, Marker as MapboxMarker } from "mapbox-gl";
 import {
   type ChangeEvent,
@@ -23,6 +23,7 @@ import {
   classifyMapboxToken,
   mapboxFeatureCoordinates as featureCoordinates,
   firstMapboxFeature as firstFeature,
+  mapboxRtlTextPluginUrl,
   mapboxNestedString as nestedString,
   wafloBasemapConfig,
   wafloMapStyleUrl,
@@ -236,6 +237,7 @@ export function LocationMapPicker({
   const markerRef = useRef<MapboxMarker | null>(null);
   const valueRef = useRef(value);
   const updateCounterRef = useRef(0);
+  const geolocationRequestRef = useRef(0);
   const sessionTokenRef = useRef(createSessionToken());
   const suppressNextSearchRef = useRef(false);
   const selectCoordinateRef = useRef<
@@ -248,6 +250,7 @@ export function LocationMapPicker({
   const [searching, setSearching] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -334,6 +337,9 @@ export function LocationMapPicker({
         if (!active || !mapContainerRef.current) return;
         const mapboxgl = module.default;
         mapboxgl.accessToken = token;
+        if (locale !== "en" && mapboxgl.getRTLTextPluginStatus() === "unavailable") {
+          mapboxgl.setRTLTextPlugin(mapboxRtlTextPluginUrl, null, true);
+        }
         const current = valueRef.current;
         const hasCoordinate = current.latitude !== null && current.longitude !== null;
         const map = new mapboxgl.Map({
@@ -363,6 +369,8 @@ export function LocationMapPicker({
         markerElement.addEventListener("keydown", (event) => {
           if (!markerRef.current || !event.key.startsWith("Arrow")) return;
           event.preventDefault();
+          geolocationRequestRef.current += 1;
+          setLocating(false);
           const coordinate = markerRef.current.getLngLat();
           const step = event.shiftKey ? 0.0001 : 0.00001;
           if (event.key === "ArrowLeft") coordinate.lng -= step;
@@ -382,12 +390,19 @@ export function LocationMapPicker({
           marker.setLngLat([current.longitude as number, current.latitude as number]).addTo(map);
         }
         marker.on("dragend", () => {
+          geolocationRequestRef.current += 1;
+          setLocating(false);
           const coordinate = marker.getLngLat();
           void selectCoordinateRef.current(coordinate.lat, coordinate.lng);
         });
-        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
+        map.addControl(
+          new mapboxgl.NavigationControl({ showCompass: false }),
+          locale === "en" ? "bottom-right" : "bottom-left",
+        );
         clickHandler = (event) => {
           if (!markerRef.current) return;
+          geolocationRequestRef.current += 1;
+          setLocating(false);
           setResultsOpen(false);
           if (!markerRef.current.getElement().isConnected) markerRef.current.addTo(map);
           map.easeTo({ center: event.lngLat, duration: 180 });
@@ -412,6 +427,8 @@ export function LocationMapPicker({
       });
     return () => {
       active = false;
+      geolocationRequestRef.current += 1;
+      setLocating(false);
       if (clickHandler && mapRef.current) mapRef.current.off("click", clickHandler);
       markerRef.current?.remove();
       markerRef.current = null;
@@ -419,7 +436,7 @@ export function LocationMapPicker({
       mapRef.current = null;
     };
     // The ref keeps form callbacks current without recreating the WebGL context.
-  }, [contentLocale, copy, token, tokenStatus]);
+  }, [contentLocale, copy, locale, token, tokenStatus]);
 
   useEffect(() => {
     if (suppressNextSearchRef.current) {
@@ -500,6 +517,8 @@ export function LocationMapPicker({
   }, [contentLocale, copy, query, token, tokenStatus, value.countryCode]);
 
   async function chooseResult(result: SearchResult) {
+    geolocationRequestRef.current += 1;
+    setLocating(false);
     const selectedQuery = [result.label, result.description].filter(Boolean).join(", ");
     if (selectedQuery !== query) {
       suppressNextSearchRef.current = true;
@@ -548,6 +567,46 @@ export function LocationMapPicker({
     await selectCoordinate(latitude, longitude);
   }
 
+  function chooseCurrentLocation() {
+    if (!("geolocation" in navigator)) {
+      setError(copy.currentLocationUnavailable);
+      return;
+    }
+    const requestId = ++geolocationRequestRef.current;
+    setLocating(true);
+    setResultsOpen(false);
+    setError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (requestId !== geolocationRequestRef.current) return;
+        setLocating(false);
+        const map = mapRef.current;
+        const marker = markerRef.current;
+        if (!map || !marker) {
+          setError(copy.currentLocationUnavailable);
+          return;
+        }
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+        if (!marker.getElement().isConnected) marker.addTo(map);
+        map.easeTo({ center: [longitude, latitude], zoom: 17, duration: 320 });
+        void selectCoordinate(latitude, longitude);
+      },
+      (locationError) => {
+        if (requestId !== geolocationRequestRef.current) return;
+        setLocating(false);
+        if (locationError.code === locationError.PERMISSION_DENIED) {
+          setError(copy.currentLocationPermissionDenied);
+        } else if (locationError.code === locationError.TIMEOUT) {
+          setError(copy.currentLocationTimeout);
+        } else {
+          setError(copy.currentLocationUnavailable);
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 12_000 },
+    );
+  }
+
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -573,8 +632,8 @@ export function LocationMapPicker({
     <section
       className="location-picker"
       data-mapbox-token-status={tokenStatus}
-      data-resolving={resolving || undefined}
-      aria-busy={resolving || searching}
+      data-resolving={resolving || locating || undefined}
+      aria-busy={resolving || searching || locating}
       aria-labelledby={`${listboxId}-heading`}
     >
       <div className="location-picker__intro">
@@ -597,61 +656,77 @@ export function LocationMapPicker({
         </Alert>
       ) : (
         <>
-          <div className="location-search">
-            <Search size={18} aria-hidden="true" />
-            <input
-              type="search"
-              className="wf-input location-search__input"
-              value={query}
-              placeholder={copy.searchPlaceholder}
-              aria-label={copy.searchAria}
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={resultsOpen}
-              aria-controls={listboxId}
-              aria-activedescendant={
-                resultsOpen && results[activeIndex] ? `${listboxId}-${activeIndex}` : undefined
-              }
-              onFocus={() => setResultsOpen(results.length > 0)}
-              onChange={(event) => {
-                suppressNextSearchRef.current = false;
-                setQuery(event.currentTarget.value);
-                setResultsOpen(true);
-                setActiveIndex(0);
-              }}
-              onKeyDown={onSearchKeyDown}
-            />
-            {searching ? (
-              <LoaderCircle className="location-search__spinner" aria-label={copy.searching} />
-            ) : null}
-            {resultsOpen ? (
-              <div className="location-search__results" id={listboxId} role="listbox">
-                {results.length ? (
-                  results.map((result, index) => (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={index === activeIndex}
-                      data-active={index === activeIndex || undefined}
-                      id={`${listboxId}-${index}`}
-                      key={result.id}
-                      tabIndex={-1}
-                      onPointerDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setActiveIndex(index)}
-                      onClick={() => void chooseResult(result)}
-                    >
-                      <MapPin size={17} aria-hidden="true" />
-                      <span>
-                        <strong>{result.label}</strong>
-                        {result.description ? <small>{result.description}</small> : null}
-                      </span>
-                    </button>
-                  ))
-                ) : searching ? null : (
-                  <p>{copy.noResults}</p>
-                )}
-              </div>
-            ) : null}
+          <div className="location-picker__tools">
+            <div className="location-search">
+              <Search size={18} aria-hidden="true" />
+              <input
+                type="search"
+                className="wf-input location-search__input"
+                value={query}
+                placeholder={copy.searchPlaceholder}
+                aria-label={copy.searchAria}
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={resultsOpen}
+                aria-controls={listboxId}
+                aria-activedescendant={
+                  resultsOpen && results[activeIndex] ? `${listboxId}-${activeIndex}` : undefined
+                }
+                onFocus={() => setResultsOpen(results.length > 0)}
+                onChange={(event) => {
+                  geolocationRequestRef.current += 1;
+                  setLocating(false);
+                  suppressNextSearchRef.current = false;
+                  setQuery(event.currentTarget.value);
+                  setResultsOpen(true);
+                  setActiveIndex(0);
+                }}
+                onKeyDown={onSearchKeyDown}
+              />
+              {searching ? (
+                <LoaderCircle className="location-search__spinner" aria-label={copy.searching} />
+              ) : null}
+              {resultsOpen ? (
+                <div className="location-search__results" id={listboxId} role="listbox">
+                  {results.length ? (
+                    results.map((result, index) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={index === activeIndex}
+                        data-active={index === activeIndex || undefined}
+                        id={`${listboxId}-${index}`}
+                        key={result.id}
+                        tabIndex={-1}
+                        onPointerDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onClick={() => void chooseResult(result)}
+                      >
+                        <MapPin size={17} aria-hidden="true" />
+                        <span>
+                          <strong>{result.label}</strong>
+                          {result.description ? <small>{result.description}</small> : null}
+                        </span>
+                      </button>
+                    ))
+                  ) : searching ? null : (
+                    <p>{copy.noResults}</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="location-picker__geolocate"
+              loading={locating}
+              loadingLabel={copy.locatingCurrentLocation}
+              disabled={!mapReady || resolving}
+              onClick={chooseCurrentLocation}
+            >
+              <LocateFixed size={18} aria-hidden="true" />
+              {copy.useCurrentLocation}
+            </Button>
           </div>
           <div
             className="location-map-frame"

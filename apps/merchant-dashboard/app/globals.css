@@ -414,6 +414,25 @@ html:lang(ckb-Arab-IQ) body {
   font-weight: 700;
 }
 
+.location-picker__tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.location-picker__geolocate {
+  min-height: 3.25rem;
+  padding-inline: 1rem;
+  border-radius: 18px;
+  white-space: nowrap;
+}
+
+.location-picker__geolocate svg {
+  flex: 0 0 auto;
+  color: var(--waflo-brick);
+}
+
 .location-search {
   position: relative;
   z-index: 6;
@@ -600,7 +619,7 @@ html:lang(ckb-Arab-IQ) body {
 }
 
 .location-map-marker {
-  position: relative;
+  position: absolute;
   width: 48px;
   height: 58px;
   color: white;
@@ -1070,6 +1089,14 @@ html:lang(ckb-Arab-IQ) body {
 
   .location-picker__confirmed {
     align-self: flex-start;
+  }
+
+  .location-picker__tools {
+    grid-template-columns: 1fr;
+  }
+
+  .location-picker__geolocate {
+    width: 100%;
   }
 
   .location-map-frame {

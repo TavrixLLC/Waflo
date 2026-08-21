@@ -5,6 +5,7 @@ import { validateBusinessCoordinate } from "../../apps/api/src/locations/locatio
 import {
   canonicalAddressFromMapboxFeature,
   classifyMapboxToken,
+  mapboxRtlTextPluginUrl,
   wafloBasemapConfig,
   wafloMapStyleUrl,
 } from "../../apps/merchant-dashboard/components/location-mapbox";
@@ -135,18 +136,21 @@ describe("Mapbox-backed exact business location contract", () => {
 
   it("uses the maintained Mapbox basemap with an explicit Waflo color system", () => {
     expect(wafloMapStyleUrl).toBe("mapbox://styles/mapbox/standard");
+    expect(wafloBasemapConfig).not.toHaveProperty("theme");
     expect(wafloBasemapConfig).toMatchObject({
-      theme: "monochrome",
       show3dObjects: false,
       colorLand: "#fffdfc",
       colorRoads: "#f2a187",
       colorTrunks: "#e86f4e",
       colorMotorways: "#ae3115",
       colorPlaceLabels: "#241916",
+      colorRoadLabels: "#5e4640",
+      colorModePointOfInterestLabels: "single",
+      colorPointOfInterestLabels: "#76584f",
     });
   });
 
-  it("keeps click, drag, keyboard, reverse-geocode, and attribution behavior explicit", () => {
+  it("keeps click, touch, current-location, RTL, reverse-geocode, and attribution behavior explicit", () => {
     const picker = readFileSync(
       join(process.cwd(), "apps/merchant-dashboard/components/location-map-picker.tsx"),
       "utf8",
@@ -164,12 +168,26 @@ describe("Mapbox-backed exact business location contract", () => {
     expect(picker).toContain("attributionControl: true");
     expect(picker).toContain("respectPrefersReducedMotion: true");
     expect(picker).toContain("wafloBasemapConfig");
+    expect(picker).toContain("mapboxgl.setRTLTextPlugin");
+    expect(mapboxRtlTextPluginUrl).toContain("mapbox-gl-rtl-text");
     expect(picker).toContain("coordinatesConfirmed: false");
     expect(picker).toContain("coordinatesConfirmed: true");
-    expect(picker).not.toContain("navigator.geolocation");
+    expect(picker).toContain("navigator.geolocation.getCurrentPosition");
+    expect(picker).toContain("enableHighAccuracy: true");
     expect(picker).not.toContain("console.");
     expect(styles).toContain(".location-map-dialog");
     expect(styles).toContain("height: 100dvh");
+    expect(styles).toMatch(/\.location-map-marker\s*\{[^}]*position:\s*absolute/su);
     expect(styles).not.toMatch(/\.mapboxgl-ctrl-attrib\s*\{[^}]*display:\s*none/su);
+  });
+
+  it("allows user-initiated geolocation only in the merchant dashboard origin", () => {
+    const dashboardConfig = readFileSync(
+      join(process.cwd(), "apps/merchant-dashboard/next.config.ts"),
+      "utf8",
+    );
+    expect(dashboardConfig).toContain("geolocation=(self)");
+    expect(dashboardConfig).toContain("camera=()");
+    expect(dashboardConfig).toContain("microphone=()");
   });
 });

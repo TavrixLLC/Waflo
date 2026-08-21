@@ -160,6 +160,14 @@ export const onboardingInterfaceCopy = {
       searchAria: "Search for the branch location",
       searching: "Searching",
       noResults: "No results. Try a different address.",
+      useCurrentLocation: "Use my current location",
+      locatingCurrentLocation: "Finding your location",
+      currentLocationPermissionDenied:
+        "Location access was denied. Search for a nearby address or enable location access in your browser.",
+      currentLocationUnavailable:
+        "Your current location could not be determined. Search for a nearby address instead.",
+      currentLocationTimeout:
+        "Finding your location took too long. Try again or search for a nearby address.",
       mapAria: "Branch location selection map",
       loadingMap: "Loading map",
       selectedAddress: "Selected address",
@@ -325,6 +333,12 @@ export const onboardingInterfaceCopy = {
       searchAria: "البحث عن موقع الفرع",
       searching: "جارٍ البحث",
       noResults: "لا توجد نتائج. جرّب كتابة عنوان مختلف.",
+      useCurrentLocation: "استخدام موقعي الحالي",
+      locatingCurrentLocation: "جارٍ تحديد موقعك",
+      currentLocationPermissionDenied:
+        "تم رفض الوصول إلى الموقع. ابحث عن عنوان قريب أو فعّل إذن الموقع في المتصفح.",
+      currentLocationUnavailable: "تعذر تحديد موقعك الحالي. ابحث عن عنوان قريب بدلاً من ذلك.",
+      currentLocationTimeout: "استغرق تحديد موقعك وقتاً طويلاً. حاول مرة أخرى أو ابحث عن عنوان قريب.",
       mapAria: "خريطة اختيار موقع الفرع",
       loadingMap: "جارٍ تحميل الخريطة",
       selectedAddress: "العنوان المحدد",
@@ -491,6 +505,13 @@ export const onboardingInterfaceCopy = {
       searchAria: "گەڕان بۆ شوێنا لقێ",
       searching: "گەڕان تێتە کرن",
       noResults: "ئەنجام نینن. ناڤونیشانەکێ دی بنڤیسە.",
+      useCurrentLocation: "شوێنا من یا نووکە بەکاربینە",
+      locatingCurrentLocation: "شوێنا تە تێتە دیارکرن",
+      currentLocationPermissionDenied:
+        "دەستگەهشتن بۆ شوێنی هاتە ڕەتکرن. ل ناڤونیشانەکێ نێزیک بگەڕە یان مۆلەتا شوێنی د وێبگەڕی دا چالاک بکە.",
+      currentLocationUnavailable: "شوێنا تە یا نووکە نەهاتە دیارکرن. ل ناڤونیشانەکێ نێزیک بگەڕە.",
+      currentLocationTimeout:
+        "دیارکرنا شوێنا تە زۆر درێژ بوو. دووبارە هەول بدە یان ل ناڤونیشانەکێ نێزیک بگەڕە.",
       mapAria: "نەخشەیا هەلبژارتنا شوێنا لقێ",
       loadingMap: "نەخشە تێتە بارکرن",
       selectedAddress: "ناڤونیشانا هەلبژارتی",
@@ -659,6 +680,14 @@ export const onboardingInterfaceCopy = {
       searchAria: "گەڕان بۆ شوێنی لق",
       searching: "گەڕان دەکرێت",
       noResults: "ئەنجام نییە. ناونیشانێکی دیکە بنووسە.",
+      useCurrentLocation: "شوێنی ئێستام بەکاربهێنە",
+      locatingCurrentLocation: "شوێنەکەت دیاری دەکرێت",
+      currentLocationPermissionDenied:
+        "دەستگەیشتن بە شوێن ڕەت کرایەوە. ناونیشانێکی نزیک بگەڕێ یان مۆڵەتی شوێن لە وێبگەڕەکەتدا چالاک بکە.",
+      currentLocationUnavailable:
+        "نەتوانرا شوێنی ئێستات دیاری بکرێت. لە جیاتی ئەوە ناونیشانێکی نزیک بگەڕێ.",
+      currentLocationTimeout:
+        "دیارکردنی شوێنەکەت زۆری خایاند. دووبارە هەوڵ بدە یان ناونیشانێکی نزیک بگەڕێ.",
       mapAria: "نەخشەی هەڵبژاردنی شوێنی لق",
       loadingMap: "نەخشە بار دەکرێت",
       selectedAddress: "ناونیشانی هەڵبژێردراو",

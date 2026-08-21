@@ -653,8 +653,19 @@ test("captures live Mapbox location review states when configured", async ({ pag
 
   await waitForMapbox(dialog);
   const canvas = dialog.locator(".mapboxgl-canvas");
+  await page.context().grantPermissions(["geolocation"]);
+  await page.context().setGeolocation({ latitude: 33.3152, longitude: 44.3661 });
+  const currentLocationButton = dialog.getByRole("button", { name: "Use my current location" });
+  await expect(currentLocationButton).toBeEnabled();
+  await currentLocationButton.click();
+  await expect(dialog.locator(".location-picker__selection small")).toContainText(
+    "33.315200, 44.366100",
+  );
+
   await canvas.click({ position: { x: 420, y: 210 } });
-  await expect(dialog.locator(".location-map-marker")).toBeVisible({ timeout: 20_000 });
+  const clickedMarker = dialog.locator(".location-map-marker");
+  await expect(clickedMarker).toBeVisible({ timeout: 20_000 });
+  await expect(clickedMarker).toHaveCSS("position", "absolute");
   await expect(dialog.locator(".location-picker__selection")).toBeVisible();
 
   const search = dialog.getByRole("combobox", { name: "Search for the branch location" });
@@ -706,6 +717,8 @@ test("captures live Mapbox location review states when configured", async ({ pag
   await page.getByRole("button", { name: "إضافة موقع" }).click();
   dialog = page.getByRole("dialog", { name: "إضافة موقع" });
   await waitForMapbox(dialog);
+  await expect(dialog.getByRole("button", { name: "استخدام موقعي الحالي" })).toBeVisible();
+  await expect(dialog.locator(".mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-zoom-in")).toBeVisible();
   await selectMapboxSearchResult(dialog, "ar", "مطار بغداد الدولي");
   await capture(page, "location-add-map-desktop-ar.png");
   await dialog.getByRole("button", { name: "تأكيد هذا الموقع" }).click();
