@@ -8,6 +8,43 @@ export interface CanonicalAddress {
   countryCode?: string;
 }
 
+export const wafloMapStyleUrl = "mapbox://styles/mapbox/standard";
+
+/**
+ * Mapbox Standard exposes these basemap color controls directly, which keeps the
+ * branded map on Mapbox's maintained vector style without adding a second map
+ * bundle or a brittle list of provider layer ids.
+ */
+export const wafloBasemapConfig = {
+  theme: "monochrome",
+  lightPreset: "day",
+  show3dObjects: false,
+  showPedestrianRoads: true,
+  showPlaceLabels: true,
+  showPointOfInterestLabels: true,
+  showRoadLabels: true,
+  showTransitLabels: false,
+  colorLand: "#fffdfc",
+  colorWater: "#eef4f5",
+  colorGreenspace: "#f1f3e9",
+  colorCommercial: "#fff5f1",
+  colorEducation: "#fff8f4",
+  colorMedical: "#fff0ec",
+  colorIndustrial: "#f6f0ed",
+  colorBuildings: "#f0e7e3",
+  colorAdminBoundaries: "#d7bbb3",
+  colorRoads: "#f2a187",
+  colorTrunks: "#e86f4e",
+  colorMotorways: "#ae3115",
+  colorPlaceLabels: "#241916",
+  colorRoadLabels: "#5e4640",
+  colorPointOfInterestLabels: "#76584f",
+  colorPlaceLabelHighlight: "#ae3115",
+  colorPlaceLabelSelect: "#ae3115",
+  colorBuildingHighlight: "#ffb39f",
+  colorBuildingSelect: "#ff6b4a",
+} as const;
+
 const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 
 export function classifyMapboxToken(value: string | undefined): MapboxTokenStatus {

@@ -1,9 +1,10 @@
 "use client";
 
 import { countryOptions } from "@waflo/contracts";
-import { contentLocaleForInterface, messages, type InterfaceLocale } from "@waflo/i18n";
+import { contentLocaleForInterface, type InterfaceLocale, messages } from "@waflo/i18n";
 import { Alert, Button, FormField, SearchableSelect, TextInput } from "@waflo/ui";
 import { CheckCircle2, LoaderCircle, MapPin, Search } from "lucide-react";
+import type { Map as MapboxMap, Marker as MapboxMarker } from "mapbox-gl";
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -13,17 +14,18 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Map as MapboxMap, Marker as MapboxMarker } from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { apiFetch } from "../lib/api-client";
 import {
   asMapboxRecord as asRecord,
+  type CanonicalAddress,
   canonicalAddressFromMapboxFeature,
   classifyMapboxToken,
-  firstMapboxFeature as firstFeature,
   mapboxFeatureCoordinates as featureCoordinates,
+  firstMapboxFeature as firstFeature,
   mapboxNestedString as nestedString,
-  type CanonicalAddress,
+  wafloBasemapConfig,
+  wafloMapStyleUrl,
 } from "./location-mapbox";
 
 export interface LocationMapSelection {
@@ -217,10 +219,12 @@ export function LocationMapPicker({
   locale,
   value,
   onChange,
+  headingLevel = 3,
 }: {
   locale: InterfaceLocale;
   value: LocationMapSelection;
   onChange: (value: LocationMapSelection) => void;
+  headingLevel?: 2 | 3;
 }) {
   const copy = messages[locale].onboarding.location;
   const contentLocale = contentLocaleForInterface(locale);
@@ -233,6 +237,7 @@ export function LocationMapPicker({
   const valueRef = useRef(value);
   const updateCounterRef = useRef(0);
   const sessionTokenRef = useRef(createSessionToken());
+  const suppressNextSearchRef = useRef(false);
   const selectCoordinateRef = useRef<
     (latitude: number, longitude: number, preliminaryAddress?: CanonicalAddress) => Promise<void>
   >(() => Promise.resolve());
@@ -302,6 +307,13 @@ export function LocationMapPicker({
     };
     valueRef.current = next;
     onChange(next);
+    if (addressResult.status === "fulfilled") {
+      const writtenAddress = displayAddress(next, locale === "en" ? ", " : "، ", "");
+      if (writtenAddress && writtenAddress !== query) {
+        suppressNextSearchRef.current = true;
+        setQuery(writtenAddress);
+      }
+    }
     setResolving(false);
     if (coordinateResult.status === "rejected") {
       setError(copy.validationError);
@@ -326,18 +338,27 @@ export function LocationMapPicker({
         const hasCoordinate = current.latitude !== null && current.longitude !== null;
         const map = new mapboxgl.Map({
           container: mapContainerRef.current,
-          style: "mapbox://styles/mapbox/streets-v12",
+          style: wafloMapStyleUrl,
+          config: { basemap: { ...wafloBasemapConfig } },
           center: hasCoordinate
             ? [current.longitude as number, current.latitude as number]
             : defaultCenter,
           zoom: hasCoordinate ? 16 : 11,
           attributionControl: true,
           cooperativeGestures: true,
+          language: contentLocale,
+          respectPrefersReducedMotion: true,
         });
         const markerElement = document.createElement("button");
         markerElement.type = "button";
         markerElement.className = "location-map-marker";
-        markerElement.append(document.createElement("span"));
+        const markerBody = document.createElement("span");
+        const markerBrand = document.createElement("img");
+        markerBrand.src = "/brand/waflo-mark-primary.svg";
+        markerBrand.alt = "";
+        markerBrand.setAttribute("aria-hidden", "true");
+        markerBody.append(markerBrand);
+        markerElement.append(markerBody);
         markerElement.setAttribute("aria-label", copy.markerAria);
         markerElement.addEventListener("keydown", (event) => {
           if (!markerRef.current || !event.key.startsWith("Arrow")) return;
@@ -367,6 +388,7 @@ export function LocationMapPicker({
         map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
         clickHandler = (event) => {
           if (!markerRef.current) return;
+          setResultsOpen(false);
           if (!markerRef.current.getElement().isConnected) markerRef.current.addTo(map);
           map.easeTo({ center: event.lngLat, duration: 180 });
           void selectCoordinateRef.current(event.lngLat.lat, event.lngLat.lng);
@@ -397,9 +419,15 @@ export function LocationMapPicker({
       mapRef.current = null;
     };
     // The ref keeps form callbacks current without recreating the WebGL context.
-  }, [copy, token, tokenStatus]);
+  }, [contentLocale, copy, token, tokenStatus]);
 
   useEffect(() => {
+    if (suppressNextSearchRef.current) {
+      suppressNextSearchRef.current = false;
+      setResults([]);
+      setSearching(false);
+      return;
+    }
     if (tokenStatus !== "SET" || query.trim().length < 2) {
       setResults([]);
       setSearching(false);
@@ -413,6 +441,13 @@ export function LocationMapPicker({
         access_token: token,
         language: contentLocale,
         limit: "6",
+        ...(mapRef.current
+          ? {
+              proximity: `${mapRef.current.getCenter().lng.toFixed(6)},${mapRef.current
+                .getCenter()
+                .lat.toFixed(6)}`,
+            }
+          : {}),
         ...(value.countryCode ? { country: value.countryCode.toLocaleLowerCase("en-US") } : {}),
       };
       const searchBoxParams = new URLSearchParams({
@@ -465,7 +500,11 @@ export function LocationMapPicker({
   }, [contentLocale, copy, query, token, tokenStatus, value.countryCode]);
 
   async function chooseResult(result: SearchResult) {
-    setQuery([result.label, result.description].filter(Boolean).join(", "));
+    const selectedQuery = [result.label, result.description].filter(Boolean).join(", ");
+    if (selectedQuery !== query) {
+      suppressNextSearchRef.current = true;
+      setQuery(selectedQuery);
+    }
     setResultsOpen(false);
     setError("");
     let latitude = result.latitude;
@@ -528,17 +567,20 @@ export function LocationMapPicker({
 
   const canConfirm =
     value.latitude !== null && value.longitude !== null && Boolean(value.timezone) && !resolving;
+  const Heading = headingLevel === 2 ? "h2" : "h3";
 
   return (
     <section
       className="location-picker"
       data-mapbox-token-status={tokenStatus}
+      data-resolving={resolving || undefined}
+      aria-busy={resolving || searching}
       aria-labelledby={`${listboxId}-heading`}
     >
       <div className="location-picker__intro">
         <div>
           <span className="location-picker__step">{copy.exactLocation}</span>
-          <h3 id={`${listboxId}-heading`}>{copy.placePin}</h3>
+          <Heading id={`${listboxId}-heading`}>{copy.placePin}</Heading>
           <p>{copy.description}</p>
         </div>
         {value.coordinatesConfirmed ? (
@@ -572,6 +614,7 @@ export function LocationMapPicker({
               }
               onFocus={() => setResultsOpen(results.length > 0)}
               onChange={(event) => {
+                suppressNextSearchRef.current = false;
                 setQuery(event.currentTarget.value);
                 setResultsOpen(true);
                 setActiveIndex(0);
@@ -592,6 +635,7 @@ export function LocationMapPicker({
                       data-active={index === activeIndex || undefined}
                       id={`${listboxId}-${index}`}
                       key={result.id}
+                      tabIndex={-1}
                       onPointerDown={(event) => event.preventDefault()}
                       onMouseEnter={() => setActiveIndex(index)}
                       onClick={() => void chooseResult(result)}
@@ -609,12 +653,24 @@ export function LocationMapPicker({
               </div>
             ) : null}
           </div>
-          <div className="location-map-frame" data-ready={mapReady || undefined}>
+          <div
+            className="location-map-frame"
+            data-ready={mapReady || undefined}
+            data-has-selection={
+              value.latitude !== null && value.longitude !== null ? true : undefined
+            }
+          >
             <section
               ref={mapContainerRef}
               className="location-map-canvas"
               aria-label={copy.mapAria}
             />
+            {mapReady ? (
+              <div className="location-map-instruction" aria-hidden="true">
+                <MapPin size={16} />
+                <span>{copy.placePin}</span>
+              </div>
+            ) : null}
             {!mapReady ? (
               <div className="location-map-loading" role="status">
                 <LoaderCircle aria-hidden="true" />
@@ -628,14 +684,19 @@ export function LocationMapPicker({
       {error ? <Alert tone="danger" title={error} /> : null}
       {value.latitude !== null && value.longitude !== null ? (
         <div className="location-picker__selection" aria-live="polite">
-          <div>
-            <span>{copy.selectedAddress}</span>
-            <strong>
-              {displayAddress(value, locale === "en" ? ", " : "، ", copy.noWrittenAddress)}
-            </strong>
-            <small dir="ltr">
-              {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)} · {value.timezone || "—"}
-            </small>
+          <div className="location-picker__selection-copy">
+            <span className="location-picker__selection-icon" aria-hidden="true">
+              <MapPin size={18} />
+            </span>
+            <div>
+              <span className="location-picker__selection-label">{copy.selectedAddress}</span>
+              <strong>
+                {displayAddress(value, locale === "en" ? ", " : "، ", copy.noWrittenAddress)}
+              </strong>
+              <small dir="ltr">
+                {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)} · {value.timezone || "—"}
+              </small>
+            </div>
           </div>
           <Button
             type="button"

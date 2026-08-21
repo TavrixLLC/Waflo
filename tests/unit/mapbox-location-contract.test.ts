@@ -5,6 +5,8 @@ import { validateBusinessCoordinate } from "../../apps/api/src/locations/locatio
 import {
   canonicalAddressFromMapboxFeature,
   classifyMapboxToken,
+  wafloBasemapConfig,
+  wafloMapStyleUrl,
 } from "../../apps/merchant-dashboard/components/location-mapbox";
 import { classifyPublicMapboxToken, parseEnvironment } from "../../packages/config/src/index";
 import {
@@ -131,6 +133,19 @@ describe("Mapbox-backed exact business location contract", () => {
     expect(shell).not.toContain("mapbox-gl");
   });
 
+  it("uses the maintained Mapbox basemap with an explicit Waflo color system", () => {
+    expect(wafloMapStyleUrl).toBe("mapbox://styles/mapbox/standard");
+    expect(wafloBasemapConfig).toMatchObject({
+      theme: "monochrome",
+      show3dObjects: false,
+      colorLand: "#fffdfc",
+      colorRoads: "#f2a187",
+      colorTrunks: "#e86f4e",
+      colorMotorways: "#ae3115",
+      colorPlaceLabels: "#241916",
+    });
+  });
+
   it("keeps click, drag, keyboard, reverse-geocode, and attribution behavior explicit", () => {
     const picker = readFileSync(
       join(process.cwd(), "apps/merchant-dashboard/components/location-map-picker.tsx"),
@@ -147,6 +162,8 @@ describe("Mapbox-backed exact business location contract", () => {
     expect(picker).toContain('permanent: "true"');
     expect(picker).toContain("session_token");
     expect(picker).toContain("attributionControl: true");
+    expect(picker).toContain("respectPrefersReducedMotion: true");
+    expect(picker).toContain("wafloBasemapConfig");
     expect(picker).toContain("coordinatesConfirmed: false");
     expect(picker).toContain("coordinatesConfirmed: true");
     expect(picker).not.toContain("navigator.geolocation");

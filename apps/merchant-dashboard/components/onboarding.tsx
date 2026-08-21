@@ -6,10 +6,10 @@ import { billingCadenceCatalog, cadencePrice } from "@waflo/billing";
 import { type BillingCadence, countryOptions, type PlanCode } from "@waflo/contracts";
 import {
   contentLocaleForInterface,
-  localeRegistry,
-  messages,
   type InterfaceLocale,
   type InterfaceMessages,
+  localeRegistry,
+  messages,
 } from "@waflo/i18n";
 import { Alert, Button, FormField, SearchableSelect, TextInput } from "@waflo/ui";
 import { Check, CreditCard, Link2, LockKeyhole } from "lucide-react";
@@ -202,22 +202,27 @@ function OnboardingShell({
   ];
   return (
     <main className="onboarding-shell">
-      <header className="onboarding-header">
-        <Image
-          src="/brand/waflo-logo-white-horizontal.svg"
-          alt="Waflo"
-          width={140}
-          height={40}
-          priority
-        />
-        <MerchantLanguagePicker
-          locale={locale}
-          routePath="/onboarding/business"
-          label={copy.language.label}
-        />
-      </header>
-      <div className="onboarding-main">
-        <nav className="onboarding-progress" aria-label={copy.onboarding.progress.ariaLabel}>
+      <aside className="onboarding-rail">
+        <header className="onboarding-header">
+          <Image
+            src="/brand/waflo-logo-white-horizontal.svg"
+            alt="Waflo"
+            width={140}
+            height={40}
+            priority
+          />
+          <MerchantLanguagePicker
+            locale={locale}
+            routePath="/onboarding/business"
+            label={copy.language.label}
+          />
+        </header>
+        <nav
+          className="onboarding-progress"
+          aria-label={copy.onboarding.progress.ariaLabel}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: The progress rail scrolls horizontally on small screens and must be keyboard-accessible.
+          tabIndex={0}
+        >
           {steps.map((label, index) => {
             const number = (index + 1) as OnboardingStep;
             const complete = number < step;
@@ -239,8 +244,8 @@ function OnboardingShell({
             );
           })}
         </nav>
-        <section className="onboarding-card">{children}</section>
-      </div>
+      </aside>
+      <section className="onboarding-card">{children}</section>
     </main>
   );
 }
@@ -855,7 +860,12 @@ export function BusinessOnboarding({
               />
             </FormField>
           </div>
-          <LocationMapPicker locale={locale} value={firstLocation} onChange={setFirstLocation} />
+          <LocationMapPicker
+            locale={locale}
+            value={firstLocation}
+            onChange={setFirstLocation}
+            headingLevel={2}
+          />
           <LocationAddressFields
             locale={locale}
             value={firstLocation}
