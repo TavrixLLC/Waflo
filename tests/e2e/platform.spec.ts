@@ -654,8 +654,30 @@ test.describe
       ).toBeVisible();
       await expect(page.getByText("Billing configuration is incomplete")).toBeVisible();
       await screenshot(page, "13-billing");
+      const stripeMutationPaths: string[] = [];
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (
+          request.method() !== "GET" &&
+          (path.endsWith("/billing/subscription/change") ||
+            /\/billing\/(?:trial|payment-method)(?:\/|$)/u.test(path))
+        ) {
+          stripeMutationPaths.push(path);
+        }
+      });
       const growthCard = page.locator(".wf-plan-card").filter({ hasText: "Growth" });
-      await expect(growthCard.getByRole("button", { name: "Choose plan" })).toHaveCount(0);
+      const unavailablePreview = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname.endsWith("/billing/subscription/change/preview"),
+      );
+      await growthCard.getByRole("button", { name: "Choose plan" }).click();
+      expect((await unavailablePreview).status()).toBe(503);
+      await expect(page.getByText("Billing configuration is incomplete")).toBeVisible();
+      const starterCard = page.locator(".wf-plan-card").filter({ hasText: "Starter" });
+      await expect(starterCard.getByRole("button", { name: "Selected" })).toBeDisabled();
+      await expect(growthCard.getByRole("button", { name: "Choose plan" })).toBeVisible();
+      expect(stripeMutationPaths).toEqual([]);
 
       await page.goto("/en/dashboard/locations");
       await expect(page.getByText("Location limit reached")).toBeVisible();
@@ -856,9 +878,8 @@ test.describe
       await expect(refundDialog.getByText("Originally paid")).toBeVisible();
       await expect(refundDialog.getByText("Remaining refundable")).toBeVisible();
       const refundReason = refundDialog.getByRole("combobox", { name: "Reason" });
-      await refundReason.click();
-      await page.getByRole("option", { name: "Incorrect charge", exact: true }).click();
-      await expect(refundReason).toHaveValue("Incorrect charge");
+      await refundReason.selectOption({ label: "Incorrect charge" });
+      await expect(refundReason).toHaveValue("incorrect_charge");
       await refundDialog.getByRole("spinbutton", { name: "Amount (USD)" }).fill("17.00");
       await refundDialog
         .getByRole("textbox", { name: "Optional explanation" })

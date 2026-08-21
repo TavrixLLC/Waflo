@@ -463,7 +463,7 @@ test("captures organization branding, optional onboarding logo, and truthful Ove
       merchantBrandLogoDataUri: merchantLogo,
     });
     await page.goto(`/${locale}/dashboard/programs`);
-    await expect(page.locator(".loyalty-card-real-preview__brand-badge img")).toBeVisible();
+    await expect(page.locator("img.loyalty-card-real-preview__brand-badge")).toBeVisible();
     await capture(page, `loyalty-list-merchant-logo-desktop-${locale}.png`);
     await page.close();
   }
