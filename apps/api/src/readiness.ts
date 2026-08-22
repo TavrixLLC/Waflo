@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -9,30 +10,16 @@ import { cadencePrice } from "@waflo/billing";
 import { parseEnvironment } from "@waflo/config";
 import type { BillingCadence, PlanCode } from "@waflo/contracts";
 import { Redis } from "ioredis";
-import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { createApiApplication } from "./app.js";
 import { ExternalAuthService } from "./auth/external-auth.service.js";
 import { CustomerSecurityService } from "./customer/customer-security.service.js";
 import { PrismaService } from "./database/prisma.service.js";
 import { NotificationService } from "./notifications/notification.service.js";
+import { evaluateReleaseReadiness, type ReleaseReadinessResult } from "./readiness-policy.js";
 import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
 
-type ReadinessStatus =
-  | "READY"
-  | "NOT_CONFIGURED"
-  | "UNREACHABLE"
-  | "INVALID_CONFIG"
-  | "DEGRADED"
-  | "DISABLED"
-  | "CONFIG_MISSING"
-  | "CONFIG_READY"
-  | "PROVIDER_ERROR";
-
-interface ComponentResult {
-  status: ReadinessStatus;
-  metadata?: Record<string, unknown>;
-}
+type ComponentResult = ReleaseReadinessResult;
 
 async function checked(operation: () => Promise<void>): Promise<ComponentResult> {
   try {
@@ -270,8 +257,17 @@ async function main() {
     WALLET_WORKER: await workerStatus("WALLET_WORKER"),
     KEY_ROTATION_CONFIG: { status: "READY", metadata: security.keyVersionSummary() },
   };
+  const releaseGate = evaluateReleaseReadiness(result, environment.DEPLOYMENT_ENVIRONMENT);
+  result.RELEASE_GATE = {
+    status: releaseGate.blockers.length === 0 ? "READY" : "DEGRADED",
+    metadata: {
+      environment: environment.DEPLOYMENT_ENVIRONMENT,
+      blockers: releaseGate.blockers,
+      warnings: releaseGate.warnings,
+    },
+  };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (Object.values(result).some((item) => item.status !== "READY")) process.exitCode = 1;
+  if (releaseGate.blockers.length > 0) process.exitCode = 1;
   await redis?.quit().catch(() => undefined);
   storage.destroy();
   await app.close();

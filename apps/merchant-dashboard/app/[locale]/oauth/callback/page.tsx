@@ -1,6 +1,6 @@
 "use client";
 
-import { isInterfaceLocale, messages, type InterfaceLocale } from "@waflo/i18n";
+import { type InterfaceLocale, isInterfaceLocale, messages } from "@waflo/i18n";
 import { Alert } from "@waflo/ui";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -60,13 +60,31 @@ export default function OAuthCallbackPage() {
 
   if (result !== "authenticated") {
     const noAccount = result === "no_account";
+    const actionRequired = result === "action_required";
+    const expired = result === "expired";
+    const unavailable = result === "unavailable";
+    const title = noAccount
+      ? copy.oauth.noAccountTitle
+      : actionRequired
+        ? copy.oauth.actionRequiredTitle
+        : expired
+          ? copy.oauth.expiredTitle
+          : unavailable
+            ? copy.oauth.unavailableTitle
+            : copy.oauth.failedTitle;
+    const description = noAccount
+      ? copy.oauth.noAccountDescription
+      : actionRequired
+        ? copy.oauth.actionRequiredDescription
+        : expired
+          ? copy.oauth.expiredDescription
+          : unavailable
+            ? copy.oauth.unavailableDescription
+            : copy.oauth.failedDescription;
     return (
       <AuthLayout locale={interfaceLocale} routePath="/oauth/callback">
-        <Alert
-          tone={noAccount ? "info" : "danger"}
-          title={noAccount ? copy.oauth.noAccountTitle : copy.oauth.failedTitle}
-        >
-          {noAccount ? copy.oauth.noAccountDescription : copy.oauth.failedDescription}
+        <Alert tone={noAccount || actionRequired || expired ? "info" : "danger"} title={title}>
+          {description}
         </Alert>
         <Link
           className="wf-button wf-button--primary auth-oauth-action"

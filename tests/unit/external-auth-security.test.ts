@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { ExternalAuthController } from "../../apps/api/src/auth/external-auth.controller.js";
 import { ExternalAuthService } from "../../apps/api/src/auth/external-auth.service.js";
+import { AppError } from "../../apps/api/src/common/app-error.js";
 import type { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { hashOpaqueToken } from "../../packages/auth/src/index.js";
 import { parseEnvironment } from "../../packages/config/src/index.js";
@@ -118,6 +119,74 @@ describe("external-auth security primitives and configuration", () => {
       }),
     );
     expect(setCookie.mock.calls[0]?.[2]).not.toHaveProperty("domain");
+  });
+
+  it("logs only a safe OAuth callback rejection category and returns an actionable result", async () => {
+    const warn = vi.fn();
+    const error = vi.fn();
+    const clearCookie = vi.fn();
+    const redirect = vi.fn();
+    const controller = new ExternalAuthController(
+      {
+        localeForState: vi.fn(async () => "en" as const),
+        browserBindingCookieName: vi.fn(() => "__Secure-waflo_oauth_g_test"),
+        complete: vi.fn(async () => {
+          throw new AppError(
+            "EXTERNAL_AUTH_INVALID",
+            "The external sign-in request is invalid or expired.",
+            401,
+          );
+        }),
+      } as never,
+      environment(),
+    ) as unknown as {
+      completeCallback(
+        provider: "google",
+        state: string,
+        code: string,
+        appleUser: undefined,
+        request: {
+          id: string;
+          requestId: string;
+          cookies: Record<string, string>;
+          log: { warn: typeof warn; error: typeof error };
+        },
+        reply: { clearCookie: typeof clearCookie; redirect: typeof redirect },
+      ): Promise<unknown>;
+    };
+
+    await controller.completeCallback(
+      "google",
+      "secret-state-never-logged",
+      "secret-code-never-logged",
+      undefined,
+      {
+        id: "request-1",
+        requestId: "request-1",
+        cookies: { "__Secure-waflo_oauth_g_test": "secret-browser-binding-never-logged" },
+        log: { warn, error },
+      },
+      { clearCookie, redirect },
+    );
+
+    expect(warn).toHaveBeenCalledWith(
+      {
+        event: "oauth.callback_rejected",
+        provider: "google",
+        result: "expired",
+        requestId: "request-1",
+        errorCode: "EXTERNAL_AUTH_INVALID",
+      },
+      "External authentication callback rejected",
+    );
+    expect(error).not.toHaveBeenCalled();
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-state-never-logged");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-code-never-logged");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-browser-binding-never-logged");
+    expect(redirect).toHaveBeenCalledWith(
+      "http://localhost:3001/en/oauth/callback?result=expired",
+      302,
+    );
   });
 
   it("keeps removed Apple authentication unavailable regardless of legacy configuration", () => {

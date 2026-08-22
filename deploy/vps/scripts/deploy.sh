@@ -40,6 +40,9 @@ compose up -d --no-build --wait --wait-timeout 240 \
 compose exec -T api node -e \
   "fetch('http://127.0.0.1:4000/ready').then(async r=>{if(!r.ok)throw new Error(await r.text())}).catch(()=>process.exit(1))"
 
+printf 'Checking the complete merchant-journey release gate.\n'
+compose exec -T api node dist/readiness.js
+
 assert_public_health
 ln -sfn "${RELEASE_DIRECTORY}" "${PLATFORM_ROOT}/current/${environment}"
 compose ps

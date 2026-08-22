@@ -8,6 +8,27 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("customer public error states", () => {
+  it("rebuilds trusted public-host metadata for server-rendered tenant resolution", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: { status: "active", programs: [] } }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchCustomerApi("/v1/public/merchant-programs", "card-staging.waflo.app", "hamzacafe"),
+    ).resolves.toMatchObject({ status: "active", programs: [] });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.searchParams.get("tenant")).toBe("hamzacafe");
+    const headers = new Headers(init.headers);
+    expect(headers.get("host")).toBe("card-staging.waflo.app");
+    expect(headers.get("x-forwarded-host")).toBe("card-staging.waflo.app");
+    expect(headers.get("x-forwarded-proto")).toBe("https");
+  });
+
   it("keeps a safe upstream code and status for the branded page state", async () => {
     vi.stubGlobal(
       "fetch",
@@ -43,7 +64,7 @@ describe("customer public error states", () => {
     expect(joinPage).toContain("We could not find this merchant");
     expect(joinPage).toContain("We could not open this merchant page");
     expect(joinPage).toContain('directHostname === "card.waflo.app"');
-    expect(joinPage).toContain(["https://", "${result.merchant.slug}", ".waflo.app"].join(""));
+    expect(joinPage).toContain(["https://", "$", "{result.merchant.slug}", ".waflo.app"].join(""));
     expect(joinPage).not.toContain('canonical.searchParams.set("tenant"');
   });
 });

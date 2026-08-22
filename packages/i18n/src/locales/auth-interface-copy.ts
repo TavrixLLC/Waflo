@@ -107,6 +107,13 @@ export const authInterfaceCopy = {
       failedTitle: "Sign-in could not be completed",
       noAccountDescription:
         "Create an account first, then you can use this Google account to sign in.",
+      actionRequiredTitle: "Use your existing Waflo sign-in",
+      actionRequiredDescription:
+        "Waflo could not connect this Google account automatically. Sign in with your existing method, then connect Google from Security.",
+      expiredTitle: "Google sign-in expired",
+      expiredDescription: "Return to sign in and start Google sign-in again.",
+      unavailableTitle: "Google sign-in is temporarily unavailable",
+      unavailableDescription: "Use email and password for now, or try Google again later.",
       failedDescription: "Use another sign-in method, or contact support if this continues.",
       createAccount: "Create account",
       securingTitle: "Securing your session…",
@@ -262,6 +269,13 @@ export const authInterfaceCopy = {
       noAccountTitle: "لا يوجد حساب Waflo مرتبط",
       failedTitle: "تعذر إكمال تسجيل الدخول",
       noAccountDescription: "أنشئ حساباً أولاً، ثم استخدم حساب Google هذا لتسجيل الدخول.",
+      actionRequiredTitle: "استخدم طريقة دخولك الحالية إلى Waflo",
+      actionRequiredDescription:
+        "تعذر ربط حساب Google هذا تلقائياً. سجّل الدخول بالطريقة الحالية، ثم اربط Google من صفحة الأمان.",
+      expiredTitle: "انتهت صلاحية تسجيل الدخول عبر Google",
+      expiredDescription: "ارجع إلى تسجيل الدخول وابدأ محاولة Google من جديد.",
+      unavailableTitle: "تسجيل الدخول عبر Google غير متاح مؤقتاً",
+      unavailableDescription: "استخدم البريد وكلمة المرور حالياً، أو جرّب Google لاحقاً.",
       failedDescription: "استخدم طريقة تسجيل دخول أخرى أو تواصل مع الدعم إذا استمرت المشكلة.",
       createAccount: "إنشاء حساب",
       securingTitle: "جارٍ تأمين جلستك…",
@@ -418,6 +432,14 @@ export const authInterfaceCopy = {
       noAccountTitle: "هەژمارەکا Waflo نەهاتە دیتن",
       failedTitle: "چوونە ژوور نەهاتە تەمامکرن",
       noAccountDescription: "پێشێ هەژمارەکێ دروست بکە، پاشی دشێی ب ڤێ هەژمارا Google بچیە ژوور.",
+      actionRequiredTitle: "رێکا ئێستا یا چوونە ژوورا Waflo ب کار بینە",
+      actionRequiredDescription:
+        "Waflo نەشیا ڤێ هەژمارا Google ب خۆکار بهەڤ گرێ بدەت. ب رێکا ئێستا بچۆ ژوور، پاشی Google ژ پەڕا پاراستنێ گرێ بدە.",
+      expiredTitle: "دەمێ چوونە ژوور ب Google ب دوماهیک هات",
+      expiredDescription: "ڤەگەڕە چوونە ژوور و هەوڵا Google ژ نوو دەست پێ بکە.",
+      unavailableTitle: "چوونە ژوور ب Google ب کاتی بەردەست نینە",
+      unavailableDescription:
+        "نوکە ئیمەیل و وشەیا نهێنی ب کار بینە، یان پاشتر Google دووبارە تاقی بکە.",
       failedDescription:
         "رێکەکا دی یا چوونە ژوور ب کار بینە، یان ئەگەر ئارێشە بەردەوام بوو پەیوەندیێ ب پشتگیریێ بکە.",
       createAccount: "هەژمارێ دروست بکە",
@@ -575,6 +597,14 @@ export const authInterfaceCopy = {
       failedTitle: "چوونەژوورەوە تەواو نەکرا",
       noAccountDescription:
         "سەرەتا هەژمارێک دروست بکە، پاشان دەتوانیت بەو هەژمارەی Google بچیتە ژوورەوە.",
+      actionRequiredTitle: "ڕێگای ئێستای چوونەژوورەوەی Waflo بەکاربهێنە",
+      actionRequiredDescription:
+        "Waflo نەیتوانی ئەم هەژمارەی Google بە خۆکار پەیوەست بکات. بە ڕێگای ئێستا بچۆرە ژوورەوە، پاشان Google لە پەڕەی ئاسایش پەیوەست بکە.",
+      expiredTitle: "کاتی چوونەژوورەوە بە Google بەسەرچوو",
+      expiredDescription: "بگەڕێوە بۆ چوونەژوورەوە و هەوڵی Google لە نوێوە دەست پێ بکە.",
+      unavailableTitle: "چوونەژوورەوە بە Google کاتێکی کەم بەردەست نییە",
+      unavailableDescription:
+        "ئێستا ئیمەیڵ و وشەی نهێنی بەکاربهێنە، یان دواتر Google دووبارە تاقی بکەوە.",
       failedDescription:
         "ڕێگایەکی دیکەی چوونەژوورەوە بەکاربهێنە، یان ئەگەر کێشەکە بەردەوام بوو پەیوەندی بە پشتگیری بکە.",
       createAccount: "هەژمار دروست بکە",

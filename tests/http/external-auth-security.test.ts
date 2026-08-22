@@ -272,9 +272,13 @@ describe.sequential("external-auth HTTP security boundary", () => {
     return bareCookie(session ?? "");
   }
 
-  function expectFailed(response: Awaited<ReturnType<typeof callback>>, code?: string) {
+  function expectRejected(
+    response: Awaited<ReturnType<typeof callback>>,
+    result: "failed" | "expired" | "action_required",
+    code?: string,
+  ) {
     expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toContain("result=failed");
+    expect(response.headers.location).toContain(`result=${result}`);
     expect(
       setCookies(response).some((value) => value.startsWith(`${environment.values.COOKIE_NAME}=`)),
     ).toBe(false);
@@ -366,6 +370,37 @@ describe.sequential("external-auth HTTP security boundary", () => {
     });
   });
 
+  it("returns a safe recovery result when Google signup matches an existing email", async () => {
+    const email = `${randomUUID()}@existing-signup.example`;
+    await prisma.client.user.create({
+      data: {
+        email,
+        normalizedEmail: email,
+        displayName: "Existing Waflo merchant",
+        passwordHash: "existing-password-hash",
+        emailVerifiedAt: new Date(),
+        termsVersion: "test",
+        privacyVersion: "test",
+        legalAcceptedAt: new Date(),
+      },
+    });
+    const flow = await start("google", true);
+    const subject = `signup-collision-${randomUUID()}`;
+    await prepareProviderResponse({
+      provider: "google",
+      subject,
+      nonce: flow.nonce,
+      email,
+      emailVerified: true,
+    });
+
+    expectRejected(await callback(flow, { cookie: flow.correlationCookie }), "action_required");
+    expect(
+      await prisma.client.externalIdentity.count({ where: { providerSubject: subject } }),
+    ).toBe(0);
+    expect(await prisma.client.user.count({ where: { normalizedEmail: email } })).toBe(1);
+  });
+
   it.each(["google"] as const)(
     "rejects a %s callback transferred to another browser without consuming Browser A's flow",
     async (provider) => {
@@ -399,7 +434,7 @@ describe.sequential("external-auth HTTP security boundary", () => {
       } as never);
       const victimCookie = `${environment.values.COOKIE_NAME}=${victimSession.rawToken}`;
       const callsBefore = providerCalls.length;
-      expectFailed(await callback(flow, { cookie: victimCookie }), "provider-code");
+      expectRejected(await callback(flow, { cookie: victimCookie }), "expired", "provider-code");
       expect(providerCalls).toHaveLength(callsBefore);
       expect(
         await prisma.client.externalIdentity.count({ where: { providerSubject: subject } }),
@@ -413,7 +448,10 @@ describe.sequential("external-auth HTTP security boundary", () => {
       expect(envelope<{ id: string }>(victimMe).id).toBe(victim.id);
 
       const wrongCookie = `${flow.correlationCookieName}=${Buffer.alloc(32, 4).toString("base64url")}`;
-      expectFailed(await callback(flow, { cookie: `${victimCookie}; ${wrongCookie}` }));
+      expectRejected(
+        await callback(flow, { cookie: `${victimCookie}; ${wrongCookie}` }),
+        "expired",
+      );
       expect(providerCalls).toHaveLength(callsBefore);
 
       const correct = await callback(flow, { cookie: flow.correlationCookie });
@@ -455,7 +493,10 @@ describe.sequential("external-auth HTTP security boundary", () => {
         emailVerified: true,
       });
       expectAuthenticated(await callback(second, { cookie: browserCookies, code: "parallel-two" }));
-      expectFailed(await callback(first, { cookie: first.correlationCookie, code: "reused" }));
+      expectRejected(
+        await callback(first, { cookie: first.correlationCookie, code: "reused" }),
+        "expired",
+      );
 
       const expired = await start(provider);
       await prisma.client.oAuthAuthorizationRequest.update({
@@ -473,7 +514,10 @@ describe.sequential("external-auth HTTP security boundary", () => {
         email: `${randomUUID()}@expired.example`,
         emailVerified: true,
       });
-      expectFailed(await callback(expired, { cookie: expired.correlationCookie, code: "expired" }));
+      expectRejected(
+        await callback(expired, { cookie: expired.correlationCookie, code: "expired" }),
+        "expired",
+      );
     },
   );
 
@@ -537,8 +581,9 @@ describe.sequential("external-auth HTTP security boundary", () => {
           ...(boundary === "issuer" ? { issuer: "https://wrong-issuer.example" } : {}),
           ...(boundary === "audience" ? { audience: "wrong-audience" } : {}),
         });
-        expectFailed(
+        expectRejected(
           await callback(flow, { cookie: flow.correlationCookie, code: `wrong-${boundary}` }),
+          "failed",
           `wrong-${boundary}`,
         );
       }
@@ -548,12 +593,13 @@ describe.sequential("external-auth HTTP security boundary", () => {
   it.each(["google"] as const)("rejects an unknown %s state", async (provider) => {
     const flow = await start(provider);
     const unknownState = Buffer.from(randomUUID().repeat(2)).toString("base64url").slice(0, 43);
-    expectFailed(
+    expectRejected(
       await callback(flow, {
         state: unknownState,
         cookie: flow.correlationCookie,
         code: "unknown-state-code",
       }),
+      "expired",
       "unknown-state-code",
     );
   });

@@ -102,7 +102,15 @@ export async function fetchCustomerApi<T>(path: string, host: string, tenant?: s
   if (effectiveTenant) url.searchParams.set("tenant", effectiveTenant);
   try {
     const response = await fetch(url, {
-      headers: { host },
+      // Customer Web is the trusted tenant-resolution boundary for server-rendered
+      // pages. Rebuild the public request identity exactly as the browser BFF does;
+      // `Host` alone is not reliably preserved by Node fetch/proxies and caused the
+      // API to resolve shared staging requests against api-staging.waflo.app.
+      headers: {
+        host,
+        "x-forwarded-host": host,
+        "x-forwarded-proto": "https",
+      },
       cache: "no-store",
     });
     const payload = (await response.json()) as {

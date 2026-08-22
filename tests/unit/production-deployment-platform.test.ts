@@ -16,6 +16,10 @@ const productionApplication = readFileSync(
 );
 const workflowRoot = resolve(root, ".github/workflows");
 const workflow = readFileSync(resolve(workflowRoot, "ci.yml"), "utf8");
+const realProviderRunbook = readFileSync(
+  resolve(root, "docs/release/real-provider-configuration.md"),
+  "utf8",
+);
 const bake = readFileSync(resolve(deploymentRoot, "docker-bake.hcl"), "utf8");
 const common = readFileSync(resolve(deploymentRoot, "scripts/common.sh"), "utf8");
 const deploy = readFileSync(resolve(deploymentRoot, "scripts/deploy.sh"), "utf8");
@@ -142,6 +146,14 @@ describe("production deployment platform", () => {
     expect(productionApplication).toContain("STRIPE_PUBLISHABLE_KEY=pk_live_PUBLIC_VALUE");
   });
 
+  it("documents the same complete Stripe catalog enforced by deployed configuration", () => {
+    expect(realProviderRunbook).toMatch(/complete nine-Price\s+catalog/u);
+    expect(realProviderRunbook).toContain("USD 79.75 every 3 months");
+    expect(realProviderRunbook).toContain("USD 1,290.00 every year");
+    expect(realProviderRunbook).toContain("publishable key, webhook secret, and all nine");
+    expect(realProviderRunbook).not.toContain("optional quarterly/yearly");
+  });
+
   it("contains no legacy deployment root or inter-container localhost dependency", () => {
     const contents = deploymentFiles(deploymentRoot)
       .map((file) => readFileSync(file, "utf8"))
@@ -244,6 +256,9 @@ describe("production deployment platform", () => {
     expect(workflow).toContain("run: pnpm test");
     expect(workflow).not.toMatch(/run: pnpm test:(unit|integration|http|concurrency)/u);
     expect(workflow).toContain("run: pnpm audit:production");
+    const audit = readFileSync(resolve(root, "scripts/check-production-audit.mjs"), "utf8");
+    expect(audit).toContain('const acceptedPrismaDeepmergeAdvisory = "GHSA-ggr8-5vv4-36mx"');
+    expect(audit).not.toContain("acceptedSharpAdvisory");
     expect(workflow).toContain("run: pnpm deploy:validate");
     expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d/u);
     expect(workflow).not.toContain("artifacts/");
@@ -319,6 +334,10 @@ describe("production deployment platform", () => {
     );
     expect(deploy.indexOf("compose run --rm migrate")).toBeLessThan(
       deploy.indexOf("compose up -d --no-build --wait"),
+    );
+    expect(deploy).toContain("node dist/readiness.js");
+    expect(deploy.indexOf("node dist/readiness.js")).toBeLessThan(
+      deploy.indexOf("assert_public_health"),
     );
     expect(deploy.indexOf("assert_public_health")).toBeLessThan(deploy.indexOf("ln -sfn"));
   });

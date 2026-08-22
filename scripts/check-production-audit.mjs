@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
 
 const windows = process.platform === "win32";
 const command = windows ? "cmd.exe" : "pnpm";
@@ -28,31 +26,6 @@ try {
 }
 
 const advisories = Object.values(report.advisories ?? {});
-const acceptedSharpAdvisory = "GHSA-f88m-g3jw-g9cj";
-const acceptedSharpPaths = new Set([
-  "apps__customer-web>next>sharp",
-  "apps__marketing-web>next>sharp",
-  "apps__merchant-dashboard>next>sharp",
-]);
-
-function isAcceptedSharpBaseline(advisory) {
-  if (
-    advisory.github_advisory_id !== acceptedSharpAdvisory ||
-    advisory.module_name !== "sharp" ||
-    advisory.severity !== "high"
-  ) {
-    return false;
-  }
-  const findings = advisory.findings ?? [];
-  const paths = findings.flatMap((finding) => finding.paths ?? []);
-  return (
-    findings.length === 1 &&
-    findings[0].optional === true &&
-    paths.length === acceptedSharpPaths.size &&
-    paths.every((path) => acceptedSharpPaths.has(path))
-  );
-}
-
 const acceptedPrismaDeepmergeAdvisory = "GHSA-ggr8-5vv4-36mx";
 const acceptedPrismaDeepmergePaths = new Set([
   "deploy__vps__migrate>prisma>@prisma/config>deepmerge-ts",
@@ -77,7 +50,11 @@ function isAcceptedPrismaDeepmergeBaseline(advisory) {
 }
 
 function isAcceptedAdvisory(advisory) {
-  return isAcceptedSharpBaseline(advisory) || isAcceptedPrismaDeepmergeBaseline(advisory);
+  // Prisma 7 is the supported production line. Its CLI/config package owns
+  // this dependency and Waflo only gives it repository-authored, acyclic
+  // configuration; no request or tenant input reaches the vulnerable merge.
+  // Remove this exception as soon as a compatible Prisma 7 release patches it.
+  return isAcceptedPrismaDeepmergeBaseline(advisory);
 }
 
 const blocked = advisories.filter((advisory) => !isAcceptedAdvisory(advisory));
@@ -91,18 +68,6 @@ if (blocked.length > 0) {
   throw new Error(`Production dependency audit contains an unaccepted advisory:\n${summary}`);
 }
 
-const nextConfigs = [
-  "apps/customer-web/next.config.ts",
-  "apps/marketing-web/next.config.ts",
-  "apps/merchant-dashboard/next.config.ts",
-];
-if (
-  advisories.some(isAcceptedSharpBaseline) &&
-  nextConfigs.some((path) => !/unoptimized:\s*true/u.test(readFileSync(resolve(path), "utf8")))
-) {
-  throw new Error("The accepted Sharp baseline requires image optimization to remain disabled.");
-}
-
 if (result.status !== 0 && advisories.length === 0) {
   throw new Error(`pnpm audit failed without a recognized advisory (exit ${result.status}).`);
 }
@@ -110,5 +75,5 @@ if (result.status !== 0 && advisories.length === 0) {
 process.stdout.write(
   advisories.length === 0
     ? "Production dependency audit passed with no advisories.\n"
-    : `Production dependency audit passed with accepted baseline advisories; Next image optimization remains disabled.\n`,
+    : "Production dependency audit passed with the accepted Prisma CLI/config baseline advisory.\n",
 );

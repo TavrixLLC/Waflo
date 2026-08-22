@@ -11,16 +11,39 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
-import type { FastifyReply } from "fastify";
 import { googleSignupIntentSchema } from "@waflo/contracts";
+import { sanitizeErrorForReporting } from "@waflo/security";
+import type { FastifyReply } from "fastify";
 import { AppError } from "../common/app-error.js";
-import { parseInput } from "../common/validation.js";
 import { CurrentSession, CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
+import { parseInput } from "../common/validation.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { ExternalAuthService } from "./external-auth.service.js";
 
 type Provider = "google" | "apple";
+type ExternalAuthCallbackResult =
+  | "failed"
+  | "no_account"
+  | "action_required"
+  | "expired"
+  | "unavailable";
+
+function callbackResultFor(error: unknown): ExternalAuthCallbackResult {
+  if (!(error instanceof AppError)) return "failed";
+  switch (error.code) {
+    case "EXTERNAL_AUTH_ACCOUNT_NOT_FOUND":
+      return "no_account";
+    case "EXTERNAL_AUTH_ACTION_REQUIRED":
+      return "action_required";
+    case "EXTERNAL_AUTH_INVALID":
+      return "expired";
+    case "PROVIDER_NOT_CONFIGURED":
+      return "unavailable";
+    default:
+      return "failed";
+  }
+}
 
 function parseProvider(value: string): Provider {
   if (value === "google" || value === "apple") return value;
@@ -218,10 +241,26 @@ export class ExternalAuthController {
       result = "authenticated";
       redirectLocale = completed.locale;
     } catch (error) {
-      result =
-        error instanceof AppError && error.code === "EXTERNAL_AUTH_ACCOUNT_NOT_FOUND"
-          ? "no_account"
-          : "failed";
+      // Keep provider and account details out of the redirect while returning enough
+      // information for the dashboard to offer a safe, actionable recovery path.
+      result = callbackResultFor(error);
+      const logContext = {
+        event: "oauth.callback_rejected",
+        provider,
+        result,
+        requestId: request.requestId || request.id,
+      };
+      if (error instanceof AppError) {
+        request.log.warn(
+          { ...logContext, errorCode: error.code },
+          "External authentication callback rejected",
+        );
+      } else {
+        request.log.error(
+          { ...logContext, err: sanitizeErrorForReporting(error) },
+          "External authentication callback failed unexpectedly",
+        );
+      }
     } finally {
       this.clearBrowserBindingCookie(reply, provider, cookieName);
     }
