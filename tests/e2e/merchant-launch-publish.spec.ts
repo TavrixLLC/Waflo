@@ -625,7 +625,7 @@ test("shows mixed Wallet truth and remains accessible at 360px in English and Ar
     await expect(
       page
         .locator(".publication-wallet-list")
-        .getByText(locale === "ar" ? "جاهزة" : "Ready", { exact: true }),
+        .getByText(locale === "ar" ? "للاختبار فقط" : "Test only", { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByText(locale === "ar" ? "غير متاحة مؤقتاً" : "Temporarily unavailable", {
