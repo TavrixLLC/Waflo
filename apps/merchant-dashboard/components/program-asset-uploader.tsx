@@ -5,8 +5,13 @@ import { Alert, Button, FormField, Modal } from "@waflo/ui";
 import { Crop, ImagePlus, Upload, ZoomIn, ZoomOut } from "lucide-react";
 import Image from "next/image";
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch, apiUrl } from "../lib/api-client";
+import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
 import type { AssetCategory, AssetItem } from "./program-studio-types";
+
+const maximumUploadBytes = 2 * 1024 * 1024;
+const acceptedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+const fullImageCrop = { x: 0, y: 0, width: 1, height: 1, zoom: 1 };
+const initialCrop = { x: 1 / 24, y: 1 / 24, width: 11 / 12, height: 11 / 12, zoom: 12 / 11 };
 
 function AssetThumbnail({ asset, label }: { asset: AssetItem; label: string }) {
   const [source, setSource] = useState("");
@@ -79,7 +84,7 @@ export function ProgramAssetPicker({
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
-  const [crop, setCrop] = useState({ x: 0, y: 0, width: 1, height: 1, zoom: 1 });
+  const [crop, setCrop] = useState(initialCrop);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -175,6 +180,24 @@ export function ProgramAssetPicker({
     setShowChoices(false);
   }
 
+  function selectFile(selected: File | null): void {
+    setError("");
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+    if (!acceptedImageTypes.has(selected.type)) {
+      setError(copy.unsupportedType);
+      return;
+    }
+    if (selected.size === 0 || selected.size > maximumUploadBytes) {
+      setError(copy.fileTooLarge);
+      return;
+    }
+    setCrop(initialCrop);
+    setFile(selected);
+  }
+
   useEffect(() => {
     if (!file) {
       setPreviewUrl("");
@@ -210,9 +233,17 @@ export function ProgramAssetPicker({
               : copy.uploadedProcessed,
       );
       setFile(null);
-      setCrop({ x: 0, y: 0, width: 1, height: 1, zoom: 1 });
-    } catch {
-      setError(copy.uploadError);
+      setCrop(initialCrop);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError && caught.code === "ASSET_UPLOAD_INVALID"
+          ? copy.invalidFile
+          : caught instanceof ApiClientError && caught.code === "ASSET_PROCESSING_FAILED"
+            ? copy.processingFailed
+            : caught instanceof ApiClientError && caught.code === "NETWORK_ERROR"
+              ? copy.networkError
+              : copy.uploadError,
+      );
     } finally {
       setUploading(false);
     }
@@ -221,6 +252,7 @@ export function ProgramAssetPicker({
   return (
     <section className="studio-asset-picker" aria-label={label}>
       {uploadMessage ? <Alert tone="success" title={uploadMessage} /> : null}
+      {error && !file ? <Alert tone="danger" title={error} /> : null}
       <div className="studio-section-heading">
         <div>
           <h4>{label}</h4>
@@ -237,7 +269,10 @@ export function ProgramAssetPicker({
           type="file"
           accept="image/png,image/jpeg,image/webp"
           aria-label={`${label} ${copy.imageUpload}`}
-          onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
+          onChange={(event) => {
+            selectFile(event.currentTarget.files?.[0] ?? null);
+            event.currentTarget.value = "";
+          }}
         />
       </div>
       {selectedAsset ? (
@@ -383,11 +418,7 @@ export function ProgramAssetPicker({
               </FormField>
               <div className="studio-crop-control-row">
                 <p>{copy.cropHelp}</p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setCrop({ x: 0, y: 0, width: 1, height: 1, zoom: 1 })}
-                >
+                <Button type="button" variant="ghost" onClick={() => setCrop(fullImageCrop)}>
                   {copy.resetCrop}
                 </Button>
               </div>

@@ -138,8 +138,8 @@ describe("production deployment platform", () => {
     expect(stagingApplication).toContain("APPLE_WALLET_MODE=REAL");
     expect(stagingApplication).toContain("APPLE_APNS_ENVIRONMENT=production");
     expect(productionApplication).toContain("GOOGLE_WALLET_PUBLISHING_MODE=PUBLISHING");
-    expect(stagingApplication).not.toContain("STRIPE_PUBLISHABLE_KEY");
-    expect(productionApplication).not.toContain("STRIPE_PUBLISHABLE_KEY");
+    expect(stagingApplication).toContain("STRIPE_PUBLISHABLE_KEY=pk_test_PUBLIC_VALUE");
+    expect(productionApplication).toContain("STRIPE_PUBLISHABLE_KEY=pk_live_PUBLIC_VALUE");
   });
 
   it("contains no legacy deployment root or inter-container localhost dependency", () => {

@@ -45,7 +45,13 @@ export class S3ObjectStorage implements ObjectStorage {
   async ensureReady(): Promise<void> {
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.options.bucket }));
-    } catch {
+    } catch (error) {
+      const missingBucket =
+        error instanceof S3ServiceException &&
+        (error.$metadata.httpStatusCode === 404 ||
+          error.name === "NotFound" ||
+          error.name === "NoSuchBucket");
+      if (!missingBucket) throw error;
       await this.client.send(new CreateBucketCommand({ Bucket: this.options.bucket }));
       await this.client.send(new HeadBucketCommand({ Bucket: this.options.bucket }));
     }

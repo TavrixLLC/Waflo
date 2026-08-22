@@ -139,6 +139,16 @@ describe("Next.js Content-Security-Policy", () => {
     expect(policy).not.toContain("https://api.waflo.app");
   });
 
+  it("binds Customer Web to its configured staging API instead of the production fallback", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "https://api-staging.waflo.app/v1";
+
+    const policy = await contentSecurityPolicyFor(customerConfig, "production");
+
+    expect(policy).toContain("connect-src 'self' https://api-staging.waflo.app");
+    expect(policy).toContain("img-src 'self' data: blob: https://api-staging.waflo.app");
+    expect(policy).not.toContain("https://api.waflo.app");
+  });
+
   it("rejects unsafe or malformed configured API origins", () => {
     const insecure = createNextContentSecurityPolicy("production", {
       apiUrl: "http://example.test:4000/header; injection",

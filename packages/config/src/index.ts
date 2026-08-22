@@ -692,17 +692,24 @@ export const environmentSchema = z
     const stripePublishable = value.STRIPE_PUBLISHABLE_KEY ?? "";
     const stripeCore = [
       value.STRIPE_SECRET_KEY,
+      value.STRIPE_PUBLISHABLE_KEY,
       value.STRIPE_WEBHOOK_SECRET,
       value.STRIPE_STARTER_MONTHLY_PRICE_ID,
       value.STRIPE_GROWTH_MONTHLY_PRICE_ID,
       value.STRIPE_SCALE_MONTHLY_PRICE_ID,
+      value.STRIPE_STARTER_QUARTERLY_PRICE_ID,
+      value.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
+      value.STRIPE_SCALE_QUARTERLY_PRICE_ID,
+      value.STRIPE_STARTER_YEARLY_PRICE_ID,
+      value.STRIPE_GROWTH_YEARLY_PRICE_ID,
+      value.STRIPE_SCALE_YEARLY_PRICE_ID,
     ];
     if (stripeCore.some(Boolean) && !stripeCore.every(Boolean)) {
       context.addIssue({
         code: "custom",
         path: ["STRIPE_SECRET_KEY"],
         message:
-          "Stripe secret, webhook secret, and all three Price IDs must be complete or absent.",
+          "Stripe secret and publishable keys, webhook secret, and all nine Price IDs must be complete or absent.",
       });
     }
     if (

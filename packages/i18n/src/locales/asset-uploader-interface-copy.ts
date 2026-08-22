@@ -7,6 +7,12 @@ export const assetUploaderInterfaceCopy = {
     uploadedProcessed: "The asset was uploaded and processed.",
     uploadError:
       "The file could not be uploaded. The currently saved design is unchanged. Check the file and try again.",
+    fileTooLarge: "Choose an image smaller than 2 MB.",
+    unsupportedType: "Choose a PNG, JPEG, or WebP image.",
+    invalidFile: "This image is empty, too large, or uses an unsupported format.",
+    processingFailed:
+      "Waflo could not safely read this image. Export it as PNG, JPEG, or WebP and try again.",
+    networkError: "The upload service could not be reached. Check your connection and try again.",
     guidance: "Choose from the Waflo library or upload PNG, JPEG, or WebP.",
     hideOptions: "Hide options",
     change: "Change",
@@ -40,6 +46,12 @@ export const assetUploaderInterfaceCopy = {
     repaired: "تم إصلاح ملفات الأصل المطابق.",
     uploadedProcessed: "تم رفع الأصل ومعالجته.",
     uploadError: "تعذر رفع الملف. لم يتغير التصميم المحفوظ حالياً. تحقق من الملف وحاول مرة أخرى.",
+    fileTooLarge: "اختر صورة أصغر من 2 ميغابايت.",
+    unsupportedType: "اختر صورة بصيغة PNG أو JPEG أو WebP.",
+    invalidFile: "هذه الصورة فارغة أو كبيرة جداً أو بصيغة غير مدعومة.",
+    processingFailed:
+      "تعذر على Waflo قراءة هذه الصورة بأمان. صدّرها بصيغة PNG أو JPEG أو WebP وحاول مرة أخرى.",
+    networkError: "تعذر الوصول إلى خدمة الرفع. تحقق من الاتصال وحاول مرة أخرى.",
     guidance: "اختر من مكتبة Waflo أو ارفع صورة PNG أو JPEG أو WebP.",
     hideOptions: "إخفاء الخيارات",
     change: "تغيير",
@@ -74,6 +86,12 @@ export const assetUploaderInterfaceCopy = {
     uploadedProcessed: "وێنە هاتە بارکرن و ئامادەکرن.",
     uploadError:
       "بارکرنا پەڕگەیێ سەرنەکەفت. دیزاینا پاشەکەفتکری نەهاتییە گوهۆڕین. پەڕگەیێ بپشکنە و دووبارە هەول بدە.",
+    fileTooLarge: "وێنەیەکا ژ 2 MB بچویکتر هەلبژێرە.",
+    unsupportedType: "وێنەیەکا PNG، JPEG یان WebP هەلبژێرە.",
+    invalidFile: "ڤێ وێنەیێ ناڤەرۆک نینە، زۆر مەزنە یان جۆرێ وێ نە پشتگیرییە.",
+    processingFailed:
+      "Waflo نەشیا ڤێ وێنەیێ ب پاراستی بخوینیت. وێ وەک PNG، JPEG یان WebP هەناردە بکە و دووبارە هەول بدە.",
+    networkError: "خزمەتگوزارییا بارکرنێ نەهاتە دەست. پەیوەندییا خو بپشکنە و دووبارە هەول بدە.",
     guidance: "ژ کتێبخانا Waflo هەلبژێرە یان وێنەیەکا PNG، JPEG یان WebP بار بکە.",
     hideOptions: "هەلبژارتنان ڤەشێرە",
     change: "بگوهۆڕە",
@@ -108,6 +126,12 @@ export const assetUploaderInterfaceCopy = {
     uploadedProcessed: "وێنەکە بارکرا و ئامادە کرا.",
     uploadError:
       "بارکردنی پەڕگەکە سەرنەکەوت. دیزاینە پاشەکەوتکراوەکە نەگۆڕاوە. پەڕگەکە بپشکنە و دووبارە هەوڵ بدە.",
+    fileTooLarge: "وێنەیەکی بچووکتر لە 2 MB هەڵبژێرە.",
+    unsupportedType: "وێنەیەکی PNG، JPEG یان WebP هەڵبژێرە.",
+    invalidFile: "ئەم وێنەیە بەتاڵە، زۆر گەورەیە یان جۆرەکەی پشتگیری ناکرێت.",
+    processingFailed:
+      "Waflo نەیتوانی ئەم وێنەیە بە پارێزراوی بخوێنێتەوە. بە PNG، JPEG یان WebP هەناردەی بکە و دووبارە هەوڵ بدە.",
+    networkError: "نەتوانرا بگات بە خزمەتگوزاری بارکردن. پەیوەندییەکەت بپشکنە و دووبارە هەوڵ بدە.",
     guidance: "لە کتێبخانەی Waflo هەڵبژێرە یان وێنەی PNG، JPEG یان WebP بار بکە.",
     hideOptions: "هەڵبژاردنەکان بشارەوە",
     change: "بیگۆڕە",

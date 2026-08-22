@@ -73,7 +73,7 @@ export class WalletService {
 
   async providerHealth(userId: string, organizationId: string, request: WafloRequest) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
-    const health = await Promise.all(this.registry.all().map((provider) => provider.healthCheck()));
+    const health = await this.registry.healthChecks();
     await Promise.allSettled(
       health
         .filter((provider) => !["HEALTHY", "NOT_CONFIGURED"].includes(provider.status))

@@ -132,7 +132,7 @@ describe("production environment and provider boundaries", () => {
     expect(await retired.verifyCredentialPayload(oldCredential.payload)).toBeNull();
   });
 
-  it("reports wallet providers unavailable when real signing configuration is incomplete", () => {
+  it("reports wallet providers unavailable when real signing configuration is incomplete", async () => {
     const env = environment({
       APPLE_WALLET_MODE: "REAL",
       GOOGLE_WALLET_MODE: "REAL",
@@ -140,9 +140,11 @@ describe("production environment and provider boundaries", () => {
       GOOGLE_WALLET_ISSUER_ID: "issuer",
     });
     const registry = new WalletProviderRegistry(env, security());
-    expect(registry.publicCapabilities()).toEqual({
+    expect(await registry.publicCapabilities()).toEqual({
       googleWalletAvailable: false,
       appleWalletAvailable: false,
+      googleWalletConfigured: false,
+      appleWalletConfigured: false,
       googleWallet: "NOT_CONFIGURED",
       appleWallet: "NOT_CONFIGURED",
     });
@@ -179,7 +181,7 @@ describe("production environment and provider boundaries", () => {
         DEPLOYMENT_ENVIRONMENT: "staging",
         STRIPE_SECRET_KEY: "sk_test_partial",
       }),
-    ).toThrow("all three Price IDs must be complete or absent");
+    ).toThrow("all nine Price IDs must be complete or absent");
     expect(() =>
       parseEnvironment({
         NODE_ENV: "production",

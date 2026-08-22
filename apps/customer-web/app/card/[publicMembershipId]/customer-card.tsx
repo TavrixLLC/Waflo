@@ -153,9 +153,12 @@ export function CustomerCard({
   async function addGoogle() {
     setWalletBusy("google");
     try {
-      const action = await customerApi<{ url: string }>("/v1/customer/wallet/google/add-action", {
-        method: "POST",
-      });
+      const action = await customerApi<{ url: string }>(
+        `/v1/customer/wallet/google/add-action${tenantQuery}`,
+        {
+          method: "POST",
+        },
+      );
       window.location.assign(action.url);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Google Wallet is unavailable.");

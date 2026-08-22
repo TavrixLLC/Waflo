@@ -21,7 +21,16 @@ export const onboardingInterfaceCopy = {
       businessType: "Business type",
       categoryCafe: "Cafe",
       categoryRestaurant: "Restaurant",
+      categoryBakery: "Bakery",
+      categoryGrocery: "Grocery or supermarket",
       categoryRetail: "Retail",
+      categoryBeautySalon: "Beauty salon",
+      categoryBarbershop: "Barbershop",
+      categoryPharmacy: "Pharmacy",
+      categoryFitness: "Fitness or gym",
+      categoryHotel: "Hotel or lodging",
+      categoryAutomotive: "Automotive",
+      categoryServices: "Professional services",
       categoryOther: "Other",
       chooseType: "Choose a type",
       merchantUrl: "Merchant URL",
@@ -68,6 +77,13 @@ export const onboardingInterfaceCopy = {
     payment: {
       billingConfigurationIncomplete:
         "Billing setup is not configured right now. Try again or contact Waflo support.",
+      publishableKeyMissing:
+        "Secure card entry is not configured. Contact Waflo support before continuing.",
+      priceMissing: "This plan is not connected to a Stripe price yet. Contact Waflo support.",
+      priceMismatch:
+        "This plan's Stripe price does not match Waflo's billing catalog. Contact Waflo support.",
+      networkError:
+        "Waflo could not reach the payment service. Check your connection and try again.",
       verifyCardError: "Unable to verify the card.",
       reviewTrialError: "Unable to review your trial.",
       saveCardError: "Unable to save the card.",
@@ -196,7 +212,16 @@ export const onboardingInterfaceCopy = {
       businessType: "نوع النشاط",
       categoryCafe: "مقهى",
       categoryRestaurant: "مطعم",
+      categoryBakery: "مخبز",
+      categoryGrocery: "بقالة أو سوبرماركت",
       categoryRetail: "متجر",
+      categoryBeautySalon: "صالون تجميل",
+      categoryBarbershop: "صالون حلاقة",
+      categoryPharmacy: "صيدلية",
+      categoryFitness: "نادي رياضي",
+      categoryHotel: "فندق أو إقامة",
+      categoryAutomotive: "خدمات سيارات",
+      categoryServices: "خدمات مهنية",
       categoryOther: "أخرى",
       chooseType: "اختر النوع",
       merchantUrl: "رابط نشاطك",
@@ -243,6 +268,10 @@ export const onboardingInterfaceCopy = {
     payment: {
       billingConfigurationIncomplete:
         "إعداد الفوترة غير مهيأ حالياً. حاول مرة أخرى أو تواصل مع دعم Waflo.",
+      publishableKeyMissing: "إدخال البطاقة الآمن غير مهيأ. تواصل مع دعم Waflo قبل المتابعة.",
+      priceMissing: "هذه الخطة غير مرتبطة بسعر في Stripe بعد. تواصل مع دعم Waflo.",
+      priceMismatch: "سعر الخطة في Stripe لا يطابق كتالوج فوترة Waflo. تواصل مع دعم Waflo.",
+      networkError: "تعذر على Waflo الوصول إلى خدمة الدفع. تحقق من الاتصال وحاول مرة أخرى.",
       verifyCardError: "تعذر التحقق من البطاقة.",
       reviewTrialError: "تعذرت مراجعة تجربتك.",
       saveCardError: "تعذر حفظ البطاقة.",
@@ -367,7 +396,16 @@ export const onboardingInterfaceCopy = {
       businessType: "جۆرێ کارێ",
       categoryCafe: "قەهوەخانە",
       categoryRestaurant: "خواردنگەه",
+      categoryBakery: "نانپێژگەه",
+      categoryGrocery: "بەقالی یان سوپەرمارکێت",
       categoryRetail: "دۆکان",
+      categoryBeautySalon: "سالۆنا جوانکاریێ",
+      categoryBarbershop: "سالۆنا سەرژێکریێ",
+      categoryPharmacy: "دەرمانخانە",
+      categoryFitness: "هۆلا وەرزشێ",
+      categoryHotel: "هۆتێل یان مانگەه",
+      categoryAutomotive: "خزمەتگوزارییێن ئۆتۆمبێلان",
+      categoryServices: "خزمەتگوزارییێن پیشەیی",
       categoryOther: "یێ دی",
       chooseType: "جۆرەکێ هەلبژێرە",
       merchantUrl: "لینکا بازرگانێ",
@@ -414,6 +452,13 @@ export const onboardingInterfaceCopy = {
     payment: {
       billingConfigurationIncomplete:
         "ڕێکخستنا پارەدانێ نووکە نەهاتییە ئامادەکرن. دووبارە هەول بدە یان پەیوەندییێ ب پشتەڤانیا Waflo بکە.",
+      publishableKeyMissing:
+        "تێکرنا کارتا پارەدانێ یا پاراستی نەهاتییە ڕێکخستن. بەری بەردەوامبوونێ پەیوەندییێ ب پشتەڤانیا Waflo بکە.",
+      priceMissing: "ڤی پلانێ هێشتا نرخی Stripe نینە. پەیوەندییێ ب پشتەڤانیا Waflo بکە.",
+      priceMismatch:
+        "نرخێ پلانێ ل Stripe ل گەل کاتالۆگا پارەدانا Waflo ناگونجیت. پەیوەندییێ ب پشتەڤانیا Waflo بکە.",
+      networkError:
+        "Waflo نەشیا بگەهیتە خزمەتگوزارییا پارەدانێ. پەیوەندییا خو بپشکنە و دووبارە هەول بدە.",
       verifyCardError: "پشتڕاستکرنا کارتێ سەرنەکەفت.",
       reviewTrialError: "پێداچوونا تاقیکرنێ سەرنەکەفت.",
       saveCardError: "پاشەکەفتکرنا کارتێ سەرنەکەفت.",
@@ -540,7 +585,16 @@ export const onboardingInterfaceCopy = {
       businessType: "جۆری کاروبار",
       categoryCafe: "قاوەخانە",
       categoryRestaurant: "چێشتخانە",
+      categoryBakery: "نانەواخانە",
+      categoryGrocery: "بەقاڵی یان سوپەرمارکێت",
       categoryRetail: "فرۆشگا",
+      categoryBeautySalon: "سالۆنی جوانکاری",
+      categoryBarbershop: "سالۆنی سەرتاشی",
+      categoryPharmacy: "دەرمانخانە",
+      categoryFitness: "هۆڵی وەرزش",
+      categoryHotel: "هۆتێل یان شوێنی مانەوە",
+      categoryAutomotive: "خزمەتگوزاری ئۆتۆمبێل",
+      categoryServices: "خزمەتگوزاری پیشەیی",
       categoryOther: "هی تر",
       chooseType: "جۆرێک هەڵبژێرە",
       merchantUrl: "بەستەری بازرگان",
@@ -587,6 +641,13 @@ export const onboardingInterfaceCopy = {
     payment: {
       billingConfigurationIncomplete:
         "ڕێکخستنی پارەدان ئێستا ئامادە نەکراوە. دووبارە هەوڵ بدە یان پەیوەندی بە پشتگیری Waflo بکە.",
+      publishableKeyMissing:
+        "تێکردنی پارێزراوی کارت ڕێک نەخراوە. پێش بەردەوامبوون پەیوەندی بە پشتگیری Waflo بکە.",
+      priceMissing: "ئەم پلانە هێشتا بە نرخی Stripe نەبەستراوەتەوە. پەیوەندی بە پشتگیری Waflo بکە.",
+      priceMismatch:
+        "نرخی پلانەکە لە Stripe لەگەڵ کەتەلۆگی پارەدانی Waflo ناگونجێت. پەیوەندی بە پشتگیری Waflo بکە.",
+      networkError:
+        "Waflo نەیتوانی بگات بە خزمەتگوزاری پارەدان. پەیوەندییەکەت بپشکنە و دووبارە هەوڵ بدە.",
       verifyCardError: "پشتڕاستکردنەوەی کارت سەرنەکەوت.",
       reviewTrialError: "پێداچوونەوەی تاقیکردنەوە سەرنەکەوت.",
       saveCardError: "پاشەکەوتکردنی کارت سەرنەکەوت.",

@@ -21,7 +21,11 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "no-referrer" },
           {
             key: "Content-Security-Policy",
-            value: createNextContentSecurityPolicy(process.env.NODE_ENV),
+            value: createNextContentSecurityPolicy(process.env.NODE_ENV, {
+              ...(process.env.NEXT_PUBLIC_API_URL
+                ? { apiUrl: process.env.NEXT_PUBLIC_API_URL }
+                : {}),
+            }),
           },
           ...(process.env.NODE_ENV === "production"
             ? [

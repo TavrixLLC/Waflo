@@ -47,6 +47,23 @@ if (!supportedProjects.has(project)) {
 const isolatedDatabase =
   process.env.WAFLO_ISOLATED_E2E === "1" ||
   (process.env.WAFLO_ISOLATED_E2E !== "0" && ["chromium", "accessibility"].includes(project));
+if (isolatedDatabase) {
+  Object.assign(process.env, {
+    NODE_ENV: "test",
+    DEPLOYMENT_ENVIRONMENT: "development",
+    CUSTOMER_DATA_ENCRYPTION_KEY_V1: "a".repeat(64),
+    CUSTOMER_CONTACT_LOOKUP_HMAC_KEY: "b".repeat(64),
+    CUSTOMER_SESSION_SECRET: "c".repeat(64),
+    MEMBERSHIP_CREDENTIAL_SECRET_V1: "d".repeat(64),
+    LEDGER_HASH_SECRET_V1: "e".repeat(64),
+    MERCHANT_TRANSACTION_REFERENCE_HMAC_KEY_V1: "f".repeat(64),
+    DEVICE_SESSION_SECRET: "1".repeat(64),
+    OAUTH_FLOW_SECRET: "2".repeat(64),
+    APPLE_PASS_AUTH_SECRET_V1: "3".repeat(64),
+    SCALE_LOCATION_LIMIT: "100",
+    SCALE_TEAM_LIMIT: "100",
+  });
+}
 const isW3 = project.startsWith("w3");
 const isW4 = project.startsWith("w4");
 const usesWalletOperations = isW3 || isW4;

@@ -406,6 +406,7 @@ export class AuthService {
       where: { normalizedEmail: normalizeEmail(emailInput) },
     });
     if (user?.interactiveLoginAllowed) {
+      const notificationKind = user.passwordHash ? "password_reset" : "password_setup";
       const rawToken = createOpaqueToken();
       const expiresAt = new Date(
         Date.now() + this.environment.values.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
@@ -428,7 +429,7 @@ export class AuthService {
         {
           to: user.email,
           locale: localeFromDb(user.preferredLocale),
-          kind: "password_reset",
+          kind: notificationKind,
           actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
         },
         user.id,
@@ -437,7 +438,10 @@ export class AuthService {
       await this.audit.record(
         {
           actorUserId: user.id,
-          action: "password_reset.requested",
+          action:
+            notificationKind === "password_setup"
+              ? "password_setup.requested"
+              : "password_reset.requested",
           targetType: "user",
           targetId: user.id,
         },
@@ -459,7 +463,43 @@ export class AuthService {
         HttpStatus.CONFLICT,
       );
     }
-    await this.forgotPassword(user.email, request);
+    const rawToken = createOpaqueToken();
+    const expiresAt = new Date(
+      Date.now() + this.environment.values.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
+    );
+    await withInvariantLock(
+      this.prisma.client,
+      `password-reset-token:${user.id}`,
+      async (transaction) => {
+        const now = new Date();
+        await transaction.passwordResetToken.updateMany({
+          where: { userId: user.id, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        await transaction.passwordResetToken.create({
+          data: { userId: user.id, tokenHash: hashOpaqueToken(rawToken), expiresAt },
+        });
+      },
+    );
+    await this.sendNotificationAfterCommit(
+      {
+        to: user.email,
+        locale: localeFromDb(user.preferredLocale),
+        kind: "password_setup",
+        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
+      },
+      user.id,
+      request,
+    );
+    await this.audit.record(
+      {
+        actorUserId: user.id,
+        action: "password_setup.requested",
+        targetType: "user",
+        targetId: user.id,
+      },
+      request,
+    );
     return {
       status: "accepted",
       message: "Password setup instructions have been sent to your verified email address.",

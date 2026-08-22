@@ -314,6 +314,7 @@ describe("production-v1 UX and billing repair", () => {
     expect(source).not.toContain("wallet-promotion-consent");
     expect(source).not.toContain("wallet-engagement/consent");
     expect(source).toContain("apple/pass$" + "{tenantQuery}");
+    expect(source).toContain("google/add-action$" + "{tenantQuery}");
     expect(source).toContain('platform === "ios"');
     expect(source).toContain('platform === "android"');
   });
@@ -335,6 +336,29 @@ describe("production-v1 UX and billing repair", () => {
     expect(styles).toContain("transform-origin: top left");
     expect(source).not.toContain("Horizontal position");
     expect(source).not.toContain("Vertical position");
+  });
+
+  it("keeps the repaired mobile onboarding controls compact and validates uploads before sending", () => {
+    const onboarding = readFileSync("apps/merchant-dashboard/components/onboarding.tsx", "utf8");
+    const uploader = readFileSync(
+      "apps/merchant-dashboard/components/program-asset-uploader.tsx",
+      "utf8",
+    );
+    const locationPicker = readFileSync(
+      "apps/merchant-dashboard/components/location-map-picker.tsx",
+      "utf8",
+    );
+    const styles = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
+
+    expect(onboarding).toContain('className="wf-sr-only"');
+    expect(onboarding).toContain('aria-current={number === step ? "step" : undefined}');
+    expect(styles).toContain("grid-auto-columns: min(82vw, 21rem);");
+    expect(styles).toContain("max-height: min(70dvh, 31rem);");
+    expect(uploader).toContain("const maximumUploadBytes = 2 * 1024 * 1024;");
+    expect(uploader).toContain("acceptedImageTypes.has(selected.type)");
+    expect(uploader).toContain("const initialCrop =");
+    expect(locationPicker).toContain("timeout: 20_000");
+    expect(locationPicker).toContain("maximumAge: 15 * 60_000");
   });
 
   it("uses native selects for bounded choices and the accessible listbox for searchable choices", () => {

@@ -17,7 +17,10 @@ import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { HostResolutionService } from "../public/host-resolution.service.js";
+import {
+  HostResolutionService,
+  normalizeRequestHostname,
+} from "../public/host-resolution.service.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
 import {
   publishedVisualThemeInclude,
@@ -71,6 +74,49 @@ export class PublicEnrollmentService {
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
 
+  /**
+   * Old staging QR codes were issued before the shared customer host carried an
+   * explicit `tenant` query parameter. Preserve those already-printed codes only
+   * when the public program slug identifies exactly one active organization.
+   * Production keeps strict hostname tenancy, and ambiguous slugs stay closed.
+   */
+  private async resolveProgramOrganization(
+    host: string,
+    programSlug: string,
+    developmentOverride?: string,
+  ) {
+    const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
+    if (resolved.status === "active" || developmentOverride) return resolved;
+    if (this.environment.values.DEPLOYMENT_ENVIRONMENT !== "staging") return resolved;
+    const sharedCustomerHost = new URL(this.environment.values.CUSTOMER_WEB_URL).hostname;
+    if (normalizeRequestHostname(host) !== sharedCustomerHost) return resolved;
+
+    const candidates = await this.prisma.client.organization.findMany({
+      where: {
+        status: "ACTIVE",
+        loyaltyPrograms: {
+          some: {
+            publicSlug: programSlug,
+            status: { in: [...visibleProgramStates] },
+            currentPublishedVersionId: { not: null },
+          },
+        },
+      },
+      take: 2,
+      include: {
+        billingProfile: true,
+        brandLogoAsset: { include: { variants: true } },
+      },
+    });
+    const organization = candidates[0];
+    if (candidates.length !== 1 || !organization) return resolved;
+    return {
+      status: "active" as const,
+      organization,
+      normalizedHost: sharedCustomerHost,
+    };
+  }
+
   async merchantPrograms(host: string, developmentOverride?: string) {
     const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
     if (resolved.status !== "active") return { status: resolved.status, programs: [] };
@@ -108,7 +154,7 @@ export class PublicEnrollmentService {
   }
 
   async program(host: string, programSlug: string, developmentOverride?: string) {
-    const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
+    const resolved = await this.resolveProgramOrganization(host, programSlug, developmentOverride);
     if (resolved.status !== "active") return { status: resolved.status };
     const program = await this.prisma.client.loyaltyProgram.findFirst({
       where: {
@@ -152,7 +198,7 @@ export class PublicEnrollmentService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
+    const resolved = await this.resolveProgramOrganization(host, programSlug, developmentOverride);
     if (resolved.status !== "active") {
       throw new AppError(
         "ENROLLMENT_UNAVAILABLE",

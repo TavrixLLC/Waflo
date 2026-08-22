@@ -1,6 +1,15 @@
-import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { cadencePrice } from "@waflo/billing";
 import { parseEnvironment } from "@waflo/config";
+import type { BillingCadence, PlanCode } from "@waflo/contracts";
 import { Redis } from "ioredis";
+import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { createApiApplication } from "./app.js";
 import { ExternalAuthService } from "./auth/external-auth.service.js";
@@ -126,10 +135,44 @@ async function main() {
   };
   const stripeConfiguration = [
     environment.STRIPE_SECRET_KEY,
+    environment.STRIPE_PUBLISHABLE_KEY,
     environment.STRIPE_WEBHOOK_SECRET,
     environment.STRIPE_STARTER_MONTHLY_PRICE_ID,
     environment.STRIPE_GROWTH_MONTHLY_PRICE_ID,
     environment.STRIPE_SCALE_MONTHLY_PRICE_ID,
+    environment.STRIPE_STARTER_QUARTERLY_PRICE_ID,
+    environment.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
+    environment.STRIPE_SCALE_QUARTERLY_PRICE_ID,
+    environment.STRIPE_STARTER_YEARLY_PRICE_ID,
+    environment.STRIPE_GROWTH_YEARLY_PRICE_ID,
+    environment.STRIPE_SCALE_YEARLY_PRICE_ID,
+  ];
+  const stripePrices: ReadonlyArray<{
+    plan: PlanCode;
+    cadence: BillingCadence;
+    id: string | undefined;
+  }> = [
+    { plan: "starter", cadence: "monthly", id: environment.STRIPE_STARTER_MONTHLY_PRICE_ID },
+    { plan: "growth", cadence: "monthly", id: environment.STRIPE_GROWTH_MONTHLY_PRICE_ID },
+    { plan: "scale", cadence: "monthly", id: environment.STRIPE_SCALE_MONTHLY_PRICE_ID },
+    {
+      plan: "starter",
+      cadence: "quarterly",
+      id: environment.STRIPE_STARTER_QUARTERLY_PRICE_ID,
+    },
+    {
+      plan: "growth",
+      cadence: "quarterly",
+      id: environment.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
+    },
+    {
+      plan: "scale",
+      cadence: "quarterly",
+      id: environment.STRIPE_SCALE_QUARTERLY_PRICE_ID,
+    },
+    { plan: "starter", cadence: "yearly", id: environment.STRIPE_STARTER_YEARLY_PRICE_ID },
+    { plan: "growth", cadence: "yearly", id: environment.STRIPE_GROWTH_YEARLY_PRICE_ID },
+    { plan: "scale", cadence: "yearly", id: environment.STRIPE_SCALE_YEARLY_PRICE_ID },
   ];
   const stripeStatus = async (): Promise<ComponentResult> => {
     if (!stripeConfiguration.some(Boolean)) return { status: "DISABLED" };
@@ -137,6 +180,31 @@ async function main() {
     try {
       const stripe = new Stripe(environment.STRIPE_SECRET_KEY as string);
       await stripe.balance.retrieve();
+      for (const configured of stripePrices) {
+        if (!configured.id) return { status: "CONFIG_MISSING" };
+        const price = await stripe.prices.retrieve(configured.id);
+        const expectedAmount = Math.round(
+          cadencePrice(configured.plan, configured.cadence).billedAmountUsd * 100,
+        );
+        const expectedInterval = configured.cadence === "yearly" ? "year" : "month";
+        const expectedIntervalCount = configured.cadence === "quarterly" ? 3 : 1;
+        if (
+          !price.active ||
+          price.type !== "recurring" ||
+          price.unit_amount !== expectedAmount ||
+          price.currency.toLocaleLowerCase("en-US") !== "usd" ||
+          price.recurring?.interval !== expectedInterval ||
+          price.recurring.interval_count !== expectedIntervalCount
+        ) {
+          return {
+            status: "INVALID_CONFIG",
+            metadata: {
+              mode: environment.DEPLOYMENT_ENVIRONMENT === "production" ? "LIVE" : "TEST",
+              invalidCatalogEntry: `${configured.plan}:${configured.cadence}`,
+            },
+          };
+        }
+      }
       return {
         status: "READY",
         metadata: {
@@ -161,7 +229,29 @@ async function main() {
         })
       : { status: "NOT_CONFIGURED" },
     OBJECT_STORAGE: await checked(async () => {
+      const key = `readiness/${randomUUID()}.txt`;
+      const expected = Buffer.from("waflo-readiness", "utf8");
       await storage.send(new HeadBucketCommand({ Bucket: environment.OBJECT_STORAGE_BUCKET }));
+      try {
+        await storage.send(
+          new PutObjectCommand({
+            Bucket: environment.OBJECT_STORAGE_BUCKET,
+            Key: key,
+            Body: expected,
+            ContentType: "text/plain",
+          }),
+        );
+        const result = await storage.send(
+          new GetObjectCommand({ Bucket: environment.OBJECT_STORAGE_BUCKET, Key: key }),
+        );
+        if (!result.Body) throw new Error("Object storage returned an empty readiness object.");
+        const received = Buffer.from(await result.Body.transformToByteArray());
+        if (!received.equals(expected)) throw new Error("Object storage readiness data mismatch.");
+      } finally {
+        await storage
+          .send(new DeleteObjectCommand({ Bucket: environment.OBJECT_STORAGE_BUCKET, Key: key }))
+          .catch(() => undefined);
+      }
     }),
     SMTP:
       notifications.configurationStatus() === "READY"

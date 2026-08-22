@@ -63,14 +63,18 @@ const defaultCenter: [number, number] = [44.3661, 33.3152];
 
 const fastGeolocationOptions: PositionOptions = {
   enableHighAccuracy: false,
-  maximumAge: 5 * 60_000,
-  timeout: 4_000,
+  // A recent network-assisted fix is preferable to making the merchant wait for
+  // a cold GPS lock. The precise request below can still refine this position.
+  maximumAge: 15 * 60_000,
+  timeout: 10_000,
 };
 
 const preciseGeolocationOptions: PositionOptions = {
   enableHighAccuracy: true,
   maximumAge: 0,
-  timeout: 8_000,
+  // Mobile browsers frequently need more than eight seconds for their first
+  // high-accuracy fix, especially indoors or immediately after permission.
+  timeout: 20_000,
 };
 
 function browserPosition(options: PositionOptions): Promise<GeolocationPosition> {

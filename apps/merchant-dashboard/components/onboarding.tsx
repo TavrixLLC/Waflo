@@ -137,8 +137,22 @@ function writeWizard(update: Partial<WizardDraft>) {
 type OnboardingCopy = InterfaceMessages["onboarding"];
 
 function localizedError(caught: unknown, copy: OnboardingCopy, fallback: string): string {
-  if (caught instanceof ApiClientError && caught.code === "BILLING_CONFIGURATION_INCOMPLETE") {
-    return copy.payment.billingConfigurationIncomplete;
+  if (caught instanceof ApiClientError) {
+    if (caught.code === "BILLING_CONFIGURATION_INCOMPLETE") {
+      return copy.payment.billingConfigurationIncomplete;
+    }
+    if (caught.code === "STRIPE_PUBLISHABLE_KEY_NOT_CONFIGURED") {
+      return copy.payment.publishableKeyMissing;
+    }
+    if (caught.code === "STRIPE_PRICE_NOT_CONFIGURED") {
+      return copy.payment.priceMissing;
+    }
+    if (caught.code === "STRIPE_PRICE_CONFIGURATION_MISMATCH") {
+      return copy.payment.priceMismatch;
+    }
+    if (caught.code === "NETWORK_ERROR") {
+      return copy.payment.networkError;
+    }
   }
   return fallback;
 }
@@ -239,8 +253,9 @@ function OnboardingShell({
                 }`}
                 aria-current={number === step ? "step" : undefined}
               >
-                <span>{complete ? <Check size={15} aria-hidden="true" /> : number}</span>
-                <small>{label}</small>
+                <span aria-hidden="true">{complete ? <Check size={15} /> : number}</span>
+                <small aria-hidden="true">{label}</small>
+                <span className="wf-sr-only">{`${number}. ${label}`}</span>
               </div>
             );
           })}
@@ -821,7 +836,18 @@ export function BusinessOnboarding({
                   </option>
                   <option value="Cafe">{copy.organization.categoryCafe}</option>
                   <option value="Restaurant">{copy.organization.categoryRestaurant}</option>
+                  <option value="Bakery">{copy.organization.categoryBakery}</option>
+                  <option value="Grocery">{copy.organization.categoryGrocery}</option>
                   <option value="Retail">{copy.organization.categoryRetail}</option>
+                  <option value="Beauty salon">{copy.organization.categoryBeautySalon}</option>
+                  <option value="Barbershop">{copy.organization.categoryBarbershop}</option>
+                  <option value="Pharmacy">{copy.organization.categoryPharmacy}</option>
+                  <option value="Fitness">{copy.organization.categoryFitness}</option>
+                  <option value="Hotel">{copy.organization.categoryHotel}</option>
+                  <option value="Automotive">{copy.organization.categoryAutomotive}</option>
+                  <option value="Professional services">
+                    {copy.organization.categoryServices}
+                  </option>
                   <option value="Other">{copy.organization.categoryOther}</option>
                 </Select>
               </FormField>

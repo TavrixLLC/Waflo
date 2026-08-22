@@ -153,6 +153,36 @@ describe("merchant publication presentation", () => {
         false,
       ),
     ).toMatchObject({ label: "Temporarily unavailable", tone: "warning" });
+    expect(
+      walletSurfacePresentation(
+        {
+          provider: "APPLE",
+          mode: "REAL",
+          status: "EXTERNALLY_UNCERTIFIED",
+          configured: true,
+          providerReachable: false,
+          externallyCertified: false,
+          safeMessage: "Local signing valid",
+          demo: false,
+        },
+        false,
+      ),
+    ).toMatchObject({ label: "Device verification required", tone: "warning" });
+    expect(
+      walletSurfacePresentation(
+        {
+          provider: "GOOGLE",
+          mode: "REAL",
+          status: "HEALTHY",
+          configured: true,
+          providerReachable: true,
+          externallyCertified: false,
+          safeMessage: "Issuer access verified",
+          demo: false,
+        },
+        false,
+      ),
+    ).toMatchObject({ label: "Connected — device test pending", tone: "warning" });
   });
 
   it("communicates paused and archived customer access precisely", () => {

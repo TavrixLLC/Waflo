@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { PublicEnrollmentService } from "../../apps/api/src/enrollment/public-enrollment.service.js";
 import { normalizeWalletCampaignDestination } from "../../apps/api/src/wallet-engagement/wallet-engagement.service.js";
 import { parseEnvironment, platformDomains } from "../../packages/config/src/index.js";
 import { createNextContentSecurityPolicy } from "../../packages/security/src/index.js";
@@ -54,6 +55,78 @@ function stagingEnvironment(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 describe("staging public hostname cutover", () => {
+  it("recovers an old shared-host QR only for one unambiguous staging merchant", async () => {
+    const organization = {
+      id: "00000000-0000-4000-8000-000000000001",
+      name: "Cedar",
+      merchantSlug: "cedar",
+      status: "ACTIVE",
+      defaultLocale: "EN",
+      billingProfile: null,
+      brandLogoAsset: null,
+    };
+    const findMany = vi.fn(async () => [organization]);
+    const hosts = {
+      resolveOrganization: vi.fn(async () => ({ status: "malformed" as const })),
+    };
+    const service = new PublicEnrollmentService(
+      { client: { organization: { findMany } } } as never,
+      hosts as never,
+      {} as never,
+      { values: stagingEnvironment() } as never,
+      {} as never,
+      {} as never,
+    );
+    const resolve = (
+      service as unknown as {
+        resolveProgramOrganization: (
+          host: string,
+          slug: string,
+        ) => Promise<{
+          status: string;
+          organization?: typeof organization;
+        }>;
+      }
+    ).resolveProgramOrganization.bind(service);
+
+    await expect(resolve("card-staging.waflo.app", "cedar-circle")).resolves.toMatchObject({
+      status: "active",
+      organization,
+    });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 2,
+        where: expect.objectContaining({ status: "ACTIVE" }),
+      }),
+    );
+
+    findMany.mockResolvedValueOnce([organization, { ...organization, id: "other" }]);
+    await expect(resolve("card-staging.waflo.app", "shared-slug")).resolves.toEqual({
+      status: "malformed",
+    });
+
+    const productionService = new PublicEnrollmentService(
+      { client: { organization: { findMany } } } as never,
+      hosts as never,
+      {} as never,
+      {
+        values: { ...stagingEnvironment(), DEPLOYMENT_ENVIRONMENT: "production" },
+      } as never,
+      {} as never,
+      {} as never,
+    );
+    const resolveProduction = (
+      productionService as unknown as {
+        resolveProgramOrganization: (host: string, slug: string) => Promise<{ status: string }>;
+      }
+    ).resolveProgramOrganization.bind(productionService);
+    findMany.mockClear();
+    await expect(resolveProduction("card.waflo.app", "cedar-circle")).resolves.toEqual({
+      status: "malformed",
+    });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it("parses only the authoritative staging origins and preserves production constants", () => {
     const environment = stagingEnvironment();
     expect(environment).toMatchObject({
