@@ -9,6 +9,7 @@ import {
 } from "@waflo/auth";
 import type { Locale, RegisterInput } from "@waflo/contracts";
 import type { FastifyRequest } from "fastify";
+import { AccountAccessService } from "../account/account-access.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
@@ -19,6 +20,8 @@ import {
   type NotificationMessage,
   NotificationService,
 } from "../notifications/notification.service.js";
+import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycle.js";
+import { requireSensitiveReauthentication } from "./sensitive-reauthentication.js";
 
 interface SessionResult {
   rawToken: string;
@@ -65,6 +68,7 @@ export class AuthService {
     private readonly environment: EnvironmentService,
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
+    private readonly accountAccess: AccountAccessService = new AccountAccessService(prisma),
   ) {}
 
   async register(input: RegisterInput, request: WafloRequest) {
@@ -73,34 +77,36 @@ export class AuthService {
     const passwordHash = await hashPassword(input.password);
     const existing = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
     if (existing) {
-      // Deliberately match the successful public registration response so this
-      // endpoint cannot be used as an account-existence oracle.
-      if (!existing.emailVerifiedAt && existing.status === "ACTIVE") {
-        await this.issueVerification(
-          existing.id,
-          existing.email,
-          localeFromDb(existing.preferredLocale),
-          request,
-        );
-      }
-      return {
-        status: "verification_required",
-        email: input.email.replace(/^(.{2}).*(@.*)$/, "$1•••$2"),
-      };
+      throw new AppError(
+        "ACCOUNT_NOT_CREATED",
+        "We couldn't create a new account with this email. If you've used Waflo before, sign in or reset your password.",
+        HttpStatus.CONFLICT,
+      );
     }
     const legalAcceptedAt = new Date();
-    const user = await this.prisma.client.user.create({
-      data: {
-        displayName: input.displayName,
-        email: input.email,
-        normalizedEmail,
-        passwordHash,
-        preferredLocale: input.locale === "ar" ? "AR" : "EN",
-        termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
-        privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
-        legalAcceptedAt,
-      },
-    });
+    const user = await this.prisma.client.user
+      .create({
+        data: {
+          displayName: input.displayName,
+          email: input.email,
+          normalizedEmail,
+          passwordHash,
+          preferredLocale: input.locale === "ar" ? "AR" : "EN",
+          termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
+          privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
+          legalAcceptedAt,
+        },
+      })
+      .catch((error: unknown) => {
+        if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+          throw new AppError(
+            "ACCOUNT_NOT_CREATED",
+            "We couldn't create a new account with this email. If you've used Waflo before, sign in or reset your password.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw error;
+      });
     await this.audit.record(
       {
         actorUserId: user.id,
@@ -110,10 +116,11 @@ export class AuthService {
       },
       request,
     );
-    await this.issueVerification(user.id, user.email, input.locale, request);
+    await this.issueVerification(user.id, user.email, input.locale, request, true);
     return {
       status: "verification_required",
       email: user.email.replace(/^(.{2}).*(@.*)$/, "$1•••$2"),
+      emailAcceptedForDelivery: true,
     };
   }
 
@@ -122,6 +129,7 @@ export class AuthService {
     email: string,
     locale: Locale,
     request: WafloRequest,
+    accountCreatedOnThisRequest = false,
   ): Promise<void> {
     const rawToken = createOpaqueToken();
     const expiresAt = new Date(
@@ -131,6 +139,11 @@ export class AuthService {
       this.prisma.client,
       `verification-token:${userId}`,
       async (transaction) => {
+        const user = await transaction.user.findUnique({
+          where: { id: userId },
+          select: { interactiveLoginAllowed: true },
+        });
+        if (!user?.interactiveLoginAllowed) return;
         const now = new Date();
         await transaction.emailVerificationToken.updateMany({
           where: { userId, consumedAt: null },
@@ -142,7 +155,7 @@ export class AuthService {
       },
     );
     const url = `${this.environment.values.MERCHANT_DASHBOARD_URL}/${locale}/verify-email#token=${encodeURIComponent(rawToken)}`;
-    await this.sendNotificationAfterCommit(
+    const accepted = await this.sendNotificationAfterCommit(
       {
         to: email,
         locale,
@@ -152,6 +165,16 @@ export class AuthService {
       userId,
       request,
     );
+    if (!accepted) {
+      throw new AppError(
+        "EMAIL_DELIVERY_UNAVAILABLE",
+        accountCreatedOnThisRequest
+          ? "We created your account, but we couldn't send the verification email. Try again."
+          : "We couldn't send the verification email. Try again.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+        { accountCreated: accountCreatedOnThisRequest, retryAllowed: true },
+      );
+    }
     await this.audit.record(
       {
         actorUserId: userId,
@@ -170,7 +193,9 @@ export class AuthService {
         where: { tokenHash: hashOpaqueToken(rawToken) },
         include: { user: true },
       });
-      if (!token) return { claimed: false as const, token: null };
+      if (!token?.user.interactiveLoginAllowed) {
+        return { claimed: false as const, token: token ?? null };
+      }
       const claim = await transaction.emailVerificationToken.updateMany({
         where: { id: token.id, consumedAt: null, expiresAt: { gt: now } },
         data: { consumedAt: now },
@@ -214,17 +239,30 @@ export class AuthService {
   async resendVerification(emailInput: string, request: WafloRequest) {
     const normalizedEmail = normalizeEmail(emailInput);
     const user = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
-    if (user && !user.emailVerifiedAt) {
+    if (user?.interactiveLoginAllowed && !user.emailVerifiedAt) {
       await this.issueVerification(
         user.id,
         user.email,
         localeFromDb(user.preferredLocale),
         request,
-      );
+      ).catch(async () => {
+        await this.audit
+          .record(
+            {
+              actorUserId: user.id,
+              action: "notification.delivery_failed",
+              targetType: "user",
+              targetId: user.id,
+              metadata: { kind: "email_verification" },
+            },
+            request,
+          )
+          .catch(() => undefined);
+      });
     }
     return {
       status: "accepted",
-      message: "If verification is available for that address, a new email has been sent.",
+      message: "If verification is available for that address, the request was accepted.",
     };
   }
 
@@ -232,7 +270,7 @@ export class AuthService {
     const normalizedEmail = normalizeEmail(emailInput);
     const user = await this.prisma.client.user.findUnique({ where: { normalizedEmail } });
     const passwordValid = await verifyPassword(user?.passwordHash ?? DUMMY_PASSWORD_HASH, password);
-    if (!user || !passwordValid) {
+    if (!user?.interactiveLoginAllowed || !passwordValid) {
       if (user) {
         await this.audit.security(
           {
@@ -249,7 +287,19 @@ export class AuthService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    if (!user.emailVerifiedAt || user.status !== "ACTIVE") {
+    if (!user.emailVerifiedAt && user.status === "ACTIVE") {
+      await this.audit.security(
+        { userId: user.id, eventType: "login.verification_required", severity: "LOW" },
+        request,
+      );
+      throw new AppError(
+        "EMAIL_VERIFICATION_REQUIRED",
+        "Verify your email before continuing.",
+        HttpStatus.FORBIDDEN,
+        { verificationRequired: true },
+      );
+    }
+    if (user.status !== "ACTIVE") {
       await this.audit.security(
         { userId: user.id, eventType: "login.denied", severity: "LOW" },
         request,
@@ -310,9 +360,9 @@ export class AuthService {
       async (transaction) => {
         const user = await transaction.user.findUnique({
           where: { id: userId },
-          select: { status: true },
+          select: { status: true, interactiveLoginAllowed: true },
         });
-        if (user?.status !== "ACTIVE") {
+        if (user?.status !== "ACTIVE" || !user.interactiveLoginAllowed) {
           throw new AppError(
             "AUTHENTICATION_FAILED",
             "Sign-in could not be completed.",
@@ -355,7 +405,8 @@ export class AuthService {
     const user = await this.prisma.client.user.findUnique({
       where: { normalizedEmail: normalizeEmail(emailInput) },
     });
-    if (user) {
+    if (user?.interactiveLoginAllowed) {
+      const notificationKind = user.passwordHash ? "password_reset" : "password_setup";
       const rawToken = createOpaqueToken();
       const expiresAt = new Date(
         Date.now() + this.environment.values.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
@@ -378,7 +429,7 @@ export class AuthService {
         {
           to: user.email,
           locale: localeFromDb(user.preferredLocale),
-          kind: "password_reset",
+          kind: notificationKind,
           actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
         },
         user.id,
@@ -387,7 +438,10 @@ export class AuthService {
       await this.audit.record(
         {
           actorUserId: user.id,
-          action: "password_reset.requested",
+          action:
+            notificationKind === "password_setup"
+              ? "password_setup.requested"
+              : "password_reset.requested",
           targetType: "user",
           targetId: user.id,
         },
@@ -400,6 +454,58 @@ export class AuthService {
     };
   }
 
+  async requestPasswordSetup(userId: string, request: WafloRequest) {
+    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.passwordHash) {
+      throw new AppError(
+        "PASSWORD_ALREADY_ENABLED",
+        "This account already has a Waflo password.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const rawToken = createOpaqueToken();
+    const expiresAt = new Date(
+      Date.now() + this.environment.values.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
+    );
+    await withInvariantLock(
+      this.prisma.client,
+      `password-reset-token:${user.id}`,
+      async (transaction) => {
+        const now = new Date();
+        await transaction.passwordResetToken.updateMany({
+          where: { userId: user.id, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        await transaction.passwordResetToken.create({
+          data: { userId: user.id, tokenHash: hashOpaqueToken(rawToken), expiresAt },
+        });
+      },
+    );
+    await this.sendNotificationAfterCommit(
+      {
+        to: user.email,
+        locale: localeFromDb(user.preferredLocale),
+        kind: "password_setup",
+        actionUrl: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${localeFromDb(user.preferredLocale)}/reset-password#token=${encodeURIComponent(rawToken)}`,
+      },
+      user.id,
+      request,
+    );
+    await this.audit.record(
+      {
+        actorUserId: user.id,
+        action: "password_setup.requested",
+        targetType: "user",
+        targetId: user.id,
+      },
+      request,
+    );
+    return {
+      status: "accepted",
+      message: "Password setup instructions have been sent to your verified email address.",
+    };
+  }
+
   async resetPassword(rawToken: string, password: string, request: WafloRequest) {
     const passwordHash = await hashPassword(password);
     const changedAt = new Date();
@@ -408,7 +514,9 @@ export class AuthService {
         where: { tokenHash: hashOpaqueToken(rawToken) },
         include: { user: true },
       });
-      if (!token) return { claimed: false as const, token: null };
+      if (!token?.user.interactiveLoginAllowed) {
+        return { claimed: false as const, token: token ?? null };
+      }
       const claim = await transaction.passwordResetToken.updateMany({
         where: { id: token.id, consumedAt: null, expiresAt: { gt: changedAt } },
         data: { consumedAt: changedAt },
@@ -482,7 +590,11 @@ export class AuthService {
     request: WafloRequest,
   ): Promise<SessionResult> {
     const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!user.passwordHash || !(await verifyPassword(user.passwordHash, currentPassword))) {
+    if (
+      !user.interactiveLoginAllowed ||
+      !user.passwordHash ||
+      !(await verifyPassword(user.passwordHash, currentPassword))
+    ) {
       throw new AppError(
         "CURRENT_PASSWORD_INVALID",
         "The current password is incorrect.",
@@ -529,7 +641,7 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    return this.prisma.client.user.findUniqueOrThrow({
+    const user = await this.prisma.client.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
         id: true,
@@ -557,6 +669,10 @@ export class AuthService {
         },
       },
     });
+    return {
+      ...user,
+      accountState: await this.accountAccess.resolveUser(userId, user.lastSelectedOrganizationId),
+    };
   }
 
   async updateMe(
@@ -687,39 +803,25 @@ export class AuthService {
     },
     request: WafloRequest,
   ) {
-    const expected = requestType === "DELETION" ? "REQUEST DELETION" : "DEACTIVATE";
-    if (input.confirmation !== expected) {
+    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
+    const expected = requestType === "DELETION" ? normalizeEmail(user.email) : "DEACTIVATE";
+    const submitted =
+      requestType === "DELETION"
+        ? normalizeEmail(input.confirmation)
+        : input.confirmation.normalize("NFKC").trim();
+    if (submitted !== expected) {
       throw new AppError(
         "SENSITIVE_ACTION_CONFIRMATION_FAILED",
         "Account confirmation did not match.",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    const recentExternalSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: input.sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !input.currentPassword ||
-          !(await verifyPassword(user.passwordHash, input.currentPassword))
-        : !recentExternalSession
-    ) {
-      throw new AppError(
-        "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password to continue.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId: input.sessionId,
+      currentPassword: input.currentPassword,
+      message: "Re-enter your password or verify with your connected sign-in method to continue.",
+    });
     const existing = await this.prisma.client.merchantAccountLifecycleRequest.findUnique({
       where: { userId_idempotencyKey: { userId, idempotencyKey: input.commandId } },
     });
@@ -752,6 +854,43 @@ export class AuthService {
             identityValidatedAt: now,
           },
         });
+        if (requestType === "DELETION") {
+          const appleIdentity = await transaction.externalIdentity.findUnique({
+            where: { userId_provider: { userId, provider: "APPLE" } },
+            include: { appleCredential: true },
+          });
+          const credential = appleIdentity?.appleCredential;
+          if (appleIdentity && credential) {
+            const useRefresh = Boolean(
+              credential.refreshTokenEncrypted && credential.refreshTokenKeyVersion,
+            );
+            const tokenEncrypted = useRefresh
+              ? credential.refreshTokenEncrypted
+              : credential.accessTokenEncrypted;
+            const tokenKeyVersion = useRefresh
+              ? credential.refreshTokenKeyVersion
+              : credential.accessTokenKeyVersion;
+            if (tokenEncrypted && tokenKeyVersion) {
+              await transaction.appleTokenRevocationJob.upsert({
+                where: {
+                  idempotencyKey: `account-deletion:${lifecycle.id}:${appleIdentity.id}`,
+                },
+                create: {
+                  idempotencyKey: `account-deletion:${lifecycle.id}:${appleIdentity.id}`,
+                  encryptionContextId: appleIdentity.id,
+                  tokenEncrypted,
+                  tokenKeyVersion,
+                  tokenType: useRefresh ? "REFRESH_TOKEN" : "ACCESS_TOKEN",
+                  reason: "ACCOUNT_DELETION",
+                },
+                update: {},
+              });
+            }
+            await transaction.appleAuthorizationCredential.delete({
+              where: { id: credential.id },
+            });
+          }
+        }
         await transaction.user.update({
           where: { id: userId },
           data: {
@@ -764,6 +903,7 @@ export class AuthService {
           where: { userId, revokedAt: null },
           data: { revokedAt: now, revocationReason: "account_deactivated" },
         });
+        const staffAccess = await revokeStaffAccessForUser(transaction, userId, now);
         await transaction.oAuthAuthorizationRequest.updateMany({
           where: { userId, consumedAt: null },
           data: { consumedAt: now },
@@ -799,7 +939,11 @@ export class AuthService {
             targetId: userId,
             metadata: {
               sessionsRevoked: true,
+              staffDeviceSessionsRevoked: staffAccess.sessionsRevoked,
+              staffPairingsCanceled: staffAccess.pairingsCanceled,
+              staffApprovalsExpired: staffAccess.approvalsExpired,
               externalIdentitiesRetainedAsRevokedAccountTombstones: true,
+              appleAuthorizationQueuedForRevocation: requestType === "DELETION",
             },
           },
           request,
@@ -820,9 +964,10 @@ export class AuthService {
     message: NotificationMessage,
     userId: string,
     request: WafloRequest,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await this.notifications.send(message);
+      return true;
     } catch {
       await this.audit
         .record(
@@ -836,6 +981,7 @@ export class AuthService {
           request,
         )
         .catch(() => undefined);
+      return false;
     }
   }
 }

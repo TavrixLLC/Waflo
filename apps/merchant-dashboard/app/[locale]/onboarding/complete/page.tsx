@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { isLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { CompletionOnboarding } from "../../../../components/onboarding";
 
 export default async function CompletionPage({
@@ -10,7 +10,7 @@ export default async function CompletionPage({
   searchParams: Promise<{ organization?: string | string[] }>;
 }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
+  if (!isInterfaceLocale(locale)) notFound();
   const query = await searchParams;
   const organization = Array.isArray(query.organization)
     ? query.organization[0]

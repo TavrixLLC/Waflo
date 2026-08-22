@@ -69,7 +69,8 @@ export interface PublishedMembershipStampRenderInput {
   readonly programVersionId: string;
   readonly membershipId: string;
   readonly rendererSchemaVersion: "waflo-stamp-render-v1";
-  readonly locale: "en" | "ar";
+  /** Canonical card-content BCP-47 locale. */
+  readonly locale: string;
   readonly requiredStampCount: number;
   readonly currentStampCount: number;
   readonly rewardReady: boolean;
@@ -123,16 +124,22 @@ function artworkHref(artwork: StampArtwork | undefined): string | null {
   }
   if (/<script|<foreignObject|on[a-z]+\s*=|javascript:/i.test(artwork.content))
     throw new Error("Unsafe artwork content.");
-  return `data:image/svg+xml;base64,${Buffer.from(artwork.content, "utf8").toString("base64")}`;
+  if (typeof Buffer !== "undefined" && typeof Buffer.from === "function") {
+    return `data:image/svg+xml;base64,${Buffer.from(artwork.content, "utf8").toString("base64")}`;
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(artwork.content)}`;
 }
 
 function fallbackArtwork(filled: boolean, filledColor: string, emptyColor: string): StampArtwork {
   const fill = filled ? validColor(filledColor, "#E4572E") : validColor(emptyColor, "#F7F4EE");
   const stroke = filled ? "#7A2A16" : "#AFA79B";
+  const inner = filled
+    ? `<circle cx="50" cy="50" r="44" fill="${fill}" stroke="${stroke}" stroke-width="4"/><circle cx="50" cy="50" r="34" fill="none" stroke="${stroke}" stroke-width="2" opacity="0.6"/><path d="M50 24l6.5 15.5 16.5 1.5-12.5 11 3.5 16.5L50 60l-14 8.5 3.5-16.5-12.5-11 16.5-1.5z" fill="${stroke}"/>`
+    : `<circle cx="50" cy="50" r="44" fill="${fill}" stroke="${stroke}" stroke-width="3" stroke-dasharray="6 4"/><circle cx="50" cy="50" r="34" fill="none" stroke="${stroke}" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.5"/><circle cx="50" cy="50" r="4" fill="${stroke}" opacity="0.35"/>`;
   return {
     kind: "svg",
     trusted: true,
-    content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 4c7 8 14 7 21 5 1 8 7 13 15 15-3 8-1 15 5 21-6 6-8 13-5 21-8 2-14 7-15 15-7-2-14-3-21 5-7-8-14-7-21-5-1-8-7-13-15-15 3-8 1-15-5-21 6-6 8-13 5-21 8-2 14-7 15-15 7 2 14 3 21-5Z" fill="${fill}" stroke="${stroke}" stroke-width="5"/><circle cx="35" cy="40" r="5" fill="${stroke}"/><circle cx="65" cy="40" r="5" fill="${stroke}"/><path d="M34 62c10 8 22 8 32 0" fill="none" stroke="${stroke}" stroke-width="5" stroke-linecap="round"/></svg>`,
+    content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${inner}</svg>`,
   };
 }
 
@@ -226,8 +233,8 @@ export function renderStampSvg(input: StampRenderInput): {
     input.rewardLabelVisible && input.rewardLabel ? input.rewardLabel : null,
   ].filter((value): value is string => Boolean(value));
   const labelHeight = labelLines.length ? labelLines.length * 24 + 16 : 0;
-  const maxX = Math.max(...positions.map((position) => position.x + size / 2)) + size / 2;
-  const maxY = Math.max(...positions.map((position) => position.y + size / 2)) + size / 2;
+  const maxX = Math.max(...positions.map((position) => position.x + size / 2));
+  const maxY = Math.max(...positions.map((position) => position.y + size / 2));
   const width = Math.ceil(maxX);
   const height = Math.ceil(maxY + labelHeight);
   const filledHref = artworkHref(
@@ -248,7 +255,7 @@ export function renderStampSvg(input: StampRenderInput): {
   const labels = labelLines
     .map(
       (label, index) =>
-        `<text x="16" y="${Math.ceil(maxY + 24 + index * 24)}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${index === 0 ? 16 : 14}" fill="${foreground}">${escapeXml(label)}</text>`,
+        `<text x="16" y="${Math.ceil(maxY + 24 + index * 24)}" font-family="Cairo,Arial,sans-serif" font-size="${index === 0 ? 16 : 14}" fill="${foreground}">${escapeXml(label)}</text>`,
     )
     .join("");
   const profile = input.outputProfile ?? "CUSTOMER_WEB";

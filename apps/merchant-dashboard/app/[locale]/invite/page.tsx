@@ -1,16 +1,18 @@
-import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { AuthLayout } from "../../../components/auth-layout";
+import { authPageMetadata } from "../../../components/auth-page-metadata";
 import { InviteClient } from "../../../components/invite-client";
 
-export const metadata: Metadata = { title: "Team invitation" };
+export function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
+  return authPageMetadata(params, "invitation");
+}
 
 export default async function InvitationPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
+  if (!isInterfaceLocale(locale)) notFound();
   return (
-    <AuthLayout locale={locale}>
+    <AuthLayout locale={locale} routePath="/invite">
       <InviteClient locale={locale} />
     </AuthLayout>
   );

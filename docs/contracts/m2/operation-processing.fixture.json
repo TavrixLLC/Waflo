@@ -1,0 +1,10 @@
+{
+  "commandId": "30000000-0000-4000-8000-000000000001",
+  "operationPublicId": "20000000-0000-4000-8000-000000000001",
+  "operationType": "ISSUE_STAMP",
+  "status": "PROCESSING",
+  "result": null,
+  "safeFailureCode": null,
+  "createdAt": "2026-08-07T12:00:00.000Z",
+  "completedAt": null
+}

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { createOpaqueToken, hashOpaqueToken, normalizeEmail } from "@waflo/auth";
 import { canInviteTeamMember } from "@waflo/billing";
@@ -15,9 +16,16 @@ import {
   NotificationService,
 } from "../notifications/notification.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { revokeStaffAccessForMembership } from "../staff-devices/staff-device-lifecycle.js";
 
 function toPlanCode(plan: "STARTER" | "GROWTH" | "SCALE"): "starter" | "growth" | "scale" {
   return plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
+}
+
+const LOCAL_STAFF_EMAIL_DOMAIN = "staff.waflo.invalid";
+
+export function isLocalStaffIdentityEmail(email: string): boolean {
+  return email.toLocaleLowerCase("en-US").endsWith(`@${LOCAL_STAFF_EMAIL_DOMAIN}`);
 }
 
 @Injectable()
@@ -82,7 +90,20 @@ export class TeamService {
       activeSeatCount + pendingSeatCount,
       plan === "scale" ? this.environment.values.SCALE_TEAM_LIMIT : undefined,
     );
-    return { members, invitations, usage };
+    return {
+      members: members.map((member) => ({
+        ...member,
+        accessType: isLocalStaffIdentityEmail(member.user.email)
+          ? ("QR" as const)
+          : ("ACCOUNT" as const),
+        user: {
+          ...member.user,
+          email: isLocalStaffIdentityEmail(member.user.email) ? null : member.user.email,
+        },
+      })),
+      invitations,
+      usage,
+    };
   }
 
   private async currentSeatUsage(
@@ -108,6 +129,112 @@ export class TeamService {
       }),
     ]);
     return active + pending;
+  }
+
+  async createLocalStaff(
+    userId: string,
+    organizationId: string,
+    input: { name: string; role: "MANAGER" | "STAFF" },
+    request: WafloRequest,
+  ) {
+    const initialMembership = await this.tenant.requireMembership(
+      userId,
+      organizationId,
+      "team.invite",
+    );
+    if (!allowedInvitationRoles(initialMembership.role as MemberRole).includes(input.role)) {
+      throw new AppError(
+        "STAFF_ROLE_FORBIDDEN",
+        "Your role cannot create this Staff role.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const localUserId = randomUUID();
+    const email = `${localUserId}@${LOCAL_STAFF_EMAIL_DOMAIN}`;
+    const created = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const [actor, organization] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+          }),
+          transaction.organization.findUniqueOrThrow({ where: { id: organizationId } }),
+        ]);
+        if (
+          actor?.status !== "ACTIVE" ||
+          !allowedInvitationRoles(actor.role as MemberRole).includes(input.role)
+        ) {
+          throw new AppError(
+            "STAFF_ROLE_FORBIDDEN",
+            "Your role cannot create this Staff role.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        const plan = toPlanCode(organization.selectedPlan);
+        const usage = await this.currentSeatUsage(transaction, organizationId);
+        const decision = canInviteTeamMember(
+          plan,
+          usage,
+          plan === "scale" ? this.environment.values.SCALE_TEAM_LIMIT : undefined,
+        );
+        if (!decision.allowed) {
+          throw new AppError(
+            "TEAM_LIMIT_REACHED",
+            "Your current plan has reached its team seat limit.",
+            HttpStatus.CONFLICT,
+            {
+              limit: decision.limit,
+              currentUsage: decision.currentUsage,
+              recommendedPlan: decision.recommendedPlan,
+            },
+          );
+        }
+        const user = await transaction.user.create({
+          data: {
+            id: localUserId,
+            displayName: input.name,
+            email,
+            normalizedEmail: email,
+            preferredLocale: organization.defaultLocale,
+            passwordHash: null,
+            emailVerifiedAt: null,
+            interactiveLoginAllowed: false,
+            termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
+            privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
+            legalAcceptedAt: new Date(),
+          },
+        });
+        const member = await transaction.organizationMember.create({
+          data: {
+            organizationId,
+            userId: user.id,
+            role: input.role,
+            status: "ACTIVE",
+          },
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "staff.local_identity_created",
+            targetType: "organization_member",
+            targetId: member.id,
+            metadata: { role: input.role, accessType: "QR" },
+          },
+          request,
+        );
+        return { member, user };
+      },
+    );
+    return {
+      id: created.member.id,
+      role: created.member.role,
+      status: created.member.status,
+      accessType: "QR" as const,
+      user: { id: created.user.id, displayName: created.user.displayName, email: null },
+    };
   }
 
   async invite(
@@ -680,13 +807,17 @@ export class TeamService {
             );
           }
         }
-        return transaction.organizationMember.update({
+        const member = await transaction.organizationMember.update({
           where: { id: target.id },
           data: {
             ...(input.role ? { role: input.role } : {}),
             ...(input.status ? { status: input.status } : {}),
           },
         });
+        if (input.status === "SUSPENDED" && target.status !== "SUSPENDED") {
+          await revokeStaffAccessForMembership(transaction, target.id, new Date());
+        }
+        return member;
       },
     );
     await this.audit.record(
@@ -742,6 +873,7 @@ export class TeamService {
           where: { id: current.id },
           data: { status: "REMOVED" },
         });
+        await revokeStaffAccessForMembership(transaction, current.id, new Date());
         return current;
       },
     );

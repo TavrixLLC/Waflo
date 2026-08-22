@@ -1,13 +1,24 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isLocale } from "@waflo/i18n";
 import { MarketingShell } from "../../../components/marketing-shell";
+import { configuredLegalEffectiveDate, createMarketingMetadata } from "../../../lib/seo";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return isLocale(locale) ? createMarketingMetadata(locale, "terms") : {};
+}
 
 export default async function TermsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
   const ar = locale === "ar";
   return (
-    <MarketingShell locale={locale}>
+    <MarketingShell locale={locale} path="/terms">
       <article className="marketing-container marketing-content">
         <span className="marketing-kicker">{ar ? "الشروط" : "Terms"}</span>
         <h1>{ar ? "شروط استخدام Waflo" : "Waflo Terms of Service"}</h1>
@@ -19,14 +30,13 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
         <div className="marketing-legal">
           <p>
             <strong>{ar ? "تاريخ السريان:" : "Effective date:"}</strong>{" "}
-            {process.env.NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE ??
-              (ar ? "يُحدد بعد المراجعة القانونية" : "To be confirmed after legal review")}
+            {configuredLegalEffectiveDate(locale)}
           </p>
           <h2>{ar ? "الخدمة" : "The service"}</h2>
           <p>
             {ar
-              ? "تقدم Tavrix LLC منصة Waflo لمساعدة الأعمال المحلية على إعداد وإدارة تجارب ولاء رقمية. لا تتوفر وظائف إصدار بطاقات المحفظة أو برامج الولاء في مرحلة الأساس الحالية."
-              : "Tavrix LLC provides Waflo to help local businesses prepare and manage digital loyalty experiences. Wallet issuance and loyalty-program functionality are not available in the current foundation phase."}
+              ? "تقدم Tavrix LLC منصة Waflo لمساعدة الأعمال المحلية على إنشاء وإدارة بطاقات وبرامج الولاء الرقمية. قد يعتمد توفر مزودي المحفظة على تهيئة الخدمة وبرنامج التاجر."
+              : "Tavrix LLC provides Waflo to help local businesses create and manage digital loyalty cards and programs. Wallet-provider availability may depend on service and merchant-program configuration."}
           </p>
           <h2>{ar ? "الحسابات" : "Accounts"}</h2>
           <p>
@@ -37,14 +47,21 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
           <h2>{ar ? "الخطط والفوترة" : "Plans and billing"}</h2>
           <p>
             {ar
-              ? "اختيار خطة أثناء الإعداد لا ينشئ اشتراكاً مدفوعاً. التجربة المجانية لا تبدأ حتى نشر أول برنامج ولاء في مرحلة لاحقة."
-              : "Selecting a plan during setup does not create a paid subscription. The free trial does not begin until the first loyalty program is published in a later phase."}
+              ? "تبدأ التجربة المجانية لمدة 7 أيام بعد اختيار الباقة ووتيرة الدفع وإضافة طريقة دفع صالحة وتأكيد الاشتراك. نوضح السعر وتاريخ أول دفعة قبل التأكيد."
+              : "The seven-day free trial starts after you choose a plan and billing cadence, add a valid payment method, and confirm the subscription. We show the price and first charge date before confirmation."}
           </p>
           <h2>{ar ? "المراجعة القانونية" : "Legal review"}</h2>
           <p>
             {ar
               ? "لا تمثل هذه النسخة نصيحة قانونية نهائية، وستُستبدل بنسخة معتمدة قبل الإطلاق."
               : "This version is not final legal advice and will be replaced by an approved version before launch."}
+          </p>
+          <p>
+            <a href={`/${locale}/contact`}>{ar ? "تواصل مع Waflo" : "Contact Waflo"}</a>
+            {" · "}
+            <a href={`/${locale}/refunds`}>
+              {ar ? "سياسة الفوترة والاسترداد" : "Billing & Refund Policy"}
+            </a>
           </p>
         </div>
       </article>

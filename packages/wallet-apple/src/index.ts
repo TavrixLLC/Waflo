@@ -1,7 +1,4 @@
 import { createHash, createHmac } from "node:crypto";
-import { zipSync } from "fflate";
-import forge from "node-forge";
-import sharp from "sharp";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
   type WalletAddAction,
@@ -17,6 +14,9 @@ import {
   type WalletUpdateReason,
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
+import { zipSync } from "fflate";
+import forge from "node-forge";
+import sharp from "sharp";
 
 export interface ApplePassConfiguration {
   readonly passTypeIdentifier: string;
@@ -46,6 +46,12 @@ export interface AppleStoreCardPass {
   readonly webServiceURL: string;
   readonly authenticationToken: string;
   readonly voided: boolean;
+  readonly locations?: ReadonlyArray<{
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly relevantText: string;
+  }>;
+  readonly maxDistance?: number;
   readonly barcodes: ReadonlyArray<{
     readonly format: "PKBarcodeFormatQR";
     readonly message: string;
@@ -80,6 +86,10 @@ export function mapAppleStoreCard(
     input.membershipStatus !== "ACTIVE" ||
     input.programStatus === "ARCHIVED" ||
     input.programStatus === "SUSPENDED";
+  const nearby = input.nearbyRelevance;
+  if (nearby?.enabled && nearby.locations.length > 10) {
+    throw new Error("Apple Wallet supports at most 10 nearby locations per pass.");
+  }
   return {
     formatVersion: 1,
     passTypeIdentifier: configuration.passTypeIdentifier,
@@ -94,6 +104,16 @@ export function mapAppleStoreCard(
     webServiceURL: configuration.webServiceUrl.replace(/\/+$/, ""),
     authenticationToken,
     voided: inactive,
+    ...(nearby?.enabled && nearby.locations.length
+      ? {
+          locations: nearby.locations.map((location) => ({
+            latitude: location.latitude,
+            longitude: location.longitude,
+            relevantText: location.relevantText,
+          })),
+          maxDistance: nearby.desiredAppleMaxDistanceMeters,
+        }
+      : {}),
     barcodes: [
       {
         format: "PKBarcodeFormatQR",
@@ -316,23 +336,84 @@ async function progressStrip(input: WalletMembershipInput): Promise<Buffer> {
     .toBuffer();
 }
 
-function localizedStrings(locale: "en" | "ar"): string {
-  return locale === "ar"
-    ? '"STAMPS" = "الأختام";\n"MEMBER" = "العضو";\n"STATUS" = "الحالة";\n"Transferred" = "تم النقل";\n"No longer valid" = "لم تعد صالحة";\n'
-    : '"STAMPS" = "STAMPS";\n"MEMBER" = "MEMBER";\n"STATUS" = "STATUS";\n"Transferred" = "Transferred";\n"No longer valid" = "No longer valid";\n';
+function appleStringsEscape(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
+}
+
+function localizedStrings(
+  locale: string,
+  replacements: readonly { key: string; value: string }[] = [],
+): string {
+  const structural =
+    locale === "ar"
+      ? '"STAMPS" = "الأختام";\n"MEMBER" = "العضو";\n"STATUS" = "الحالة";\n"Transferred" = "تم النقل";\n"No longer valid" = "لم تعد صالحة";\n'
+      : '"STAMPS" = "STAMPS";\n"MEMBER" = "MEMBER";\n"STATUS" = "STATUS";\n"Transferred" = "Transferred";\n"No longer valid" = "No longer valid";\n';
+  return `${structural}${replacements
+    .map(({ key, value }) => `"${appleStringsEscape(key)}" = "${appleStringsEscape(value)}";\n`)
+    .join("")}`;
+}
+
+function utf16AppleStrings(value: string): Buffer {
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(value, "utf16le")]);
 }
 
 export async function buildApplePassPackage(input: {
   pass: AppleStoreCardPass;
   signer: ApplePassSigner;
   images?: Readonly<Record<string, Uint8Array>>;
+  defaultLocale?: string;
+  localizations?: ReadonlyArray<{
+    locale: string;
+    programName: string;
+    description: string;
+    rewardSummary: string;
+  }>;
 }): Promise<Buffer> {
   const defaults = await defaultPassImages();
+  const localizations = input.localizations?.length
+    ? input.localizations
+    : [
+        {
+          locale: "en",
+          programName: input.pass.storeCard.primaryFields[0]?.value.toString() ?? "",
+          description: input.pass.description,
+          rewardSummary: input.pass.storeCard.backFields[0]?.value.toString() ?? "",
+        },
+        {
+          locale: "ar",
+          programName: input.pass.storeCard.primaryFields[0]?.value.toString() ?? "",
+          description: input.pass.description,
+          rewardSummary: input.pass.storeCard.backFields[0]?.value.toString() ?? "",
+        },
+      ];
+  const defaultLocale = input.defaultLocale ?? localizations[0]?.locale ?? "en";
+  const defaultContent =
+    localizations.find((item) => item.locale === defaultLocale) ?? localizations[0];
+  const localizedFiles = Object.fromEntries(
+    localizations.map((content) => [
+      `${content.locale}.lproj/pass.strings`,
+      utf16AppleStrings(
+        localizedStrings(content.locale, [
+          {
+            key: defaultContent?.programName ?? "",
+            value: content.programName,
+          },
+          {
+            key: defaultContent?.description ?? "",
+            value: content.description,
+          },
+          {
+            key: defaultContent?.rewardSummary ?? "",
+            value: content.rewardSummary,
+          },
+        ]),
+      ),
+    ]),
+  );
   const files: Record<string, Uint8Array> = {
     "pass.json": Buffer.from(JSON.stringify(input.pass), "utf8"),
     ...defaults,
-    "en.lproj/pass.strings": Buffer.from(localizedStrings("en"), "utf8"),
-    "ar.lproj/pass.strings": Buffer.from(localizedStrings("ar"), "utf8"),
+    ...localizedFiles,
     ...(input.images ?? {}),
   };
   const manifest = Buffer.from(JSON.stringify(createAppleManifest(files)), "utf8");
@@ -509,12 +590,32 @@ export class AppleWalletProvider implements WalletProvider {
 
   async issueMembershipPass(input: WalletMembershipInput): Promise<WalletIssueResult> {
     const configuration = this.requireConfigured();
-    const pass = mapAppleStoreCard(input, configuration, this.options.authenticationToken(input));
+    const defaultLocale = input.defaultLocale ?? input.locale;
+    const defaultContent =
+      input.localizedContent?.find((content) => content.locale === defaultLocale) ??
+      input.localizedContent?.[0];
+    const passInput = defaultContent
+      ? {
+          ...input,
+          locale: defaultLocale,
+          programName: defaultContent.programName,
+          description: defaultContent.description,
+          rewardSummary: defaultContent.rewardSummary,
+        }
+      : input;
+    const pass = mapAppleStoreCard(
+      passInput,
+      configuration,
+      this.options.authenticationToken(input),
+    );
     const artifact = await buildApplePassPackage({
       pass,
       signer: this.options.signer as ApplePassSigner,
+      defaultLocale,
+      ...(input.localizedContent ? { localizations: input.localizedContent } : {}),
       images: {
         "strip.png": await progressStrip(input),
+        ...(input.applePassImages ?? {}),
       },
     });
     return {

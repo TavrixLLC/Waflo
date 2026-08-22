@@ -1,13 +1,22 @@
 import { z } from "zod";
+import {
+  canonicalizeCardLocale,
+  isSupportedCardLocale,
+  normalizeCardLocaleConfiguration,
+} from "./card-locales.js";
+import { canonicalTimeZoneSchema, countryCodeSchema } from "./geography.js";
 import { programOperationalStatuses } from "./program-publication-state.js";
 
+export * from "./geography.js";
+export * from "./card-locales.js";
+export * from "./m2.js";
 export * from "./platform-capabilities.js";
 export * from "./program-publication-state.js";
 export * from "./program-template-catalog.js";
-export * from "./w4-policy-backlog.js";
 export * from "./w3.js";
 export * from "./w4.js";
-export * from "./m2.js";
+export * from "./w4-policy-backlog.js";
+export * from "./wallet-engagement.js";
 
 export const locales = ["en", "ar"] as const;
 export type Locale = (typeof locales)[number];
@@ -16,6 +25,10 @@ export const localeSchema = z.enum(locales);
 export const planCodes = ["starter", "growth", "scale"] as const;
 export type PlanCode = (typeof planCodes)[number];
 export const planCodeSchema = z.enum(planCodes);
+
+export const billingCadences = ["monthly", "quarterly", "yearly"] as const;
+export type BillingCadence = (typeof billingCadences)[number];
+export const billingCadenceSchema = z.enum(billingCadences);
 
 export const memberRoles = ["OWNER", "MANAGER", "STAFF"] as const;
 export type MemberRole = (typeof memberRoles)[number];
@@ -74,6 +87,14 @@ export const registerSchema = z
   })
   .strict();
 
+export const googleSignupIntentSchema = z
+  .object({
+    locale: localeSchema.default("en"),
+    termsAccepted: z.literal(true),
+    privacyAccepted: z.literal(true),
+  })
+  .strict();
+
 export const loginSchema = z
   .object({
     email: emailSchema,
@@ -100,17 +121,7 @@ export const updateUserSchema = z
   })
   .strict();
 
-export const timezoneSchema = z.string().refine(
-  (value) => {
-    try {
-      Intl.DateTimeFormat("en-US", { timeZone: value }).format();
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  { message: "Invalid IANA timezone." },
-);
+export const timezoneSchema = canonicalTimeZoneSchema;
 
 export const organizationSchema = z
   .object({
@@ -120,6 +131,23 @@ export const organizationSchema = z
     defaultLocale: localeSchema,
     timezone: timezoneSchema,
     selectedPlan: planCodeSchema.default("starter"),
+    commandId: z.uuid().optional(),
+    firstLocation: z
+      .object({
+        name: z.string().trim().min(2).max(120),
+        addressLine1: z.string().trim().max(160).optional(),
+        addressLine2: z.string().trim().max(160).optional(),
+        city: z.string().trim().max(100).optional(),
+        region: z.string().trim().max(100).optional(),
+        postalCode: z.string().trim().max(30).optional(),
+        countryCode: countryCodeSchema,
+        timezone: timezoneSchema,
+        latitude: z.number().finite().min(-90).max(90),
+        longitude: z.number().finite().min(-180).max(180),
+        coordinatesConfirmed: z.literal(true),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -129,27 +157,91 @@ export const organizationUpdateSchema = z
     businessCategory: z.string().trim().max(80).nullable().optional(),
     defaultLocale: localeSchema.optional(),
     timezone: timezoneSchema.optional(),
+    // Web branding is deliberately separate from customer-authored program content.
+    // The API verifies that this points to a safe, tenant-owned merchant LOGO asset.
+    brandLogoAssetId: z.uuid().nullable().optional(),
   })
   .strict();
 
-export const locationSchema = z
+const locationObjectSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  addressLine1: z.string().trim().max(160).optional(),
+  addressLine2: z.string().trim().max(160).optional(),
+  city: z.string().trim().max(100).optional(),
+  region: z.string().trim().max(100).optional(),
+  postalCode: z.string().trim().max(30).optional(),
+  countryCode: countryCodeSchema.optional(),
+  phone: z.string().trim().min(5).max(30).optional(),
+  timezone: timezoneSchema.optional(),
+  latitude: z.number().finite().min(-90).max(90).optional(),
+  longitude: z.number().finite().min(-180).max(180).optional(),
+  coordinatesConfirmed: z.literal(true).optional(),
+});
+
+function validateCoordinatePair(
+  value: {
+    latitude?: number | undefined;
+    longitude?: number | undefined;
+    coordinatesConfirmed?: true | undefined;
+  },
+  context: z.RefinementCtx,
+) {
+  const latitudeProvided = Object.hasOwn(value, "latitude");
+  const longitudeProvided = Object.hasOwn(value, "longitude");
+  if (latitudeProvided !== longitudeProvided) {
+    context.addIssue({
+      code: "custom",
+      path: [latitudeProvided ? "longitude" : "latitude"],
+      message: "Latitude and longitude must be configured together.",
+    });
+  }
+  if ((latitudeProvided || longitudeProvided) && value.coordinatesConfirmed !== true) {
+    context.addIssue({
+      code: "custom",
+      path: ["coordinatesConfirmed"],
+      message: "Confirm the exact location on the map.",
+    });
+  }
+  if (Object.hasOwn(value, "timezone") && !latitudeProvided && !longitudeProvided) {
+    context.addIssue({
+      code: "custom",
+      path: ["timezone"],
+      message: "Timezone is determined from the confirmed map coordinate.",
+    });
+  }
+}
+
+export const locationCoordinateSchema = z
   .object({
-    name: z.string().trim().min(2).max(120),
-    addressLine1: z.string().trim().max(160).optional(),
-    addressLine2: z.string().trim().max(160).optional(),
-    city: z.string().trim().max(100).optional(),
-    region: z.string().trim().max(100).optional(),
-    postalCode: z.string().trim().max(30).optional(),
-    countryCode: z.string().trim().length(2).toUpperCase().optional(),
-    phone: z.string().trim().min(5).max(30).optional(),
-    timezone: timezoneSchema.optional(),
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
   })
   .strict();
 
-export const locationUpdateSchema = locationSchema.partial().strict();
+export const locationSchema = locationObjectSchema
+  .extend({
+    countryCode: countryCodeSchema,
+    timezone: timezoneSchema,
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+    coordinatesConfirmed: z.literal(true),
+  })
+  .strict();
+
+export const locationUpdateSchema = locationObjectSchema
+  .partial()
+  .strict()
+  .superRefine(validateCoordinatePair);
 
 export const invitationSchema = z
   .object({ email: emailSchema, role: z.enum(["MANAGER", "STAFF"]) })
+  .strict();
+
+export const localStaffMemberSchema = z
+  .object({
+    name: z.string().trim().min(2).max(100),
+    role: z.enum(["MANAGER", "STAFF"]),
+  })
   .strict();
 
 export const memberUpdateSchema = z
@@ -159,10 +251,97 @@ export const memberUpdateSchema = z
   })
   .strict();
 
-export const selectedPlanSchema = z.object({ plan: planCodeSchema }).strict();
+export const selectedPlanSchema = z
+  .object({ plan: planCodeSchema, cadence: billingCadenceSchema.optional() })
+  .strict();
+
+export const billingSubscriptionChangeSchema = z
+  .object({ plan: planCodeSchema, cadence: billingCadenceSchema })
+  .strict();
+
+export const billingSubscriptionCancellationSchema = z
+  .object({ reason: z.string().trim().max(500).optional() })
+  .strict();
+
+export const billingCheckoutSchema = z
+  .object({ cadence: billingCadenceSchema.default("monthly") })
+  .strict();
+
+const optionalBillingText = (maximum: number) =>
+  z.string().trim().max(maximum).nullable().optional();
+
+export const billingIdentitySchema = z
+  .object({
+    name: z.string().trim().min(2).max(160),
+    email: emailSchema,
+    countryCode: countryCodeSchema.nullable().optional(),
+    addressLine1: optionalBillingText(200),
+    addressLine2: optionalBillingText(200),
+    city: optionalBillingText(120),
+    region: optionalBillingText(120),
+    postalCode: optionalBillingText(40),
+  })
+  .strict();
+
+export const billingTrialSetupSchema = z
+  .object({
+    plan: planCodeSchema,
+    cadence: billingCadenceSchema,
+    billingIdentity: billingIdentitySchema.extend({
+      countryCode: countryCodeSchema,
+      addressLine1: z.string().trim().min(1).max(200),
+      city: z.string().trim().min(1).max(120),
+    }),
+  })
+  .strict();
+
+export const billingTrialCompleteSchema = z
+  .object({
+    setupIntentId: z
+      .string()
+      .trim()
+      .regex(/^seti_[A-Za-z0-9_]+$/)
+      .max(255),
+  })
+  .strict();
+
+export type BillingIdentityInput = z.infer<typeof billingIdentitySchema>;
+export type BillingTrialSetupInput = z.infer<typeof billingTrialSetupSchema>;
+export type BillingSubscriptionChangeInput = z.infer<typeof billingSubscriptionChangeSchema>;
+export type BillingSubscriptionCancellationInput = z.infer<
+  typeof billingSubscriptionCancellationSchema
+>;
+
+export const refundReasons = [
+  "duplicate_charge",
+  "incorrect_charge",
+  "service_failure",
+  "unauthorized_payment",
+  "other",
+] as const;
+export type RefundReason = (typeof refundReasons)[number];
+export const refundReasonSchema = z.enum(refundReasons);
+
+export const refundRequestSchema = z
+  .object({
+    reason: refundReasonSchema,
+    amount: z.number().int().positive().optional(),
+    explanation: z.string().trim().max(2000).nullable().optional(),
+  })
+  .strict();
+export type RefundRequestInput = z.infer<typeof refundRequestSchema>;
+
+export const refundReviewSchema = z
+  .object({
+    action: z.enum(["start_review", "approve", "reject"]),
+    approvedAmount: z.number().int().positive().optional(),
+    note: z.string().trim().max(2000).nullable().optional(),
+  })
+  .strict();
+export type RefundReviewInput = z.infer<typeof refundReviewSchema>;
 
 export const slugChangeSchema = z
-  .object({ slug: z.string().min(3).max(40), password: z.string().min(1).max(128) })
+  .object({ slug: z.string().min(3).max(40), password: z.string().max(128).optional() })
   .strict();
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -181,14 +360,15 @@ export const rewardTypeSchema = z.enum([
 ]);
 
 const translationInputSchema = z.object({
-  programName: z.string().trim().min(1).max(120),
-  shortDescription: z.string().trim().min(1).max(240),
+  programName: z.string().trim().max(120),
+  shortDescription: z.string().trim().max(240),
+  earningDescription: z.string().trim().max(240).optional(),
   fullDescription: z.string().trim().max(4000).optional(),
-  rewardSummary: z.string().trim().min(1).max(240),
+  rewardSummary: z.string().trim().max(240),
   joinInstructions: z.string().trim().max(4000).optional(),
-  termsAndConditions: z.string().trim().min(1).max(8000),
-  completionMessage: z.string().trim().min(1).max(240),
-  rewardUnlockedMessage: z.string().trim().min(1).max(240),
+  termsAndConditions: z.string().trim().max(8000),
+  completionMessage: z.string().trim().max(240),
+  rewardUnlockedMessage: z.string().trim().max(240),
   pausedMessage: z.string().trim().max(240).optional(),
 });
 
@@ -211,18 +391,14 @@ const rewardInputSchema = z.object({
     })
     .strict()
     .optional(),
-  translations: z.object({
-    en: z.object({
-      name: z.string().trim().min(1).max(120),
-      description: z.string().trim().min(1).max(240),
+  translations: z.record(
+    z.string().min(2).max(35),
+    z.object({
+      name: z.string().trim().max(120),
+      description: z.string().trim().max(240),
       redemptionInstructions: z.string().trim().max(4000).optional(),
     }),
-    ar: z.object({
-      name: z.string().trim().min(1).max(120),
-      description: z.string().trim().min(1).max(240),
-      redemptionInstructions: z.string().trim().max(4000).optional(),
-    }),
-  }),
+  ),
 });
 
 const layoutConfigurationSchema = z
@@ -334,7 +510,9 @@ const programInputSchema = z
     resetBehaviorAfterReward: z
       .literal("RESET_ON_FINAL_REWARD_REDEMPTION")
       .default("RESET_ON_FINAL_REWARD_REDEMPTION"),
-    translations: z.object({ en: translationInputSchema, ar: translationInputSchema }),
+    defaultLocale: z.string().trim().min(2).max(35).optional(),
+    enabledLocales: z.array(z.string().trim().min(2).max(35)).min(1).optional(),
+    translations: z.record(z.string().min(2).max(35), translationInputSchema),
     earningDescription: z
       .string()
       .trim()
@@ -348,6 +526,54 @@ const programInputSchema = z
   .strict();
 
 function validateProgramInput(value: z.infer<typeof programInputSchema>, context: z.RefinementCtx) {
+  const translationLocales = Object.keys(value.translations);
+  const defaultLocale = value.defaultLocale ?? "en";
+  const enabledLocales = value.enabledLocales ?? translationLocales;
+  const configuration = normalizeCardLocaleConfiguration(defaultLocale, enabledLocales);
+  if (!configuration) {
+    context.addIssue({
+      code: "custom",
+      path: ["enabledLocales"],
+      message: "Card locales must be unique, supported, non-empty, and include the default locale.",
+    });
+  }
+  for (const locale of translationLocales) {
+    const canonical = canonicalizeCardLocale(locale);
+    if (!canonical || canonical !== locale || !isSupportedCardLocale(locale)) {
+      context.addIssue({
+        code: "custom",
+        path: ["translations", locale],
+        message: "Translation keys must be canonical supported BCP-47 card locales.",
+      });
+    }
+  }
+  if (!value.translations[defaultLocale]) {
+    context.addIssue({
+      code: "custom",
+      path: ["translations", defaultLocale],
+      message: "The default card locale needs a translation record.",
+    });
+  }
+  for (const locale of enabledLocales) {
+    if (!value.translations[locale]) {
+      context.addIssue({
+        code: "custom",
+        path: ["translations", locale],
+        message: "Every enabled card locale needs a translation record.",
+      });
+    }
+  }
+  value.rewards.forEach((reward, rewardIndex) => {
+    for (const locale of translationLocales) {
+      if (!reward.translations[locale]) {
+        context.addIssue({
+          code: "custom",
+          path: ["rewards", rewardIndex, "translations", locale],
+          message: "Every card locale needs a matching reward translation record.",
+        });
+      }
+    }
+  });
   const thresholds = value.rewards.map((reward) => reward.thresholdStampCount);
   if (new Set(thresholds).size !== thresholds.length) {
     context.addIssue({

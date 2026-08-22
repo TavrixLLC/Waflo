@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(process.env.WAFLO_E2E_NEXT_START === "1" ? {} : { output: "standalone" }),
   outputFileTracingRoot: join(import.meta.dirname, "../.."),
   transpilePackages: ["@waflo/ui", "@waflo/brand", "@waflo/billing", "@waflo/i18n"],
   images: { unoptimized: true },
@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
       {
         source: "/(.*)",
         headers: [
+          ...(process.env.DEPLOYMENT_ENVIRONMENT === "staging"
+            ? [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" }]
+            : []),
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "no-referrer" },

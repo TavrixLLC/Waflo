@@ -346,6 +346,124 @@ describe.sequential("production Stripe subscription reconciliation", () => {
     expect(JSON.stringify(auditEntry)).not.toContain(rawProviderMessage);
   });
 
+  it("serializes recovery and pays the same outstanding invoice with the replacement card", async () => {
+    const item = await fixture("PAST_DUE");
+    const invoiceId = `in_recovery_${randomUUID().slice(0, 8)}`;
+    const firstFailedAt = new Date(Date.now() - 13 * 60 * 60 * 1000);
+    const graceEndsAt = new Date(firstFailedAt.getTime() + 48 * 60 * 60 * 1000);
+    const row = await prisma.client.billingInvoice.create({
+      data: {
+        organizationId: item.organizationId,
+        stripeInvoiceId: invoiceId,
+        stripeSubscriptionId: item.subscriptionId,
+        stripePaymentMethodId: "pm_stale",
+        invoiceNumber: "WAFLO-RECOVERY-1",
+        status: "open",
+        billingReason: "subscription_cycle",
+        amountDue: 3_000,
+        amountPaid: 0,
+        amountRemaining: 3_000,
+        currency: "USD",
+        invoiceDate: firstFailedAt,
+        customerName: "Recovery fixture",
+        customerEmail: `billing-${randomUUID()}@reconcile.waflo.local`,
+        paymentMethodBrand: "visa",
+        paymentMethodLast4: "1111",
+        firstFailedAt,
+        graceEndsAt,
+        recoveryStatus: "GRACE",
+        automaticRetryEligible: true,
+        nextRecoveryAttemptAt: new Date(Date.now() - 1_000),
+      },
+    });
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: item.organizationId },
+      data: { subscriptionStatus: "GRACE_PERIOD", gracePeriodEnd: graceEndsAt },
+    });
+    const baseInvoice = {
+      id: invoiceId,
+      object: "invoice",
+      customer: item.customerId,
+      status: "open",
+      amount_due: 3_000,
+      amount_paid: 0,
+      amount_remaining: 3_000,
+      currency: "usd",
+      created: Math.floor(firstFailedAt.getTime() / 1000),
+      effective_at: Math.floor(firstFailedAt.getTime() / 1000),
+      number: "WAFLO-RECOVERY-1",
+      parent: { subscription_details: { subscription: item.subscriptionId, metadata: {} } },
+      status_transitions: { paid_at: null },
+      hosted_invoice_url: "https://invoice.stripe.com/i/test",
+      invoice_pdf: "https://pay.stripe.com/invoice/test/pdf",
+    } as unknown as Stripe.Invoice;
+    const paidInvoice = {
+      ...baseInvoice,
+      status: "paid",
+      amount_paid: 3_000,
+      amount_remaining: 0,
+      status_transitions: { paid_at: Math.floor(Date.now() / 1000) },
+    } as Stripe.Invoice;
+    const retrieve = vi.fn(async () => baseInvoice);
+    const updateInvoice = vi.fn(async () => baseInvoice);
+    const pay = vi.fn(async () => paidInvoice);
+    const updateSubscription = vi.fn(async () => ({}));
+    const worker = new OperationalWorker(prisma.client, environment.values);
+    Object.defineProperty(worker, "stripe", {
+      value: {
+        customers: {
+          retrieve: vi.fn(async () => ({
+            id: item.customerId,
+            deleted: false,
+            invoice_settings: { default_payment_method: "pm_replacement" },
+          })),
+        },
+        invoices: { retrieve, update: updateInvoice, pay },
+        subscriptions: { update: updateSubscription },
+      },
+    });
+
+    const results = await Promise.all([
+      worker.processBillingRecoveries(),
+      worker.processBillingRecoveries(),
+    ]);
+    expect(results.reduce((sum, value) => sum + value, 0)).toBe(1);
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(updateSubscription).toHaveBeenCalledWith(item.subscriptionId, {
+      default_payment_method: "pm_replacement",
+    });
+    expect(updateInvoice).toHaveBeenCalledWith(invoiceId, {
+      default_payment_method: "pm_replacement",
+    });
+    expect(pay).toHaveBeenCalledWith(
+      invoiceId,
+      { payment_method: "pm_replacement" },
+      { idempotencyKey: expect.stringContaining(`waflo:invoice:${invoiceId}:recovery:`) },
+    );
+    expect(
+      await prisma.client.billingInvoice.count({ where: { stripeInvoiceId: invoiceId } }),
+    ).toBe(1);
+    expect(
+      await prisma.client.billingInvoice.findUniqueOrThrow({ where: { id: row.id } }),
+    ).toMatchObject({
+      status: "paid",
+      amountRemaining: 0,
+      recoveryStatus: "RECOVERED",
+      nextRecoveryAttemptAt: null,
+    });
+    expect(
+      await prisma.client.billingEmailOutbox.count({
+        where: { billingInvoiceId: row.id, kind: "INVOICE_PAID" },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.client.organizationBillingProfile.findUniqueOrThrow({
+        where: { organizationId: item.organizationId },
+      }),
+    ).toMatchObject({ subscriptionStatus: "ACTIVE", gracePeriodEnd: null });
+    worker.close();
+  });
+
   it("bounded retention cleanup removes only expired security material after its policy window", async () => {
     const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
     const session = await prisma.client.session.create({
@@ -375,6 +493,7 @@ describe.sequential("production Stripe subscription reconciliation", () => {
         provider: "GOOGLE",
         intent: "SIGN_IN",
         nonceHash: randomUUID().replaceAll("-", "").padEnd(64, "e"),
+        browserBindingHash: randomUUID().replaceAll("-", "").padEnd(64, "f"),
         codeVerifierCiphertext: "expired-and-no-longer-usable",
         expiresAt: old,
       },

@@ -1,11 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type BrowserContext, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/handoff-p6-final");
+const evidenceDirectory = path.resolve("test-results/evidence/handoff-p6-final");
 const programId = "created-program-id";
 
 const visualFiles = [
@@ -13,7 +13,7 @@ const visualFiles = [
   "02-final-gallery.png",
   "03-final-builder.png",
   "04-final-studio.png",
-  "05-final-test.png",
+  "05-final-automatic-checks.png",
   "06-final-launch.png",
   "07-final-live.png",
   "08-final-mobile-390.png",
@@ -92,13 +92,22 @@ async function openSeededStudio(
   options: {
     locale?: "en" | "ar";
     state?: "DRAFT" | "READY" | "LIVE";
-    area?: "overview" | "how-it-works" | "customers-locations" | "test" | "launch" | "settings";
+    previewLocale?: "English" | "Arabic";
+    area?:
+      | "overview"
+      | "how-it-works"
+      | "customers-locations"
+      | "engagement"
+      | "test"
+      | "launch"
+      | "settings";
     viewport?: { width: number; height: number };
   } = {},
 ): Promise<void> {
   const {
     locale = "en",
     state = "LIVE",
+    previewLocale,
     area = "overview",
     viewport = { width: 1440, height: 900 },
   } = options;
@@ -112,6 +121,11 @@ async function openSeededStudio(
     `/${locale}/dashboard/programs/${programId}${area === "overview" ? "" : `/${area}`}`,
   );
   await expect(page.locator(".studio-shell--p4")).toBeVisible();
+  if (previewLocale) {
+    const picker = page.locator(".studio-preview-panel").getByRole("combobox");
+    await picker.fill(previewLocale);
+    await page.getByRole("option", { name: new RegExp(`^${previewLocale}\\b`, "u") }).click();
+  }
 }
 
 async function capture(page: Page, filename: (typeof visualFiles)[number]): Promise<void> {
@@ -199,6 +213,10 @@ test("completes the final English merchant release journey", async ({ page }) =>
   );
 
   await chooseFirstTemplate(page);
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("P6 release coffee card");
   await expect.poll(() => patchCount).toBeGreaterThan(0);
   await expect(page.locator(".builder-save-state")).toContainText("Saved");
@@ -210,12 +228,7 @@ test("completes the final English merchant release journey", async ({ page }) =>
     page.getByRole("heading", { level: 1, name: "P6 release coffee card" }),
   ).toBeVisible();
 
-  await openStudioArea(page, /^Test/u);
-  await expect(page).toHaveURL(`/en/dashboard/programs/${programId}/test`);
-  await page.getByRole("button", { name: "Start demo customer" }).click();
-  await expect(page.getByRole("button", { name: "Reset demo customer" })).toBeVisible();
-
-  await openStudioArea(page, /^Launch/u);
+  await openStudioArea(page, /^Review & launch/u);
   await expect(page).toHaveURL(`/en/dashboard/programs/${programId}/launch`);
   await page.getByRole("button", { name: "Launch loyalty card" }).click();
   const dialog = page.getByRole("dialog", { name: "You’re about to launch this loyalty card" });
@@ -246,7 +259,7 @@ test("loads Studio deep links, refreshes, and fails safely for inaccessible card
     ["", "Overview"],
     ["/how-it-works", "How it works"],
     ["/customers-locations", "Customers & locations"],
-    ["/test", "Test"],
+    ["/engagement", "Wallet Engagement"],
     ["/launch", "Launch"],
     ["/settings", "Settings"],
   ] as const;
@@ -314,7 +327,11 @@ test("keeps Arabic preview and Studio summaries localized with an honest English
   const arabicEarningCopy = "اجمع ختم كوب مع كل طلب قهوة مؤهل.";
 
   const localized = await context.newPage();
-  await openSeededStudio(localized, { locale: "ar", state: "LIVE" });
+  await openSeededStudio(localized, {
+    locale: "ar",
+    state: "LIVE",
+    previewLocale: "Arabic",
+  });
   const localizedPreview = localized.locator(".studio-published-customer-preview");
   const localizedSummary = localized.locator(".studio-overview__summary > section").first();
   await expect(localizedPreview).toContainText(arabicEarningCopy);
@@ -331,6 +348,9 @@ test("keeps Arabic preview and Studio summaries localized with an honest English
   });
   await fallback.goto(`/ar/dashboard/programs/${programId}`);
   await expect(fallback.locator(".studio-shell--p4")).toBeVisible();
+  const fallbackPicker = fallback.locator(".studio-preview-panel").getByRole("combobox");
+  await fallbackPicker.fill("Arabic");
+  await fallback.getByRole("option", { name: /^Arabic\b/u }).click();
   const fallbackSummary = fallback.locator(".studio-overview__summary > section").first();
   await expect(fallbackSummary).toContainText(englishEarningCopy);
   await expect(fallbackSummary).not.toContainText(arabicEarningCopy);
@@ -376,7 +396,7 @@ test("keeps routed Studio dialogs centered and contained across the release view
   }
 });
 
-test("captures exactly the ten final P6 release visuals", async ({ context }) => {
+async function captureFinalReleaseVisuals(context: BrowserContext): Promise<void> {
   const library = await context.newPage();
   await mockTemplateGalleryApi(library, {
     existingPrograms: [
@@ -432,11 +452,12 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
   await capture(studio, "04-final-studio.png");
   await studio.close();
 
-  const testMode = await context.newPage();
-  await openSeededStudio(testMode, { state: "READY", area: "test" });
-  await expect(testMode.getByRole("button", { name: "Start demo customer" })).toBeVisible();
-  await capture(testMode, "05-final-test.png");
-  await testMode.close();
+  const automaticChecks = await context.newPage();
+  await openSeededStudio(automaticChecks, { state: "READY", area: "launch" });
+  await expect(automaticChecks.getByRole("button", { name: "Launch loyalty card" })).toBeVisible();
+  await expect(automaticChecks.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  await capture(automaticChecks, "05-final-automatic-checks.png");
+  await automaticChecks.close();
 
   const launch = await context.newPage();
   await openSeededStudio(launch, { state: "READY", area: "launch" });
@@ -463,6 +484,7 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
   await openSeededStudio(arabic, {
     locale: "ar",
     state: "LIVE",
+    previewLocale: "Arabic",
     viewport: { width: 1440, height: 900 },
   });
   await expect(arabic.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");
@@ -473,7 +495,10 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
   );
   await capture(arabic, "09-final-arabic-rtl.png");
   await arabic.close();
+}
 
+test("captures exactly the ten final P6 release visuals", async ({ context }) => {
+  await captureFinalReleaseVisuals(context);
   await makeContactSheet();
   expect(
     await Promise.all(
@@ -485,11 +510,14 @@ test("captures exactly the ten final P6 release visuals", async ({ context }) =>
 });
 
 test("updates only the repaired Arabic RTL and release contact-sheet evidence", async ({
+  context,
   page,
 }) => {
+  await captureFinalReleaseVisuals(context);
   await openSeededStudio(page, {
     locale: "ar",
     state: "LIVE",
+    previewLocale: "Arabic",
     viewport: { width: 1440, height: 900 },
   });
   await expect(page.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");

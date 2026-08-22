@@ -113,6 +113,13 @@ async function seedUsersAndOrganization(now: Date) {
         displayName: user.displayName,
         email: user.email,
         normalizedEmail: user.email,
+        emailVerifiedAt: now,
+        passwordHash,
+        preferredLocale: user.locale,
+        termsVersion: environment.LEGAL_TERMS_VERSION,
+        privacyVersion: environment.LEGAL_PRIVACY_VERSION,
+        legalAcceptedAt: now,
+        ...(user.id === IDs.owner ? { lastSelectedOrganizationId: IDs.organization } : {}),
       },
       create: {
         id: user.id,
@@ -473,6 +480,77 @@ async function seedProgram(input: ProgramSeed, now: Date) {
       });
     }
   }
+  const legacyProgramTranslations = await prisma.programTranslation.findMany({
+    where: { versionId: input.versionId },
+  });
+  for (const [position, translation] of legacyProgramTranslations
+    .toSorted((left, right) => left.locale.localeCompare(right.locale))
+    .entries()) {
+    const locale = translation.locale === "AR" ? "ar" : "en";
+    const localeRow = await prisma.programVersionLocale.upsert({
+      where: { versionId_locale: { versionId: input.versionId, locale } },
+      update: {
+        enabled: true,
+        position,
+        programName: translation.programName,
+        shortDescription: translation.shortDescription,
+        earningDescription: "One stamp for each qualifying visit.",
+        fullDescription: translation.fullDescription,
+        rewardSummary: translation.rewardSummary,
+        joinInstructions: translation.joinInstructions,
+        termsAndConditions: translation.termsAndConditions,
+        completionMessage: translation.completionMessage,
+        rewardUnlockedMessage: translation.rewardUnlockedMessage,
+        pausedMessage: translation.pausedMessage,
+      },
+      create: {
+        versionId: input.versionId,
+        locale,
+        enabled: true,
+        position,
+        programName: translation.programName,
+        shortDescription: translation.shortDescription,
+        earningDescription: "One stamp for each qualifying visit.",
+        fullDescription: translation.fullDescription,
+        rewardSummary: translation.rewardSummary,
+        joinInstructions: translation.joinInstructions,
+        termsAndConditions: translation.termsAndConditions,
+        completionMessage: translation.completionMessage,
+        rewardUnlockedMessage: translation.rewardUnlockedMessage,
+        pausedMessage: translation.pausedMessage,
+      },
+    });
+    for (const reward of rewards) {
+      const legacyReward = await prisma.rewardTranslation.findUniqueOrThrow({
+        where: {
+          rewardId_locale: {
+            rewardId: reward.id,
+            locale: translation.locale,
+          },
+        },
+      });
+      await prisma.programLocaleRewardTranslation.upsert({
+        where: {
+          rewardId_programVersionLocaleId: {
+            rewardId: reward.id,
+            programVersionLocaleId: localeRow.id,
+          },
+        },
+        update: {
+          name: legacyReward.name,
+          description: legacyReward.description,
+          redemptionInstructions: legacyReward.redemptionInstructions,
+        },
+        create: {
+          rewardId: reward.id,
+          programVersionLocaleId: localeRow.id,
+          name: legacyReward.name,
+          description: legacyReward.description,
+          redemptionInstructions: legacyReward.redemptionInstructions,
+        },
+      });
+    }
+  }
   for (const locationId of [IDs.locationOne, IDs.locationTwo]) {
     await prisma.programLocation.upsert({
       where: { versionId_locationId: { versionId: input.versionId, locationId } },
@@ -702,7 +780,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4ZeroMembership0001",
       targetStamps: 0,
       redeemFinal: false,
-      email: "zero@example.test",
+      email: "zero@example.com",
       displayName: "Noor Zero",
     },
     {
@@ -711,7 +789,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4PartialMembership02",
       targetStamps: 5,
       redeemFinal: false,
-      email: "partial@example.test",
+      email: "partial@example.com",
       displayName: "Ali Partial",
     },
     {
@@ -720,7 +798,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4MilestoneReady003",
       targetStamps: program.milestoneThreshold + 1,
       redeemFinal: false,
-      email: "milestone@example.test",
+      email: "milestone@example.com",
       displayName: "Sara Milestone",
     },
     {
@@ -729,7 +807,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4FinalReady000004",
       targetStamps: program.goal,
       redeemFinal: false,
-      email: "ready@example.test",
+      email: "ready@example.com",
       displayName: "Maha Reward Ready",
     },
     {
@@ -738,7 +816,7 @@ async function seedCustomersAndMemberships(
       publicMembershipId: "mem_W4CompletedCycle005",
       targetStamps: program.goal,
       redeemFinal: true,
-      email: "cycle@example.test",
+      email: "cycle@example.com",
       displayName: "Zaid Completed Cycle",
     },
   ];

@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { unzipSync } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createCustomerDataKeyring,
   decryptCustomerValue,
@@ -25,6 +25,7 @@ import {
   GoogleWalletProvider,
   googleLoyaltyClassId,
   googleLoyaltyObjectId,
+  mapGoogleLoyaltyClass,
   mapGoogleLoyaltyObject,
 } from "../../packages/wallet-google/src/index.js";
 import {
@@ -32,6 +33,7 @@ import {
   walletCommandIdempotencyKey,
   type WalletMembershipInput,
 } from "../../packages/wallet-core/src/index.js";
+import { WalletProviderError } from "../../packages/wallet-core/dist/index.js";
 import { parseEnvironment } from "../../packages/config/src/index.js";
 import {
   enrollmentBillingDecision,
@@ -54,6 +56,27 @@ const walletInput: WalletMembershipInput = {
   foregroundColor: "#241916",
   configurationFingerprint: "a".repeat(64),
   locale: "en",
+  defaultLocale: "en",
+  localizedContent: [
+    {
+      locale: "en",
+      programName: "Cedar Circle",
+      description: "A multilingual coffee loyalty card.",
+      rewardSummary: "A complimentary drink after eight stamps.",
+    },
+    {
+      locale: "ar",
+      programName: "دائرة سيدار",
+      description: "بطاقة ولاء للمقهى.",
+      rewardSummary: "مشروب مجاني بعد ثمانية أختام.",
+    },
+    {
+      locale: "fr",
+      programName: "Cercle Cedar",
+      description: "Une carte de fidélité du café.",
+      rewardSummary: "Une boisson offerte après huit tampons.",
+    },
+  ],
   walletPassInstanceId: "00000000-0000-4000-8000-000000000004",
   providerIdentity: "waflo.00000000000040008000000000000004",
   publicMembershipId: "member_m8PNYl1aSr9bT0V4w89d3H2g",
@@ -193,6 +216,7 @@ describe("W3 customer security, QR, and Wallet domain", () => {
         "strip.png",
         "en.lproj/pass.strings",
         "ar.lproj/pass.strings",
+        "fr.lproj/pass.strings",
       ]),
     );
     const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8"));
@@ -200,6 +224,31 @@ describe("W3 customer security, QR, and Wallet domain", () => {
     expect(pass.voided).toBe(false);
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
     expect(Buffer.from(files["manifest.json"] ?? []).toString("utf8")).not.toContain("signature");
+    const frenchStrings = Buffer.from(files["fr.lproj/pass.strings"] ?? [])
+      .subarray(2)
+      .toString("utf16le");
+    expect(frenchStrings).toContain('"Cedar Circle" = "Cercle Cedar";');
+    expect(frenchStrings).toContain(
+      '"A complimentary drink after eight stamps." = "Une boisson offerte après huit tampons.";',
+    );
+  });
+
+  it("maps the published card translation source into Google LocalizedString fields", () => {
+    const mapped = mapGoogleLoyaltyClass(
+      walletInput,
+      googleLoyaltyClassId("issuer-1", walletInput.programVersionId),
+    );
+    expect(mapped.localizedProgramName).toEqual({
+      defaultValue: { language: "en", value: "Cedar Circle" },
+      translatedValues: [
+        { language: "ar", value: "دائرة سيدار" },
+        { language: "fr", value: "Cercle Cedar" },
+      ],
+    });
+    expect(mapped.textModulesData[0]).toMatchObject({
+      id: "reward",
+      body: "A complimentary drink after eight stamps.",
+    });
   });
 
   it("maps Google Loyalty identity, opaque QR, public progress art, and transfer invalidation", () => {
@@ -239,6 +288,72 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       origins: ["https://merchant.waflo.app"],
       payload: { loyaltyObjects: [{ id: "issuer.object" }] },
     });
+  });
+
+  it("converges a concurrent Google object create race onto the deterministic identity", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new WalletProviderError("NOT_FOUND", "missing", { retryable: false }))
+      .mockRejectedValueOnce(
+        new WalletProviderError("ALREADY_EXISTS", "raced", { retryable: false }),
+      )
+      .mockResolvedValueOnce({ value: {} });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer-1",
+      allowedOrigins: ["https://card.example.test"],
+      testActionBaseUrl: "https://card.example.test/wallet-test/google",
+      client: { request } as never,
+    });
+
+    await expect(provider.issueMembershipPass(walletInput)).resolves.toMatchObject({
+      providerObjectId: walletInput.providerIdentity,
+      state: "ACTIVE",
+    });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "loyaltyObject",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      `loyaltyObject/${encodeURIComponent(walletInput.providerIdentity)}`,
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("creates the complete inactive Google object when invalidation finds no provider object", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new WalletProviderError("NOT_FOUND", "missing", { retryable: false }))
+      .mockResolvedValueOnce({ value: {} });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer-1",
+      allowedOrigins: ["https://card.example.test"],
+      testActionBaseUrl: "https://card.example.test/wallet-test/google",
+      client: { request } as never,
+    });
+
+    await expect(
+      provider.invalidateMembershipPass(walletInput, "MEMBERSHIP_TRANSFERRED"),
+    ).resolves.toEqual({ state: "INACTIVE" });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "loyaltyObject",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.objectContaining({
+          id: walletInput.providerIdentity,
+          state: "INACTIVE",
+          barcode: {
+            type: "QR_CODE",
+            value: walletInput.credentialPayload,
+            alternateText: "No longer valid",
+          },
+        }),
+      }),
+    );
   });
 
   it("classifies provider failures and makes command identity deterministic", () => {

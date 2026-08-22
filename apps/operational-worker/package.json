@@ -16,13 +16,16 @@
     "@waflo/contracts": "workspace:*",
     "@waflo/customer-security": "workspace:*",
     "@waflo/database": "workspace:*",
+    "@waflo/external-auth-security": "workspace:*",
     "@waflo/loyalty-ledger": "workspace:*",
     "@waflo/loyalty-policy": "workspace:*",
     "@waflo/operational-analytics": "workspace:*",
+    "nodemailer": "9.0.3",
     "stripe": "22.3.2"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
+    "@types/nodemailer": "8.0.1",
     "tsx": "4.23.1",
     "typescript": "5.9.3"
   }

@@ -2,19 +2,14 @@
 
 import { planCatalog } from "@waflo/billing";
 import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
-import { formatDate } from "@waflo/i18n";
-import { Alert, AlertDialog, Badge, Button, Card, DropdownMenu, PageHeader } from "@waflo/ui";
 import {
-  Archive,
-  ArrowRight,
-  CreditCard,
-  Ellipsis,
-  Layers3,
-  Pause,
-  Play,
-  Plus,
-  RotateCcw,
-} from "lucide-react";
+  directionForInterface,
+  formatDate,
+  localeRegistry,
+  type InterfaceLocale,
+} from "@waflo/i18n";
+import { Alert, AlertDialog, Badge, Button, DropdownMenu, PageHeader } from "@waflo/ui";
+import { Archive, ArrowRight, Ellipsis, Layers3, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
@@ -24,6 +19,7 @@ import {
   merchantProgramLifecycleLabel,
   merchantProgramStatus,
 } from "./loyalty-card-presentation";
+import { LoyaltyCardRealPreview } from "./loyalty-card-real-preview";
 import { ProgramCardBuilder } from "./program-card-builder";
 import { applyBuilderTemplate, createBuilderDraft } from "./program-card-builder-state";
 import { ProgramQuickWizard } from "./program-quick-wizard";
@@ -49,6 +45,7 @@ interface CursorPage<T> {
 
 interface OrganizationPresentationView {
   businessCategory: string | null;
+  brandLogoAsset: Pick<AssetItem, "contentUrl"> | null;
 }
 
 const planCodes = {
@@ -57,142 +54,25 @@ const planCodes = {
   SCALE: "scale",
 } as const;
 
-const emptyStateStampSlots = [true, true, true, false, false] as const;
-
 type CardLifecycleAction = Exclude<MerchantProgramLifecycleAction, "publish" | "abandon">;
 
-const loyaltyCardCopy = {
-  en: {
-    eyebrow: "LOYALTY CARDS",
-    title: "Loyalty cards",
-    description:
-      "Create and manage customer-ready loyalty cards for the web, with Wallet availability when supported.",
-    create: "Create loyalty card",
-    summaryLabel: "Loyalty card summary",
-    yourCards: "Your cards",
-    plan: "Plan",
-    cardSingular: "loyalty card",
-    cardPlural: "loyalty cards",
-    activeCardSingular: "active card included",
-    activeCardPlural: "active cards included",
-    noFixedLimit: "No fixed active-card limit",
-    currentPlan: "Current workspace plan",
-    emptyTitle: "Create your first loyalty card",
-    emptyDescription:
-      "Choose a design, customize your reward, test the customer experience, and publish when you’re ready.",
-    loading: "Loading loyalty cards…",
-    loadError:
-      "Loyalty cards could not be loaded. Your cards were not changed. Reload and try again.",
-    libraryTitle: "Your loyalty cards",
-    libraryDescription: "Open a card to review its setup, test it, or prepare the next update.",
-    visualSummary: "Design available in Studio",
-    updated: "Updated",
-    published: "Published",
-    open: "Open card",
-    loadMore: "Load more loyalty cards",
-    loadMoreAssets: "Load more design assets",
-    draftOnly: "Finish setup, test the customer experience, then publish this card.",
-    unpublishedChanges: "Unpublished changes are safely separate from the live card.",
-    live: "Live for customers. Create a draft when you’re ready to make changes.",
-    paused: "This card is paused and is not currently live for customers.",
-    archived: "This card is archived. Its setup and history remain preserved.",
-    suspended: "This card is suspended. Contact support before publishing changes.",
-    scheduled: "This card is scheduled, but scheduled publishing is not available yet.",
-    readyToTest: "The setup is ready for customer-experience testing.",
-    testing: "Customer-experience testing is in progress.",
-    moreActions: "More actions",
-    confirm: "Confirm",
-    cancel: "Cancel",
-    working: "Working…",
-    lifecycleError:
-      "The loyalty card status could not be updated. Its current status is unchanged. Try again.",
-    lifecycleDescriptions: {
-      pause: "The card will stop being live for customers until you resume it.",
-      resume: "The card will become live for customers again.",
-      archive: "The card will be archived while its setup and version history remain preserved.",
-      restore: "The card will return to its preserved state.",
-    },
-  },
-  ar: {
-    eyebrow: "بطاقات الولاء",
-    title: "بطاقات الولاء",
-    description:
-      "أنشئ وأدر بطاقات ولاء جاهزة للعملاء على الويب، مع توفر المحافظ الرقمية عند دعمها.",
-    create: "إنشاء بطاقة ولاء",
-    summaryLabel: "ملخص بطاقات الولاء",
-    yourCards: "بطاقاتك",
-    plan: "الخطة",
-    cardSingular: "بطاقة ولاء",
-    cardPlural: "بطاقات ولاء",
-    activeCardSingular: "بطاقة نشطة مشمولة",
-    activeCardPlural: "بطاقات نشطة مشمولة",
-    noFixedLimit: "بلا حد ثابت للبطاقات النشطة",
-    currentPlan: "خطة مساحة العمل الحالية",
-    emptyTitle: "أنشئ أول بطاقة ولاء",
-    emptyDescription:
-      "اختر تصميمًا، وخصّص المكافأة، واختبر تجربة العميل، ثم انشر البطاقة عندما تصبح جاهزة.",
-    loading: "جارٍ تحميل بطاقات الولاء…",
-    loadError: "تعذر تحميل بطاقات الولاء. لم تتغير بطاقاتك. أعد تحميل الصفحة وحاول مرة أخرى.",
-    libraryTitle: "بطاقات الولاء الخاصة بك",
-    libraryDescription: "افتح أي بطاقة لمراجعة إعداداتها أو اختبارها أو تحضير التحديث التالي.",
-    visualSummary: "التصميم متاح في الاستوديو",
-    updated: "آخر تحديث",
-    published: "نُشرت في",
-    open: "فتح البطاقة",
-    loadMore: "تحميل المزيد من بطاقات الولاء",
-    loadMoreAssets: "تحميل المزيد من أصول التصميم",
-    draftOnly: "أكمل الإعداد، واختبر تجربة العميل، ثم انشر هذه البطاقة.",
-    unpublishedChanges: "التغييرات غير المنشورة منفصلة بأمان عن البطاقة المباشرة.",
-    live: "البطاقة مباشرة للعملاء. أنشئ مسودة عندما تصبح مستعدًا لإجراء تغييرات.",
-    paused: "هذه البطاقة متوقفة مؤقتًا وليست مباشرة للعملاء حاليًا.",
-    archived: "هذه البطاقة مؤرشفة، مع الاحتفاظ بإعداداتها وسجلها.",
-    suspended: "هذه البطاقة موقوفة. تواصل مع الدعم قبل نشر أي تغييرات.",
-    scheduled: "هذه البطاقة مجدولة، لكن النشر المجدول غير متاح بعد.",
-    readyToTest: "أصبحت الإعدادات جاهزة لاختبار تجربة العميل.",
-    testing: "يجري الآن اختبار تجربة العميل.",
-    moreActions: "المزيد من الإجراءات",
-    confirm: "تأكيد",
-    cancel: "إلغاء",
-    working: "جارٍ التنفيذ…",
-    lifecycleError: "تعذر تحديث حالة بطاقة الولاء. حالتها الحالية لم تتغير. حاول مرة أخرى.",
-    lifecycleDescriptions: {
-      pause: "ستتوقف البطاقة عن الظهور مباشرة للعملاء حتى تستأنفها.",
-      resume: "ستعود البطاقة مباشرة للعملاء.",
-      archive: "ستُؤرشف البطاقة مع الاحتفاظ بإعداداتها وسجل إصداراتها.",
-      restore: "ستعود البطاقة إلى حالتها المحفوظة.",
-    },
-  },
-} as const;
-
-function builderFlowError(error: unknown, locale: Locale): string {
-  const ar = locale === "ar";
-  if (!(error instanceof ApiClientError))
-    return ar
-      ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
-      : "Waflo could not start this loyalty card. Try again.";
-  if (error.code === "PROGRAM_LIMIT_REACHED")
-    return ar
-      ? "وصلت إلى حد بطاقات الولاء النشطة في خطتك. أرشف بطاقة حالية أو غيّر الخطة للمتابعة."
-      : "You have reached your plan's active loyalty-card limit. Archive a card or change plan to continue.";
-  if (error.code === "PROGRAM_LOCATION_INVALID")
-    return ar
-      ? "أضف موقعًا نشطًا قبل إنشاء بطاقة ولاء."
-      : "Add an active location before creating a loyalty card.";
-  if (error.code === "PROGRAM_PRO_MODE_UNAVAILABLE" || error.code.includes("LAYOUT_UNAVAILABLE"))
-    return ar
-      ? "يتطلب هذا التصميم خطة Growth أو Scale. اختر تصميمًا آخر أو غيّر الخطة."
-      : "This design requires Growth or Scale. Choose another design or change plan.";
-  if (error.code.includes("TEMPLATE"))
-    return ar
-      ? "لم يعد هذا التصميم متاحًا. اختر تصميمًا آخر."
-      : "That design is no longer available. Choose another design.";
-  return ar
-    ? "تعذر بدء إعداد بطاقة الولاء. حاول مرة أخرى."
-    : "Waflo could not start this loyalty card. Try again.";
+function programsText(locale: InterfaceLocale) {
+  return localeRegistry[locale].messages.merchant.loyalty.programs;
 }
 
-function cardStateDescription(program: ProgramItem, locale: Locale): string {
-  const copy = loyaltyCardCopy[locale];
+function builderFlowError(error: unknown, interfaceLocale: InterfaceLocale): string {
+  const copy = programsText(interfaceLocale);
+  if (!(error instanceof ApiClientError)) return copy.couldNotStart;
+  if (error.code === "PROGRAM_LIMIT_REACHED") return copy.limitReached;
+  if (error.code === "PROGRAM_LOCATION_INVALID") return copy.locationRequired;
+  if (error.code === "PROGRAM_PRO_MODE_UNAVAILABLE" || error.code.includes("LAYOUT_UNAVAILABLE")) {
+    return copy.planRequired;
+  }
+  if (error.code.includes("TEMPLATE")) return copy.templateUnavailable;
+  return copy.couldNotStart;
+}
+function cardStateDescription(program: ProgramItem, interfaceLocale: InterfaceLocale): string {
+  const copy = programsText(interfaceLocale);
 
   if (program.status === "SUSPENDED") return copy.suspended;
   if (program.status === "ARCHIVED") return copy.archived;
@@ -217,6 +97,7 @@ function cardLifecycleActions(status: ProgramOperationalStatus): CardLifecycleAc
 }
 
 export function ProgramsScreen({
+  interfaceLocale,
   locale,
   membership,
   view = "library",
@@ -226,6 +107,7 @@ export function ProgramsScreen({
   studioArea = "overview",
   changeProgramId,
 }: {
+  interfaceLocale: InterfaceLocale;
   locale: Locale;
   membership: MembershipView;
   view?: "library" | "gallery" | "builder" | "studio";
@@ -236,8 +118,9 @@ export function ProgramsScreen({
   changeProgramId?: string;
 }) {
   const router = useRouter();
+  const interfaceDirection = directionForInterface(interfaceLocale);
   const ar = locale === "ar";
-  const copy = loyaltyCardCopy[locale];
+  const copy = programsText(interfaceLocale);
   const organizationId = membership.organization.id;
   const [programs, setPrograms] = useState<ProgramItem[]>([]);
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
@@ -246,6 +129,7 @@ export function ProgramsScreen({
   const [programCursor, setProgramCursor] = useState<string | null>(null);
   const [assetCursor, setAssetCursor] = useState<string | null>(null);
   const [businessCategory, setBusinessCategory] = useState<string | null>(null);
+  const [brandLogoUrl, setBrandLogoUrl] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(legacyCreate);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
   const [studioProgramId, setStudioProgramId] = useState<string | null>(
@@ -305,6 +189,7 @@ export function ProgramsScreen({
       setAssets(assetData.items);
       setAssetCursor(assetData.nextCursor);
       setBusinessCategory(organizationData.businessCategory);
+      setBrandLogoUrl(organizationData.brandLogoAsset?.contentUrl ?? null);
     } catch {
       setError(copy.loadError);
     } finally {
@@ -404,7 +289,7 @@ export function ProgramsScreen({
           },
         );
         await load();
-        router.push(`/${locale}/dashboard/programs/${changeProgramId}/edit`);
+        router.push(`/${interfaceLocale}/dashboard/programs/${changeProgramId}/edit`);
         return;
       }
 
@@ -426,10 +311,11 @@ export function ProgramsScreen({
         method: "POST",
         body: JSON.stringify(apiDraft(draft)),
       });
+      window.dispatchEvent(new Event("waflo:programs-changed"));
       await load();
-      router.push(`/${locale}/dashboard/programs/${created.id}/edit`);
+      router.push(`/${interfaceLocale}/dashboard/programs/${created.id}/edit`);
     } catch (caught) {
-      setBuilderError(builderFlowError(caught, locale));
+      setBuilderError(builderFlowError(caught, interfaceLocale));
     } finally {
       builderRequestRef.current = false;
       setCreatingBuilder(false);
@@ -439,6 +325,7 @@ export function ProgramsScreen({
   if (studioProgramId) {
     return (
       <ProgramStudioEditor
+        interfaceLocale={interfaceLocale}
         organizationId={organizationId}
         programId={studioProgramId}
         plan={membership.organization.selectedPlan}
@@ -448,9 +335,10 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         ar={ar}
+        canManageEngagement={membership.role !== "STAFF"}
         initialArea={studioArea}
         onAreaChange={(area, options) => {
-          const targetPath = `/${locale}/dashboard/programs/${studioProgramId}${
+          const targetPath = `/${interfaceLocale}/dashboard/programs/${studioProgramId}${
             area === "overview" ? "" : `/${area}`
           }`;
           router.push(targetPath);
@@ -473,15 +361,15 @@ export function ProgramsScreen({
         builderHandoff={view === "builder" && studioProgramId === builderProgramId}
         onClose={() => {
           setStudioProgramId(null);
-          router.push(`/${locale}/dashboard/programs`);
+          router.push(`/${interfaceLocale}/dashboard/programs`);
         }}
         onEditDesign={() => {
           const programId = studioProgramId;
           setStudioProgramId(null);
-          router.push(`/${locale}/dashboard/programs/${programId}/edit`);
+          router.push(`/${interfaceLocale}/dashboard/programs/${programId}/edit`);
         }}
-        onOpenCustomers={() => router.push(`/${locale}/dashboard/customers`)}
-        onOpenBilling={() => router.push(`/${locale}/dashboard/billing`)}
+        onOpenCustomers={() => router.push(`/${interfaceLocale}/dashboard/customers`)}
+        onOpenBilling={() => router.push(`/${interfaceLocale}/dashboard/billing`)}
         onChanged={load}
       />
     );
@@ -490,6 +378,7 @@ export function ProgramsScreen({
   if (view === "builder" && builderProgramId) {
     return (
       <ProgramCardBuilder
+        interfaceLocale={interfaceLocale}
         organizationId={organizationId}
         programId={builderProgramId}
         plan={membership.organization.selectedPlan}
@@ -500,11 +389,13 @@ export function ProgramsScreen({
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }
         locale={locale}
-        onBack={() => router.push(`/${locale}/dashboard/programs`)}
+        onBack={() => router.push(`/${interfaceLocale}/dashboard/programs`)}
         onChangeDesign={() =>
-          router.push(`/${locale}/dashboard/programs/new?changeFor=${builderProgramId}`)
+          router.push(`/${interfaceLocale}/dashboard/programs/new?changeFor=${builderProgramId}`)
         }
-        onOpenStudio={() => router.push(`/${locale}/dashboard/programs/${builderProgramId}`)}
+        onOpenStudio={() =>
+          router.push(`/${interfaceLocale}/dashboard/programs/${builderProgramId}`)
+        }
         onChanged={load}
       />
     );
@@ -554,7 +445,8 @@ export function ProgramsScreen({
       onCreated={(programId) => {
         setWizardOpen(false);
         setSelectedTemplate(null);
-        router.push(`/${locale}/dashboard/programs/${programId}`);
+        window.dispatchEvent(new Event("waflo:programs-changed"));
+        router.push(`/${interfaceLocale}/dashboard/programs/${programId}`);
         void load();
       }}
       ar={ar}
@@ -564,6 +456,7 @@ export function ProgramsScreen({
   if (view === "gallery") {
     return (
       <TemplateGallery
+        interfaceLocale={interfaceLocale}
         locale={locale}
         templates={templates}
         businessCategory={businessCategory}
@@ -573,8 +466,8 @@ export function ProgramsScreen({
         onBack={() =>
           router.push(
             changeProgramId
-              ? `/${locale}/dashboard/programs/${changeProgramId}/edit`
-              : `/${locale}/dashboard/programs`,
+              ? `/${interfaceLocale}/dashboard/programs/${changeProgramId}/edit`
+              : `/${interfaceLocale}/dashboard/programs`,
           )
         }
         onLoadPreviews={(template, presentation) =>
@@ -590,17 +483,16 @@ export function ProgramsScreen({
   return (
     <div
       className={`programs-home ${empty ? "programs-home--empty" : ""}`}
-      dir={ar ? "rtl" : "ltr"}
+      dir={interfaceDirection}
     >
       <PageHeader
-        eyebrow={copy.eyebrow}
         title={copy.title}
         description={copy.description}
         actions={
           <Button
             type="button"
             className="programs-home__header-action"
-            onClick={() => router.push(`/${locale}/dashboard/programs/new`)}
+            onClick={() => router.push(`/${interfaceLocale}/dashboard/programs/new`)}
           >
             <Plus size={17} aria-hidden="true" />
             {copy.create}
@@ -611,49 +503,35 @@ export function ProgramsScreen({
       {error ? <Alert tone="danger" title={error} /> : null}
 
       <section className="programs-home__summary" aria-label={copy.summaryLabel}>
-        <Card className="loyalty-card-summary loyalty-card-summary--count">
+        <div className="loyalty-card-summary loyalty-card-summary--count">
           <span className="dashboard-card__label">{copy.yourCards}</span>
           <div className="loyalty-card-summary__value">
             <strong>{displayedCardCount}</strong>
             <span>{cardCountNoun}</span>
           </div>
           <small>{planCapacity}</small>
-        </Card>
-        <Card className="loyalty-card-summary loyalty-card-summary--plan">
+        </div>
+        <div className="loyalty-card-summary loyalty-card-summary--plan">
           <span className="dashboard-card__label">{copy.plan}</span>
           <strong translate="no">{plan.name}</strong>
           <small>{planInclusion}</small>
-        </Card>
+        </div>
       </section>
 
       {loading ? (
-        <Card className="programs-home__loading" role="status">
+        <div className="programs-home__loading" role="status">
           <Layers3 size={24} aria-hidden="true" />
           {copy.loading}
-        </Card>
+        </div>
       ) : programs.length === 0 ? (
-        <section className="wf-card loyalty-card-empty" aria-labelledby="loyalty-card-empty-title">
-          <div className="loyalty-card-empty__preview" aria-hidden="true">
-            <div className="loyalty-card-visual__brand">
-              <span>W</span>
-              <CreditCard size={22} />
-            </div>
-            <div className="loyalty-card-visual__stamps">
-              {emptyStateStampSlots.map((filled, index) => (
-                <span
-                  className={filled ? "loyalty-card-visual__stamp--filled" : ""}
-                  key={`empty-card-stamp-${index.toString()}`}
-                />
-              ))}
-            </div>
-          </div>
+        <section className="loyalty-card-empty" aria-labelledby="loyalty-card-empty-title">
           <div className="loyalty-card-empty__content">
             <h2 id="loyalty-card-empty-title">{copy.emptyTitle}</h2>
             <p>{copy.emptyDescription}</p>
             <Button
               type="button"
               className="loyalty-card-empty__mobile-action"
-              onClick={() => router.push(`/${locale}/dashboard/programs/new`)}
+              onClick={() => router.push(`/${interfaceLocale}/dashboard/programs/new`)}
             >
               <Plus size={17} aria-hidden="true" />
               {copy.create}
@@ -670,7 +548,7 @@ export function ProgramsScreen({
           </div>
           <div className="program-list">
             {programs.map((program) => {
-              const status = merchantProgramStatus(program.status, locale);
+              const status = merchantProgramStatus(program.status, interfaceLocale);
               const lifecycleActions = cardLifecycleActions(program.status);
               const relevantDate =
                 program.currentDraftVersion || !program.currentPublishedVersion
@@ -680,29 +558,32 @@ export function ProgramsScreen({
                 program.currentDraftVersion || !program.currentPublishedVersion
                   ? copy.updated
                   : copy.published;
+              const version = program.currentDraftVersion ?? program.currentPublishedVersion;
+              const theme = version?.visualTheme;
+              const translation = version?.translations?.find(
+                (item) => item.locale === (ar ? "AR" : "EN"),
+              );
+              const logoUrl = theme?.logoAssetId
+                ? `/v1/organizations/${organizationId}/assets/${theme.logoAssetId}/content?variant=THUMBNAIL_96`
+                : brandLogoUrl;
 
               return (
                 <article className="wf-card program-list__card" key={program.id}>
-                  <div
-                    className="loyalty-card-visual loyalty-card-visual--summary"
-                    role="img"
-                    aria-label={`${copy.visualSummary}: ${program.internalName}`}
-                  >
-                    <div className="loyalty-card-visual__brand">
-                      <span>{program.internalName.charAt(0).toLocaleUpperCase(locale)}</span>
-                      <Layers3 size={22} aria-hidden="true" />
-                    </div>
-                    <div className="loyalty-card-visual__summary-copy">
-                      <small>{copy.visualSummary}</small>
-                      <strong>{program.internalName}</strong>
-                    </div>
-                  </div>
+                  <LoyaltyCardRealPreview
+                    programName={translation?.programName ?? program.internalName}
+                    internalName={program.internalName}
+                    requiredStampCount={version?.stampRule?.requiredStampCount ?? 8}
+                    rewardSummary={translation?.rewardSummary ?? copy.visualSummary}
+                    visualTheme={theme}
+                    locale={locale}
+                    brandLogoUrl={logoUrl}
+                  />
                   <div className="program-list__content">
                     <div className="program-list__heading">
                       <h3>{program.internalName}</h3>
                       <Badge tone={status.tone}>{status.label}</Badge>
                     </div>
-                    <p>{cardStateDescription(program, locale)}</p>
+                    <p>{cardStateDescription(program, interfaceLocale)}</p>
                     <div className="program-list__footer">
                       {relevantDate ? (
                         <span>
@@ -745,14 +626,16 @@ export function ProgramsScreen({
                               {action === "restore" ? (
                                 <RotateCcw size={17} aria-hidden="true" />
                               ) : null}
-                              {merchantProgramLifecycleLabel(action, locale)}
+                              {merchantProgramLifecycleLabel(action, interfaceLocale)}
                             </button>
                           ))}
                         </DropdownMenu>
                         <Button
                           type="button"
                           aria-label={`${copy.open}: ${program.internalName}`}
-                          onClick={() => router.push(`/${locale}/dashboard/programs/${program.id}`)}
+                          onClick={() =>
+                            router.push(`/${interfaceLocale}/dashboard/programs/${program.id}`)
+                          }
                         >
                           {copy.open}
                           <ArrowRight
@@ -790,7 +673,7 @@ export function ProgramsScreen({
         open={Boolean(lifecycleConfirmation)}
         title={
           lifecycleConfirmation
-            ? merchantProgramLifecycleLabel(lifecycleConfirmation.action, locale)
+            ? merchantProgramLifecycleLabel(lifecycleConfirmation.action, interfaceLocale)
             : ""
         }
         description={

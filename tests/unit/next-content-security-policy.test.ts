@@ -6,7 +6,6 @@ import { createNextContentSecurityPolicy } from "../../packages/security/src/ind
 
 const originalNodeEnvironment = process.env.NODE_ENV;
 const originalPublicApiUrl = process.env.NEXT_PUBLIC_API_URL;
-// biome-ignore lint/suspicious/noUndeclaredEnvVars: P6 exercises an explicit local-only production smoke switch without changing provenance-bound turbo.json.
 const originalLocalProductionSmoke = process.env.WAFLO_LOCAL_PRODUCTION_SMOKE;
 
 const applicationConfigs = [
@@ -29,7 +28,6 @@ afterEach(() => {
   else process.env.NODE_ENV = originalNodeEnvironment;
   if (originalPublicApiUrl === undefined) delete process.env.NEXT_PUBLIC_API_URL;
   else process.env.NEXT_PUBLIC_API_URL = originalPublicApiUrl;
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: restore the local-only smoke switch after each configuration test.
   if (originalLocalProductionSmoke === undefined) delete process.env.WAFLO_LOCAL_PRODUCTION_SMOKE;
   else process.env.WAFLO_LOCAL_PRODUCTION_SMOKE = originalLocalProductionSmoke;
 });
@@ -79,6 +77,33 @@ describe("Next.js Content-Security-Policy", () => {
     expectPreservedSecurityDirectives(policy);
   });
 
+  it("allows Stripe.js only when the embedded payment surface opts in", () => {
+    const policy = createNextContentSecurityPolicy("production", { stripeJs: true });
+
+    expect(policy).toContain(
+      "frame-src 'self' https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com",
+    );
+    expect(policy).toContain(
+      "script-src 'self' 'unsafe-inline' https://*.js.stripe.com https://js.stripe.com",
+    );
+    expect(policy).toContain("connect-src 'self' https://api.stripe.com https://api.waflo.app");
+    expect(policy).not.toContain("https://*.stripe.com");
+    expect(policy).not.toContain("https://checkout.stripe.com");
+    expectPreservedSecurityDirectives(policy);
+  });
+
+  it("allows only the Mapbox map/search endpoints and a blob worker when the picker opts in", () => {
+    const policy = createNextContentSecurityPolicy("production", { mapboxGl: true });
+
+    expect(policy).toContain("worker-src 'self' blob:");
+    expect(policy).toContain("https://api.mapbox.com");
+    expect(policy).toContain("https://events.mapbox.com");
+    expect(policy).not.toContain("api.mapbox.cn");
+    expect(policy).not.toContain("*.mapbox.com");
+    expect(policy).not.toContain("'unsafe-eval'");
+    expectPreservedSecurityDirectives(policy);
+  });
+
   it.each(["production", "test", undefined])(
     "keeps the shared policy strict for NODE_ENV=%s",
     (nodeEnvironment) => {
@@ -99,8 +124,29 @@ describe("Next.js Content-Security-Policy", () => {
     const policy = await contentSecurityPolicyFor(dashboardConfig, "production");
 
     expect(policy).toContain("connect-src 'self'");
-    expect(policy).toContain(" http://localhost:4000 https://api.waflo.app");
+    expect(policy).toContain(" http://localhost:4000");
+    expect(policy).toContain("img-src 'self' data: blob: http://localhost:4000");
+    expect(policy).not.toContain("https://api.waflo.app");
     expect(policy).not.toContain("'unsafe-eval'");
+  });
+
+  it("allows merchant-hosted image assets only from the validated API origin", () => {
+    const policy = createNextContentSecurityPolicy("production", {
+      apiUrl: "https://api-staging.waflo.app/v1",
+    });
+
+    expect(policy).toContain("img-src 'self' data: blob: https://api-staging.waflo.app");
+    expect(policy).not.toContain("https://api.waflo.app");
+  });
+
+  it("binds Customer Web to its configured staging API instead of the production fallback", async () => {
+    process.env.NEXT_PUBLIC_API_URL = "https://api-staging.waflo.app/v1";
+
+    const policy = await contentSecurityPolicyFor(customerConfig, "production");
+
+    expect(policy).toContain("connect-src 'self' https://api-staging.waflo.app");
+    expect(policy).toContain("img-src 'self' data: blob: https://api-staging.waflo.app");
+    expect(policy).not.toContain("https://api.waflo.app");
   });
 
   it("rejects unsafe or malformed configured API origins", () => {
@@ -139,6 +185,17 @@ describe("Next.js Content-Security-Policy", () => {
       } else {
         expect(productionPolicy).toContain("https://fonts.googleapis.com");
         expect(productionPolicy).toContain("https://fonts.gstatic.com");
+      }
+      if (applicationName === "merchant-dashboard") {
+        expect(productionPolicy).toContain("https://js.stripe.com");
+        expect(productionPolicy).toContain("https://hooks.stripe.com");
+        expect(productionPolicy).toContain("https://api.mapbox.com");
+        expect(productionPolicy).toContain("worker-src 'self' blob:");
+        expect(productionPolicy).toContain("https://api.stripe.com");
+      } else {
+        expect(productionPolicy).not.toContain("https://js.stripe.com");
+        expect(productionPolicy).not.toContain("https://hooks.stripe.com");
+        expect(productionPolicy).not.toContain("https://api.stripe.com");
       }
     });
   }

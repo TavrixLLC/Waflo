@@ -1,24 +1,28 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  createPrivateKey,
-  randomBytes,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { hashOpaqueToken, normalizeEmail, verifyPassword } from "@waflo/auth";
-import type { ExternalIdentityProvider, Locale } from "@waflo/database";
-import { createRemoteJWKSet, importPKCS8, jwtVerify, SignJWT, type JWTPayload } from "jose";
+import { hashOpaqueToken, normalizeEmail } from "@waflo/auth";
+import { type ExternalIdentityProvider, type Locale, type Prisma } from "@waflo/database";
+import {
+  APPLE_IDENTITY_ISSUER,
+  createAppleClientSecret,
+  createExternalAuthTokenKeyring,
+  type ExternalAuthTokenKeyring,
+  encryptExternalAuthToken,
+  resolveApplePrivateKey,
+} from "@waflo/external-auth-security";
+import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { revokeStaffAccessForUser } from "../staff-devices/staff-device-lifecycle.js";
 import { AuthService } from "./auth.service.js";
+import { requireSensitiveReauthentication } from "./sensitive-reauthentication.js";
 
 type PublicProvider = "google" | "apple";
-type CapabilityStatus = "AVAILABLE" | "NOT_CONFIGURED";
+type CapabilityStatus = "AVAILABLE" | "NOT_CONFIGURED" | "REMOVED";
 
 interface VerifiedIdentity {
   issuer: string;
@@ -26,17 +30,26 @@ interface VerifiedIdentity {
   email: string | null;
   emailVerified: boolean;
   displayName: string | null;
+  appleTokens?: AppleTokenMaterial | undefined;
+}
+
+interface AppleTokenMaterial {
+  accessToken: string;
+  accessTokenExpiresAt: Date;
+  refreshToken: string | null;
 }
 
 interface CompletionInput {
   provider: PublicProvider;
   state: string;
   code: string;
+  browserBinding: string;
   appleUser?: string | undefined;
 }
 
 const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"] as const;
-const APPLE_ISSUER = "https://appleid.apple.com";
+const GOOGLE_CANONICAL_ISSUER = "https://accounts.google.com";
+const APPLE_ISSUER = APPLE_IDENTITY_ISSUER;
 const GOOGLE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
 const APPLE_JWKS = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"));
 
@@ -45,7 +58,7 @@ function providerCode(provider: PublicProvider): ExternalIdentityProvider {
 }
 
 function safeDisplayName(identity: VerifiedIdentity): string {
-  const supplied = identity.displayName?.trim().slice(0, 100);
+  const supplied = identity.displayName?.trim().normalize("NFKC").slice(0, 100);
   if (supplied && supplied.length >= 2) return supplied;
   return identity.email?.split("@")[0]?.slice(0, 100) || "Waflo merchant";
 }
@@ -66,9 +79,9 @@ export class ExternalAuthService {
   publicCapabilities() {
     return {
       googleSignIn: this.providerStatus("google"),
-      appleSignIn: this.providerStatus("apple"),
+      appleSignIn: "REMOVED" as const,
       googleSignInAvailable: this.providerStatus("google") === "AVAILABLE",
-      appleSignInAvailable: this.providerStatus("apple") === "AVAILABLE",
+      appleSignInAvailable: false,
     };
   }
 
@@ -83,22 +96,13 @@ export class ExternalAuthService {
         ? "AVAILABLE"
         : "NOT_CONFIGURED";
     }
-    return this.environment.values.APPLE_SIGNIN_CLIENT_ID &&
-      this.environment.values.APPLE_SIGNIN_TEAM_ID &&
-      this.environment.values.APPLE_SIGNIN_KEY_ID &&
-      this.applePrivateKey() &&
-      this.validCallback(
-        this.environment.values.APPLE_SIGNIN_REDIRECT_URI,
-        "/v1/auth/external/apple/callback",
-      )
-      ? "AVAILABLE"
-      : "NOT_CONFIGURED";
+    return "REMOVED";
   }
 
   async verifyProviderReachability(provider: PublicProvider): Promise<void> {
     this.requireConfigured(provider);
     if (provider === "apple") {
-      await importPKCS8(this.applePrivateKey() ?? "", "ES256");
+      await this.appleClientSecret();
     }
     const endpoint =
       provider === "google"
@@ -135,6 +139,7 @@ export class ExternalAuthService {
       reauthenticatedSessionId?: string | undefined;
     },
   ) {
+    if (provider === "apple") this.appleSignInRemoved();
     this.requireConfigured(provider);
     if (input.allowRegistration && !input.legalAccepted) {
       throw new AppError(
@@ -146,29 +151,44 @@ export class ExternalAuthService {
     const state = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
     const verifier = randomBytes(48).toString("base64url");
+    const browserBinding = randomBytes(32).toString("base64url");
     const challenge = createHash("sha256").update(verifier, "ascii").digest("base64url");
     const locale: Locale = input.locale === "ar" ? "AR" : "EN";
+    const expiresAt = new Date(
+      Date.now() + this.environment.values.OAUTH_FLOW_TTL_MINUTES * 60 * 1000,
+    );
     await this.prisma.client.oAuthAuthorizationRequest.create({
       data: {
         stateHash: hashOpaqueToken(state),
         provider: providerCode(provider),
-        intent: input.linkUserId ? "LINK" : "SIGN_IN",
+        intent: input.linkUserId ? "LINK" : input.allowRegistration ? "SIGN_UP" : "SIGN_IN",
         userId: input.linkUserId ?? null,
         reauthenticatedSessionId: input.reauthenticatedSessionId ?? null,
         nonceHash: hashOpaqueToken(nonce),
+        browserBindingHash: hashOpaqueToken(browserBinding),
         codeVerifierCiphertext: this.encryptVerifier(verifier),
         allowRegistration: input.allowRegistration,
+        termsVersion: input.allowRegistration ? this.environment.values.LEGAL_TERMS_VERSION : null,
+        privacyVersion: input.allowRegistration
+          ? this.environment.values.LEGAL_PRIVACY_VERSION
+          : null,
+        legalAcceptedAt: input.allowRegistration ? new Date() : null,
         locale,
-        expiresAt: new Date(
-          Date.now() + this.environment.values.OAUTH_FLOW_TTL_MINUTES * 60 * 1000,
-        ),
+        expiresAt,
       },
     });
     const authorizationUrl =
       provider === "google"
         ? this.googleAuthorizationUrl(state, nonce, challenge)
-        : this.appleAuthorizationUrl(state, nonce, challenge);
-    return { authorizationUrl };
+        : this.appleAuthorizationUrl(state, nonce);
+    return {
+      authorizationUrl,
+      browserBinding: {
+        cookieName: this.browserBindingCookieName(provider, state),
+        value: browserBinding,
+        expiresAt,
+      },
+    };
   }
 
   async startLink(
@@ -178,27 +198,50 @@ export class ExternalAuthService {
     currentPassword: string,
     locale: "en" | "ar",
   ) {
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    const recentSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !(await verifyPassword(user.passwordHash, currentPassword))
-        : !recentSession
-    ) {
+    if (provider === "apple") this.appleSignInRemoved();
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId,
+      currentPassword,
+      message: "Re-enter your password before linking an identity.",
+    });
+    return this.start(provider, {
+      locale,
+      allowRegistration: false,
+      legalAccepted: false,
+      linkUserId: userId,
+      reauthenticatedSessionId: sessionId,
+    });
+  }
+
+  async startReauthentication(
+    provider: PublicProvider,
+    userId: string,
+    sessionId: string,
+    locale: "en" | "ar",
+  ) {
+    if (provider === "apple") this.appleSignInRemoved();
+    const [identity, session] = await Promise.all([
+      this.prisma.client.externalIdentity.findUnique({
+        where: { userId_provider: { userId, provider: providerCode(provider) } },
+        select: { id: true },
+      }),
+      this.prisma.client.session.findFirst({
+        where: { id: sessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
+        select: { id: true },
+      }),
+    ]);
+    if (!identity) {
+      throw new AppError(
+        "IDENTITY_NOT_LINKED",
+        "Connect this sign-in method before using it for verification.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (!session) {
       throw new AppError(
         "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password before linking an identity.",
+        "Sign in again before continuing.",
         HttpStatus.FORBIDDEN,
       );
     }
@@ -213,7 +256,8 @@ export class ExternalAuthService {
 
   async complete(input: CompletionInput, request: WafloRequest) {
     this.requireConfigured(input.provider);
-    const flow = await this.consumeFlow(input.provider, input.state);
+    const flow = await this.consumeFlow(input.provider, input.state, input.browserBinding);
+    if (!input.code) this.invalidFlow();
     if (flow.intent === "LINK") {
       await this.assertLinkAuthorization(flow.userId, flow.reauthenticatedSessionId);
     }
@@ -226,12 +270,7 @@ export class ExternalAuthService {
               this.decryptVerifier(flow.codeVerifierCiphertext),
               flow,
             )
-          : await this.exchangeApple(
-              input.code,
-              this.decryptVerifier(flow.codeVerifierCiphertext),
-              flow,
-              input.appleUser,
-            );
+          : await this.exchangeApple(input.code, flow, input.appleUser);
     } catch (error) {
       await this.audit.security(
         {
@@ -251,16 +290,26 @@ export class ExternalAuthService {
           );
     }
 
-    const user =
+    const linkedIdentity =
       flow.intent === "LINK"
         ? await this.linkIdentity(flow.userId, flow.provider, identity, request)
-        : await this.signInIdentity(
-            flow.allowRegistration,
-            flow.provider,
-            identity,
-            flow.locale,
-            request,
-          );
+        : null;
+    const user = linkedIdentity
+      ? linkedIdentity.user
+      : await this.signInIdentity(
+          flow.intent === "SIGN_UP",
+          flow.provider,
+          identity,
+          flow.locale,
+          flow.intent === "SIGN_UP"
+            ? {
+                termsVersion: flow.termsVersion,
+                privacyVersion: flow.privacyVersion,
+                acceptedAt: flow.legalAcceptedAt,
+              }
+            : null,
+          request,
+        );
     const session = await this.auth.createSession(
       user.id,
       request,
@@ -269,13 +318,23 @@ export class ExternalAuthService {
     if (flow.intent === "LINK" && flow.reauthenticatedSessionId) {
       await this.prisma.client.session.updateMany({
         where: { id: flow.reauthenticatedSessionId, userId: user.id, revokedAt: null },
-        data: { revokedAt: new Date(), revocationReason: "external_identity_link_rotation" },
+        data: {
+          revokedAt: new Date(),
+          revocationReason: linkedIdentity?.identityCreated
+            ? "external_identity_link_rotation"
+            : "external_identity_reauthentication",
+        },
       });
     }
     await this.audit.record(
       {
         actorUserId: user.id,
-        action: flow.intent === "LINK" ? "external_identity.linked" : "external_login.succeeded",
+        action:
+          flow.intent !== "LINK"
+            ? "external_login.succeeded"
+            : linkedIdentity?.identityCreated
+              ? "external_identity.linked"
+              : "external_identity.reauthenticated",
         targetType: "user",
         targetId: user.id,
         metadata: { provider: flow.provider },
@@ -285,10 +344,147 @@ export class ExternalAuthService {
     return { session, locale: flow.locale === "AR" ? "ar" : "en" } as const;
   }
 
+  async handleAppleNotification(payload: string, request: WafloRequest) {
+    // Apple authentication is removed, but Apple can still send lifecycle
+    // notifications for historical identities. Keep that cleanup channel
+    // available without re-enabling sign-in or account linking.
+    if (!this.environment.values.APPLE_SIGNIN_CLIENT_ID) {
+      throw new AppError(
+        "APPLE_NOTIFICATION_NOT_CONFIGURED",
+        "Apple identity cleanup is temporarily unavailable.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    if (!payload || payload.length > 32_768) this.providerFailure();
+    const verified = await jwtVerify(payload, this.appleJwks, {
+      issuer: APPLE_ISSUER,
+      audience: this.environment.values.APPLE_SIGNIN_CLIENT_ID as string,
+      algorithms: ["RS256"],
+      clockTolerance: 60,
+      maxTokenAge: "7 days",
+    }).catch(() => this.providerFailure());
+    const events = verified.payload.events;
+    if (!events || typeof events !== "object" || Array.isArray(events)) this.providerFailure();
+    const value = events as Record<string, unknown>;
+    const eventType = value.type;
+    const providerSubject = value.sub;
+    const eventTimeSeconds = value.event_time;
+    const notificationId = verified.payload.jti;
+    if (
+      !["email-enabled", "email-disabled", "consent-revoked", "account-deleted"].includes(
+        String(eventType),
+      ) ||
+      typeof providerSubject !== "string" ||
+      providerSubject.length < 1 ||
+      providerSubject.length > 255 ||
+      typeof eventTimeSeconds !== "number" ||
+      !Number.isFinite(eventTimeSeconds) ||
+      typeof notificationId !== "string" ||
+      notificationId.length < 1 ||
+      notificationId.length > 255
+    ) {
+      this.providerFailure();
+    }
+    const eventTime = new Date(eventTimeSeconds * 1_000);
+    if (
+      Number.isNaN(eventTime.getTime()) ||
+      eventTime.getTime() > Date.now() + 60_000 ||
+      eventTime.getTime() < Date.now() - 7 * 24 * 60 * 60 * 1_000
+    ) {
+      this.providerFailure();
+    }
+    let notificationEmail: string | null = null;
+    if (typeof value.email === "string" && value.email.length <= 254) {
+      try {
+        notificationEmail = normalizeEmail(value.email);
+      } catch {
+        this.providerFailure();
+      }
+    }
+    if ((eventType === "email-enabled" || eventType === "email-disabled") && !notificationEmail) {
+      this.providerFailure();
+    }
+    try {
+      return await this.prisma.client.$transaction(async (transaction) => {
+        const duplicate = await transaction.appleServerNotification.findUnique({
+          where: { notificationId },
+          select: { id: true },
+        });
+        if (duplicate) return { status: "duplicate" as const };
+        await transaction.appleServerNotification.create({
+          data: {
+            notificationId,
+            eventType: String(eventType),
+            providerSubject,
+            eventTime,
+            processedAt: new Date(),
+          },
+        });
+        const identity = await transaction.externalIdentity.findUnique({
+          where: {
+            provider_issuer_providerSubject: {
+              provider: "APPLE",
+              issuer: APPLE_ISSUER,
+              providerSubject,
+            },
+          },
+          include: { user: { include: { externalIdentities: true } } },
+        });
+        if (!identity) return { status: "processed" as const };
+        if (eventType === "email-enabled" || eventType === "email-disabled") {
+          await transaction.externalIdentity.update({
+            where: { id: identity.id },
+            data: {
+              emailForwardingEnabled: eventType === "email-enabled",
+              ...(eventType === "email-enabled" && notificationEmail
+                ? { providerEmail: notificationEmail }
+                : {}),
+            },
+          });
+        } else {
+          const now = new Date();
+          await transaction.session.updateMany({
+            where: { userId: identity.userId, revokedAt: null },
+            data: { revokedAt: now, revocationReason: "apple_authorization_revoked" },
+          });
+          await transaction.oAuthAuthorizationRequest.updateMany({
+            where: { userId: identity.userId, provider: "APPLE", consumedAt: null },
+            data: { consumedAt: now },
+          });
+          await transaction.externalIdentity.delete({ where: { id: identity.id } });
+          if (!identity.user.passwordHash && identity.user.externalIdentities.length <= 1) {
+            await transaction.user.update({
+              where: { id: identity.userId },
+              data: { status: "DEACTIVATED", deactivatedAt: now },
+            });
+            await revokeStaffAccessForUser(transaction, identity.userId, now);
+          }
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              action: "external_identity.apple_authorization_revoked",
+              targetType: "user",
+              targetId: identity.userId,
+              metadata: { eventType },
+            },
+            request,
+          );
+        }
+        return { status: "processed" as const };
+      });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+        return { status: "duplicate" as const };
+      }
+      throw error;
+    }
+  }
+
   async identities(userId: string) {
     const user = await this.prisma.client.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
+        email: true,
         passwordHash: true,
         externalIdentities: {
           select: { provider: true, providerEmail: true, createdAt: true, lastUsedAt: true },
@@ -297,6 +493,7 @@ export class ExternalAuthService {
       },
     });
     return {
+      accountEmail: user.email,
       passwordEnabled: Boolean(user.passwordHash),
       identities: user.externalIdentities,
     };
@@ -328,36 +525,19 @@ export class ExternalAuthService {
         HttpStatus.CONFLICT,
       );
     }
-    const recentExternalSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !currentPassword || !(await verifyPassword(user.passwordHash, currentPassword))
-        : !recentExternalSession
-    ) {
-      throw new AppError(
-        "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password before disconnecting this identity.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId,
+      currentPassword,
+      message: "Re-enter your password before disconnecting this identity.",
+    });
     const unlinked = await withInvariantLock(
       this.prisma.client,
       `user-auth-lifecycle:${userId}`,
       async (transaction) => {
         const current = await transaction.user.findUniqueOrThrow({
           where: { id: userId },
-          include: { externalIdentities: true },
+          include: { externalIdentities: { include: { appleCredential: true } } },
         });
         const currentTarget = current.externalIdentities.find(
           (item) => item.provider === providerCode(provider),
@@ -374,6 +554,15 @@ export class ExternalAuthService {
             "FINAL_AUTH_METHOD",
             "Add another sign-in method before disconnecting this one.",
             HttpStatus.CONFLICT,
+          );
+        }
+        if (currentTarget.provider === "APPLE" && currentTarget.appleCredential) {
+          await this.enqueueAppleRevocation(
+            transaction,
+            currentTarget.id,
+            currentTarget.appleCredential,
+            "UNLINK",
+            `unlink:${currentTarget.id}`,
           );
         }
         await transaction.externalIdentity.delete({ where: { id: currentTarget.id } });
@@ -393,8 +582,51 @@ export class ExternalAuthService {
     return { status: "unlinked" as const };
   }
 
-  private async consumeFlow(provider: PublicProvider, state: string) {
-    if (!/^[A-Za-z0-9_-]{40,100}$/.test(state)) this.invalidFlow();
+  private async enqueueAppleRevocation(
+    transaction: Prisma.TransactionClient,
+    externalIdentityId: string,
+    credential: {
+      refreshTokenEncrypted: string | null;
+      refreshTokenKeyVersion: number | null;
+      accessTokenEncrypted: string | null;
+      accessTokenKeyVersion: number | null;
+    },
+    reason: "UNLINK" | "ACCOUNT_DELETION",
+    idempotencyKey: string,
+  ) {
+    const refreshUsable = credential.refreshTokenEncrypted && credential.refreshTokenKeyVersion;
+    const tokenEncrypted = refreshUsable
+      ? credential.refreshTokenEncrypted
+      : credential.accessTokenEncrypted;
+    const tokenKeyVersion = refreshUsable
+      ? credential.refreshTokenKeyVersion
+      : credential.accessTokenKeyVersion;
+    if (!tokenEncrypted || !tokenKeyVersion) return;
+    await transaction.appleTokenRevocationJob.upsert({
+      where: { idempotencyKey },
+      create: {
+        idempotencyKey,
+        encryptionContextId: externalIdentityId,
+        tokenEncrypted,
+        tokenKeyVersion,
+        tokenType: refreshUsable ? "REFRESH_TOKEN" : "ACCESS_TOKEN",
+        reason,
+      },
+      update: {},
+    });
+  }
+
+  browserBindingCookieName(provider: PublicProvider, state: string): string {
+    const flowId = createHash("sha256").update(state, "utf8").digest("base64url").slice(0, 24);
+    const prefix =
+      this.environment.values.DEPLOYMENT_ENVIRONMENT === "development" ? "" : "__Secure-";
+    return `${prefix}waflo_oauth_${provider === "google" ? "g" : "a"}_${flowId}`;
+  }
+
+  private async consumeFlow(provider: PublicProvider, state: string, browserBinding: string) {
+    if (!/^[A-Za-z0-9_-]{40,100}$/.test(state) || !/^[A-Za-z0-9_-]{40,100}$/.test(browserBinding)) {
+      this.invalidFlow();
+    }
     const now = new Date();
     return this.prisma.client.$transaction(async (transaction) => {
       const flow = await transaction.oAuthAuthorizationRequest.findUnique({
@@ -402,7 +634,12 @@ export class ExternalAuthService {
       });
       if (!flow || flow.provider !== providerCode(provider)) this.invalidFlow();
       const claimed = await transaction.oAuthAuthorizationRequest.updateMany({
-        where: { id: flow.id, consumedAt: null, expiresAt: { gt: now } },
+        where: {
+          id: flow.id,
+          browserBindingHash: hashOpaqueToken(browserBinding),
+          consumedAt: null,
+          expiresAt: { gt: now },
+        },
         data: { consumedAt: now },
       });
       if (claimed.count !== 1) this.invalidFlow();
@@ -429,10 +666,15 @@ export class ExternalAuthService {
   }
 
   private async signInIdentity(
-    allowRegistration: boolean,
+    signup: boolean,
     provider: ExternalIdentityProvider,
     identity: VerifiedIdentity,
     locale: Locale,
+    legalAcceptance: {
+      termsVersion: string | null;
+      privacyVersion: string | null;
+      acceptedAt: Date | null;
+    } | null,
     request: WafloRequest,
   ) {
     const existingIdentity = await this.prisma.client.externalIdentity.findUnique({
@@ -446,25 +688,42 @@ export class ExternalAuthService {
       include: { user: true },
     });
     if (existingIdentity) {
-      if (existingIdentity.user.status !== "ACTIVE") this.deniedIdentity();
-      return this.prisma.client.user.update({
-        where: { id: existingIdentity.userId },
-        data: {
-          lastLoginAt: new Date(),
-          externalIdentities: {
-            update: {
-              where: { id: existingIdentity.id },
-              data: {
-                ...(identity.email !== null ? { providerEmail: identity.email } : {}),
-                emailVerified: identity.emailVerified,
-                lastUsedAt: new Date(),
+      if (
+        existingIdentity.user.status !== "ACTIVE" ||
+        !existingIdentity.user.interactiveLoginAllowed
+      ) {
+        this.deniedIdentity();
+      }
+      return this.prisma.client.$transaction(async (transaction) => {
+        if (identity.appleTokens) {
+          await this.upsertAppleCredential(transaction, existingIdentity.id, identity.appleTokens);
+        }
+        return transaction.user.update({
+          where: { id: existingIdentity.userId },
+          data: {
+            lastLoginAt: new Date(),
+            externalIdentities: {
+              update: {
+                where: { id: existingIdentity.id },
+                data: {
+                  ...(identity.email !== null ? { providerEmail: identity.email } : {}),
+                  emailVerified: identity.emailVerified,
+                  lastUsedAt: new Date(),
+                },
               },
             },
           },
-        },
+        });
       });
     }
-    if (!allowRegistration || !identity.email || !identity.emailVerified) {
+    if (!signup) this.noAccountIdentity();
+    if (
+      !identity.email ||
+      !identity.emailVerified ||
+      !legalAcceptance?.termsVersion ||
+      !legalAcceptance.privacyVersion ||
+      !legalAcceptance.acceptedAt
+    ) {
       this.deniedIdentity();
     }
     const normalizedEmail = normalizeEmail(identity.email);
@@ -482,6 +741,10 @@ export class ExternalAuthService {
       this.deniedIdentity();
     }
     const now = new Date();
+    const externalIdentityId = randomUUID();
+    const appleCredential = identity.appleTokens
+      ? this.encryptAppleTokenMaterial(externalIdentityId, identity.appleTokens, true)
+      : null;
     return this.prisma.client.user.create({
       data: {
         displayName: safeDisplayName(identity),
@@ -490,17 +753,25 @@ export class ExternalAuthService {
         emailVerifiedAt: now,
         passwordHash: null,
         preferredLocale: locale,
-        termsVersion: this.environment.values.LEGAL_TERMS_VERSION,
-        privacyVersion: this.environment.values.LEGAL_PRIVACY_VERSION,
-        legalAcceptedAt: now,
+        termsVersion: legalAcceptance.termsVersion,
+        privacyVersion: legalAcceptance.privacyVersion,
+        legalAcceptedAt: legalAcceptance.acceptedAt,
         lastLoginAt: now,
         externalIdentities: {
           create: {
+            id: externalIdentityId,
             provider,
             issuer: identity.issuer,
             providerSubject: identity.subject,
             providerEmail: identity.email,
             emailVerified: identity.emailVerified,
+            ...(appleCredential
+              ? {
+                  appleCredential: {
+                    create: appleCredential,
+                  },
+                }
+              : {}),
           },
         },
       },
@@ -519,7 +790,7 @@ export class ExternalAuthService {
       `user-auth-lifecycle:${userId}`,
       async (transaction) => {
         const user = await transaction.user.findUniqueOrThrow({ where: { id: userId } });
-        if (user.status !== "ACTIVE") this.deniedIdentity();
+        if (user.status !== "ACTIVE" || !user.interactiveLoginAllowed) this.deniedIdentity();
         const attached = await transaction.externalIdentity.findUnique({
           where: {
             provider_issuer_providerSubject: {
@@ -541,18 +812,42 @@ export class ExternalAuthService {
           );
         }
         if (!attached) {
+          const externalIdentityId = randomUUID();
+          const appleCredential = identity.appleTokens
+            ? this.encryptAppleTokenMaterial(externalIdentityId, identity.appleTokens, true)
+            : null;
           await transaction.externalIdentity.create({
             data: {
+              id: externalIdentityId,
               userId,
               provider,
               issuer: identity.issuer,
               providerSubject: identity.subject,
               providerEmail: identity.email,
               emailVerified: identity.emailVerified,
+              ...(appleCredential
+                ? {
+                    appleCredential: {
+                      create: appleCredential,
+                    },
+                  }
+                : {}),
             },
           });
+        } else {
+          await transaction.externalIdentity.update({
+            where: { id: attached.id },
+            data: {
+              ...(identity.email !== null ? { providerEmail: identity.email } : {}),
+              emailVerified: identity.emailVerified,
+              lastUsedAt: new Date(),
+            },
+          });
+          if (identity.appleTokens) {
+            await this.upsertAppleCredential(transaction, attached.id, identity.appleTokens);
+          }
         }
-        return { user, conflict: false } as const;
+        return { user, conflict: false, identityCreated: !attached } as const;
       },
     );
     if (result.conflict) {
@@ -567,7 +862,71 @@ export class ExternalAuthService {
       );
       this.deniedIdentity();
     }
-    return result.user;
+    return { user: result.user, identityCreated: result.identityCreated };
+  }
+
+  private encryptAppleTokenMaterial(
+    externalIdentityId: string,
+    tokens: AppleTokenMaterial,
+    requireRefreshToken: boolean,
+  ) {
+    if (requireRefreshToken && !tokens.refreshToken) this.providerFailure();
+    const keyring = this.externalAuthTokenKeyring();
+    if (!keyring) this.providerFailure();
+    const access = encryptExternalAuthToken(tokens.accessToken, {
+      contextId: externalIdentityId,
+      purpose: "apple-access-token",
+      keyring,
+    });
+    const refresh = tokens.refreshToken
+      ? encryptExternalAuthToken(tokens.refreshToken, {
+          contextId: externalIdentityId,
+          purpose: "apple-refresh-token",
+          keyring,
+        })
+      : null;
+    return {
+      refreshTokenEncrypted: refresh?.serialized ?? null,
+      refreshTokenKeyVersion: refresh?.keyVersion ?? null,
+      accessTokenEncrypted: access.serialized,
+      accessTokenKeyVersion: access.keyVersion,
+      accessTokenExpiresAt: tokens.accessTokenExpiresAt,
+    };
+  }
+
+  private async upsertAppleCredential(
+    transaction: Prisma.TransactionClient,
+    externalIdentityId: string,
+    tokens: AppleTokenMaterial,
+  ) {
+    const existing = await transaction.appleAuthorizationCredential.findUnique({
+      where: { externalIdentityId },
+    });
+    const encrypted = this.encryptAppleTokenMaterial(
+      externalIdentityId,
+      tokens,
+      !existing?.refreshTokenEncrypted,
+    );
+    if (existing) {
+      await transaction.appleAuthorizationCredential.update({
+        where: { id: existing.id },
+        data: {
+          accessTokenEncrypted: encrypted.accessTokenEncrypted,
+          accessTokenKeyVersion: encrypted.accessTokenKeyVersion,
+          accessTokenExpiresAt: encrypted.accessTokenExpiresAt,
+          ...(encrypted.refreshTokenEncrypted
+            ? {
+                refreshTokenEncrypted: encrypted.refreshTokenEncrypted,
+                refreshTokenKeyVersion: encrypted.refreshTokenKeyVersion,
+              }
+            : {}),
+        },
+      });
+      return;
+    }
+    await transaction.appleAuthorizationCredential.create({
+      data: { externalIdentityId, ...encrypted },
+    });
   }
 
   private googleAuthorizationUrl(state: string, nonce: string, challenge: string) {
@@ -587,7 +946,7 @@ export class ExternalAuthService {
     return url.toString();
   }
 
-  private appleAuthorizationUrl(state: string, nonce: string, challenge: string) {
+  private appleAuthorizationUrl(state: string, nonce: string) {
     const values = this.environment.values;
     const url = new URL("https://appleid.apple.com/auth/authorize");
     url.search = new URLSearchParams({
@@ -598,8 +957,6 @@ export class ExternalAuthService {
       scope: "name email",
       state,
       nonce,
-      code_challenge: challenge,
-      code_challenge_method: "S256",
     }).toString();
     return url.toString();
   }
@@ -632,7 +989,7 @@ export class ExternalAuthService {
     this.assertAzp(verified.payload, values.GOOGLE_SIGNIN_CLIENT_ID ?? "");
     if (!verified.payload.sub) this.providerFailure();
     return {
-      issuer: String(verified.payload.iss),
+      issuer: GOOGLE_CANONICAL_ISSUER,
       subject: verified.payload.sub,
       email: typeof verified.payload.email === "string" ? verified.payload.email : null,
       emailVerified: verified.payload.email_verified === true,
@@ -642,7 +999,6 @@ export class ExternalAuthService {
 
   private async exchangeApple(
     code: string,
-    verifier: string,
     flow: { nonceHash: string },
     appleUser: string | undefined,
   ) {
@@ -656,13 +1012,35 @@ export class ExternalAuthService {
         client_secret: await this.appleClientSecret(),
         redirect_uri: values.APPLE_SIGNIN_REDIRECT_URI ?? "",
         grant_type: "authorization_code",
-        code_verifier: verifier,
       }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) this.providerFailure();
-    const token = (await response.json()) as { id_token?: unknown };
-    if (typeof token.id_token !== "string") this.providerFailure();
+    const token = (await response.json()) as {
+      id_token?: unknown;
+      access_token?: unknown;
+      refresh_token?: unknown;
+      expires_in?: unknown;
+      token_type?: unknown;
+    };
+    if (
+      typeof token.id_token !== "string" ||
+      typeof token.access_token !== "string" ||
+      token.access_token.length === 0 ||
+      token.access_token.length > 32_768 ||
+      (token.refresh_token !== undefined &&
+        (typeof token.refresh_token !== "string" ||
+          token.refresh_token.length === 0 ||
+          token.refresh_token.length > 32_768)) ||
+      typeof token.expires_in !== "number" ||
+      !Number.isFinite(token.expires_in) ||
+      token.expires_in <= 0 ||
+      token.expires_in > 86_400 ||
+      typeof token.token_type !== "string" ||
+      token.token_type.toLocaleLowerCase("en-US") !== "bearer"
+    ) {
+      this.providerFailure();
+    }
     const verified = await jwtVerify(token.id_token, this.appleJwks, {
       issuer: APPLE_ISSUER,
       audience: values.APPLE_SIGNIN_CLIENT_ID as string,
@@ -675,60 +1053,60 @@ export class ExternalAuthService {
     return {
       issuer: APPLE_ISSUER,
       subject: verified.payload.sub,
-      email: typeof verified.payload.email === "string" ? verified.payload.email : firstLogin.email,
+      email: typeof verified.payload.email === "string" ? verified.payload.email : null,
       emailVerified:
         verified.payload.email_verified === true || verified.payload.email_verified === "true",
       displayName: firstLogin.displayName,
+      appleTokens: {
+        accessToken: token.access_token,
+        accessTokenExpiresAt: new Date(Date.now() + token.expires_in * 1_000),
+        refreshToken: typeof token.refresh_token === "string" ? token.refresh_token : null,
+      },
     } satisfies VerifiedIdentity;
   }
 
   private async appleClientSecret(): Promise<string> {
     const values = this.environment.values;
-    const key = await importPKCS8(this.applePrivateKey() ?? "", "ES256");
-    const now = Math.floor(Date.now() / 1000);
-    return new SignJWT({})
-      .setProtectedHeader({ alg: "ES256", kid: values.APPLE_SIGNIN_KEY_ID as string })
-      .setIssuer(values.APPLE_SIGNIN_TEAM_ID ?? "")
-      .setIssuedAt(now)
-      .setExpirationTime(now + 300)
-      .setAudience(APPLE_ISSUER)
-      .setSubject(values.APPLE_SIGNIN_CLIENT_ID ?? "")
-      .sign(key);
+    return createAppleClientSecret({
+      privateKey: this.applePrivateKey() ?? "",
+      teamId: values.APPLE_SIGNIN_TEAM_ID ?? "",
+      keyId: values.APPLE_SIGNIN_KEY_ID ?? "",
+      clientId: values.APPLE_SIGNIN_CLIENT_ID ?? "",
+    });
   }
 
   private applePrivateKey(): string | null {
-    const raw = this.environment.values.APPLE_SIGNIN_PRIVATE_KEY;
-    const base64 = this.environment.values.APPLE_SIGNIN_PRIVATE_KEY_BASE64;
-    const value = raw
-      ? raw.replace(/\\n/g, "\n")
-      : base64
-        ? Buffer.from(base64, "base64").toString("utf8")
-        : "";
-    if (!value.includes("BEGIN PRIVATE KEY")) return null;
-    try {
-      const key = createPrivateKey(value);
-      return key.asymmetricKeyType === "ec" && key.asymmetricKeyDetails?.namedCurve === "prime256v1"
-        ? value
-        : null;
-    } catch {
-      return null;
-    }
+    return resolveApplePrivateKey(
+      this.environment.values.APPLE_SIGNIN_PRIVATE_KEY,
+      this.environment.values.APPLE_SIGNIN_PRIVATE_KEY_BASE64,
+    );
   }
 
   private parseAppleUser(value: string | undefined) {
-    if (!value || value.length > 8_192) return { email: null, displayName: null };
+    if (!value || value.length > 8_192) return { displayName: null };
     try {
       const parsed = JSON.parse(value) as {
-        email?: unknown;
         name?: { firstName?: unknown; lastName?: unknown };
       };
-      const email = typeof parsed.email === "string" ? parsed.email : null;
       const names = [parsed.name?.firstName, parsed.name?.lastName].filter(
         (part): part is string => typeof part === "string",
       );
-      return { email, displayName: names.join(" ").trim() || null };
+      const normalized = names
+        .map((part) =>
+          part
+            .normalize("NFKC")
+            .replace(/\p{Cc}/gu, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 50),
+        )
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+        .slice(0, 100);
+      return { displayName: normalized || null };
     } catch {
-      return { email: null, displayName: null };
+      return { displayName: null };
     }
   }
 
@@ -800,6 +1178,24 @@ export class ExternalAuthService {
     return createHash("sha256").update(this.environment.values.OAUTH_FLOW_SECRET, "utf8").digest();
   }
 
+  private externalAuthTokenKeyring(): ExternalAuthTokenKeyring | null {
+    const values = this.environment.values;
+    if (
+      !values.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON &&
+      !values.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1
+    ) {
+      return null;
+    }
+    try {
+      const entries = values.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON
+        ? (JSON.parse(values.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON) as Record<number, string>)
+        : { 1: values.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1 ?? "" };
+      return createExternalAuthTokenKeyring(values.EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION, entries);
+    } catch {
+      return null;
+    }
+  }
+
   private requireConfigured(provider: PublicProvider) {
     if (this.providerStatus(provider) !== "AVAILABLE") {
       throw new AppError(
@@ -823,6 +1219,22 @@ export class ExternalAuthService {
       "EXTERNAL_AUTH_ACTION_REQUIRED",
       "This sign-in could not be completed. Use another sign-in method or contact support.",
       HttpStatus.CONFLICT,
+    );
+  }
+
+  private noAccountIdentity(): never {
+    throw new AppError(
+      "EXTERNAL_AUTH_ACCOUNT_NOT_FOUND",
+      "No Waflo account was found for this Google account. Create an account first.",
+      HttpStatus.NOT_FOUND,
+    );
+  }
+
+  private appleSignInRemoved(): never {
+    throw new AppError(
+      "APPLE_SIGNIN_REMOVED",
+      "Apple Sign-In is no longer available. Use Google or your email and password.",
+      HttpStatus.GONE,
     );
   }
 

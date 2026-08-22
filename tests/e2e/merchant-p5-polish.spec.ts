@@ -1,11 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type BrowserContext, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/p5-end-to-end-polish");
+const evidenceDirectory = path.resolve("test-results/evidence/uiux/p5-end-to-end-polish");
 
 type StudioState =
   | "DRAFT"
@@ -189,7 +189,9 @@ async function createPreviewConsistencySheet(context: BrowserContext): Promise<v
   await openStudio(studio, { state: "LIVE" });
   panels.push(
     await labeledPanel(
-      await studio.getByLabel("Card preview").screenshot({ animations: "disabled" }),
+      await studio
+        .getByRole("region", { name: "Card preview" })
+        .screenshot({ animations: "disabled" }),
       "Studio · current published card",
     ),
   );
@@ -197,7 +199,7 @@ async function createPreviewConsistencySheet(context: BrowserContext): Promise<v
 
   const launch = await context.newPage();
   await openStudio(launch, { state: "READY" });
-  await openStudioArea(launch, /^Launch/u);
+  await openStudioArea(launch, /^Review & launch/u);
   panels.push(
     await labeledPanel(
       await launch.getByLabel("Loyalty card summary").screenshot({ animations: "disabled" }),
@@ -242,7 +244,7 @@ async function createComparisonNotes(): Promise<void> {
         <line x1="92" y1="498" x2="1508" y2="498" stroke="#e7ded9"/>
         <text x="116" y="552" font-weight="700">Visible complexity</text>
         <text x="562" y="552">The public message emphasizes</text><text x="562" y="578">a short guided path.</text>
-        <text x="998" y="552">Operational depth is staged across six</text><text x="998" y="578">Studio tasks; redundant outer panels removed.</text>
+        <text x="998" y="552">Operational depth is staged across seven</text><text x="998" y="578">Studio areas; redundant outer panels removed.</text>
 
         <line x1="92" y1="618" x2="1508" y2="618" stroke="#e7ded9"/>
         <text x="116" y="672" font-weight="700">Wallet truthfulness</text>
@@ -272,7 +274,7 @@ async function createEndToEndContactSheet(): Promise<void> {
     "05-studio-draft.png",
     "06-studio-live.png",
     "07-launch-review.png",
-    "08-test-mode.png",
+    "08-automatic-checks.png",
     "09-mobile-gallery-390.png",
     "10-mobile-builder-390.png",
     "11-mobile-studio-360.png",
@@ -468,19 +470,20 @@ test("captures exactly the focused P5 visual QA set", async ({ context }) => {
 
   const launch = await context.newPage();
   await openStudio(launch, { state: "READY" });
-  await openStudioArea(launch, /^Launch/u);
+  await openStudioArea(launch, /^Review & launch/u);
   await expect(launch.getByText("FINAL LAUNCH REVIEW", { exact: true })).toBeVisible();
   await capture(launch, "07-launch-review.png");
   await launch.close();
 
-  const testMode = await context.newPage();
-  await openStudio(testMode);
-  await openStudioArea(testMode, /^Test/u);
-  await testMode.getByRole("button", { name: "Start demo customer" }).click();
-  await testMode.getByRole("button", { name: "Add a stamp" }).click();
-  await expect(testMode.getByText("1 / 8", { exact: true })).toBeVisible();
-  await capture(testMode, "08-test-mode.png");
-  await testMode.close();
+  const automaticChecks = await context.newPage();
+  await openStudio(automaticChecks);
+  await openStudioArea(automaticChecks, /^(?:Review & launch|Launch)/u);
+  await expect(
+    automaticChecks.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }),
+  ).toBeVisible();
+  await expect(automaticChecks.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  await capture(automaticChecks, "08-automatic-checks.png");
+  await automaticChecks.close();
 
   const mobileGallery = await context.newPage();
   await openGallery(mobileGallery, "en", { width: 390, height: 844 });

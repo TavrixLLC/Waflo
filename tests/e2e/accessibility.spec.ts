@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { messages } from "../../packages/i18n/dist/index.js";
 
 async function expectNoCriticalViolations(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page }).analyze();
@@ -26,6 +27,13 @@ async function loginAsSeedOwner(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
 }
 
+async function switchOrganization(page: Page, organizationName: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Choose organization" });
+  await trigger.click();
+  await page.getByRole("option", { name: organizationName, exact: true }).click();
+  await expect(trigger).toContainText(organizationName);
+}
+
 async function expectKeyboardFocus(page: Page): Promise<void> {
   await page.keyboard.press("Tab");
   await expect
@@ -43,8 +51,12 @@ test("public, authentication, and form-error screens have no serious accessibili
     "http://localhost:3000/en/contact",
     "http://localhost:3000/en/privacy",
     "http://localhost:3000/en/terms",
+    "http://localhost:3000/en/refunds",
+    "http://localhost:3000/ar/refunds",
     "http://localhost:3001/en/signup",
+    "http://localhost:3001/ar/signup",
     "http://localhost:3001/en/login",
+    "http://localhost:3001/en/oauth/callback?result=no_account",
     "http://localhost:3001/en/forgot-password",
     "http://localhost:3001/en/reset-password",
     "http://localhost:3001/en/verify-email",
@@ -69,21 +81,106 @@ test("public, authentication, and form-error screens have no serious accessibili
   await expectNoCriticalViolations(page);
 });
 
+test("Kurdish authentication, language menus, and onboarding remain accessible", async ({
+  page,
+}) => {
+  for (const locale of ["ku-badini", "ku-sorani"] as const) {
+    const copy = messages[locale];
+    await page.goto(`http://localhost:3001/${locale}/login`);
+    await expect(page.getByRole("heading", { name: copy.auth.login.title })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    const authFont = await page
+      .locator(".auth-layout")
+      .evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(authFont.toLowerCase()).toContain("noto sans arabic");
+    await page.getByRole("button", { name: copy.language.label }).click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await expectNoCriticalViolations(page);
+    await page.keyboard.press("Escape");
+
+    await page.goto(`http://localhost:3001/${locale}/onboarding/business`);
+    await expect(
+      page.getByRole("heading", { name: copy.onboarding.organization.setupTitle }),
+    ).toBeVisible();
+    const onboardingFont = await page
+      .locator(".onboarding-shell")
+      .evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(onboardingFont.toLowerCase()).toContain("noto sans arabic");
+    await expectNoCriticalViolations(page);
+  }
+
+  await page.goto("http://localhost:3001/en/onboarding/business");
+  await page.evaluate(() => {
+    (
+      window as typeof window & { __wafloLocaleNavigationProbe?: boolean }
+    ).__wafloLocaleNavigationProbe = true;
+  });
+  await page.getByRole("button", { name: messages.en.language.label }).click();
+  await page.getByRole("menuitemradio", { name: "کوردی سۆرانی", exact: true }).click();
+  await expect(page).toHaveURL(/\/ku-sorani\/onboarding\/business$/u);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __wafloLocaleNavigationProbe?: boolean })
+          .__wafloLocaleNavigationProbe,
+    ),
+  ).toBe(true);
+});
+
+test("Verify Email feedback, resend action, RTL, and zoom remain accessible", async ({ page }) => {
+  await page.route("**/v1/auth/resend-verification", async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { status: "accepted" }, requestId: "verify-email-a11y" }),
+    });
+  });
+
+  for (const locale of ["en", "ar"] as const) {
+    await page.goto(`http://localhost:3001/${locale}/verify-email`);
+    await page.evaluate(() => {
+      window.sessionStorage.setItem("waflo:verification-email", "a11y@example.test");
+    });
+    await page.reload();
+    const resend = page.getByRole("button", {
+      name: locale === "ar" ? "إعادة إرسال الرسالة" : "Resend verification email",
+    });
+    await expect(resend).toBeEnabled();
+    await resend.click();
+    await expect(page.getByRole("status")).toHaveCount(1);
+    await expect(page.getByRole("status")).toBeVisible();
+    await resend.focus();
+    await expect(resend).toBeFocused();
+    await expectNoCriticalViolations(page);
+
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = "2";
+    });
+    await expect(
+      page.getByRole("heading", { name: locale === "ar" ? "تحقق من بريدك" : "Check your email" }),
+    ).toBeVisible();
+    await expect(resend).toBeVisible();
+    expect(await page.locator("body").innerText()).not.toMatch(/[٠-٩۰-۹]/u);
+  }
+});
+
 test("authenticated English and Arabic dashboard screens and dialogs are accessible", async ({
   page,
 }) => {
   await loginAsSeedOwner(page);
   await page.goto("http://localhost:3001/en/onboarding/business");
-  await expect(page.getByRole("heading", { name: "Tell us about your business" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Set up your organization" })).toBeVisible();
   await expectNoCriticalViolations(page);
   for (const route of [
     "",
     "/programs",
+    "/customers",
     "/locations",
     "/team",
+    "/analytics",
+    "/exports",
     "/billing",
     "/security",
-    "/audit",
     "/settings",
   ]) {
     await page.goto(`http://localhost:3001/en/dashboard${route}`);
@@ -91,8 +188,43 @@ test("authenticated English and Arabic dashboard screens and dialogs are accessi
     await expectNoCriticalViolations(page);
   }
 
+  await page.route("**/v1/organizations/*/billing", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const upstream = await route.fetch();
+    const body = (await upstream.json()) as { data: Record<string, unknown> };
+    body.data.canManageBilling = true;
+    body.data.invoices = [
+      {
+        id: "f3333333-3333-4333-8333-333333333333",
+        number: "WF-A11Y-REFUND",
+        status: "paid",
+        paymentStatus: "paid",
+        amountDue: 6900,
+        amountPaid: 6900,
+        amountRemaining: 0,
+        currency: "USD",
+        date: "2026-08-01T09:00:00.000Z",
+        periodStart: "2026-08-01T09:00:00.000Z",
+        periodEnd: "2026-09-01T09:00:00.000Z",
+        paidAt: "2026-08-01T09:00:00.000Z",
+        hostedInvoiceUrl: "https://invoice.stripe.test/a11y",
+        invoicePdfUrl: null,
+        refundable: true,
+        amountRefunded: 0,
+        remainingRefundableAmount: 6900,
+        paymentMethod: { brand: "visa", last4: "4242", expMonth: 8, expYear: 2029 },
+        refunds: [],
+      },
+    ];
+    await route.fulfill({ response: upstream, json: body });
+  });
+  await page.goto("http://localhost:3001/en/dashboard/billing");
+  await page.getByRole("button", { name: "Request refund for invoice WF-A11Y-REFUND" }).click();
+  await expect(page.getByRole("dialog", { name: "Request a refund review" })).toBeVisible();
+  await expectNoCriticalViolations(page);
+
   await page.goto("http://localhost:3001/en/dashboard/team");
-  await page.getByRole("button", { name: "Invite member" }).click();
+  await page.getByRole("button", { name: "Add staff" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectNoCriticalViolations(page);
 
@@ -110,17 +242,15 @@ test("authenticated English and Arabic dashboard screens and dialogs are accessi
   await expectNoCriticalViolations(page);
 });
 
-test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible", async ({
+test("Loyalty Studio lifecycle, automatic checks, launch, conflicts, and RTL are accessible", async ({
   page,
 }) => {
   test.setTimeout(120_000);
   const programName = `A11y Pro ${randomUUID().slice(0, 6)}`;
+  const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   await loginAsSeedOwner(page);
 
-  const organizationSwitcher = page.locator(".wf-org-switcher select");
-  const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-  await organizationSwitcher.selectOption(growthOrganizationId);
-  await expect(organizationSwitcher).toHaveValue(growthOrganizationId);
+  await switchOrganization(page, "مخبز النهر");
   await page.goto("http://localhost:3001/en/dashboard/programs?create=quick");
   await page.getByRole("radio", { name: /Pro Mode/ }).check();
   await expectNoCriticalViolations(page);
@@ -176,24 +306,12 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
 
   await studioNavigation.getByRole("button", { name: /^Customers & locations/u }).click();
   await expect(page).toHaveURL(/\/customers-locations$/u);
+  await expect(page).toHaveTitle(/Customers & locations/u);
   await expectNoCriticalViolations(page);
 
-  await studioNavigation.getByRole("button", { name: /^Test/u }).click();
-  await expect(page).toHaveURL(/\/test$/u);
-  await expectNoCriticalViolations(page);
-  await page.getByRole("button", { name: "Start demo customer" }).click();
-  const currentProgress = page.getByText("Current progress", { exact: true });
-  const safeTestFailure = page.getByText(
-    "Test Mode could not start. No real customer activity was created. Try again.",
-    { exact: true },
-  );
-  await expect(currentProgress.or(safeTestFailure)).toBeVisible();
-  if (await currentProgress.isVisible()) {
-    await page.getByRole("button", { name: "Add a stamp" }).click();
-  }
-  await expectNoCriticalViolations(page);
+  await expect(studioNavigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 
-  await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+  await studioNavigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page).toHaveURL(/\/launch$/u);
   await expectNoCriticalViolations(page);
   await studioNavigation.getByRole("button", { name: /^Settings/u }).click();
@@ -227,7 +345,7 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await expect(restoreAction).toBeFocused();
   await page
     .getByRole("navigation", { name: "Studio sections" })
-    .getByRole("button", { name: /^Launch/u })
+    .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
     .click();
   await expect(page.getByRole("heading", { name: "Card is archived" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Restore card" })).toBeVisible();
@@ -243,7 +361,10 @@ test("Loyalty Studio lifecycle, Test, launch, conflicts, and RTL are accessible"
   await programCard.getByRole("button", { name: /فتح البطاقة/ }).click();
   await expect(page.locator(".studio-shell")).toHaveAttribute("dir", "rtl");
   await expect(page.locator(".studio-workspace")).toBeVisible();
-  await page.locator(".studio-section-nav button").nth(4).click();
+  await page
+    .getByRole("navigation", { name: "أقسام الاستوديو" })
+    .getByRole("button", { name: /^الإطلاق/u })
+    .click();
   await expect(page.getByRole("heading", { name: "الإطلاق غير متاح" })).toBeVisible();
   const suspendedStatusAction = page.getByRole("button", { name: "عرض حالة البطاقة" });
   await suspendedStatusAction.focus();

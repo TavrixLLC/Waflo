@@ -1,4 +1,0 @@
-Created C:\waflo\artifacts\handoff-w3-round-1\waflo-w3-round-1-portable-source.zip
-Included 501 source files.
-
-EXIT_CODE=0

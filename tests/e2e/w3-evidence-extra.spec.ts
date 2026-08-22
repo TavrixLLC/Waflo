@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 
-const screenshotDirectory = "artifacts/handoff-w3-round-2/screenshots";
+const screenshotDirectory = "test-results/evidence/handoff-w3-round-2/screenshots";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 async function connectPrisma() {
@@ -40,7 +40,7 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     const program = await prisma.loyaltyProgram.findFirstOrThrow({
       where: {
         organizationId,
-        internalName: { startsWith: "W3 Browser Circle" },
+        internalName: "Today Coffee Rewards",
         currentPublishedVersionId: { not: null },
         latestVersionNumber: 1,
       },

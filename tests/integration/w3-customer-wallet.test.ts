@@ -395,4 +395,41 @@ describe.sequential("W3 Customer and Wallet integration", () => {
       }),
     ).toBe(1);
   }, 120_000);
+
+  it("rechecks billing before a queued wallet issuance reaches the provider", async () => {
+    const enrollment = await enroll(`enroll:${randomUUID()}`, "Billing Boundary Member");
+    expect(enrollment.statusCode).toBe(201);
+    const membership = await prisma.client.membership.findUniqueOrThrow({
+      where: {
+        publicMembershipId: responseData<{ membership: { publicMembershipId: string } }>(enrollment)
+          .membership.publicMembershipId,
+      },
+    });
+    const command = await prisma.client.walletCommand.findFirstOrThrow({
+      where: { membershipId: membership.id, provider: "GOOGLE", commandType: "ISSUE" },
+    });
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: fixture.organizationId },
+      data: { subscriptionStatus: "SUSPENDED" },
+    });
+    try {
+      const worker = new WalletWorker(prisma.client, {} as never, environment.values);
+      await expect(worker.processCommandById(command.id, 31)).resolves.toBe(true);
+      await expect(
+        prisma.client.walletCommand.findUniqueOrThrow({
+          where: { id: command.id },
+          select: { status: true, safeErrorCode: true, providerRequestId: true },
+        }),
+      ).resolves.toEqual({
+        status: "DEAD_LETTER",
+        safeErrorCode: "BILLING_ACTION_REQUIRED",
+        providerRequestId: null,
+      });
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: fixture.organizationId },
+        data: { subscriptionStatus: "ACTIVE" },
+      });
+    }
+  }, 120_000);
 });

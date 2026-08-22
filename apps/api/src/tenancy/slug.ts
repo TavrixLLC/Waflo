@@ -4,6 +4,10 @@ export const reservedSlugs = new Set([
   "www",
   "app",
   "api",
+  "card",
+  "app-staging",
+  "api-staging",
+  "card-staging",
   "admin",
   "dashboard",
   "billing",
@@ -12,8 +16,12 @@ export const reservedSlugs = new Set([
   "docs",
   "status",
   "mail",
+  "smtp",
+  "imap",
+  "pop",
   "assets",
   "static",
+  "media",
   "cdn",
   "auth",
   "login",
@@ -48,6 +56,9 @@ export const reservedSlugs = new Set([
   "privacy",
   "terms",
   "contact",
+  "m",
+  "mobile",
+  "marketing",
 ]);
 
 export function normalizeSlug(value: string): string {
@@ -55,7 +66,7 @@ export function normalizeSlug(value: string): string {
 }
 
 export function isSlugFormatValid(slug: string): boolean {
-  return slugPattern.test(slug);
+  return slugPattern.test(slug) && !slug.startsWith("xn--");
 }
 
 export function validateSlug(value: string): { valid: boolean; slug: string; reason?: string } {

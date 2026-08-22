@@ -1,7 +1,13 @@
 "use client";
 
 import { planCatalog } from "@waflo/billing";
-import type { Locale } from "@waflo/contracts";
+import {
+  cardLocaleMetadata,
+  cardLocaleRegistry,
+  directionForCardLocale,
+  type Locale,
+} from "@waflo/contracts";
+import { directionForInterface, type InterfaceLocale, localeRegistry } from "@waflo/i18n";
 import {
   Alert,
   AlertDialog,
@@ -9,8 +15,10 @@ import {
   Button,
   Card,
   Checkbox,
+  ColorInput,
   FormField,
   Modal,
+  SearchableSelect,
   Select,
   TextArea,
   TextInput,
@@ -21,12 +29,10 @@ import {
   ChevronRight,
   CircleAlert,
   Eye,
-  FlaskConical,
   Globe2,
   MapPin,
   Palette,
   RefreshCcw,
-  RotateCcw,
   Save,
   Settings2,
   Sparkles,
@@ -55,8 +61,8 @@ import {
   builderReadinessWithValidation,
   builderSectionForIssue,
   builderSections,
+  cardLocaleCompleteness,
   isNeutralBuilderDraft,
-  languageCompleteness,
   shouldScheduleBuilderAutosave,
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
@@ -68,9 +74,9 @@ import {
   type PreviewProfile,
   type ProgramDetail,
   type ProgramDraftInput,
+  type ProgramTranslationInput,
   type ProgramVersion,
   type TemplateItem,
-  type TestSession,
   type ValidationResult,
   versionToDraft,
 } from "./program-studio-types";
@@ -104,6 +110,23 @@ interface ConflictState {
 
 type DraftUpdate = (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
 
+function withProgramTranslationField(
+  value: ProgramTranslationInput,
+  key: keyof ProgramTranslationInput,
+  next: string,
+): ProgramTranslationInput {
+  if (key === "programName") return { ...value, programName: next };
+  if (key === "shortDescription") return { ...value, shortDescription: next };
+  if (key === "earningDescription") return { ...value, earningDescription: next };
+  if (key === "fullDescription") return { ...value, fullDescription: next };
+  if (key === "rewardSummary") return { ...value, rewardSummary: next };
+  if (key === "joinInstructions") return { ...value, joinInstructions: next };
+  if (key === "termsAndConditions") return { ...value, termsAndConditions: next };
+  if (key === "completionMessage") return { ...value, completionMessage: next };
+  if (key === "rewardUnlockedMessage") return { ...value, rewardUnlockedMessage: next };
+  return { ...value, pausedMessage: next };
+}
+
 const sectionIcons = {
   basics: Sparkles,
   reward: WandSparkles,
@@ -113,210 +136,22 @@ const sectionIcons = {
   review: Check,
 } as const;
 
-const copy = {
-  en: {
-    eyebrow: "CREATE LOYALTY CARD",
-    title: "Customize your loyalty card",
-    description: "Shape the reward, language, and look while the real card stays in view.",
-    back: "Loyalty cards",
-    saveDraft: "Save draft",
-    review: "Review card",
-    continueStudio: "Continue to Studio",
-    opening: "Opening your card builder…",
-    openingError:
-      "Card Builder could not open. No loyalty card data was changed. Return to Loyalty cards and try again.",
-    selectedDesign: "Starting design",
-    changeDesign: "Change design",
-    changeTitle: "Change this design?",
-    changeDescription:
-      "Changing the design updates colors, stamp artwork, card layout, and supported wallet branding. Your card name, reward, languages, goal, locations, and advanced policy stay unchanged.",
-    chooseDesign: "Choose another design",
-    keepDesign: "Keep this design",
-    quick: "Quick Mode",
-    pro: "Pro Mode",
-    preview: "Live preview",
-    previewOnly: "Preview only",
-    previewPending: "Save your changes to prepare this preview.",
-    previewPreparing: "Preparing your preview…",
-    previewLoading: "Updating the real card preview…",
-    previewError: "The preview could not be refreshed.",
-    walletPreviewNote:
-      "Visual preview only. Wallet availability and production readiness are shown separately in Studio.",
-    retry: "Retry",
-    customer: "Customer",
-    previewProgress: "Preview stamp progress",
-    openPreview: "Preview",
-    closePreview: "Close live preview",
-    advanced: "Advanced settings",
-    advancedDescription: "Operational policy and Pro controls stay out of the Quick path.",
-    sections: {
-      basics: "Basics",
-      reward: "Reward",
-      languages: "Languages",
-      locations: "Locations",
-      appearance: "Appearance",
-      review: "Review & test",
-    },
-    sectionDescriptions: {
-      basics: "Name the card and confirm how customers earn stamps.",
-      reward: "Describe what the customer receives at the goal.",
-      languages: "Keep English and Arabic together and see what remains.",
-      locations: "Choose where earning and redemption are available.",
-      appearance: "Keep the template identity, then adjust supported visual controls.",
-      review: "Resolve readiness issues and test the customer experience.",
-    },
-    saved: "Saved",
-    unsaved: "Unsaved changes",
-    saving: "Saving…",
-    failed: "Save failed",
-    conflict: "Conflict detected",
-    conflictTitle: "This draft changed in another editor",
-    conflictDescription:
-      "Your local edits are still here. Reload the saved draft or reapply your edits to the latest saved version.",
-    reloadSaved: "Reload saved draft",
-    keepEdits: "Keep my edits",
-    genericError: "Waflo could not update this loyalty card. Try again.",
-    planError: "Your current plan cannot create another active loyalty card.",
-    locationError: "Add an active location before creating a loyalty card.",
-    templateError: "That starting design is no longer available. Choose another design.",
-    featureError: "This control requires Growth or Scale.",
-    assetError: "One of the selected design assets is unavailable. Choose it again.",
-    ready: "Draft ready",
-    needsAttention: "Needs attention",
-    fieldsRemaining: "fields remaining",
-    complete: "Complete",
-    checksNotRun: "Readiness checks have not run yet.",
-    runChecks: "Run readiness checks",
-    runAgain: "Run again",
-    checksPassed: "Readiness checks passed",
-    issuesFound: "Readiness issues found",
-    fix: "Fix",
-    testMode: "Test the reward cycle",
-    testModeDescription:
-      "Test safely with a demo customer. No real customer activity will be created.",
-    startTest: "Start Test Mode",
-    addStamp: "Add one stamp",
-    resetTest: "Reset test",
-    redeemReward: "Redeem test reward",
-    rewardReady: "Reward ready outside the stamp grid",
-    testRequired: "Run readiness checks before starting Test Mode.",
-    noPublish: "Publishing remains in Studio. Saving this draft does not start your trial.",
-    starterAdvanced: "Pro Mode requires Growth or Scale. Quick Mode remains fully available.",
-    mode: "Editing mode",
-    basicsSummary: "Card name, earning rule, and goal",
-    rewardSummary: "Final reward at the stamp goal",
-    languageSummary: "English and Arabic customer content",
-    locationSummary: "Participating active locations",
-    appearanceSummary: "Template, colors, logo, and stamp artwork",
-  },
-  ar: {
-    eyebrow: "إنشاء بطاقة ولاء",
-    title: "خصّص بطاقة الولاء",
-    description: "عدّل المكافأة واللغات والمظهر مع إبقاء البطاقة الحقيقية أمامك.",
-    back: "بطاقات الولاء",
-    saveDraft: "حفظ المسودة",
-    review: "مراجعة البطاقة",
-    continueStudio: "المتابعة إلى الاستوديو",
-    opening: "جارٍ فتح محرر البطاقة…",
-    openingError:
-      "تعذر فتح محرر البطاقة. لم تتغير أي بيانات لبطاقة الولاء. ارجع إلى بطاقات الولاء وحاول مرة أخرى.",
-    selectedDesign: "التصميم الأساسي",
-    changeDesign: "تغيير التصميم",
-    changeTitle: "هل تريد تغيير التصميم؟",
-    changeDescription:
-      "يحدّث التصميم الجديد الألوان ورسومات الأختام وتخطيط البطاقة وعناصر هوية المحافظ المدعومة. سيبقى اسم البطاقة والمكافأة واللغات والهدف والمواقع والسياسات المتقدمة كما هي.",
-    chooseDesign: "اختيار تصميم آخر",
-    keepDesign: "الاحتفاظ بهذا التصميم",
-    quick: "الوضع السريع",
-    pro: "الوضع الاحترافي",
-    preview: "معاينة مباشرة",
-    previewOnly: "للمعاينة فقط",
-    previewPending: "احفظ تغييراتك لإعداد هذه المعاينة.",
-    previewPreparing: "جارٍ إعداد المعاينة…",
-    previewLoading: "جارٍ تحديث المعاينة الحقيقية للبطاقة…",
-    previewError: "تعذر تحديث المعاينة.",
-    walletPreviewNote:
-      "معاينة مرئية فقط. يظهر توفر المحافظ الرقمية وجاهزيتها للإنتاج بشكل منفصل في الاستوديو.",
-    retry: "إعادة المحاولة",
-    customer: "العميل",
-    previewProgress: "تقدم الأختام في المعاينة",
-    openPreview: "معاينة",
-    closePreview: "إغلاق المعاينة المباشرة",
-    advanced: "الإعدادات المتقدمة",
-    advancedDescription: "تبقى سياسات التشغيل وأدوات Pro خارج المسار السريع.",
-    sections: {
-      basics: "الأساسيات",
-      reward: "المكافأة",
-      languages: "اللغات",
-      locations: "المواقع",
-      appearance: "المظهر",
-      review: "المراجعة والاختبار",
-    },
-    sectionDescriptions: {
-      basics: "سمّ البطاقة وأكّد طريقة حصول العملاء على الأختام.",
-      reward: "وضّح ما الذي سيحصل عليه العميل عند بلوغ الهدف.",
-      languages: "أدر الإنجليزية والعربية معًا واعرف ما تبقى.",
-      locations: "اختر المواقع التي يتاح فيها الكسب والاسترداد.",
-      appearance: "حافظ على هوية القالب وعدّل عناصر المظهر المدعومة.",
-      review: "عالج ملاحظات الجاهزية واختبر تجربة العميل.",
-    },
-    saved: "تم الحفظ",
-    unsaved: "تغييرات غير محفوظة",
-    saving: "جارٍ الحفظ…",
-    failed: "فشل الحفظ",
-    conflict: "تم اكتشاف تعارض",
-    conflictTitle: "تغيّرت هذه المسودة في محرر آخر",
-    conflictDescription:
-      "ما زالت تعديلاتك المحلية محفوظة هنا. حمّل المسودة المحفوظة أو أعد تطبيق تعديلاتك على أحدث نسخة محفوظة.",
-    reloadSaved: "تحميل المسودة المحفوظة",
-    keepEdits: "الاحتفاظ بتعديلاتي",
-    genericError: "تعذر تحديث بطاقة الولاء. حاول مرة أخرى.",
-    planError: "لا تسمح خطتك الحالية بإنشاء بطاقة ولاء نشطة إضافية.",
-    locationError: "أضف موقعًا نشطًا قبل إنشاء بطاقة ولاء.",
-    templateError: "لم يعد هذا التصميم متاحًا. اختر تصميمًا آخر.",
-    featureError: "يتطلب هذا الخيار خطة Growth أو Scale.",
-    assetError: "أحد أصول التصميم المحددة غير متاح. اختره مرة أخرى.",
-    ready: "المسودة جاهزة",
-    needsAttention: "تحتاج إلى مراجعة",
-    fieldsRemaining: "حقول متبقية",
-    complete: "مكتمل",
-    checksNotRun: "لم تُشغّل فحوصات الجاهزية بعد.",
-    runChecks: "تشغيل فحوصات الجاهزية",
-    runAgain: "إعادة الفحص",
-    checksPassed: "اجتازت البطاقة فحوصات الجاهزية",
-    issuesFound: "توجد ملاحظات على الجاهزية",
-    fix: "إصلاح",
-    testMode: "اختبار دورة المكافأة",
-    testModeDescription: "اختبر بأمان مع عميل تجريبي. لن يُنشأ أي نشاط حقيقي للعملاء.",
-    startTest: "بدء وضع الاختبار",
-    addStamp: "إضافة ختم واحد",
-    resetTest: "إعادة ضبط الاختبار",
-    redeemReward: "استرداد المكافأة التجريبية",
-    rewardReady: "المكافأة جاهزة خارج شبكة الأختام",
-    testRequired: "شغّل فحوصات الجاهزية قبل بدء وضع الاختبار.",
-    noPublish: "يبقى النشر داخل الاستوديو. حفظ المسودة لا يبدأ الفترة التجريبية.",
-    starterAdvanced: "يتطلب وضع Pro خطة Growth أو Scale. يبقى الوضع السريع متاحًا بالكامل.",
-    mode: "وضع التحرير",
-    basicsSummary: "اسم البطاقة وقاعدة الكسب والهدف",
-    rewardSummary: "المكافأة النهائية عند هدف الأختام",
-    languageSummary: "محتوى العميل بالإنجليزية والعربية",
-    locationSummary: "المواقع النشطة المشاركة",
-    appearanceSummary: "القالب والألوان والشعار ورسومات الأختام",
-  },
-} as const;
-
 function previewSource(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function previewLabel(profile: PreviewProfile, locale: Locale): string {
-  if (profile === "APPLE_WALLET") return "Apple Wallet";
-  if (profile === "GOOGLE_WALLET") return "Google Wallet";
-  return copy[locale].customer;
+function builderText(locale: InterfaceLocale | Locale) {
+  return localeRegistry[locale].messages.merchant.loyalty.builder;
 }
 
-function merchantError(error: unknown, locale: Locale): string {
-  const text = copy[locale];
+function previewLabel(profile: PreviewProfile, locale: InterfaceLocale | Locale): string {
+  if (profile === "APPLE_WALLET") return "Apple Wallet";
+  if (profile === "GOOGLE_WALLET") return "Google Wallet";
+  return builderText(locale).customer;
+}
+
+function merchantError(error: unknown, locale: InterfaceLocale | Locale): string {
+  const text = builderText(locale);
   if (!(error instanceof ApiClientError)) return text.genericError;
   if (error.code === "PROGRAM_LIMIT_REACHED") return text.planError;
   if (error.code === "PROGRAM_LOCATION_INVALID") return text.locationError;
@@ -344,6 +179,7 @@ function finalRewardIndex(draft: ProgramDraftInput): number {
 }
 
 export function ProgramCardBuilder({
+  interfaceLocale,
   organizationId,
   programId,
   plan,
@@ -357,6 +193,7 @@ export function ProgramCardBuilder({
   onOpenStudio,
   onChanged,
 }: {
+  interfaceLocale: InterfaceLocale;
   organizationId: string;
   programId: string;
   plan: "STARTER" | "GROWTH" | "SCALE";
@@ -370,21 +207,21 @@ export function ProgramCardBuilder({
   onOpenStudio: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const interfaceDirection = directionForInterface(interfaceLocale);
   const ar = locale === "ar";
-  const text = copy[locale];
+  const text = builderText(interfaceLocale);
   const [detail, setDetail] = useState<ProgramDetail | null>(null);
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [saveState, setSaveState] = useState<BuilderSaveState>("saved");
-  const [activeSection, setActiveSection] = useState<BuilderSection>("basics");
-  const [language, setLanguage] = useState<"en" | "ar">(ar ? "ar" : "en");
-  const [previewLocale, setPreviewLocale] = useState<"EN" | "AR">(ar ? "AR" : "EN");
+  const [activeSection, setActiveSection] = useState<BuilderSection>("languages");
+  const [language, setLanguage] = useState<string>(ar ? "ar" : "en");
+  const [previewLocale, setPreviewLocale] = useState<string>(ar ? "ar" : "en");
   const [profile, setProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
   const [progress, setProgress] = useState(0);
   const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewState>>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [testSession, setTestSession] = useState<TestSession | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -407,13 +244,16 @@ export function ProgramCardBuilder({
     if (!program.currentDraftVersion) {
       setDraft(null);
       setError(
-        ar
-          ? "لا توجد مسودة قابلة للتحرير لهذه البطاقة. افتح الاستوديو لإنشاء نسخة جديدة."
-          : "This card has no editable draft. Open Studio to create the next version.",
+        builderText(interfaceLocale).ui.thisCardHasNoEditableDraftOpenStudioToCreateTheNextVersion,
       );
       return;
     }
     const next = versionToDraft(program, program.currentDraftVersion);
+    const nextLocale = next.enabledLocales.includes(next.defaultLocale)
+      ? next.defaultLocale
+      : (next.enabledLocales[0] ?? "en");
+    setLanguage(nextLocale);
+    setPreviewLocale(nextLocale);
     const serialized = JSON.stringify(apiDraft(next));
     draftRef.current = next;
     revisionRef.current = program.currentDraftVersion.revision;
@@ -421,7 +261,7 @@ export function ProgramCardBuilder({
     setDraft(next);
     setSaveState("saved");
     initializedRef.current = true;
-  }, [ar, organizationId, programId]);
+  }, [interfaceLocale, organizationId, programId]);
 
   useEffect(() => {
     const key = `${organizationId}:${programId}:${locale}`;
@@ -481,7 +321,7 @@ export function ProgramCardBuilder({
             setSaveState("conflict");
           } else {
             setSaveState("failed");
-            setError(merchantError(caught, locale));
+            setError(merchantError(caught, interfaceLocale));
           }
           return false;
         });
@@ -496,7 +336,7 @@ export function ProgramCardBuilder({
         return saveLatest();
       return result;
     },
-    [conflict, locale, organizationId, programId],
+    [conflict, interfaceLocale, organizationId, programId],
   );
 
   useEffect(() => {
@@ -551,20 +391,20 @@ export function ProgramCardBuilder({
       setPreviewError(false);
       try {
         const result = await apiFetch<PreviewResult>(
-          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${nextProfile}&locale=${previewLocale}`,
+          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${nextProfile}&locale=${encodeURIComponent(previewLocale)}`,
         );
         previewCacheRef.current.set(key, result);
         setPreviews((current) => ({ ...current, [nextProfile]: { key, result } }));
         return result;
       } catch (caught) {
         setPreviewError(true);
-        setError(merchantError(caught, locale));
+        setError(merchantError(caught, interfaceLocale));
         return null;
       } finally {
         setPreviewLoading(false);
       }
     },
-    [locale, organizationId, previewKey, previewLocale, programId, progress],
+    [interfaceLocale, organizationId, previewKey, previewLocale, programId, progress],
   );
 
   useEffect(() => {
@@ -595,61 +435,7 @@ export function ProgramCardBuilder({
       setValidation(result);
       await load();
     } catch (caught) {
-      setError(merchantError(caught, locale));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function startTest(): Promise<void> {
-    if (!validation || validation.errors.length > 0) return;
-    setWorking(true);
-    try {
-      if (!(await saveNow())) return;
-      const session = await apiFetch<TestSession>(
-        `/v1/organizations/${organizationId}/programs/${programId}/test-sessions`,
-        { method: "POST" },
-      );
-      setTestSession(session);
-      setProgress(session.currentStampCount);
-    } catch (caught) {
-      setError(merchantError(caught, locale));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function testCommand(kind: "add" | "reset" | "redeem"): Promise<void> {
-    if (!testSession) return;
-    setWorking(true);
-    const base = `/v1/organizations/${organizationId}/programs/test-sessions/${testSession.id}`;
-    try {
-      if (kind === "add") {
-        await apiFetch(`${base}/stamps`, {
-          method: "POST",
-          body: JSON.stringify({ amount: 1, idempotencyKey: crypto.randomUUID() }),
-        });
-      } else if (kind === "reset") {
-        await apiFetch(`${base}/reset`, {
-          method: "POST",
-          body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
-        });
-      } else {
-        const reward = testSession.version.rewards.find(
-          (item) => item.thresholdStampCount === testSession.version.stampRule?.requiredStampCount,
-        );
-        if (!reward) return;
-        await apiFetch(`${base}/redeem/${reward.id}`, {
-          method: "POST",
-          body: JSON.stringify({ idempotencyKey: crypto.randomUUID(), managerApproved: true }),
-        });
-      }
-      const refreshed = await apiFetch<TestSession>(base);
-      setTestSession(refreshed);
-      setProgress(refreshed.currentStampCount);
-      await load();
-    } catch (caught) {
-      setError(merchantError(caught, locale));
+      setError(merchantError(caught, interfaceLocale));
     } finally {
       setWorking(false);
     }
@@ -745,27 +531,21 @@ export function ProgramCardBuilder({
 
   const localReadiness = builderReadiness(draft);
   const readiness = builderReadinessWithValidation(draft, validation);
-  const enCompleteness = languageCompleteness(draft.translations.en);
-  const arCompleteness = languageCompleteness(draft.translations.ar);
   const blank = isNeutralBuilderDraft(draft);
   const selectedName = blank
-    ? ar
-      ? "ابدأ من الصفر"
-      : "Start from scratch"
+    ? builderText(interfaceLocale).ui.startFromScratch
     : selectedTemplate
       ? templateDisplayName(selectedTemplate, locale)
-      : ar
-        ? "التصميم المحدد"
-        : "Selected design";
+      : builderText(interfaceLocale).ui.selectedDesign;
   const selectedMeta = selectedTemplate
-    ? `${templateCategoryLabel(templateCategory(selectedTemplate), locale)} · ${blank ? (ar ? "محايد" : "Neutral") : templateStyleLabel(selectedTemplate, locale)}`
+    ? `${templateCategoryLabel(templateCategory(selectedTemplate), locale)} · ${blank ? builderText(interfaceLocale).ui.neutral : templateStyleLabel(selectedTemplate, locale)}`
     : text.selectedDesign;
   const accentStyle = {
     "--builder-live-accent": draft.visualTheme.accentColor,
   } as CSSProperties;
 
   return (
-    <div className="builder-shell" dir={ar ? "rtl" : "ltr"} style={accentStyle}>
+    <div className="builder-shell" dir={interfaceDirection} style={accentStyle}>
       <header className="builder-toolbar">
         <Button type="button" variant="secondary" onClick={() => void leaveBuilder("back")}>
           <ArrowLeft className="builder-logical-back" size={16} aria-hidden="true" />
@@ -819,7 +599,7 @@ export function ProgramCardBuilder({
           <nav
             ref={sectionNavRef}
             className="builder-section-nav"
-            aria-label={ar ? "أقسام محرر البطاقة" : "Card builder sections"}
+            aria-label={builderText(interfaceLocale).ui.cardBuilderSections}
           >
             {builderSections.map((section) => {
               const Icon = sectionIcons[section];
@@ -882,23 +662,30 @@ export function ProgramCardBuilder({
             </div>
 
             {activeSection === "basics" ? (
-              <BasicsSection draft={draft} update={update} locale={locale} />
+              <BasicsSection draft={draft} update={update} interfaceLocale={interfaceLocale} />
             ) : null}
             {activeSection === "reward" ? (
-              <RewardSection draft={draft} update={update} locale={locale} />
+              <RewardSection
+                draft={draft}
+                update={update}
+                interfaceLocale={interfaceLocale}
+                language={language}
+                setLanguage={(next) => {
+                  setLanguage(next);
+                  setPreviewLocale(next);
+                }}
+              />
             ) : null}
             {activeSection === "languages" ? (
               <LanguagesSection
                 draft={draft}
                 update={update}
-                locale={locale}
+                interfaceLocale={interfaceLocale}
                 language={language}
                 setLanguage={(next) => {
                   setLanguage(next);
-                  setPreviewLocale(next === "ar" ? "AR" : "EN");
+                  setPreviewLocale(next);
                 }}
-                enCompleteness={enCompleteness}
-                arCompleteness={arCompleteness}
               />
             ) : null}
             {activeSection === "locations" ? (
@@ -906,7 +693,7 @@ export function ProgramCardBuilder({
                 draft={draft}
                 update={update}
                 locations={locations}
-                locale={locale}
+                interfaceLocale={interfaceLocale}
               />
             ) : null}
             {activeSection === "appearance" ? (
@@ -916,11 +703,21 @@ export function ProgramCardBuilder({
                 organizationId={organizationId}
                 assets={assets}
                 onAssetUploaded={onAssetUploaded}
-                locale={locale}
+                interfaceLocale={interfaceLocale}
               />
             ) : null}
             {activeSection === "advanced" ? (
-              <AdvancedSection draft={draft} update={update} plan={plan} locale={locale} />
+              <AdvancedSection
+                draft={draft}
+                update={update}
+                plan={plan}
+                interfaceLocale={interfaceLocale}
+                language={language}
+                setLanguage={(next) => {
+                  setLanguage(next);
+                  setPreviewLocale(next);
+                }}
+              />
             ) : null}
             {activeSection === "review" ? (
               <ReviewSection
@@ -928,13 +725,10 @@ export function ProgramCardBuilder({
                 readiness={readiness}
                 validation={validation}
                 canRunChecks={localReadiness.ready}
-                testSession={testSession}
                 working={working}
-                locale={locale}
+                interfaceLocale={interfaceLocale}
                 onSection={setActiveSection}
                 onRunChecks={() => void runChecks()}
-                onStartTest={() => void startTest()}
-                onTestCommand={(kind) => void testCommand(kind)}
               />
             ) : null}
           </section>
@@ -944,7 +738,7 @@ export function ProgramCardBuilder({
           <PreviewPanel
             idPrefix="builder-desktop"
             draft={draft}
-            locale={locale}
+            interfaceLocale={interfaceLocale}
             previewLocale={previewLocale}
             setPreviewLocale={setPreviewLocale}
             profile={profile}
@@ -1007,7 +801,7 @@ export function ProgramCardBuilder({
         <PreviewPanel
           idPrefix="builder-mobile"
           draft={draft}
-          locale={locale}
+          interfaceLocale={interfaceLocale}
           previewLocale={previewLocale}
           setPreviewLocale={setPreviewLocale}
           profile={profile}
@@ -1064,18 +858,17 @@ export function ProgramCardBuilder({
 function BasicsSection({
   draft,
   update,
-  locale,
+  interfaceLocale,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
-  locale: Locale;
+  interfaceLocale: InterfaceLocale;
 }) {
-  const ar = locale === "ar";
   return (
     <div className="builder-form-stack">
       <FormField
-        label={ar ? "اسم البطاقة داخل لوحة التحكم" : "Card name in your dashboard"}
-        hint={ar ? "لن يظهر هذا الاسم للعملاء." : "Customers do not see this internal name."}
+        label={builderText(interfaceLocale).ui.cardNameInYourDashboard}
+        hint={builderText(interfaceLocale).ui.customersDoNotSeeThisInternalName}
         required
       >
         <TextInput
@@ -1088,29 +881,13 @@ function BasicsSection({
           }
         />
       </FormField>
-      <FormField
-        label={ar ? "كيف يحصل العميل على ختم؟" : "How does a customer earn a stamp?"}
-        required
-      >
-        <TextInput
-          dir="auto"
-          name="builder-earning-rule"
-          value={draft.earningDescription}
-          maxLength={240}
-          onChange={(event) =>
-            update((current) => ({ ...current, earningDescription: event.target.value }))
-          }
-        />
-      </FormField>
       <div className="builder-goal-control">
         <div>
           <label htmlFor="builder-stamp-goal">
-            {ar ? "هدف الأختام" : "Stamp goal"} <span aria-hidden="true">*</span>
+            {builderText(interfaceLocale).ui.stampGoal} <span aria-hidden="true">*</span>
           </label>
           <small>
-            {ar
-              ? "تدعم البطاقة من ختمين إلى 30 ختمًا."
-              : "This card supports an exact goal from 2 to 30 stamps."}
+            {builderText(interfaceLocale).ui.thisCardSupportsAnExactGoalFrom2To30Stamps}
           </small>
         </div>
         <input
@@ -1119,13 +896,13 @@ function BasicsSection({
           min={2}
           max={30}
           value={draft.requiredStampCount}
-          aria-valuetext={`${draft.requiredStampCount} ${ar ? "ختمًا" : "stamps"}`}
+          aria-valuetext={`${draft.requiredStampCount} ${builderText(interfaceLocale).ui.stamps}`}
           onChange={(event) =>
             update((current) => updateBuilderStampGoal(current, Number(event.target.value)))
           }
         />
         <TextInput
-          aria-label={ar ? "القيمة الدقيقة لهدف الأختام" : "Exact stamp goal"}
+          aria-label={builderText(interfaceLocale).ui.exactStampGoal}
           type="number"
           min={2}
           max={30}
@@ -1142,62 +919,53 @@ function BasicsSection({
 function RewardSection({
   draft,
   update,
-  locale,
+  interfaceLocale,
+  language,
+  setLanguage,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
-  locale: Locale;
+  interfaceLocale: InterfaceLocale;
+  language: string;
+  setLanguage: (language: string) => void;
 }) {
-  const ar = locale === "ar";
   const index = finalRewardIndex(draft);
   const reward = draft.rewards[index];
   if (!reward) return null;
+  const translation = draft.translations[language];
+  const metadata = cardLocaleMetadata(language);
+  if (!translation || !metadata) return null;
   return (
     <div className="builder-form-stack">
+      <ContentLocaleTabs
+        draft={draft}
+        value={language}
+        onValueChange={setLanguage}
+        interfaceLocale={interfaceLocale}
+      />
       <div className="builder-reward-callout">
-        <span>{ar ? "عند اكتمال" : "Unlocked at"}</span>
+        <span>{builderText(interfaceLocale).ui.unlockedAt}</span>
         <strong>
-          {draft.requiredStampCount} {ar ? "ختمًا" : "stamps"}
+          {draft.requiredStampCount} {builderText(interfaceLocale).ui.stamps}
         </strong>
-        <small>
-          {ar
-            ? "تظهر جاهزية المكافأة خارج شبكة الأختام."
-            : "Reward readiness appears outside the stamp grid."}
-        </small>
+        <small>{builderText(interfaceLocale).ui.rewardReadinessAppearsOutsideTheStampGrid}</small>
       </div>
-      <div className="builder-form-grid">
-        <FormField
-          label={ar ? "ما الذي سيحصل عليه العميل؟ — English" : "What does the customer get?"}
-          required
-        >
-          <TextInput
-            dir="ltr"
-            lang="en"
-            name="builder-reward-en"
-            value={draft.translations.en.rewardSummary}
-            maxLength={120}
-            onChange={(event) =>
-              update((current) => updateBuilderRewardCopy(current, "en", event.target.value))
-            }
-          />
-        </FormField>
-        <FormField label={ar ? "ما الذي سيحصل عليه العميل؟" : "Arabic reward"} required>
-          <TextInput
-            dir="rtl"
-            lang="ar"
-            name="builder-reward-ar"
-            value={draft.translations.ar.rewardSummary}
-            maxLength={120}
-            onChange={(event) =>
-              update((current) => updateBuilderRewardCopy(current, "ar", event.target.value))
-            }
-          />
-        </FormField>
-      </div>
+      <FormField label={builderText(interfaceLocale).ui.whatDoesTheCustomerGet} required>
+        <TextInput
+          dir={metadata.direction}
+          lang={language}
+          name={`builder-reward-${language}`}
+          value={translation.rewardSummary}
+          maxLength={120}
+          onChange={(event) =>
+            update((current) => updateBuilderRewardCopy(current, language, event.target.value))
+          }
+        />
+      </FormField>
       <details className="builder-disclosure">
-        <summary>{ar ? "خيارات المكافأة" : "Reward options"}</summary>
+        <summary>{builderText(interfaceLocale).ui.rewardOptions}</summary>
         <div className="builder-form-grid">
-          <FormField label={ar ? "نوع المكافأة" : "Reward type"}>
+          <FormField label={builderText(interfaceLocale).ui.rewardType}>
             <Select
               value={reward.rewardType}
               onChange={(event) =>
@@ -1211,19 +979,78 @@ function RewardSection({
                 }))
               }
             >
-              <option value="FREE_ITEM">{ar ? "عنصر مجاني" : "Free item"}</option>
-              <option value="DISCOUNT_DESCRIPTION">{ar ? "خصم" : "Discount"}</option>
-              <option value="TEXT_REWARD">{ar ? "مكافأة وصفية" : "Descriptive reward"}</option>
-              <option value="CUSTOM">{ar ? "مخصصة" : "Custom"}</option>
+              <option value="FREE_ITEM">{builderText(interfaceLocale).ui.freeItem}</option>
+              <option value="DISCOUNT_DESCRIPTION">
+                {builderText(interfaceLocale).ui.discount}
+              </option>
+              <option value="TEXT_REWARD">
+                {builderText(interfaceLocale).ui.descriptiveReward}
+              </option>
+              <option value="CUSTOM">{builderText(interfaceLocale).ui.custom}</option>
             </Select>
           </FormField>
         </div>
         <p className="builder-studio-ownership-note">
-          {ar
-            ? "تُضبط صلاحية المكافأة وموافقات الاسترداد في الاستوديو بعد اكتمال تصميم البطاقة."
-            : "Reward validity and redemption approvals are set in Studio after the card design is complete."}
+          {
+            builderText(interfaceLocale).ui
+              .rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete
+          }
         </p>
       </details>
+    </div>
+  );
+}
+
+function ContentLocaleTabs({
+  draft,
+  value,
+  onValueChange,
+  interfaceLocale,
+}: {
+  draft: ProgramDraftInput;
+  value: string;
+  onValueChange: (locale: string) => void;
+  interfaceLocale: InterfaceLocale;
+}) {
+  return (
+    <div
+      className="builder-language-tabs"
+      role="tablist"
+      aria-label={builderText(interfaceLocale).ui.contentLanguage}
+    >
+      {draft.enabledLocales.map((locale) => {
+        const metadata = cardLocaleMetadata(locale);
+        if (!metadata) return null;
+        return (
+          <button
+            type="button"
+            role="tab"
+            key={locale}
+            aria-selected={value === locale}
+            tabIndex={value === locale ? 0 : -1}
+            onClick={() => onValueChange(locale)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const current = draft.enabledLocales.indexOf(locale);
+              const nextIndex =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? draft.enabledLocales.length - 1
+                    : (current +
+                        (event.key === "ArrowRight" ? 1 : -1) +
+                        draft.enabledLocales.length) %
+                      draft.enabledLocales.length;
+              const next = draft.enabledLocales[nextIndex];
+              if (next) onValueChange(next);
+            }}
+          >
+            <span>{metadata.nativeName}</span>
+            <small>{metadata.englishName}</small>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1231,36 +1058,31 @@ function RewardSection({
 function LanguagesSection({
   draft,
   update,
-  locale,
+  interfaceLocale,
   language,
   setLanguage,
-  enCompleteness,
-  arCompleteness,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
-  locale: Locale;
-  language: "en" | "ar";
-  setLanguage: (language: "en" | "ar") => void;
-  enCompleteness: ReturnType<typeof languageCompleteness>;
-  arCompleteness: ReturnType<typeof languageCompleteness>;
+  interfaceLocale: InterfaceLocale;
+  language: string;
+  setLanguage: (language: string) => void;
 }) {
-  const ar = locale === "ar";
+  const text = builderText(interfaceLocale);
   const value = draft.translations[language];
-  const completeness = language === "en" ? enCompleteness : arCompleteness;
-  const contentDirection = language === "ar" ? "rtl" : "ltr";
-  const languageOptions = ["en", "ar"] as const;
+  const metadata = cardLocaleMetadata(language);
+  if (!value || !metadata) return null;
+  const completeness = cardLocaleCompleteness(draft, language);
+  const contentDirection = metadata.direction;
+  const languageOptions = draft.enabledLocales;
 
-  function selectLanguage(next: "en" | "ar"): void {
+  function selectLanguage(next: string): void {
     setLanguage(next);
     requestAnimationFrame(() => document.getElementById(`builder-language-tab-${next}`)?.focus());
   }
 
-  function handleLanguageTabKey(
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    item: "en" | "ar",
-  ): void {
-    let next: "en" | "ar" | undefined;
+  function handleLanguageTabKey(event: React.KeyboardEvent<HTMLButtonElement>, item: string): void {
+    let next: string | undefined;
     if (event.key === "Home") next = languageOptions[0];
     if (event.key === "End") next = languageOptions[languageOptions.length - 1];
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
@@ -1274,24 +1096,164 @@ function LanguagesSection({
     selectLanguage(next);
   }
 
-  function setField(key: keyof typeof value, next: string) {
+  function setField(key: keyof ProgramTranslationInput, next: string) {
+    update((current) => {
+      const currentValue =
+        current.translations[language] ??
+        current.translations[current.defaultLocale] ??
+        current.translations.en;
+      return {
+        ...current,
+        ...(key === "earningDescription" && language === current.defaultLocale
+          ? { earningDescription: next }
+          : {}),
+        translations: {
+          ...current.translations,
+          [language]: withProgramTranslationField(currentValue, key, next),
+        },
+      };
+    });
+  }
+
+  function addLanguage(locale: string): void {
+    if (!cardLocaleMetadata(locale) || draft.enabledLocales.includes(locale)) return;
     update((current) => ({
       ...current,
+      enabledLocales: [...current.enabledLocales, locale],
       translations: {
         ...current.translations,
-        [language]: { ...current.translations[language], [key]: next },
+        [locale]: current.translations[locale] ?? {
+          programName: "",
+          shortDescription: "",
+          earningDescription: "",
+          rewardSummary: "",
+          termsAndConditions: "",
+          completionMessage: "",
+          rewardUnlockedMessage: "",
+        },
       },
+      rewards: current.rewards.map((reward) => ({
+        ...reward,
+        translations: {
+          ...reward.translations,
+          [locale]: reward.translations[locale] ?? { name: "", description: "" },
+        },
+      })),
+    }));
+    setLanguage(locale);
+  }
+
+  function removeLanguage(locale: string): void {
+    if (locale === draft.defaultLocale || draft.enabledLocales.length === 1) return;
+    update((current) => ({
+      ...current,
+      enabledLocales: current.enabledLocales.filter((item) => item !== locale),
+    }));
+    if (language === locale) setLanguage(draft.defaultLocale);
+  }
+
+  function changeDefault(locale: string): void {
+    if (!draft.enabledLocales.includes(locale)) return;
+    update((current) => ({
+      ...current,
+      defaultLocale: locale,
+      enabledLocales: [locale, ...current.enabledLocales.filter((item) => item !== locale)],
+      earningDescription:
+        current.translations[locale]?.earningDescription ?? current.earningDescription,
     }));
   }
+
+  const pickerOptions = cardLocaleRegistry
+    .filter((locale) => !draft.enabledLocales.includes(locale.id))
+    .toSorted(
+      (left, right) =>
+        Number(right.popular) - Number(left.popular) ||
+        left.englishName.localeCompare(right.englishName, "en"),
+    )
+    .map((locale) => ({
+      value: locale.id,
+      label: `${locale.englishName} — ${locale.nativeName}`,
+      group: locale.popular ? text.ui.popularLanguages : text.ui.allLanguages,
+      searchText: locale.aliases.join(" "),
+    }));
+
   return (
     <div className="builder-form-stack">
+      <Card className="builder-language-configuration">
+        <div className="builder-subheading">
+          <div>
+            <h3>{text.ui.cardLanguages}</h3>
+            <p>{text.ui.chooseCardLanguagesDescription}</p>
+          </div>
+        </div>
+        <div className="builder-form-grid">
+          <FormField label={text.ui.defaultLanguage} hint={text.ui.defaultLanguageHelp} required>
+            <SearchableSelect
+              value={draft.defaultLocale}
+              options={draft.enabledLocales.flatMap((locale) => {
+                const item = cardLocaleMetadata(locale);
+                return item
+                  ? [{ value: item.id, label: `${item.englishName} — ${item.nativeName}` }]
+                  : [];
+              })}
+              onValueChange={changeDefault}
+              ariaLabel={text.ui.defaultLanguage}
+            />
+          </FormField>
+          <FormField label={text.ui.addLanguage} hint={text.ui.searchLanguages}>
+            <SearchableSelect
+              key={draft.enabledLocales.join(":")}
+              options={pickerOptions}
+              placeholder={text.ui.searchLanguages}
+              onValueChange={addLanguage}
+              ariaLabel={text.ui.addLanguage}
+            />
+          </FormField>
+        </div>
+        <ul className="builder-enabled-languages" aria-label={text.ui.enabledLanguages}>
+          {draft.enabledLocales.map((locale) => {
+            const item = cardLocaleMetadata(locale);
+            const translation = draft.translations[locale];
+            if (!item || !translation) return null;
+            const status = cardLocaleCompleteness(draft, locale);
+            return (
+              <li key={locale} dir={item.direction}>
+                <span>
+                  <strong>{item.englishName}</strong>
+                  <small lang={locale}>{item.nativeName}</small>
+                </span>
+                <span>
+                  {locale === draft.defaultLocale ? (
+                    <Badge tone="brand">{text.ui.defaultBadge}</Badge>
+                  ) : null}
+                  <Badge tone={status.complete ? "success" : "warning"}>
+                    {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={locale === draft.defaultLocale || draft.enabledLocales.length === 1}
+                    title={locale === draft.defaultLocale ? text.ui.cannotRemoveDefault : undefined}
+                    onClick={() => removeLanguage(locale)}
+                  >
+                    {text.ui.removeLanguage}
+                  </Button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
       <div
         className="builder-language-tabs"
         role="tablist"
-        aria-label={ar ? "لغات البطاقة" : "Card languages"}
+        aria-label={builderText(interfaceLocale).ui.cardLanguages}
       >
         {languageOptions.map((item) => {
-          const status = item === "en" ? enCompleteness : arCompleteness;
+          const localeMetadata = cardLocaleMetadata(item);
+          const localeTranslation = draft.translations[item];
+          if (!localeMetadata || !localeTranslation) return null;
+          const status = cardLocaleCompleteness(draft, item);
           return (
             <button
               type="button"
@@ -1304,11 +1266,9 @@ function LanguagesSection({
               onClick={() => setLanguage(item)}
               onKeyDown={(event) => handleLanguageTabKey(event, item)}
             >
-              <span>{item === "en" ? "English" : "العربية"}</span>
+              <span>{localeMetadata.nativeName}</span>
               <small>
-                {status.complete
-                  ? copy[locale].complete
-                  : `${status.missing} ${copy[locale].fieldsRemaining}`}
+                {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
               </small>
             </button>
           );
@@ -1319,22 +1279,18 @@ function LanguagesSection({
         id={`builder-language-panel-${language}`}
         aria-labelledby={`builder-language-tab-${language}`}
         className="builder-language-panel"
-        dir={language === "ar" ? "rtl" : "ltr"}
+        dir={contentDirection}
         lang={language}
       >
         <Alert
           tone={completeness.complete ? "success" : "warning"}
           title={
             completeness.complete
-              ? language === "ar"
-                ? "المحتوى العربي مكتمل"
-                : "English content is complete"
-              : language === "ar"
-                ? `${completeness.missing} حقول عربية متبقية`
-                : `${completeness.missing} English fields remaining`
+              ? `${metadata.englishName}: ${text.complete}`
+              : `${metadata.englishName}: ${completeness.missing} ${text.fieldsRemaining}`
           }
         />
-        <FormField label={language === "ar" ? "اسم البطاقة" : "Card name"} required>
+        <FormField label={text.ui.customerCardName} required>
           <TextInput
             dir={contentDirection}
             lang={language}
@@ -1342,7 +1298,7 @@ function LanguagesSection({
             onChange={(event) => setField("programName", event.target.value)}
           />
         </FormField>
-        <FormField label={language === "ar" ? "الوصف القصير" : "Short description"} required>
+        <FormField label={text.ui.shortDescription} required>
           <TextInput
             dir={contentDirection}
             lang={language}
@@ -1351,11 +1307,18 @@ function LanguagesSection({
             onChange={(event) => setField("shortDescription", event.target.value)}
           />
         </FormField>
+        <FormField label={text.ui.howDoesACustomerEarnAStamp} required>
+          <TextInput
+            dir={contentDirection}
+            lang={language}
+            value={value.earningDescription}
+            maxLength={240}
+            onChange={(event) => setField("earningDescription", event.target.value)}
+          />
+        </FormField>
         <details className="builder-disclosure">
-          <summary>
-            {language === "ar" ? "المحتوى التفصيلي والرسائل" : "Detailed content and messages"}
-          </summary>
-          <FormField label={language === "ar" ? "الوصف الكامل" : "Full description"}>
+          <summary>{text.ui.detailedContentAndMessages}</summary>
+          <FormField label={text.ui.fullDescription}>
             <TextArea
               dir={contentDirection}
               lang={language}
@@ -1363,7 +1326,7 @@ function LanguagesSection({
               onChange={(event) => setField("fullDescription", event.target.value)}
             />
           </FormField>
-          <FormField label={language === "ar" ? "تعليمات الانضمام" : "Join instructions"}>
+          <FormField label={text.ui.joinInstructions}>
             <TextArea
               dir={contentDirection}
               lang={language}
@@ -1371,10 +1334,7 @@ function LanguagesSection({
               onChange={(event) => setField("joinInstructions", event.target.value)}
             />
           </FormField>
-          <FormField
-            label={language === "ar" ? "الشروط والأحكام" : "Terms and conditions"}
-            required
-          >
+          <FormField label={text.ui.termsAndConditions} required>
             <TextArea
               dir={contentDirection}
               lang={language}
@@ -1383,10 +1343,7 @@ function LanguagesSection({
             />
           </FormField>
           <div className="builder-form-grid">
-            <FormField
-              label={language === "ar" ? "رسالة اكتمال الهدف" : "Goal completion message"}
-              required
-            >
+            <FormField label={text.ui.goalCompletionMessage} required>
               <TextInput
                 dir={contentDirection}
                 lang={language}
@@ -1394,10 +1351,7 @@ function LanguagesSection({
                 onChange={(event) => setField("completionMessage", event.target.value)}
               />
             </FormField>
-            <FormField
-              label={language === "ar" ? "رسالة جاهزية المكافأة" : "Reward-ready message"}
-              required
-            >
+            <FormField label={text.ui.rewardReadyMessage} required>
               <TextInput
                 dir={contentDirection}
                 lang={language}
@@ -1406,7 +1360,7 @@ function LanguagesSection({
               />
             </FormField>
           </div>
-          <FormField label={language === "ar" ? "رسالة الإيقاف المؤقت" : "Paused-card message"}>
+          <FormField label={text.ui.pausedCardMessage}>
             <TextInput
               dir={contentDirection}
               lang={language}
@@ -1424,26 +1378,27 @@ function LocationsSection({
   draft,
   update,
   locations,
-  locale,
+  interfaceLocale,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   locations: LocationItem[];
-  locale: Locale;
+  interfaceLocale: InterfaceLocale;
 }) {
-  const ar = locale === "ar";
+  const text = builderText(interfaceLocale);
   const active = locations.filter((location) => location.status.toUpperCase() === "ACTIVE");
   return (
     <div className="builder-form-stack">
       {active.length === 1 ? (
-        <Alert tone="info" title={ar ? "تم تضمين موقعك النشط" : "Your active location is included"}>
-          {ar
-            ? "يمكنك إلغاء تحديده، لكن يلزم موقع واحد على الأقل لاجتياز فحص الجاهزية."
-            : "You can remove it, but at least one location is required for readiness."}
+        <Alert tone="info" title={builderText(interfaceLocale).ui.yourActiveLocationIsIncluded}>
+          {
+            builderText(interfaceLocale).ui
+              .youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness
+          }
         </Alert>
       ) : null}
       {!active.length ? (
-        <Alert tone="warning" title={copy[locale].locationError} />
+        <Alert tone="warning" title={text.locationError} />
       ) : (
         <div className="builder-location-list">
           {locations.map((location) => {
@@ -1469,12 +1424,18 @@ function LocationsSection({
                 />
                 <span>
                   <strong>{location.name}</strong>
-                  <small>{isActive ? (ar ? "نشط" : "Active") : ar ? "غير نشط" : "Inactive"}</small>
+                  <small>
+                    {isActive
+                      ? builderText(interfaceLocale).ui.active
+                      : builderText(interfaceLocale).ui.inactive}
+                  </small>
                 </span>
                 <span className="builder-location__capabilities">
-                  <Badge tone={selected ? "success" : "neutral"}>{ar ? "الكسب" : "Earning"}</Badge>
                   <Badge tone={selected ? "success" : "neutral"}>
-                    {ar ? "الاسترداد" : "Redemption"}
+                    {builderText(interfaceLocale).ui.earning}
+                  </Badge>
+                  <Badge tone={selected ? "success" : "neutral"}>
+                    {builderText(interfaceLocale).ui.redemption}
                   </Badge>
                 </span>
               </label>
@@ -1492,21 +1453,20 @@ function AppearanceSection({
   organizationId,
   assets,
   onAssetUploaded,
-  locale,
+  interfaceLocale,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   organizationId: string;
   assets: AssetItem[];
   onAssetUploaded: (asset: AssetItem) => void;
-  locale: Locale;
+  interfaceLocale: InterfaceLocale;
 }) {
-  const ar = locale === "ar";
   const colors = [
-    ["backgroundColor", ar ? "الخلفية" : "Background"],
-    ["foregroundColor", ar ? "النص" : "Text"],
-    ["accentColor", ar ? "لون التمييز" : "Accent"],
-    ["secondaryColor", ar ? "اللون الثانوي" : "Secondary"],
+    ["backgroundColor", builderText(interfaceLocale).ui.background],
+    ["foregroundColor", builderText(interfaceLocale).ui.text],
+    ["accentColor", builderText(interfaceLocale).ui.accent],
+    ["secondaryColor", builderText(interfaceLocale).ui.secondary],
   ] as const;
   return (
     <div className="builder-form-stack">
@@ -1514,8 +1474,7 @@ function AppearanceSection({
         {colors.map(([key, label]) => (
           <FormField key={key} label={label}>
             <div className="builder-color-control">
-              <input
-                type="color"
+              <ColorInput
                 aria-label={label}
                 value={draft.visualTheme[key]}
                 onChange={(event) =>
@@ -1541,26 +1500,11 @@ function AppearanceSection({
           </FormField>
         ))}
       </div>
-      <ProgramAssetPicker
-        organizationId={organizationId}
-        category="LOGO"
-        label={ar ? "الشعار" : "Logo"}
-        assets={assets}
-        selectedId={draft.visualTheme.logoAssetId}
-        onSelected={(assetId) =>
-          update((current) => ({
-            ...current,
-            visualTheme: { ...current.visualTheme, logoAssetId: assetId },
-          }))
-        }
-        onUploaded={onAssetUploaded}
-        ar={ar}
-      />
       <div className="builder-artwork-grid">
         <ProgramAssetPicker
           organizationId={organizationId}
           category="STAMP_FILLED"
-          label={ar ? "أيقونة الختم" : "Stamped icon"}
+          label={builderText(interfaceLocale).ui.stampedIcon}
           assets={assets}
           selectedId={draft.visualTheme.filledStampAssetId}
           onSelected={(assetId) =>
@@ -1570,12 +1514,13 @@ function AppearanceSection({
             }))
           }
           onUploaded={onAssetUploaded}
-          ar={ar}
+          ar={interfaceLocale === "ar"}
+          interfaceLocale={interfaceLocale}
         />
         <ProgramAssetPicker
           organizationId={organizationId}
           category="STAMP_EMPTY"
-          label={ar ? "الختم الفارغ" : "Empty stamp"}
+          label={builderText(interfaceLocale).ui.emptyStamp}
           assets={assets}
           selectedId={draft.visualTheme.emptyStampAssetId}
           onSelected={(assetId) =>
@@ -1585,7 +1530,8 @@ function AppearanceSection({
             }))
           }
           onUploaded={onAssetUploaded}
-          ar={ar}
+          ar={interfaceLocale === "ar"}
+          interfaceLocale={interfaceLocale}
         />
       </div>
     </div>
@@ -1596,14 +1542,19 @@ function AdvancedSection({
   draft,
   update,
   plan,
-  locale,
+  interfaceLocale,
+  language,
+  setLanguage,
 }: {
   draft: ProgramDraftInput;
   update: DraftUpdate;
   plan: "STARTER" | "GROWTH" | "SCALE";
-  locale: Locale;
+  interfaceLocale: InterfaceLocale;
+  language: string;
+  setLanguage: (language: string) => void;
 }) {
-  const ar = locale === "ar";
+  const text = builderText(interfaceLocale);
+  const contentMetadata = cardLocaleMetadata(language);
   const planCode = plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
   const proAvailable = planCatalog[planCode].features.advancedCustomization;
   const milestones = draft.rewards.filter(
@@ -1625,8 +1576,11 @@ function AdvancedSection({
           requiresManagerApproval: false,
           maximumRedemptionsPerEarned: 1,
           translations: {
-            en: { name: "Milestone reward", description: "Milestone reward" },
-            ar: { name: "مكافأة مرحلية", description: "مكافأة مرحلية" },
+            en: { name: "", description: "" },
+            ar: { name: "", description: "" },
+            ...Object.fromEntries(
+              current.enabledLocales.map((locale) => [locale, { name: "", description: "" }]),
+            ),
           },
         },
       ],
@@ -1634,8 +1588,8 @@ function AdvancedSection({
   }
   return (
     <div className="builder-form-stack">
-      {!proAvailable ? <Alert tone="info" title={copy[locale].starterAdvanced} /> : null}
-      <FormField label={copy[locale].mode}>
+      {!proAvailable ? <Alert tone="info" title={text.starterAdvanced} /> : null}
+      <FormField label={text.mode}>
         <Select
           value={draft.editingMode}
           onChange={(event) => {
@@ -1645,41 +1599,44 @@ function AdvancedSection({
             update((current) => ({ ...current, editingMode: mode }));
           }}
         >
-          <option value="quick">{copy[locale].quick}</option>
+          <option value="quick">{text.quick}</option>
           <option value="pro" disabled={!proAvailable}>
-            {copy[locale].pro}
+            {text.pro}
           </option>
         </Select>
       </FormField>
       {milestones.length > 0 ? (
         <Alert
           tone="warning"
-          title={
-            ar
-              ? "أزل المكافآت المرحلية قبل العودة إلى الوضع السريع"
-              : "Remove milestones before returning to Quick Mode"
-          }
+          title={builderText(interfaceLocale).ui.removeMilestonesBeforeReturningToQuickMode}
         />
       ) : null}
       {draft.editingMode === "pro" ? (
         <div className="builder-pro-rewards">
+          <ContentLocaleTabs
+            draft={draft}
+            value={language}
+            onValueChange={setLanguage}
+            interfaceLocale={interfaceLocale}
+          />
           <div className="builder-subheading">
             <div>
-              <h3>{ar ? "المكافآت المرحلية" : "Milestone rewards"}</h3>
+              <h3>{builderText(interfaceLocale).ui.milestoneRewards}</h3>
               <p>
-                {ar
-                  ? "تظهر المكافآت خارج شبكة الأختام ولا تستبدل أي خانة."
-                  : "Milestones remain outside the stamp grid and never replace a slot."}
+                {
+                  builderText(interfaceLocale).ui
+                    .milestonesRemainOutsideTheStampGridAndNeverReplaceASlot
+                }
               </p>
             </div>
             <Button type="button" variant="secondary" onClick={addMilestone}>
-              {ar ? "إضافة مكافأة مرحلية" : "Add milestone"}
+              {builderText(interfaceLocale).ui.addMilestone}
             </Button>
           </div>
           {milestones.map((reward) => (
             <Card key={reward.clientId} className="builder-milestone">
               <div className="builder-form-grid">
-                <FormField label={ar ? "عند عدد أختام" : "Stamp threshold"}>
+                <FormField label={builderText(interfaceLocale).ui.stampThreshold}>
                   <TextInput
                     type="number"
                     min={2}
@@ -1697,9 +1654,11 @@ function AdvancedSection({
                     }
                   />
                 </FormField>
-                <FormField label={ar ? "اسم المكافأة" : "Reward name"}>
+                <FormField label={builderText(interfaceLocale).ui.rewardName}>
                   <TextInput
-                    value={ar ? reward.translations.ar.name : reward.translations.en.name}
+                    dir={contentMetadata?.direction ?? "ltr"}
+                    lang={language}
+                    value={reward.translations[language]?.name ?? ""}
                     onChange={(event) =>
                       update((current) => ({
                         ...current,
@@ -1709,9 +1668,36 @@ function AdvancedSection({
                                 ...item,
                                 translations: {
                                   ...item.translations,
-                                  [ar ? "ar" : "en"]: {
-                                    ...item.translations[ar ? "ar" : "en"],
+                                  [language]: {
+                                    ...item.translations[language],
                                     name: event.target.value,
+                                    description: item.translations[language]?.description ?? "",
+                                  },
+                                },
+                              }
+                            : item,
+                        ),
+                      }))
+                    }
+                  />
+                </FormField>
+                <FormField label={builderText(interfaceLocale).ui.rewardDescription}>
+                  <TextInput
+                    dir={contentMetadata?.direction ?? "ltr"}
+                    lang={language}
+                    value={reward.translations[language]?.description ?? ""}
+                    onChange={(event) =>
+                      update((current) => ({
+                        ...current,
+                        rewards: current.rewards.map((item) =>
+                          item.clientId === reward.clientId
+                            ? {
+                                ...item,
+                                translations: {
+                                  ...item.translations,
+                                  [language]: {
+                                    ...item.translations[language],
+                                    name: item.translations[language]?.name ?? "",
                                     description: event.target.value,
                                   },
                                 },
@@ -1733,30 +1719,31 @@ function AdvancedSection({
                   }))
                 }
               >
-                {ar ? "إزالة المكافأة المرحلية" : "Remove milestone"}
+                {builderText(interfaceLocale).ui.removeMilestone}
               </Button>
             </Card>
           ))}
         </div>
       ) : null}
       <div className="builder-studio-ownership-note" role="note">
-        <strong>{ar ? "قواعد التشغيل في الاستوديو" : "Operational rules live in Studio"}</strong>
+        <strong>{builderText(interfaceLocale).ui.operationalRulesLiveInStudio}</strong>
         <p>
-          {ar
-            ? "بعد إنهاء التصميم، اضبط حدود الأختام ومتطلبات الشراء وفترات التراجع وصلاحيات المدير من منطقة «طريقة العمل»."
-            : "After design, set stamp limits, purchase requirements, reversal windows, and manager permissions in How it works."}
+          {
+            builderText(interfaceLocale).ui
+              .afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks
+          }
         </p>
       </div>
       <details className="builder-disclosure">
-        <summary>{ar ? "تخطيط الأختام" : "Stamp arrangement"}</summary>
+        <summary>{builderText(interfaceLocale).ui.stampArrangement}</summary>
         <div className="builder-layout-options">
           {(["ROW", "GRID", "PATH", "RING"] as const).map((layout) => {
             const locked = !proAvailable && (layout === "PATH" || layout === "RING");
             const labels = {
-              ROW: ar ? "أفقي" : "Horizontal",
-              GRID: ar ? "كلاسيكي" : "Classic",
-              PATH: ar ? "متدرج" : "Flowing",
-              RING: ar ? "دائري" : "Circular",
+              ROW: builderText(interfaceLocale).ui.horizontal,
+              GRID: builderText(interfaceLocale).ui.classic,
+              PATH: builderText(interfaceLocale).ui.flowing,
+              RING: builderText(interfaceLocale).ui.circular,
             };
             return (
               <button
@@ -1774,12 +1761,8 @@ function AdvancedSection({
                 <strong>{labels[layout]}</strong>
                 <small>
                   {locked
-                    ? ar
-                      ? "يتطلب Growth"
-                      : "Growth required"
-                    : ar
-                      ? "ترتيب متجاوب"
-                      : "Responsive arrangement"}
+                    ? builderText(interfaceLocale).ui.growthRequired
+                    : builderText(interfaceLocale).ui.responsiveArrangement}
                 </small>
               </button>
             );
@@ -1787,19 +1770,15 @@ function AdvancedSection({
         </div>
       </details>
       <details className="builder-disclosure">
-        <summary>{ar ? "تفاصيل أسطح المعاينة" : "Preview surface details"}</summary>
+        <summary>{builderText(interfaceLocale).ui.previewSurfaceDetails}</summary>
         <div className="builder-form-stack">
           <div className="builder-subheading">
             <div>
-              <h3>{ar ? "بطاقة العميل" : "Customer card"}</h3>
-              <p>
-                {ar
-                  ? "اختر تركيب بطاقة الويب الغني الذي يراه العميل."
-                  : "Choose the richer web-card composition customers see."}
-              </p>
+              <h3>{builderText(interfaceLocale).ui.customerCard}</h3>
+              <p>{builderText(interfaceLocale).ui.chooseTheRicherWebCardCompositionCustomersSee}</p>
             </div>
           </div>
-          <FormField label={ar ? "تركيب بطاقة العميل" : "Customer card layout"}>
+          <FormField label={builderText(interfaceLocale).ui.customerCardLayout}>
             <Select
               value={draft.visualTheme.customerWebVariant}
               onChange={(event) =>
@@ -1812,28 +1791,26 @@ function AdvancedSection({
                 }))
               }
             >
-              <option value="CARD">{ar ? "بطاقة" : "Card"}</option>
-              <option value="MINIMAL">{ar ? "مبسطة" : "Minimal"}</option>
-              <option value="HERO">{ar ? "بارزة" : "Hero"}</option>
+              <option value="CARD">{builderText(interfaceLocale).ui.card}</option>
+              <option value="MINIMAL">{builderText(interfaceLocale).ui.minimal}</option>
+              <option value="HERO">{builderText(interfaceLocale).ui.hero}</option>
             </Select>
           </FormField>
           <div className="builder-subheading">
             <div>
               <h3>Apple Wallet</h3>
               <p>
-                {ar
-                  ? "هذه النصوص تخص المعاينة التي يدعمها Apple Wallet."
-                  : "These labels apply to the fields supported by Apple Wallet."}
+                {builderText(interfaceLocale).ui.theseLabelsApplyToTheFieldsSupportedByAppleWallet}
               </p>
             </div>
           </div>
           <div className="builder-form-grid">
             {(
               [
-                ["headerLabel", ar ? "عنوان الرأس" : "Header label"],
-                ["headerValue", ar ? "قيمة الرأس" : "Header value"],
-                ["secondaryLabel", ar ? "العنوان الثانوي" : "Secondary label"],
-                ["barcodeLabel", ar ? "عنوان الرمز" : "Barcode label"],
+                ["headerLabel", builderText(interfaceLocale).ui.headerLabel],
+                ["headerValue", builderText(interfaceLocale).ui.headerValue],
+                ["secondaryLabel", builderText(interfaceLocale).ui.secondaryLabel],
+                ["barcodeLabel", builderText(interfaceLocale).ui.barcodeLabel],
               ] as const
             ).map(([key, label]) => (
               <FormField key={key} label={label}>
@@ -1857,7 +1834,7 @@ function AdvancedSection({
           </div>
           <Checkbox
             checked={draft.visualTheme.applePreviewConfig.showBackContent}
-            label={ar ? "إظهار محتوى ظهر بطاقة Apple" : "Show Apple card back content"}
+            label={builderText(interfaceLocale).ui.showAppleCardBackContent}
             onChange={(event) =>
               update((current) => ({
                 ...current,
@@ -1875,19 +1852,17 @@ function AdvancedSection({
             <div>
               <h3>Google Wallet</h3>
               <p>
-                {ar
-                  ? "هذه النصوص تخص المعاينة التي يدعمها Google Wallet."
-                  : "These labels apply to the fields supported by Google Wallet."}
+                {builderText(interfaceLocale).ui.theseLabelsApplyToTheFieldsSupportedByGoogleWallet}
               </p>
             </div>
           </div>
           <div className="builder-form-grid">
             {(
               [
-                ["title", ar ? "العنوان" : "Title"],
-                ["subtitle", ar ? "العنوان الفرعي" : "Subtitle"],
-                ["detailsLabel", ar ? "عنوان التفاصيل" : "Details label"],
-                ["barcodeLabel", ar ? "عنوان الرمز" : "Barcode label"],
+                ["title", builderText(interfaceLocale).ui.title],
+                ["subtitle", builderText(interfaceLocale).ui.subtitle],
+                ["detailsLabel", builderText(interfaceLocale).ui.detailsLabel],
+                ["barcodeLabel", builderText(interfaceLocale).ui.barcodeLabel],
               ] as const
             ).map(([key, label]) => (
               <FormField key={key} label={label}>
@@ -1911,7 +1886,7 @@ function AdvancedSection({
           </div>
         </div>
       </details>
-      <FormField label={ar ? "ملخص التغييرات" : "Change summary"}>
+      <FormField label={builderText(interfaceLocale).ui.changeSummary}>
         <TextInput
           value={draft.changeSummary ?? ""}
           maxLength={240}
@@ -1920,13 +1895,11 @@ function AdvancedSection({
           }
         />
       </FormField>
-      <Alert
-        tone="info"
-        title={ar ? "سلوك المكافأة النهائية ثابت" : "Final reward behavior is fixed"}
-      >
-        {ar
-          ? "تبقى جميع الخانات ممتلئة عند بلوغ الهدف، وتُعاد إلى فارغة فقط بعد نجاح استرداد المكافأة النهائية."
-          : "At the goal every slot remains filled; the grid resets to empty only after final reward redemption succeeds."}
+      <Alert tone="info" title={builderText(interfaceLocale).ui.finalRewardBehaviorIsFixed}>
+        {
+          builderText(interfaceLocale).ui
+            .atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds
+        }
       </Alert>
     </div>
   );
@@ -1937,28 +1910,21 @@ function ReviewSection({
   readiness,
   validation,
   canRunChecks,
-  testSession,
   working,
-  locale,
+  interfaceLocale,
   onSection,
   onRunChecks,
-  onStartTest,
-  onTestCommand,
 }: {
   draft: ProgramDraftInput;
   readiness: ReturnType<typeof builderReadiness>;
   validation: ValidationResult | null;
   canRunChecks: boolean;
-  testSession: TestSession | null;
   working: boolean;
-  locale: Locale;
+  interfaceLocale: InterfaceLocale;
   onSection: (section: BuilderSection) => void;
   onRunChecks: () => void;
-  onStartTest: () => void;
-  onTestCommand: (kind: "add" | "reset" | "redeem") => void;
 }) {
-  const ar = locale === "ar";
-  const text = copy[locale];
+  const text = builderText(interfaceLocale);
   const items: Array<{
     section: Exclude<BuilderSection, "advanced" | "review">;
     label: string;
@@ -1996,8 +1962,6 @@ function ReviewSection({
       complete: readiness.appearance,
     },
   ];
-  const goal = testSession?.version.stampRule?.requiredStampCount ?? draft.requiredStampCount;
-  const rewardReady = Boolean(testSession && testSession.currentStampCount >= goal);
   return (
     <div className="builder-form-stack">
       <Alert
@@ -2028,10 +1992,50 @@ function ReviewSection({
           </button>
         ))}
       </div>
+      <Card className="builder-language-review">
+        <div className="builder-subheading">
+          <div>
+            <h3>{text.ui.cardLanguages}</h3>
+            <p>{text.ui.providerReadiness}</p>
+          </div>
+        </div>
+        <ul className="builder-enabled-languages" aria-label={text.ui.enabledLanguages}>
+          {draft.enabledLocales.map((locale) => {
+            const metadata = cardLocaleMetadata(locale);
+            if (!metadata) return null;
+            const status = cardLocaleCompleteness(draft, locale);
+            return (
+              <li key={locale} dir={metadata.direction}>
+                <span>
+                  <strong lang={locale}>{metadata.nativeName}</strong>
+                  <small>{metadata.englishName}</small>
+                </span>
+                <span>
+                  {locale === draft.defaultLocale ? (
+                    <Badge tone="brand">{text.ui.defaultBadge}</Badge>
+                  ) : null}
+                  <Badge tone={status.complete ? "success" : "warning"}>
+                    {status.complete ? text.complete : `${status.missing} ${text.fieldsRemaining}`}
+                  </Badge>
+                  <small dir={directionForInterface(interfaceLocale)}>
+                    Customer Web ✓ · Apple Wallet {text.ui.normalizedSupport} · Google Wallet{" "}
+                    {text.ui.limitedSupport}
+                  </small>
+                  {!status.complete ? (
+                    <Button type="button" variant="ghost" onClick={() => onSection("languages")}>
+                      {text.fix}
+                    </Button>
+                  ) : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
       <Card className="builder-checks">
         <div className="builder-subheading">
           <div>
-            <h3>{ar ? "فحوصات الجاهزية" : "Readiness checks"}</h3>
+            <h3>{builderText(interfaceLocale).ui.readinessChecks}</h3>
             <p>
               {!validation
                 ? text.checksNotRun
@@ -2074,61 +2078,6 @@ function ReviewSection({
           </div>
         ) : null}
       </Card>
-      <Card className="builder-test-mode">
-        <FlaskConical size={26} aria-hidden="true" />
-        <div>
-          <h3>{text.testMode}</h3>
-          <p>{text.testModeDescription}</p>
-        </div>
-        {!testSession ? (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!validation || validation.errors.length > 0}
-            onClick={onStartTest}
-            loading={working}
-          >
-            {text.startTest}
-          </Button>
-        ) : (
-          <div className="builder-test-controls">
-            <div className="builder-test-meter">
-              <strong>
-                {testSession.currentStampCount}/{goal}
-              </strong>
-              <progress value={testSession.currentStampCount} max={goal} />
-            </div>
-            {rewardReady ? <Alert tone="success" title={text.rewardReady} /> : null}
-            <div className="builder-test-actions">
-              <Button
-                type="button"
-                disabled={working || rewardReady}
-                onClick={() => onTestCommand("add")}
-              >
-                {text.addStamp}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={working}
-                onClick={() => onTestCommand("reset")}
-              >
-                <RotateCcw size={15} aria-hidden="true" />
-                {text.resetTest}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={working || !rewardReady}
-                onClick={() => onTestCommand("redeem")}
-              >
-                {text.redeemReward}
-              </Button>
-            </div>
-          </div>
-        )}
-        {!validation ? <small>{text.testRequired}</small> : null}
-      </Card>
     </div>
   );
 }
@@ -2136,7 +2085,7 @@ function ReviewSection({
 function PreviewPanel({
   idPrefix,
   draft,
-  locale,
+  interfaceLocale,
   previewLocale,
   setPreviewLocale,
   profile,
@@ -2151,9 +2100,9 @@ function PreviewPanel({
 }: {
   idPrefix: string;
   draft: ProgramDraftInput;
-  locale: Locale;
-  previewLocale: "EN" | "AR";
-  setPreviewLocale: Dispatch<SetStateAction<"EN" | "AR">>;
+  interfaceLocale: InterfaceLocale;
+  previewLocale: string;
+  setPreviewLocale: Dispatch<SetStateAction<string>>;
   profile: PreviewProfile;
   setProfile: Dispatch<SetStateAction<PreviewProfile>>;
   progress: number;
@@ -2164,7 +2113,7 @@ function PreviewPanel({
   stale: boolean;
   onRetry: () => void;
 }) {
-  const text = copy[locale];
+  const text = builderText(interfaceLocale);
   return (
     <div className="builder-preview-panel">
       <div className="builder-preview-header">
@@ -2172,25 +2121,21 @@ function PreviewPanel({
           <span className="dashboard-card__label">{text.previewOnly}</span>
           <h2>{text.preview}</h2>
         </div>
-        <fieldset className="builder-preview-language">
-          <legend className="wf-sr-only">
-            {locale === "ar" ? "لغة المعاينة" : "Preview language"}
-          </legend>
-          <button
-            type="button"
-            aria-pressed={previewLocale === "EN"}
-            onClick={() => setPreviewLocale("EN")}
-          >
-            EN
-          </button>
-          <button
-            type="button"
-            aria-pressed={previewLocale === "AR"}
-            onClick={() => setPreviewLocale("AR")}
-          >
-            AR
-          </button>
-        </fieldset>
+        <div className="builder-preview-language">
+          <SearchableSelect
+            ariaLabel={text.ui.previewLanguage}
+            value={previewLocale}
+            onValueChange={setPreviewLocale}
+            options={draft.enabledLocales.map((locale) => {
+              const metadata = cardLocaleMetadata(locale);
+              return {
+                value: locale,
+                label: metadata ? `${metadata.englishName} · ${metadata.nativeName}` : locale,
+                ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+              };
+            })}
+          />
+        </div>
       </div>
       <div className="builder-preview-tabs" role="tablist" aria-label={text.preview}>
         {previewProfiles.map((item) => (
@@ -2207,7 +2152,7 @@ function PreviewPanel({
               if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
               event.preventDefault();
               const current = previewProfiles.indexOf(profile);
-              const logicalForward = locale === "ar" ? -1 : 1;
+              const logicalForward = directionForInterface(interfaceLocale) === "rtl" ? -1 : 1;
               const next =
                 event.key === "Home"
                   ? 0
@@ -2225,13 +2170,15 @@ function PreviewPanel({
               );
             }}
           >
-            {previewLabel(item, locale)}
+            {previewLabel(item, interfaceLocale)}
           </button>
         ))}
       </div>
       <p className="builder-preview-provider-note">{text.walletPreviewNote}</p>
       <div
         id={`${idPrefix}-panel`}
+        dir={directionForCardLocale(previewLocale)}
+        lang={previewLocale}
         role="tabpanel"
         aria-labelledby={`${idPrefix}-${profile}`}
         aria-busy={previewLoading}
@@ -2240,7 +2187,7 @@ function PreviewPanel({
         {preview ? (
           <Image
             src={previewSource(preview.svg)}
-            alt={`${previewLabel(profile, locale)} ${text.previewOnly}`}
+            alt={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
             width={preview.width}
             height={preview.height}
             unoptimized
@@ -2253,7 +2200,7 @@ function PreviewPanel({
               size={20}
               aria-hidden="true"
             />
-            <strong>{previewLabel(profile, locale)}</strong>
+            <strong>{previewLabel(profile, interfaceLocale)}</strong>
             <span>{previewLoading ? text.previewPreparing : text.previewPending}</span>
           </div>
         )}

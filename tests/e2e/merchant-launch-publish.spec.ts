@@ -27,13 +27,20 @@ async function enterStudio(page: Page, locale: "en" | "ar" = "en"): Promise<void
 }
 
 async function openLaunch(page: Page, locale: "en" | "ar" = "en"): Promise<void> {
-  const name = locale === "ar" ? /^الإطلاق/u : /^Launch/u;
+  const name = locale === "ar" ? /^الإطلاق/u : /^Review & launch/u;
   const mobileTrigger = page.locator(".studio-mobile-navigation > button");
   if (await mobileTrigger.isVisible()) await mobileTrigger.click();
   await page
     .getByRole("navigation", { name: locale === "ar" ? "أقسام الاستوديو" : "Studio sections" })
     .getByRole("button", { name })
     .click();
+  await expect(page).toHaveURL(new RegExp(`/${locale}/dashboard/programs/[^/]+/launch$`, "u"));
+  await expect(
+    page.getByRole("heading", {
+      level: 2,
+      name: locale === "ar" ? "الإطلاق" : "Review & launch",
+    }),
+  ).toBeVisible();
 }
 
 async function openSettings(page: Page, locale: "en" | "ar" = "en"): Promise<void> {
@@ -136,7 +143,7 @@ test("launches a ready card once, with real execution and a focused success stat
   await expect(page.getByRole("button", { name: "View customers" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open public card page" })).toBeVisible();
   await page.getByRole("button", { name: "Share loyalty card" }).click();
-  await expect(page.getByText("Local development preview", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preview link", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download enrollment QR as PNG" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download enrollment QR as SVG" })).toBeVisible();
   await page.getByRole("button", { name: "Copy link" }).click();
@@ -150,9 +157,10 @@ test("publishes an update while preserving the existing customer contract", asyn
   });
   await enterStudio(page);
 
-  await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unpublished changes saved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live · Unpublished changes", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("The current live card is unchanged.", { exact: true }),
+    page.getByText(/Customers continue to see the current live version\./u),
   ).toBeVisible();
   await openLaunch(page);
   await expect(page.getByRole("heading", { name: "Ready to publish changes" })).toBeVisible();
@@ -282,7 +290,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(page.getByText("Available to customers", { exact: true })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "LIVE", billingStatus: "ACTIVE" }, desktop);
-  const livePreview = page.getByLabel("Card preview");
+  const livePreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     livePreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -300,14 +308,15 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   ).toBeVisible();
 
   await resetScenario(page, { studioState: "LIVE_WITH_CHANGES", billingStatus: "ACTIVE" }, desktop);
-  const pendingPreview = page.getByLabel("Card preview");
+  const pendingPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     pendingPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
   await expect(pendingPreview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(pendingPreview.getByText("Currently live", { exact: true })).toBeVisible();
   await expect(pendingPreview.getByRole("tab", { name: "Customer" })).toHaveCount(0);
-  await expect(page.getByText("Changes waiting to be published", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unpublished changes saved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live · Unpublished changes", { exact: true })).toBeVisible();
   await expect(
     page
       .locator(".studio-next-action")
@@ -320,7 +329,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(page.getByText("Preview will appear here", { exact: true })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "PAUSED", billingStatus: "ACTIVE" }, desktop);
-  const pausedPreview = page.getByLabel("Card preview");
+  const pausedPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     pausedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -339,7 +348,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   await expect(pausedShare.getByRole("button", { name: /Download enrollment QR/u })).toHaveCount(0);
 
   await resetScenario(page, { studioState: "ARCHIVED", billingStatus: "ACTIVE" }, desktop);
-  const archivedPreview = page.getByLabel("Card preview");
+  const archivedPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     archivedPreview.getByRole("img", { name: "Current published card summary" }),
   ).toBeVisible();
@@ -365,7 +374,7 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
     },
     desktop,
   );
-  const unavailableArchivedPreview = page.getByLabel("Card preview");
+  const unavailableArchivedPreview = page.getByRole("region", { name: "Card preview" });
   await expect(
     unavailableArchivedPreview.getByText("Preview unavailable", { exact: true }),
   ).toBeVisible();
@@ -380,7 +389,7 @@ test("distinguishes a loading customer preview from a confirmed unavailable prev
   const desktop = { width: 1440, height: 900 };
   await resetScenario(page, { studioState: "READY", previewDelayMs: 600 }, desktop);
 
-  const loadingPreview = page.getByLabel("Card preview");
+  const loadingPreview = page.getByRole("region", { name: "Card preview" });
   await expect(loadingPreview.getByText("Loading preview…", { exact: true })).toBeVisible();
   await expect(loadingPreview.getByText("Preview unavailable", { exact: true })).toHaveCount(0);
   await expect(loadingPreview.getByRole("img", { name: "Customer card preview" })).toBeVisible({
@@ -616,7 +625,7 @@ test("shows mixed Wallet truth and remains accessible at 360px in English and Ar
     await expect(
       page
         .locator(".publication-wallet-list")
-        .getByText(locale === "ar" ? "جاهزة" : "Ready", { exact: true }),
+        .getByText(locale === "ar" ? "للاختبار فقط" : "Test only", { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByText(locale === "ar" ? "غير متاحة مؤقتاً" : "Temporarily unavailable", {

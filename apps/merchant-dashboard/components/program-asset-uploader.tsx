@@ -1,11 +1,17 @@
 "use client";
 
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Button, FormField, Modal } from "@waflo/ui";
-import { Crop, ImagePlus, Upload } from "lucide-react";
+import { Crop, ImagePlus, Upload, ZoomIn, ZoomOut } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch, apiUrl } from "../lib/api-client";
+import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
 import type { AssetCategory, AssetItem } from "./program-studio-types";
+
+const maximumUploadBytes = 2 * 1024 * 1024;
+const acceptedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+const fullImageCrop = { x: 0, y: 0, width: 1, height: 1, zoom: 1 };
+const initialCrop = { x: 1 / 24, y: 1 / 24, width: 11 / 12, height: 11 / 12, zoom: 12 / 11 };
 
 function AssetThumbnail({ asset, label }: { asset: AssetItem; label: string }) {
   const [source, setSource] = useState("");
@@ -54,6 +60,7 @@ export function ProgramAssetPicker({
   onSelected,
   onUploaded,
   ar,
+  interfaceLocale,
 }: {
   organizationId: string;
   category: AssetCategory;
@@ -63,12 +70,21 @@ export function ProgramAssetPicker({
   onSelected: (assetId: string | null) => void;
   onUploaded: (asset: AssetItem) => void;
   ar: boolean;
+  interfaceLocale?: InterfaceLocale | undefined;
 }) {
+  const copy =
+    localeRegistry[interfaceLocale ?? (ar ? "ar" : "en")].messages.merchant.assetUploader;
   const fileInput = useRef<HTMLInputElement>(null);
+  const dragOrigin = useRef<{
+    pointerX: number;
+    pointerY: number;
+    cropX: number;
+    cropY: number;
+  } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
-  const [crop, setCrop] = useState({ x: 0, y: 0, width: 1, height: 1, zoom: 1 });
+  const [crop, setCrop] = useState(initialCrop);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -79,8 +95,77 @@ export function ProgramAssetPicker({
   );
   const selectedAsset = choices.find((asset) => asset.id === selectedId);
 
+  function clamp(value: number, minimum: number, maximum: number): number {
+    return Math.min(maximum, Math.max(minimum, value));
+  }
+
+  function zoomTo(nextZoom: number): void {
+    setCrop((current) => {
+      const zoom = clamp(nextZoom, 1, 4);
+      const width = 1 / zoom;
+      const height = 1 / zoom;
+      const focalX = current.x + current.width / 2;
+      const focalY = current.y + current.height / 2;
+      return {
+        x: clamp(focalX - width / 2, 0, 1 - width),
+        y: clamp(focalY - height / 2, 0, 1 - height),
+        width,
+        height,
+        zoom,
+      };
+    });
+  }
+
+  function beginPan(event: PointerEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragOrigin.current = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      cropX: crop.x,
+      cropY: crop.y,
+    };
+  }
+
+  function pan(event: PointerEvent<HTMLButtonElement>): void {
+    const origin = dragOrigin.current;
+    if (!origin) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const deltaX = (event.clientX - origin.pointerX) / bounds.width;
+    const deltaY = (event.clientY - origin.pointerY) / bounds.height;
+    setCrop((current) => ({
+      ...current,
+      x: clamp(origin.cropX - deltaX / current.zoom, 0, 1 - current.width),
+      y: clamp(origin.cropY - deltaY / current.zoom, 0, 1 - current.height),
+    }));
+  }
+
+  function endPan(event: PointerEvent<HTMLButtonElement>): void {
+    dragOrigin.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function keyboardPan(event: KeyboardEvent<HTMLButtonElement>): void {
+    const movement = event.shiftKey ? 0.05 : 0.01;
+    const delta = {
+      ArrowLeft: [-movement, 0],
+      ArrowRight: [movement, 0],
+      ArrowUp: [0, -movement],
+      ArrowDown: [0, movement],
+    }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    setCrop((current) => ({
+      ...current,
+      x: clamp(current.x + (delta[0] ?? 0), 0, 1 - current.width),
+      y: clamp(current.y + (delta[1] ?? 0), 0, 1 - current.height),
+    }));
+  }
+
   function displayName(asset: AssetItem): string {
-    if (ar && asset.source === "WAFLO_LIBRARY") return "رسم مدمج من Waflo";
+    if (asset.source === "WAFLO_LIBRARY") return copy.embeddedWafloArtwork;
     const name = asset.originalFilename
       .replace(/\.[^.]+$/u, "")
       .replace(/[-_]v\d+$/iu, "")
@@ -93,6 +178,24 @@ export function ProgramAssetPicker({
   function choose(assetId: string | null): void {
     onSelected(assetId);
     setShowChoices(false);
+  }
+
+  function selectFile(selected: File | null): void {
+    setError("");
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+    if (!acceptedImageTypes.has(selected.type)) {
+      setError(copy.unsupportedType);
+      return;
+    }
+    if (selected.size === 0 || selected.size > maximumUploadBytes) {
+      setError(copy.fileTooLarge);
+      return;
+    }
+    setCrop(initialCrop);
+    setFile(selected);
   }
 
   useEffect(() => {
@@ -122,28 +225,24 @@ export function ProgramAssetPicker({
       onSelected(asset.id);
       setUploadMessage(
         asset.uploadDisposition === "REPLAYED"
-          ? ar
-            ? "تمت إعادة استخدام الأصل المطابق الموجود."
-            : "The existing matching asset was reused."
+          ? copy.reused
           : asset.uploadDisposition === "RESTORED"
-            ? ar
-              ? "تمت استعادة الأصل المؤرشف وإصلاح ملفاته."
-              : "The archived matching asset was restored and repaired."
+            ? copy.restored
             : asset.uploadDisposition === "REPAIRED"
-              ? ar
-                ? "تم إصلاح ملفات الأصل المطابق."
-                : "The matching asset object set was repaired."
-              : ar
-                ? "تم رفع الأصل ومعالجته."
-                : "The asset was uploaded and processed.",
+              ? copy.repaired
+              : copy.uploadedProcessed,
       );
       setFile(null);
-      setCrop({ x: 0, y: 0, width: 1, height: 1, zoom: 1 });
-    } catch {
+      setCrop(initialCrop);
+    } catch (caught) {
       setError(
-        ar
-          ? "تعذر رفع الملف. التصميم المحفوظ حاليًا لم يتغير. تحقق من الملف وحاول مرة أخرى."
-          : "The file could not be uploaded. The currently saved design is unchanged. Check the file and try again.",
+        caught instanceof ApiClientError && caught.code === "ASSET_UPLOAD_INVALID"
+          ? copy.invalidFile
+          : caught instanceof ApiClientError && caught.code === "ASSET_PROCESSING_FAILED"
+            ? copy.processingFailed
+            : caught instanceof ApiClientError && caught.code === "NETWORK_ERROR"
+              ? copy.networkError
+              : copy.uploadError,
       );
     } finally {
       setUploading(false);
@@ -153,18 +252,15 @@ export function ProgramAssetPicker({
   return (
     <section className="studio-asset-picker" aria-label={label}>
       {uploadMessage ? <Alert tone="success" title={uploadMessage} /> : null}
+      {error && !file ? <Alert tone="danger" title={error} /> : null}
       <div className="studio-section-heading">
         <div>
           <h4>{label}</h4>
-          <p>
-            {ar
-              ? "اختر من مكتبة Waflo أو ارفع صورة PNG أو JPEG أو WebP."
-              : "Choose from the Waflo library or upload PNG, JPEG, or WebP."}
-          </p>
+          <p>{copy.guidance}</p>
         </div>
         {selectedAsset ? (
           <Button type="button" variant="ghost" onClick={() => setShowChoices((open) => !open)}>
-            {showChoices ? (ar ? "إخفاء الخيارات" : "Hide options") : ar ? "تغيير" : "Change"}
+            {showChoices ? copy.hideOptions : copy.change}
           </Button>
         ) : null}
         <input
@@ -172,24 +268,21 @@ export function ProgramAssetPicker({
           className="wf-sr-only"
           type="file"
           accept="image/png,image/jpeg,image/webp"
-          aria-label={`${label} ${ar ? "رفع صورة" : "image upload"}`}
-          onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
+          aria-label={`${label} ${copy.imageUpload}`}
+          onChange={(event) => {
+            selectFile(event.currentTarget.files?.[0] ?? null);
+            event.currentTarget.value = "";
+          }}
         />
       </div>
       {selectedAsset ? (
         <div className="studio-asset-current">
           <AssetThumbnail asset={selectedAsset} label={label} />
           <span>
-            <small>{ar ? "المستخدم حاليًا" : "Currently used"}</small>
+            <small>{copy.currentlyUsed}</small>
             <strong>{displayName(selectedAsset)}</strong>
             <small>
-              {selectedAsset.source === "WAFLO_LIBRARY"
-                ? ar
-                  ? "مكتبة Waflo"
-                  : "Waflo library"
-                : ar
-                  ? "تصميم مرفوع"
-                  : "Uploaded artwork"}
+              {selectedAsset.source === "WAFLO_LIBRARY" ? copy.wafloLibrary : copy.uploadedArtwork}
             </small>
           </span>
         </div>
@@ -200,22 +293,14 @@ export function ProgramAssetPicker({
           onClick={() => fileInput.current?.click()}
         >
           <ImagePlus size={24} />
-          {category === "LOGO"
-            ? ar
-              ? "إضافة شعار"
-              : "Add logo"
-            : ar
-              ? "اختيار رسم أو رفع تصميمك"
-              : "Choose artwork or upload your own"}
+          {category === "LOGO" ? copy.addLogo : copy.chooseArtwork}
         </button>
       )}
       {showChoices ? (
         <div className="studio-asset-library">
           {choices.length ? (
             <>
-              <span className="studio-asset-library__label">
-                {ar ? "الاختيار من المكتبة" : "Choose from library"}
-              </span>
+              <span className="studio-asset-library__label">{copy.chooseFromLibrary}</span>
               <div className="studio-asset-grid">
                 {choices.map((asset) => (
                   <button
@@ -229,13 +314,7 @@ export function ProgramAssetPicker({
                     <AssetThumbnail asset={asset} label={displayName(asset)} />
                     <span>{displayName(asset)}</span>
                     <small>
-                      {asset.source === "WAFLO_LIBRARY"
-                        ? ar
-                          ? "مكتبة Waflo"
-                          : "Waflo library"
-                        : ar
-                          ? "مرفوع"
-                          : "Uploaded"}
+                      {asset.source === "WAFLO_LIBRARY" ? copy.wafloLibrary : copy.uploaded}
                     </small>
                   </button>
                 ))}
@@ -245,26 +324,40 @@ export function ProgramAssetPicker({
           {selectedAsset || choices.length ? (
             <Button type="button" variant="secondary" onClick={() => fileInput.current?.click()}>
               <Upload size={16} />
-              {ar ? "رفع تصميمك" : "Upload your own"}
+              {copy.uploadYourOwn}
             </Button>
           ) : null}
         </div>
       ) : null}
 
-      <Modal
-        open={Boolean(file)}
-        title={ar ? "قص الصورة بأمان" : "Crop image safely"}
-        onClose={() => setFile(null)}
-      >
+      <Modal open={Boolean(file)} title={copy.cropSafely} onClose={() => setFile(null)}>
         {previewUrl ? (
           <div className="studio-crop-layout">
-            <div className="studio-crop-preview">
+            <button
+              type="button"
+              className="studio-crop-preview"
+              aria-label={copy.cropArea}
+              onPointerDown={beginPan}
+              onPointerMove={pan}
+              onPointerUp={endPan}
+              onPointerCancel={endPan}
+              onLostPointerCapture={() => {
+                dragOrigin.current = null;
+              }}
+              onKeyDown={keyboardPan}
+              onWheel={(event) => {
+                event.preventDefault();
+                zoomTo(crop.zoom + (event.deltaY > 0 ? -0.1 : 0.1));
+              }}
+            >
               <Image
                 src={previewUrl}
-                alt={ar ? "معاينة القص" : "Crop preview"}
+                alt={copy.cropPreview}
                 width={520}
                 height={360}
                 unoptimized
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
                 onLoad={(event) =>
                   setNaturalSize({
                     width: event.currentTarget.naturalWidth,
@@ -272,75 +365,73 @@ export function ProgramAssetPicker({
                   })
                 }
                 style={{
-                  transform: `scale(${crop.zoom}) translate(${crop.x * -20}%, ${crop.y * -20}%)`,
+                  transform: `scale(${crop.zoom}) translate(${-crop.x * 100}%, ${-crop.y * 100}%)`,
                 }}
               />
               <span className="studio-crop-safe-area" aria-hidden="true" />
-            </div>
+              <span className="studio-crop-instruction" aria-hidden="true">
+                {copy.dragToReposition}
+              </span>
+            </button>
             <div className="studio-crop-controls">
               <p className="field-help">
                 <Crop size={15} />
                 {naturalSize.width} × {naturalSize.height}px ·{" "}
                 {naturalSize.width < 256 || naturalSize.height < 256
-                  ? ar
-                    ? "الدقة منخفضة لختم واضح."
-                    : "Resolution is low for a crisp stamp."
-                  : ar
-                    ? "الدقة مناسبة."
-                    : "Resolution looks good."}
+                  ? copy.resolutionLow
+                  : copy.resolutionGood}
               </p>
-              <FormField label={ar ? "التكبير" : "Zoom"}>
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  step={0.1}
-                  value={crop.zoom}
-                  onChange={(event) =>
-                    setCrop((current) => ({ ...current, zoom: Number(event.target.value) }))
-                  }
-                />
+              <FormField label={copy.zoom}>
+                <div className="studio-crop-zoom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="studio-crop-zoom__button"
+                    aria-label={copy.zoomOut}
+                    title={copy.zoomOut}
+                    disabled={crop.zoom <= 1}
+                    onClick={() => zoomTo(crop.zoom - 0.2)}
+                  >
+                    <ZoomOut size={18} aria-hidden="true" />
+                  </Button>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    step={0.1}
+                    value={crop.zoom}
+                    aria-label={copy.zoom}
+                    onChange={(event) => zoomTo(Number(event.target.value))}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="studio-crop-zoom__button"
+                    aria-label={copy.zoomIn}
+                    title={copy.zoomIn}
+                    disabled={crop.zoom >= 4}
+                    onClick={() => zoomTo(crop.zoom + 0.2)}
+                  >
+                    <ZoomIn size={18} aria-hidden="true" />
+                  </Button>
+                </div>
               </FormField>
-              <FormField label={ar ? "الموضع الأفقي" : "Horizontal position"}>
-                <input
-                  type="range"
-                  min={0}
-                  max={0.5}
-                  step={0.01}
-                  value={crop.x}
-                  onChange={(event) =>
-                    setCrop((current) => {
-                      const x = Number(event.target.value);
-                      return { ...current, x, width: 1 - x };
-                    })
-                  }
-                />
-              </FormField>
-              <FormField label={ar ? "الموضع العمودي" : "Vertical position"}>
-                <input
-                  type="range"
-                  min={0}
-                  max={0.5}
-                  step={0.01}
-                  value={crop.y}
-                  onChange={(event) =>
-                    setCrop((current) => {
-                      const y = Number(event.target.value);
-                      return { ...current, y, height: 1 - y };
-                    })
-                  }
-                />
-              </FormField>
+              <div className="studio-crop-control-row">
+                <p>{copy.cropHelp}</p>
+                <Button type="button" variant="ghost" onClick={() => setCrop(fullImageCrop)}>
+                  {copy.resetCrop}
+                </Button>
+              </div>
               {error ? <p className="wf-form-error">{error}</p> : null}
             </div>
           </div>
         ) : null}
         <div className="wf-dialog__actions">
           <Button type="button" variant="secondary" onClick={() => setFile(null)}>
-            {ar ? "إلغاء" : "Cancel"}
+            {copy.cancel}
           </Button>
           <Button type="button" onClick={() => void upload()} loading={uploading}>
-            {ar ? "معالجة ورفع" : "Process and upload"}
+            {copy.processUpload}
           </Button>
         </div>
       </Modal>

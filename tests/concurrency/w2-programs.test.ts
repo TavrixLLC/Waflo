@@ -81,9 +81,16 @@ async function scenario(plan: Plan = "GROWTH"): Promise<Scenario> {
       defaultLocale: "EN",
       timezone: "UTC",
       selectedPlan: plan,
+      onboardingState: "COMPLETE",
+      onboardingCompletedAt: new Date(),
       members: { create: { userId: owner.id, role: "OWNER" } },
       billingProfile: {
-        create: { selectedPlan: plan, subscriptionStatus: "PENDING_ACTIVATION" },
+        create: {
+          selectedPlan: plan,
+          subscriptionStatus: "TRIALING",
+          trialStart: new Date(),
+          trialEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
       },
     },
   });
@@ -300,23 +307,7 @@ async function markPublishReady(context: Scenario, program: CreatedProgram) {
       request,
     ),
   ]);
-  const fingerprint = await markValidated(program);
-  await prisma.client.loyaltyProgramVersion.update({
-    where: { id: program.currentDraftVersion.id },
-    data: { status: "TEST_READY", testReadyAt: new Date() },
-  });
-  await prisma.client.programTestSession.create({
-    data: {
-      organizationId: context.organizationId,
-      versionId: program.currentDraftVersion.id,
-      createdByUserId: context.ownerId,
-      syntheticDisplayName: "Waflo concurrent customer",
-      versionRevision: program.currentDraftVersion.revision,
-      validationFingerprint: fingerprint,
-      status: "COMPLETED",
-      cycleCount: 1,
-    },
-  });
+  await markValidated(program);
 }
 
 async function createSession(context: Scenario, program: CreatedProgram) {
@@ -841,7 +832,7 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
         randomUUID(),
         request,
       ),
-    ).rejects.toMatchObject({ code: "PROGRAM_PUBLICATION_BILLING_BLOCKED" });
+    ).rejects.toMatchObject({ code: "BILLING_ACTION_REQUIRED" });
     expect(
       await prisma.client.programPublishCommand.count({
         where: { organizationId: billingContext.organizationId },
@@ -878,7 +869,7 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
     ).toBe(0);
   });
 
-  it("rejects organization, location, asset, and missing-object changes made after Test Mode", async () => {
+  it("rejects organization, location, asset, and missing-object changes after validation", async () => {
     const organizationContext = await scenario();
     const organizationProgram = await createProgram(organizationContext);
     await markPublishReady(organizationContext, organizationProgram);
@@ -1208,7 +1199,7 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
     ).toBe(1);
   });
 
-  it("publishes once across different keys and starts the deferred trial exactly once", async () => {
+  it("publishes once across different keys without changing the Stripe-owned trial", async () => {
     const context = await scenario();
     const program = await createProgram(context);
     await markPublishReady(context, program);
@@ -1218,18 +1209,18 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
     ]);
 
     expect(fulfilled(results)).toHaveLength(1);
-    expect(rejectedCodes(results)).toEqual(["PROGRAM_TEST_REQUIRED"]);
+    expect(rejectedCodes(results)).toEqual(["PROGRAM_PUBLICATION_VALIDATION_REQUIRED"]);
     const commands = await prisma.client.programPublishCommand.findMany({
       where: { organizationId: context.organizationId, programId: program.id },
     });
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatchObject({ status: "COMPLETED", trialStarted: true });
+    expect(commands[0]).toMatchObject({ status: "COMPLETED", trialStarted: false });
     const billing = await prisma.client.organizationBillingProfile.findUniqueOrThrow({
       where: { organizationId: context.organizationId },
     });
     expect(billing.subscriptionStatus).toBe("TRIALING");
     expect(billing.trialStart).not.toBeNull();
-    expect(billing.trialTriggeringProgramId).toBe(program.id);
+    expect(billing.trialTriggeringProgramId).toBeNull();
   });
 
   it("replays the same simultaneous publish key as one completed command", async () => {
@@ -1255,23 +1246,13 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
         where: {
           organizationId: context.organizationId,
           action: {
-            in: [
-              "program.published",
-              "program.version_superseded",
-              "trial.started_by_program_publication",
-            ],
+            in: ["program.published", "program.version_superseded"],
           },
         },
         _count: true,
       }),
     ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ action: "program.published", _count: 1 }),
-        expect.objectContaining({
-          action: "trial.started_by_program_publication",
-          _count: 1,
-        }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ action: "program.published", _count: 1 })]),
     );
   });
 
@@ -1354,7 +1335,7 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
         where: { id: replacement.currentDraftVersion.id },
         select: { status: true },
       }),
-    ).toEqual({ status: "TEST_READY" });
+    ).toEqual({ status: "VALIDATED" });
   });
 
   it("publishes replacements without changing PAUSED or PUBLISHED operational state", async () => {
@@ -1594,7 +1575,7 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
       });
   });
 
-  it("rolls publication, trial, command, and audit state back when audit insertion fails", async () => {
+  it("rolls publication, command, and audit state back when audit insertion fails", async () => {
     const context = await scenario();
     const program = await createProgram(context);
     await markPublishReady(context, program);
@@ -1632,11 +1613,7 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
           where: {
             organizationId: context.organizationId,
             action: {
-              in: [
-                "program.published",
-                "program.version_superseded",
-                "trial.started_by_program_publication",
-              ],
+              in: ["program.published", "program.version_superseded"],
             },
           },
         }),
@@ -1646,11 +1623,9 @@ describe.sequential("Waflo W2 database and storage concurrency invariants", () =
       currentDraftVersionId: program.currentDraftVersion.id,
       currentPublishedVersionId: null,
     });
-    expect(storedVersion.status).toBe("TEST_READY");
+    expect(storedVersion.status).toBe("VALIDATED");
     expect(billing).toMatchObject({
-      subscriptionStatus: "PENDING_ACTIVATION",
-      trialStart: null,
-      trialEnd: null,
+      subscriptionStatus: "TRIALING",
       trialTriggeringProgramId: null,
     });
     expect(commandCount).toBe(0);

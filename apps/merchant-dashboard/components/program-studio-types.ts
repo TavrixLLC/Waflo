@@ -20,6 +20,7 @@ export type AssetCategory =
 export interface ProgramTranslationInput {
   programName: string;
   shortDescription: string;
+  earningDescription: string;
   fullDescription?: string | undefined;
   rewardSummary: string;
   joinInstructions?: string | undefined;
@@ -28,6 +29,19 @@ export interface ProgramTranslationInput {
   rewardUnlockedMessage: string;
   pausedMessage?: string | undefined;
 }
+
+export type ProgramTranslationMap = Record<string, ProgramTranslationInput> & {
+  en: ProgramTranslationInput;
+  ar: ProgramTranslationInput;
+};
+
+export type RewardTranslationMap = Record<
+  string,
+  { name: string; description: string; redemptionInstructions?: string | undefined }
+> & {
+  en: { name: string; description: string; redemptionInstructions?: string | undefined };
+  ar: { name: string; description: string; redemptionInstructions?: string | undefined };
+};
 
 export interface RewardInput {
   clientId: string;
@@ -44,14 +58,13 @@ export interface RewardInput {
         accentOverride?: string | null | undefined;
       }
     | undefined;
-  translations: {
-    en: { name: string; description: string; redemptionInstructions?: string | undefined };
-    ar: { name: string; description: string; redemptionInstructions?: string | undefined };
-  };
+  translations: RewardTranslationMap;
 }
 
 export interface ProgramDraftInput {
   internalName: string;
+  defaultLocale: string;
+  enabledLocales: string[];
   editingMode: EditingMode;
   templateCode?: string | undefined;
   templateVersion?: number | undefined;
@@ -65,10 +78,7 @@ export interface ProgramDraftInput {
   managerReversalWindowMinutes: number;
   managerOverrideAllowed: boolean;
   resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION";
-  translations: {
-    en: ProgramTranslationInput;
-    ar: ProgramTranslationInput;
-  };
+  translations: ProgramTranslationMap;
   earningDescription: string;
   rewards: RewardInput[];
   locationIds: string[];
@@ -125,12 +135,30 @@ export interface ProgramItem {
     revision: number;
     status: string;
     editingMode: "QUICK" | "PRO";
+    stampRule?: { requiredStampCount: number } | null;
+    translations?: Array<{ locale: "EN" | "AR"; programName: string; rewardSummary: string }>;
+    visualTheme?: {
+      backgroundColor: string;
+      foregroundColor: string;
+      accentColor: string;
+      layoutType: StampLayout;
+      logoAssetId?: string | null;
+    } | null;
   } | null;
   currentPublishedVersion: {
     id: string;
     versionNumber: number;
     status: string;
     publishedAt?: string | null;
+    stampRule?: { requiredStampCount: number } | null;
+    translations?: Array<{ locale: "EN" | "AR"; programName: string; rewardSummary: string }>;
+    visualTheme?: {
+      backgroundColor: string;
+      foregroundColor: string;
+      accentColor: string;
+      layoutType: StampLayout;
+      logoAssetId?: string | null;
+    } | null;
   } | null;
   _count?: { versions: number };
 }
@@ -169,6 +197,29 @@ interface ServerReward {
   } | null;
 }
 
+interface ServerCardLocale {
+  id: string;
+  locale: string;
+  enabled: boolean;
+  position: number;
+  programName?: string | null;
+  shortDescription?: string | null;
+  earningDescription?: string | null;
+  fullDescription?: string | null;
+  rewardSummary?: string | null;
+  joinInstructions?: string | null;
+  termsAndConditions?: string | null;
+  completionMessage?: string | null;
+  rewardUnlockedMessage?: string | null;
+  pausedMessage?: string | null;
+  rewardTranslations: Array<{
+    rewardId: string;
+    name?: string | null;
+    description?: string | null;
+    redemptionInstructions?: string | null;
+  }>;
+}
+
 export interface ProgramVersion {
   id: string;
   versionNumber: number;
@@ -188,6 +239,8 @@ export interface ProgramVersion {
   staffOwnReversalWindowSeconds: number;
   managerReversalWindowMinutes: number;
   managerOverrideAllowed: boolean;
+  defaultCardLocale?: string;
+  cardLocales?: ServerCardLocale[];
   translations: ServerTranslation[];
   stampRule: {
     requiredStampCount: number;
@@ -254,6 +307,7 @@ export interface TemplateGalleryPreview {
 }
 
 export interface TemplateItem extends Omit<ProgramTemplateDefinition, "artwork"> {
+  availableOnPlans: readonly ["STARTER", "GROWTH", "SCALE"];
   galleryThumbnail: TemplateGalleryPreview;
   blankGalleryThumbnail?: TemplateGalleryPreview;
   artwork: {
@@ -297,43 +351,6 @@ export interface ValidationResult {
   warnings: ValidationIssue[];
 }
 
-export interface TestEvent {
-  id: string;
-  eventType: string;
-  rewardDefinitionId?: string | null;
-  safeMetadata?: { cycle?: number } | null;
-  createdAt: string;
-}
-
-export interface TestSession {
-  id: string;
-  status: "ACTIVE" | "RESET" | "COMPLETED";
-  currentStampCount: number;
-  cycleCount: number;
-  version: {
-    operationalTimezone: string;
-    staffOwnReversalWindowSeconds: number;
-    managerReversalWindowMinutes: number;
-    managerOverrideAllowed: boolean;
-    stampRule: {
-      requiredStampCount: number;
-      maximumStampsPerOperation: number;
-      maximumStampsPerCustomerPerDay: number | null;
-      minimumPurchaseAmountMinor: number | null;
-      minimumPurchaseCurrency: string | null;
-      resetBehaviorAfterReward: string;
-    } | null;
-    rewards: Array<{
-      id: string;
-      internalName: string;
-      thresholdStampCount: number;
-      requiresManagerApproval: boolean;
-      translations: Array<{ locale: "EN" | "AR"; name: string }>;
-    }>;
-  };
-  events: TestEvent[];
-}
-
 export const studioSections = [
   "overview",
   "earning",
@@ -349,7 +366,6 @@ export const studioSections = [
   "google-preview",
   "policies",
   "validation",
-  "test-mode",
   "versions",
 ] as const;
 
@@ -363,6 +379,36 @@ function rewardTranslation(reward: ServerReward, locale: "EN" | "AR") {
   return reward.translations.find((item) => item.locale === locale);
 }
 
+function cardRewardTranslations(
+  reward: ServerReward,
+  cardLocales: readonly ServerCardLocale[],
+): RewardTranslationMap {
+  const result = Object.fromEntries(
+    cardLocales.map((locale) => {
+      const localized = locale.rewardTranslations.find((item) => item.rewardId === reward.id);
+      const legacy = rewardTranslation(reward, locale.locale === "ar" ? "AR" : "EN");
+      return [
+        locale.locale,
+        {
+          name: localized?.name ?? legacy?.name ?? "",
+          description: localized?.description ?? legacy?.description ?? "",
+          redemptionInstructions:
+            localized?.redemptionInstructions ?? legacy?.redemptionInstructions ?? undefined,
+        },
+      ];
+    }),
+  ) as RewardTranslationMap;
+  result.en ??= {
+    name: rewardTranslation(reward, "EN")?.name ?? "",
+    description: rewardTranslation(reward, "EN")?.description ?? "",
+  };
+  result.ar ??= {
+    name: rewardTranslation(reward, "AR")?.name ?? "",
+    description: rewardTranslation(reward, "AR")?.description ?? "",
+  };
+  return result;
+}
+
 function stringConfig(value: Record<string, unknown>, key: string, fallback: string): string {
   return typeof value[key] === "string" ? (value[key] as string) : fallback;
 }
@@ -374,11 +420,79 @@ function booleanConfig(value: Record<string, unknown>, key: string, fallback: bo
 export function versionToDraft(program: ProgramDetail, version: ProgramVersion): ProgramDraftInput {
   const en = translation(version, "EN");
   const ar = translation(version, "AR");
+  const cardLocales: ServerCardLocale[] = version.cardLocales?.length
+    ? version.cardLocales
+    : [
+        ...(en
+          ? [
+              {
+                ...en,
+                id: "legacy-en",
+                locale: "en",
+                enabled: true,
+                position: 0,
+                rewardTranslations: [],
+              },
+            ]
+          : []),
+        ...(ar
+          ? [
+              {
+                ...ar,
+                id: "legacy-ar",
+                locale: "ar",
+                enabled: true,
+                position: 1,
+                rewardTranslations: [],
+              },
+            ]
+          : []),
+      ];
+  const cardTranslations = Object.fromEntries(
+    cardLocales.map((item) => [
+      item.locale,
+      {
+        programName: item.programName ?? program.internalName,
+        shortDescription: item.shortDescription ?? "",
+        earningDescription:
+          item.earningDescription ??
+          version.stampRule?.earningDescription ??
+          "One stamp per qualifying visit.",
+        fullDescription: item.fullDescription ?? undefined,
+        rewardSummary: item.rewardSummary ?? "",
+        joinInstructions: item.joinInstructions ?? undefined,
+        termsAndConditions: item.termsAndConditions ?? "",
+        completionMessage: item.completionMessage ?? "",
+        rewardUnlockedMessage: item.rewardUnlockedMessage ?? "",
+        pausedMessage: item.pausedMessage ?? undefined,
+      },
+    ]),
+  ) as ProgramTranslationMap;
+  cardTranslations.en ??= {
+    programName: program.internalName,
+    shortDescription: "",
+    earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
+    rewardSummary: "",
+    termsAndConditions: "",
+    completionMessage: "",
+    rewardUnlockedMessage: "",
+  };
+  cardTranslations.ar ??= {
+    programName: program.internalName,
+    shortDescription: "",
+    earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
+    rewardSummary: "",
+    termsAndConditions: "",
+    completionMessage: "",
+    rewardUnlockedMessage: "",
+  };
   const visual = version.visualTheme;
   const apple = visual?.applePreviewConfig ?? {};
   const google = visual?.googlePreviewConfig ?? {};
   return {
     internalName: program.internalName,
+    defaultLocale: version.defaultCardLocale ?? "en",
+    enabledLocales: cardLocales.filter((item) => item.enabled).map((item) => item.locale),
     editingMode: version.editingMode.toLowerCase() as EditingMode,
     templateCode: version.baseTemplateCode ?? undefined,
     templateVersion: version.baseTemplateVersion ?? undefined,
@@ -394,30 +508,7 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
     resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
     earningDescription: version.stampRule?.earningDescription ?? "One stamp per qualifying visit.",
     locationIds: version.locations.map((item) => item.locationId),
-    translations: {
-      en: {
-        programName: en?.programName ?? program.internalName,
-        shortDescription: en?.shortDescription ?? "",
-        fullDescription: en?.fullDescription ?? undefined,
-        rewardSummary: en?.rewardSummary ?? "",
-        joinInstructions: en?.joinInstructions ?? undefined,
-        termsAndConditions: en?.termsAndConditions ?? "",
-        completionMessage: en?.completionMessage ?? "",
-        rewardUnlockedMessage: en?.rewardUnlockedMessage ?? "",
-        pausedMessage: en?.pausedMessage ?? undefined,
-      },
-      ar: {
-        programName: ar?.programName ?? program.internalName,
-        shortDescription: ar?.shortDescription ?? "",
-        fullDescription: ar?.fullDescription ?? undefined,
-        rewardSummary: ar?.rewardSummary ?? "",
-        joinInstructions: ar?.joinInstructions ?? undefined,
-        termsAndConditions: ar?.termsAndConditions ?? "",
-        completionMessage: ar?.completionMessage ?? "",
-        rewardUnlockedMessage: ar?.rewardUnlockedMessage ?? "",
-        pausedMessage: ar?.pausedMessage ?? undefined,
-      },
-    },
+    translations: cardTranslations,
     rewards: version.rewards.map((reward) => ({
       clientId: reward.id,
       thresholdStampCount: reward.thresholdStampCount,
@@ -433,20 +524,7 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
             accentOverride: reward.visualOverride.accentOverride,
           }
         : undefined,
-      translations: {
-        en: {
-          name: rewardTranslation(reward, "EN")?.name ?? reward.internalName,
-          description: rewardTranslation(reward, "EN")?.description ?? reward.internalName,
-          redemptionInstructions:
-            rewardTranslation(reward, "EN")?.redemptionInstructions ?? undefined,
-        },
-        ar: {
-          name: rewardTranslation(reward, "AR")?.name ?? reward.internalName,
-          description: rewardTranslation(reward, "AR")?.description ?? reward.internalName,
-          redemptionInstructions:
-            rewardTranslation(reward, "AR")?.redemptionInstructions ?? undefined,
-        },
-      },
+      translations: cardRewardTranslations(reward, cardLocales),
     })),
     visualTheme: {
       backgroundColor: visual?.backgroundColor ?? "#F7F4EE",
@@ -509,6 +587,8 @@ export function createQuickDraft(
   const templateRewards = [...(mode === "pro" ? template.milestones : []), template.finalReward];
   return {
     internalName: "",
+    defaultLocale: "en",
+    enabledLocales: ["en"],
     editingMode: mode,
     templateCode: template.code,
     templateVersion: template.version,
@@ -524,7 +604,11 @@ export function createQuickDraft(
     resetBehaviorAfterReward: "RESET_ON_FINAL_REWARD_REDEMPTION",
     earningDescription: template.earningDescription,
     locationIds: [],
-    translations: structuredClone(template.copy),
+    translations: {
+      ...structuredClone(template.copy),
+      en: { ...structuredClone(template.copy.en), earningDescription: template.earningDescription },
+      ar: { ...structuredClone(template.copy.ar), earningDescription: template.earningDescription },
+    },
     rewards: templateRewards.map((reward, index) => ({
       clientId: crypto.randomUUID(),
       thresholdStampCount: reward.thresholdStampCount,

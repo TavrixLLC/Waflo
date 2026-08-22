@@ -1,12 +1,14 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
   HttpStatus,
   Param,
   Post,
+  Put,
   Query,
   Req,
 } from "@nestjs/common";
@@ -16,6 +18,7 @@ import {
   devicePairingClaimSchema,
   devicePairingCompleteSchema,
   staffDeviceSessionRefreshSchema,
+  staffLocationAssignmentUpsertSchema,
 } from "@waflo/contracts";
 import {
   CurrentUser,
@@ -50,6 +53,55 @@ export class MerchantStaffDeviceController {
       parseUuid(organizationId),
       parseOptionalCursor(cursor),
       parseOptionalPaginationLimit(limit),
+    );
+  }
+
+  @Get("members/:memberId/location-assignments")
+  listLocationAssignments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("memberId") memberId: string,
+  ) {
+    return this.devices.listLocationAssignments(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(memberId),
+    );
+  }
+
+  @Put("members/:memberId/location-assignments/:locationId")
+  putLocationAssignment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("memberId") memberId: string,
+    @Param("locationId") locationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.devices.putLocationAssignment(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(memberId),
+      parseUuid(locationId),
+      parseInput(staffLocationAssignmentUpsertSchema, body),
+      request,
+    );
+  }
+
+  @Delete("members/:memberId/location-assignments/:locationId")
+  revokeLocationAssignment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("memberId") memberId: string,
+    @Param("locationId") locationId: string,
+    @Req() request: WafloRequest,
+  ) {
+    return this.devices.revokeLocationAssignment(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(memberId),
+      parseUuid(locationId),
+      request,
     );
   }
 
@@ -206,8 +258,10 @@ export class StaffDevicePairingController {
     if (!context) throw new AppError("STAFF_DEVICE_NOT_ACTIVE", "Device context missing.", 401);
     return {
       organizationId: context.organizationId,
+      organization: context.organization,
       role: context.role,
       locationId: context.locationId,
+      currentLocation: context.currentLocation,
       devicePublicId: context.devicePublicId,
       deviceSessionId: context.deviceSessionId,
       platform: context.platform,

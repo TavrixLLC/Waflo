@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiUrl } from "../lib/api-client";
 import {
+  canonicalPublicUrlForDisplay,
   deriveProgramSharingPresentation,
   isLocalPreviewUrl,
   walletSurfacePresentation,
@@ -224,7 +225,9 @@ export function ProgramEnrollmentSettings({
   async function copyJoinLink() {
     if (!settings?.publicUrl) return;
     try {
-      await navigator.clipboard.writeText(settings.publicUrl);
+      await navigator.clipboard.writeText(
+        canonicalPublicUrlForDisplay(settings.publicUrl) ?? settings.publicUrl,
+      );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2_500);
     } catch {
@@ -302,6 +305,7 @@ export function ProgramEnrollmentSettings({
     locale: ar ? "ar" : "en",
   });
   const localPreview = isLocalPreviewUrl(settings.publicUrl);
+  const displayedPublicUrl = canonicalPublicUrlForDisplay(settings.publicUrl);
   return (
     <Card className="program-enrollment-settings">
       <div className="program-enrollment-settings__heading">
@@ -403,11 +407,11 @@ export function ProgramEnrollmentSettings({
                 </small>
               ) : localPreview ? (
                 <small className="program-local-preview-label">
-                  {ar ? "معاينة محلية للتطوير" : "Local development preview"}
+                  {ar ? "رابط المعاينة" : "Preview link"}
                 </small>
               ) : null}
               <code className="public-enrollment-url" dir="ltr">
-                {settings.publicUrl}
+                {displayedPublicUrl}
               </code>
             </>
           ) : null}

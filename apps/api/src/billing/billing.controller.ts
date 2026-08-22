@@ -1,8 +1,22 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from "@nestjs/common";
-import { selectedPlanSchema } from "@waflo/contracts";
+import {
+  billingIdentitySchema,
+  billingSubscriptionCancellationSchema,
+  billingSubscriptionChangeSchema,
+  billingTrialCompleteSchema,
+  billingTrialSetupSchema,
+  refundRequestSchema,
+  refundReviewSchema,
+  selectedPlanSchema,
+} from "@waflo/contracts";
 import { CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
-import { parseCheckoutIdempotencyKey, parseInput, parseUuid } from "../common/validation.js";
+import {
+  parseCheckoutIdempotencyKey,
+  parseInput,
+  parseRefundIdempotencyKey,
+  parseUuid,
+} from "../common/validation.js";
 import { BillingService } from "./billing.service.js";
 
 @Controller("v1/organizations/:organizationId/billing")
@@ -22,20 +36,178 @@ export class BillingController {
     @Req() request: WafloRequest,
   ) {
     const input = parseInput(selectedPlanSchema, body);
-    return this.billing.selectPlan(user.id, parseUuid(organizationId), input.plan, request);
+    return this.billing.selectPlan(
+      user.id,
+      parseUuid(organizationId),
+      input.plan,
+      input.cadence ?? "monthly",
+      request,
+    );
   }
 
-  @Post("checkout")
+  @Post("subscription/change/preview")
+  @RateLimit(10, 300)
+  previewSubscriptionChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+  ) {
+    return this.billing.previewSubscriptionChange(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingSubscriptionChangeSchema, body),
+    );
+  }
+
+  @Post("subscription/change")
   @RateLimit(5, 300)
-  checkout(
+  changeSubscription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.changeSubscription(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingSubscriptionChangeSchema, body),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+      request,
+    );
+  }
+
+  @Post("subscription/cancel")
+  @RateLimit(5, 300)
+  cancelSubscription(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.cancelSubscription(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingSubscriptionCancellationSchema, body),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+      request,
+    );
+  }
+
+  @Post("subscription/resume")
+  @RateLimit(5, 300)
+  resumeSubscription(
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() request: WafloRequest,
   ) {
-    return this.billing.checkout(
+    return this.billing.resumeSubscription(
       user.id,
       parseUuid(organizationId),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+      request,
+    );
+  }
+
+  @Patch("identity")
+  identity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.updateBillingIdentity(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingIdentitySchema, body),
+      request,
+    );
+  }
+
+  @Post("trial/setup")
+  @RateLimit(5, 300)
+  prepareTrial(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    const input = parseInput(billingTrialSetupSchema, body);
+    return this.billing.prepareTrialSetup(
+      user.id,
+      parseUuid(organizationId),
+      input,
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("trial/complete")
+  @RateLimit(5, 300)
+  completeTrial(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.completeTrialSetup(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingTrialCompleteSchema, body),
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("trial/preview")
+  @RateLimit(10, 300)
+  previewTrial(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+  ) {
+    return this.billing.previewTrialSetup(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingTrialCompleteSchema, body),
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("payment-method/setup")
+  @RateLimit(5, 300)
+  preparePaymentMethod(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.preparePaymentMethodReplacement(
+      user.id,
+      parseUuid(organizationId),
+      request,
+      parseCheckoutIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Post("payment-method/complete")
+  @RateLimit(5, 300)
+  completePaymentMethod(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.completePaymentMethodReplacement(
+      user.id,
+      parseUuid(organizationId),
+      parseInput(billingTrialCompleteSchema, body),
       request,
       parseCheckoutIdempotencyKey(idempotencyKey),
     );
@@ -59,6 +231,60 @@ export class BillingController {
     @Req() request: WafloRequest,
   ) {
     return this.billing.reconcileOrganization(user.id, parseUuid(organizationId), request);
+  }
+
+  @Post("invoices/:invoiceId/refunds")
+  @RateLimit(3, 300)
+  requestRefund(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("invoiceId") invoiceId: string,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.requestRefund(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(invoiceId),
+      parseInput(refundRequestSchema, body),
+      parseRefundIdempotencyKey(idempotencyKey),
+      request,
+    );
+  }
+
+  @Patch("refunds/:refundRequestId")
+  @RateLimit(5, 300)
+  reviewRefund(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("refundRequestId") refundRequestId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.reviewRefund(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(refundRequestId),
+      parseInput(refundReviewSchema, body),
+      request,
+    );
+  }
+
+  @Post("refunds/:refundRequestId/execute")
+  @RateLimit(3, 300)
+  executeRefund(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("refundRequestId") refundRequestId: string,
+    @Req() request: WafloRequest,
+  ) {
+    return this.billing.executeRefund(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(refundRequestId),
+      request,
+    );
   }
 }
 

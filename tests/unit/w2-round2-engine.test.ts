@@ -106,7 +106,7 @@ describe("W2 Round 2 visual pipeline", () => {
 });
 
 describe("W2 Round 2 validation engine", () => {
-  it("returns typed, focusable issues across content, layout, previews, and Test Mode", () => {
+  it("returns typed, focusable issues across content, layout, and automatic previews", () => {
     const result = validateProgramConfiguration({
       plan: "STARTER",
       goal: 2,
@@ -174,7 +174,6 @@ describe("W2 Round 2 validation engine", () => {
         "PATH_LAYOUT_TOO_SHORT",
         "PREVIEW_STALE",
         "PREVIEW_PROFILE_MISSING",
-        "TEST_MODE_FINGERPRINT_STALE",
       ]),
     );
     expect(

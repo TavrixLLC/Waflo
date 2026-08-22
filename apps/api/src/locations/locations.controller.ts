@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import { locationSchema, locationUpdateSchema } from "@waflo/contracts";
+import { locationCoordinateSchema, locationSchema, locationUpdateSchema } from "@waflo/contracts";
 import { CurrentUser } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { parseInput, parseOptionalCursor, parseUuid } from "../common/validation.js";
@@ -87,5 +87,16 @@ export class LocationsController {
       parseUuid(locationId),
       request,
     );
+  }
+}
+
+@Controller("v1/location-tools")
+export class LocationToolsController {
+  constructor(private readonly locations: LocationsService) {}
+
+  @Post("coordinate")
+  coordinate(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
+    const input = parseInput(locationCoordinateSchema, body);
+    return this.locations.resolveCoordinate(user.id, input.latitude, input.longitude);
   }
 }

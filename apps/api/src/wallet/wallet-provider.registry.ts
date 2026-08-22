@@ -6,7 +6,7 @@ import {
   TestApplePassSigner,
   type ApplePassSigner,
 } from "@waflo/wallet-apple";
-import type { WalletProvider, WalletProviderCode } from "@waflo/wallet-core";
+import type { WalletProvider, WalletProviderCode, WalletProviderHealth } from "@waflo/wallet-core";
 import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
@@ -42,6 +42,9 @@ function googleServiceAccount(value: string | undefined): GoogleServiceAccount |
 export class WalletProviderRegistry {
   private readonly providers: ReadonlyMap<WalletProviderCode, WalletProvider>;
   private readonly configured: Readonly<Record<WalletProviderCode, boolean>>;
+  private publicHealthCache:
+    | { expiresAt: number; value: Promise<readonly WalletProviderHealth[]> }
+    | undefined;
 
   constructor(environment: EnvironmentService, security: CustomerSecurityService) {
     const values = environment.values;
@@ -134,12 +137,43 @@ export class WalletProviderRegistry {
     return this.configured[provider];
   }
 
-  publicCapabilities() {
+  healthChecks(): Promise<readonly WalletProviderHealth[]> {
+    return Promise.all(this.all().map((provider) => provider.healthCheck()));
+  }
+
+  private cachedPublicHealth(): Promise<readonly WalletProviderHealth[]> {
+    const now = Date.now();
+    if (this.publicHealthCache && this.publicHealthCache.expiresAt > now) {
+      return this.publicHealthCache.value;
+    }
+    const value = this.healthChecks().catch(() => []);
+    this.publicHealthCache = { expiresAt: now + 60_000, value };
+    return value;
+  }
+
+  async publicCapabilities() {
+    const health = await this.cachedPublicHealth();
+    const state = (provider: WalletProviderCode) => {
+      const current = health.find((item) => item.provider === provider);
+      if (!this.configured[provider] || !current || current.status === "NOT_CONFIGURED") {
+        return "NOT_CONFIGURED" as const;
+      }
+      if (current.mode === "TEST_ADAPTER") return "TEST_ONLY" as const;
+      if (current.status === "HEALTHY") return "CONNECTED" as const;
+      if (current.status === "EXTERNALLY_UNCERTIFIED") {
+        return "DEVICE_VERIFICATION_REQUIRED" as const;
+      }
+      return "TEMPORARILY_UNAVAILABLE" as const;
+    };
+    const googleWallet = state("GOOGLE");
+    const appleWallet = state("APPLE");
     return {
-      googleWalletAvailable: this.configured.GOOGLE,
-      appleWalletAvailable: this.configured.APPLE,
-      googleWallet: this.configured.GOOGLE ? "AVAILABLE" : "NOT_CONFIGURED",
-      appleWallet: this.configured.APPLE ? "AVAILABLE" : "NOT_CONFIGURED",
+      googleWalletAvailable: googleWallet === "CONNECTED",
+      appleWalletAvailable: appleWallet === "CONNECTED",
+      googleWalletConfigured: this.configured.GOOGLE,
+      appleWalletConfigured: this.configured.APPLE,
+      googleWallet,
+      appleWallet,
     } as const;
   }
 }

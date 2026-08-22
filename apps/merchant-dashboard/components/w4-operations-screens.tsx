@@ -3,6 +3,7 @@
 import type { Locale } from "@waflo/contracts";
 import {
   Alert,
+  Avatar,
   Badge,
   Button,
   Card,
@@ -10,6 +11,7 @@ import {
   FormField,
   Modal,
   PageHeader,
+  SearchableSelect,
   Select,
   Skeleton,
   StatusBadge,
@@ -17,18 +19,9 @@ import {
   TextArea,
   TextInput,
 } from "@waflo/ui";
-import {
-  Activity,
-  CheckCircle2,
-  Download,
-  History,
-  MonitorSmartphone,
-  Search,
-  ShieldAlert,
-  UserRound,
-} from "lucide-react";
+import { Activity, Copy, Download, MonitorSmartphone, Search, UserRound } from "lucide-react";
 import Image from "next/image";
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import type { MembershipView } from "./dashboard";
 
@@ -38,7 +31,7 @@ function apiMessage(error: unknown, fallback: string) {
 
 function formattedDate(value: string | null | undefined, ar: boolean) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat(ar ? "ar-IQ" : "en-US", {
+  return new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -180,6 +173,15 @@ interface LedgerItem {
   operationCommand: { publicId: string; operationType: string };
 }
 
+interface ContextualApproval {
+  publicId: string;
+  status: "PENDING";
+  membership: { publicMembershipId: string; customer: { displayName: string } } | null;
+  rewardEntitlement: { rewardDefinition: { internalName: string } } | null;
+  location: { name: string } | null;
+  expiresAt: string;
+}
+
 interface LocationItem {
   id: string;
   name: string;
@@ -202,15 +204,23 @@ export function CustomersOperationsScreen({
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [membershipDetail, setMembershipDetail] = useState<MembershipDetail | null>(null);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
-  const [selectedLedgerEntry, setSelectedLedgerEntry] = useState<LedgerItem | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<ContextualApproval[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
 
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searching, setSearching] = useState(false);
+
   const loadCustomers = useCallback(
     async (cursor?: string) => {
       setError("");
+      if (cursor) {
+        setLoadingMore(true);
+      } else {
+        setSearching(true);
+      }
       const parameters = new URLSearchParams({ limit: "30" });
       if (query.trim()) parameters.set("search", query.trim());
       if (status) parameters.set("membershipStatus", status);
@@ -224,6 +234,9 @@ export function CustomersOperationsScreen({
         setNextCursor(page.nextCursor);
       } catch (caught) {
         setError(apiMessage(caught, ar ? "تعذر تحميل العملاء." : "Unable to load customers."));
+      } finally {
+        setLoadingMore(false);
+        setSearching(false);
       }
     },
     [ar, organizationId, query, status],
@@ -263,16 +276,26 @@ export function CustomersOperationsScreen({
     setWorking(true);
     setError("");
     try {
-      const [detail, history] = await Promise.all([
+      const [detail, history, approvalPage] = await Promise.all([
         apiFetch<MembershipDetail>(
           `/v1/organizations/${organizationId}/memberships/${membershipId}`,
         ),
         apiFetch<{ items: LedgerItem[] }>(
           `/v1/organizations/${organizationId}/memberships/${membershipId}/ledger?limit=50`,
         ),
+        membership.role === "STAFF"
+          ? Promise.resolve({ items: [] as ContextualApproval[] })
+          : apiFetch<{ items: ContextualApproval[] }>(
+              `/v1/organizations/${organizationId}/operation-approvals?status=PENDING&limit=30`,
+            ),
       ]);
       setMembershipDetail(detail);
       setLedger(history.items);
+      setPendingApprovals(
+        approvalPage.items.filter(
+          (approval) => approval.membership?.publicMembershipId === detail.publicMembershipId,
+        ),
+      );
     } catch (caught) {
       setError(apiMessage(caught, ar ? "تعذر فتح العضوية." : "Unable to open membership."));
     } finally {
@@ -282,7 +305,7 @@ export function CustomersOperationsScreen({
 
   async function membershipAction(action: "suspend" | "restore" | "revoke") {
     if (!membershipDetail || !locations[0]) return;
-    const reason = window.prompt(ar ? "أدخل سبباً واضحاً للتدقيق:" : "Enter a clear audit reason:");
+    const reason = window.prompt(ar ? "أدخل سبباً مختصراً:" : "Enter a short reason:");
     if (!reason || reason.trim().length < 3) return;
     setWorking(true);
     try {
@@ -333,25 +356,22 @@ export function CustomersOperationsScreen({
     }
   }
 
-  async function verifyProjection() {
+  async function decideApproval(approvalId: string, decision: "approve" | "reject") {
     if (!membershipDetail) return;
+    const reason = window.prompt(ar ? "أضف ملاحظة قصيرة للقرار:" : "Add a short decision note:");
+    if (!reason || reason.trim().length < 3) return;
     setWorking(true);
     try {
-      const result = await apiFetch<{ valid: boolean; drift: boolean }>(
-        `/v1/organizations/${organizationId}/memberships/${membershipDetail.id}/verify-projection`,
-        { method: "POST" },
+      await apiFetch(
+        `/v1/organizations/${organizationId}/operation-approvals/${approvalId}/${decision}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        },
       );
-      window.alert(
-        result.valid && !result.drift
-          ? ar
-            ? "سجل العمليات والإسقاط متطابقان."
-            : "Ledger and projection match."
-          : ar
-            ? "تم اكتشاف اختلاف. استخدم إعادة البناء المصرّح بها."
-            : "Drift detected. Use the authorized rebuild action.",
-      );
+      await openMembership(membershipDetail.id);
     } catch (caught) {
-      setError(apiMessage(caught, ar ? "تعذر التحقق." : "Unable to verify projection."));
+      setError(apiMessage(caught, ar ? "تعذر حفظ القرار." : "Unable to save the decision."));
     } finally {
       setWorking(false);
     }
@@ -386,88 +406,147 @@ export function CustomersOperationsScreen({
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "العمليات الحقيقية" : "Real loyalty operations"}
-        title={ar ? "العملاء والعضويات" : "Customers and memberships"}
+        title={ar ? "العملاء" : "Customers"}
         description={
           ar
-            ? "ابحث بالاسم أو البريد المطابق، وراجع التقدم والمكافآت وسجل الأحداث غير القابل للتعديل."
-            : "Search by name or exact email, then review progress, rewards, and the immutable event history."
+            ? "ابحث عن عميل وراجع بطاقات الولاء الخاصة به."
+            : "Find a customer and review their loyalty cards."
         }
       />
-      <Card className="dashboard-form-card">
+      <section className="dashboard-filter-bar" aria-label={ar ? "بحث العملاء" : "Customer search"}>
         <form
-          className="dashboard-form"
+          className="dashboard-filter-form"
           onSubmit={(event) => {
             event.preventDefault();
             void loadCustomers();
           }}
         >
-          <div className="studio-form-grid">
-            <FormField label={ar ? "البحث" : "Search"}>
+          <div className="dashboard-filter-fields">
+            <FormField label={ar ? "ابحث" : "Search"}>
               <TextInput
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={ar ? "الاسم أو البريد المطابق" : "Name or exact email"}
+                placeholder={ar ? "الاسم أو البريد" : "Name or email"}
               />
             </FormField>
             <FormField label={ar ? "حالة العضوية" : "Membership status"}>
-              <Select value={status} onChange={(event) => setStatus(event.target.value)}>
+              <Select
+                name="customer-status"
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.currentTarget.value);
+                }}
+              >
                 <option value="">{ar ? "كل الحالات" : "All statuses"}</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="SUSPENDED">SUSPENDED</option>
-                <option value="EXPIRED">EXPIRED</option>
-                <option value="REVOKED">REVOKED</option>
+                <option value="ACTIVE">{ar ? "نشطة" : "Active"}</option>
+                <option value="SUSPENDED">{ar ? "موقوفة" : "Suspended"}</option>
+                <option value="EXPIRED">{ar ? "منتهية" : "Expired"}</option>
+                <option value="REVOKED">{ar ? "ملغاة" : "Revoked"}</option>
               </Select>
             </FormField>
           </div>
-          <Button type="submit">
+          <Button type="submit" loading={searching}>
             <Search size={17} /> {ar ? "بحث" : "Search"}
           </Button>
         </form>
-      </Card>
+      </section>
       {error ? <Alert tone="danger" title={error} /> : null}
       {!customers ? (
         <Skeleton height="18rem" />
       ) : customers.length ? (
         <>
           <Table
+            className="dashboard-team-table dashboard-customers-table"
             caption={ar ? "عملاء المؤسسة" : "Organization customers"}
             headers={
               ar
-                ? ["العميل", "البريد الآمن", "العضويات", "آخر حالة"]
-                : ["Customer", "Safe email", "Memberships", "Latest state"]
+                ? ["العميل", "العضوية والتقدم", "الحالة", "الإجراء"]
+                : ["Customer", "Membership & Progress", "Status", "Action"]
             }
-            rows={customers.map((item) => [
-              <Button key="customer" variant="ghost" onClick={() => void openCustomer(item.id)}>
-                <UserRound size={16} /> {item.displayName}
-              </Button>,
-              item.maskedEmail ?? "—",
-              String(item.memberships.length),
-              item.memberships[0] ? (
-                <StatusBadge
-                  key="status"
-                  status={statusTone(item.memberships[0].status)}
-                  label={item.memberships[0].status}
-                />
-              ) : (
-                "—"
-              ),
-            ])}
+            rows={customers.map((item) => {
+              const primaryMembership = item.memberships[0];
+              const membershipCount = item.memberships.length;
+              const membershipSummary = primaryMembership
+                ? `${primaryMembership.programName} · ${primaryMembership.progress} ${ar ? "أختام" : "stamps"}`
+                : ar
+                  ? "لا توجد عضويات"
+                  : "No memberships";
+              const statusLabel =
+                item.status === "ACTIVE" ? (ar ? "نشط" : "Active") : ar ? "موقوف" : "Suspended";
+
+              return [
+                <div className="dashboard-member" key="customer">
+                  <Avatar name={item.displayName} />
+                  <span>
+                    <strong>{item.displayName}</strong>
+                    <small>
+                      {item.maskedEmail ?? (ar ? "لا يوجد بريد محفوظ" : "No stored email")}
+                    </small>
+                    <small className="dashboard-member__mobile-meta">
+                      {membershipSummary} · {statusLabel}
+                    </small>
+                  </span>
+                </div>,
+                <div className="dashboard-customer-membership" key="membership">
+                  {primaryMembership ? (
+                    <div className="dashboard-customer-membership__primary">
+                      <strong>{primaryMembership.programName}</strong>
+                      <div className="dashboard-customer-membership__progress">
+                        <span dir="ltr" className="numeric-fraction">
+                          {primaryMembership.progress} {ar ? "أختام" : "stamps"}
+                        </span>
+                        {primaryMembership.rewardReady ? (
+                          <StatusBadge
+                            status="active"
+                            label={ar ? "مكافأة جاهزة" : "Reward ready"}
+                          />
+                        ) : null}
+                        {membershipCount > 1 ? (
+                          <span className="dashboard-customer-membership__count">
+                            +{membershipCount - 1} {ar ? "أخرى" : "more"}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <span>—</span>
+                  )}
+                </div>,
+                <StatusBadge key="status" status={statusTone(item.status)} label={statusLabel} />,
+                <div className="dashboard-team-actions" key="action">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void openCustomer(item.id)}
+                    aria-label={`${ar ? "عرض تفاصيل" : "View details"}: ${item.displayName}`}
+                  >
+                    <UserRound size={16} aria-hidden="true" />
+                    {ar ? "عرض" : "View"}
+                  </Button>
+                </div>,
+              ];
+            })}
           />
           {nextCursor ? (
-            <Button variant="secondary" onClick={() => void loadCustomers(nextCursor)}>
-              {ar ? "تحميل المزيد" : "Load more"}
-            </Button>
+            <div className="dashboard-load-more">
+              <Button
+                variant="secondary"
+                loading={loadingMore}
+                onClick={() => void loadCustomers(nextCursor)}
+              >
+                {ar ? "تحميل المزيد" : "Load more"}
+              </Button>
+            </div>
           ) : null}
         </>
       ) : (
-        <Card>
+        <div className="dashboard-empty-inline">
           <EmptyState
             icon={<UserRound />}
             title={ar ? "لا توجد نتائج" : "No customers found"}
             description={ar ? "جرّب مرشحاً مختلفاً." : "Try a different search or filter."}
           />
-        </Card>
+        </div>
       )}
 
       <Modal
@@ -482,52 +561,66 @@ export function CustomersOperationsScreen({
         {working && !customer ? <Skeleton height="10rem" /> : null}
         {customer ? (
           <div className="dashboard-form">
-            <div>
-              <Badge>{customer.preferredLocale}</Badge> <Badge>{customer.status}</Badge>
+            <div className="dashboard-customer-summary">
+              <StatusBadge
+                status={statusTone(customer.status)}
+                label={customer.status === "ACTIVE" ? (ar ? "نشط" : "Active") : customer.status}
+              />
+              <span>
+                {customer.contacts[0]?.maskedDisplayValue ??
+                  (ar ? "لا يوجد بريد محفوظ" : "No stored email")}
+              </span>
             </div>
-            <p>
-              {customer.contacts[0]?.maskedDisplayValue ??
-                (ar ? "لا يوجد بريد محفوظ" : "No stored email")}
-            </p>
-            <div className="dashboard-actions">
-              <Button variant="secondary" onClick={() => void privacyRequest("privacy-export")}>
-                <Download size={16} /> {ar ? "تصدير الخصوصية" : "Privacy export"}
-              </Button>
-              {membership.role === "OWNER" ? (
-                <Button variant="secondary" onClick={() => void privacyRequest("erasure")}>
-                  {ar ? "طلب المحو" : "Request erasure"}
-                </Button>
-              ) : null}
-            </div>
-            <h3>{ar ? "العضويات" : "Memberships"}</h3>
-            {customer.memberships.map((item) => (
-              <Card key={item.id}>
-                <div className="dashboard-actions">
-                  <strong>{item.programName}</strong>
-                  <Badge>{item.status}</Badge>
-                  {item.progress?.rewardReady ? <Badge tone="brand">REWARD READY</Badge> : null}
+            <h3>{ar ? "بطاقات الولاء" : "Loyalty cards"}</h3>
+            <div className="dashboard-membership-list">
+              {customer.memberships.map((item) => (
+                <div className="dashboard-membership-row" key={item.id}>
+                  <div>
+                    <strong>{item.programName}</strong>
+                    <small dir="ltr" className="numeric-fraction">
+                      {item.progress?.currentCycleStampCount ?? 0} /{" "}
+                      {item.enrollmentProgramVersion.stampRule.requiredStampCount}{" "}
+                      {ar ? "أختام" : "stamps"}
+                    </small>
+                  </div>
+                  <div className="dashboard-actions">
+                    <StatusBadge
+                      status={statusTone(item.status)}
+                      label={item.status === "ACTIVE" ? (ar ? "نشطة" : "Active") : item.status}
+                    />
+                    {item.progress?.rewardReady ? (
+                      <StatusBadge status="active" label={ar ? "مكافأة جاهزة" : "Reward ready"} />
+                    ) : null}
+                  </div>
+                  <Button variant="tertiary" onClick={() => void openMembership(item.id)}>
+                    {ar ? "التفاصيل" : "Details"}
+                  </Button>
                 </div>
-                <p>
-                  {item.progress?.currentCycleStampCount ?? 0} /{" "}
-                  {item.enrollmentProgramVersion.stampRule.requiredStampCount} ·{" "}
-                  {item.enrollmentProgramVersion.operationalTimezone}
-                </p>
-                <Button variant="secondary" onClick={() => void openMembership(item.id)}>
-                  <History size={16} /> {ar ? "فتح السجل" : "Open ledger"}
+              ))}
+            </div>
+            <details className="dashboard-disclosure">
+              <summary>{ar ? "خيارات الخصوصية" : "Privacy options"}</summary>
+              <div className="dashboard-actions">
+                <Button variant="secondary" onClick={() => void privacyRequest("privacy-export")}>
+                  <Download size={16} /> {ar ? "طلب نسخة من البيانات" : "Request data copy"}
                 </Button>
-              </Card>
-            ))}
-            {customer.privacyRequests.length ? (
-              <>
-                <h3>{ar ? "طلبات الخصوصية" : "Privacy requests"}</h3>
-                {customer.privacyRequests.map((request) => (
-                  <p key={request.publicId}>
-                    {request.requestType} · {request.status} ·{" "}
-                    {formattedDate(request.createdAt, ar)}
-                  </p>
-                ))}
-              </>
-            ) : null}
+                {membership.role === "OWNER" ? (
+                  <Button variant="destructive" onClick={() => void privacyRequest("erasure")}>
+                    {ar ? "طلب حذف البيانات" : "Request data deletion"}
+                  </Button>
+                ) : null}
+              </div>
+              {customer.privacyRequests.length ? (
+                <div className="dashboard-compact-history">
+                  {customer.privacyRequests.map((request) => (
+                    <p key={request.publicId}>
+                      {request.requestType} · {request.status} ·{" "}
+                      {formattedDate(request.createdAt, ar)}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </details>
           </div>
         ) : null}
       </Modal>
@@ -542,26 +635,58 @@ export function CustomersOperationsScreen({
       >
         {membershipDetail ? (
           <div className="dashboard-form">
-            <div className="dashboard-actions">
-              <Badge>{membershipDetail.status}</Badge>
+            <div className="dashboard-customer-summary">
+              <StatusBadge
+                status={statusTone(membershipDetail.status)}
+                label={
+                  membershipDetail.status === "ACTIVE"
+                    ? ar
+                      ? "نشطة"
+                      : "Active"
+                    : membershipDetail.status
+                }
+              />
               {membershipDetail.progress?.rewardReady ? (
-                <Badge tone="brand">REWARD READY</Badge>
-              ) : null}
-              {membershipDetail.openRiskSignalCount ? (
-                <Badge tone="danger">{membershipDetail.openRiskSignalCount} RISK</Badge>
+                <StatusBadge status="active" label={ar ? "مكافأة جاهزة" : "Reward ready"} />
               ) : null}
             </div>
-            <Card>
-              <strong>
+            <div className="dashboard-loyalty-progress">
+              <strong dir="ltr" className="numeric-fraction">
                 {membershipDetail.progress?.currentCycleStampCount ?? 0} /{" "}
                 {membershipDetail.enrollmentProgramVersion.stampRule.requiredStampCount}
               </strong>
-              <p>
-                {ar ? "الدورة" : "Cycle"} {membershipDetail.progress?.currentCycleNumber ?? 1} ·{" "}
-                {ar ? "إصدار الإسقاط" : "Projection"}{" "}
-                {membershipDetail.progress?.projectionVersion ?? 0}
-              </p>
-            </Card>
+              <span>{ar ? "التقدم نحو المكافأة القادمة" : "Progress toward the next reward"}</span>
+            </div>
+            {pendingApprovals.map((approval) => (
+              <section className="dashboard-contextual-approval" key={approval.publicId}>
+                <div>
+                  <strong>
+                    {ar ? "طلب استبدال يحتاج قرارك" : "A reward redemption needs your decision"}
+                  </strong>
+                  <span>
+                    {approval.rewardEntitlement?.rewardDefinition.internalName ??
+                      (ar ? "مكافأة" : "Reward")}{" "}
+                    · {approval.location?.name ?? "—"} · {ar ? "ينتهي" : "expires"}{" "}
+                    {formattedDate(approval.expiresAt, ar)}
+                  </span>
+                </div>
+                <div className="dashboard-actions">
+                  <Button
+                    disabled={working}
+                    onClick={() => void decideApproval(approval.publicId, "approve")}
+                  >
+                    {ar ? "موافقة" : "Approve"}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    disabled={working}
+                    onClick={() => void decideApproval(approval.publicId, "reject")}
+                  >
+                    {ar ? "رفض" : "Reject"}
+                  </Button>
+                </div>
+              </section>
+            ))}
             <div className="dashboard-actions">
               {membershipDetail.status === "ACTIVE" ? (
                 <Button variant="secondary" onClick={() => void membershipAction("suspend")}>
@@ -573,105 +698,73 @@ export function CustomersOperationsScreen({
                 </Button>
               ) : null}
               {!["REVOKED", "EXPIRED"].includes(membershipDetail.status) ? (
-                <Button variant="secondary" onClick={() => void membershipAction("revoke")}>
-                  {ar ? "إلغاء" : "Revoke"}
+                <Button variant="destructive" onClick={() => void membershipAction("revoke")}>
+                  {ar ? "إلغاء العضوية" : "Revoke membership"}
                 </Button>
               ) : null}
               <Button variant="secondary" onClick={() => setAdjustmentOpen(true)}>
-                {ar ? "تصحيح يدوي" : "Manual correction"}
-              </Button>
-              <Button variant="secondary" onClick={() => void verifyProjection()}>
-                <CheckCircle2 size={16} /> {ar ? "تحقق من الإسقاط" : "Verify projection"}
+                {ar ? "تعديل الأختام" : "Adjust stamps"}
               </Button>
             </div>
-            <h3>{ar ? "سجل الأحداث" : "Event ledger"}</h3>
-            {ledger.length ? (
-              <Table
-                caption={ar ? "سجل العضوية" : "Membership ledger"}
-                headers={
-                  ar
-                    ? ["التسلسل", "الحدث", "الدورة", "تغير الأختام", "الوقت"]
-                    : ["Sequence", "Event", "Cycle", "Stamp delta", "Time"]
-                }
-                rows={ledger.map((entry) => [
-                  String(entry.membershipSequence),
-                  <Button key="event" variant="ghost" onClick={() => setSelectedLedgerEntry(entry)}>
-                    {entry.eventType}
-                  </Button>,
-                  String(entry.cycleNumber),
-                  String(entry.stampDelta),
-                  formattedDate(entry.occurredAt, ar),
-                ])}
-              />
-            ) : (
-              <Alert title={ar ? "لا توجد أحداث بعد." : "No ledger events yet."} />
-            )}
-            <h3>{ar ? "استحقاقات المكافآت" : "Reward entitlements"}</h3>
-            {membershipDetail.rewardEntitlements.length ? (
-              <Table
-                caption={ar ? "مكافآت العضوية" : "Membership rewards"}
-                headers={
-                  ar
-                    ? ["المكافأة", "الدورة", "الحد", "الحالة", "الاستخدام"]
-                    : ["Reward", "Cycle", "Threshold", "Status", "Usage"]
-                }
-                rows={membershipDetail.rewardEntitlements.map((entitlement) => [
-                  entitlement.rewardDefinition.internalName,
-                  String(entitlement.cycleNumber),
-                  String(entitlement.threshold),
-                  <StatusBadge
-                    key="status"
-                    status={statusTone(entitlement.status)}
-                    label={entitlement.status}
-                  />,
-                  `${entitlement.redemptionCount}/${entitlement.maximumRedemptionCount}`,
-                ])}
-              />
-            ) : (
-              <Alert title={ar ? "لا توجد مكافآت مكتسبة بعد." : "No earned rewards yet."} />
-            )}
-          </div>
-        ) : null}
-      </Modal>
-
-      <Modal
-        open={Boolean(selectedLedgerEntry)}
-        title={ar ? "تفاصيل العملية" : "Operation detail"}
-        onClose={() => setSelectedLedgerEntry(null)}
-      >
-        {selectedLedgerEntry ? (
-          <div className="dashboard-form">
-            <div className="dashboard-actions">
-              <Badge>{selectedLedgerEntry.eventType}</Badge>
-              <Badge>
-                {ar ? "التسلسل" : "Sequence"} {selectedLedgerEntry.membershipSequence}
-              </Badge>
-            </div>
-            <Card>
-              <p>
-                {ar ? "نوع الأمر" : "Command"}: {selectedLedgerEntry.operationCommand.operationType}
-              </p>
-              <p>
-                {ar ? "الدورة" : "Cycle"}: {selectedLedgerEntry.cycleNumber}
-              </p>
-              <p>
-                {ar ? "تغير الأختام" : "Stamp delta"}: {selectedLedgerEntry.stampDelta}
-              </p>
-              <p>
-                {ar ? "الوقت" : "Time"}: {formattedDate(selectedLedgerEntry.occurredAt, ar)}
-              </p>
-            </Card>
-            <Card>
-              <strong>{ar ? "بيانات آمنة" : "Safe metadata"}</strong>
-              <pre>{JSON.stringify(selectedLedgerEntry.safeMetadata ?? {}, null, 2)}</pre>
-            </Card>
+            <details className="dashboard-disclosure">
+              <summary>{ar ? "النشاط والمكافآت" : "Activity and rewards"}</summary>
+              {ledger.length ? (
+                <Table
+                  caption={ar ? "نشاط بطاقة الولاء" : "Loyalty activity"}
+                  headers={
+                    ar ? ["النشاط", "تغير الأختام", "الوقت"] : ["Activity", "Stamp change", "Time"]
+                  }
+                  rows={ledger.map((entry) => [
+                    ["STAMP_EARNED", "STAMP_ISSUED"].includes(entry.eventType)
+                      ? ar
+                        ? "إضافة ختم"
+                        : "Stamp added"
+                      : entry.eventType === "REWARD_REDEEMED"
+                        ? ar
+                          ? "استبدال مكافأة"
+                          : "Reward redeemed"
+                        : ar
+                          ? "تحديث البطاقة"
+                          : "Card updated",
+                    entry.stampDelta > 0 ? `+${entry.stampDelta}` : String(entry.stampDelta),
+                    formattedDate(entry.occurredAt, ar),
+                  ])}
+                />
+              ) : (
+                <Alert title={ar ? "لا توجد أحداث بعد." : "No ledger events yet."} />
+              )}
+              <h3>{ar ? "المكافآت" : "Rewards"}</h3>
+              {membershipDetail.rewardEntitlements.length ? (
+                <Table
+                  caption={ar ? "مكافآت العضوية" : "Membership rewards"}
+                  headers={
+                    ar
+                      ? ["المكافأة", "الدورة", "الحد", "الحالة", "الاستخدام"]
+                      : ["Reward", "Cycle", "Threshold", "Status", "Usage"]
+                  }
+                  rows={membershipDetail.rewardEntitlements.map((entitlement) => [
+                    entitlement.rewardDefinition.internalName,
+                    String(entitlement.cycleNumber),
+                    String(entitlement.threshold),
+                    <StatusBadge
+                      key="status"
+                      status={statusTone(entitlement.status)}
+                      label={entitlement.status}
+                    />,
+                    `${entitlement.redemptionCount}/${entitlement.maximumRedemptionCount}`,
+                  ])}
+                />
+              ) : (
+                <Alert title={ar ? "لا توجد مكافآت مكتسبة بعد." : "No earned rewards yet."} />
+              )}
+            </details>
           </div>
         ) : null}
       </Modal>
 
       <Modal
         open={adjustmentOpen}
-        title={ar ? "تصحيح يدوي مسجل" : "Ledger-backed manual correction"}
+        title={ar ? "تعديل الأختام" : "Adjust stamps"}
         onClose={() => setAdjustmentOpen(false)}
       >
         <form className="dashboard-form" onSubmit={manualAdjustment}>
@@ -679,19 +772,18 @@ export function CustomersOperationsScreen({
             <TextInput name="stampDelta" type="number" min={-30} max={30} required />
           </FormField>
           <FormField label={ar ? "الموقع" : "Location"} required>
-            <Select name="locationId" required>
-              {locations.map((location) => (
-                <option value={location.id} key={location.id}>
-                  {location.name}
-                </option>
-              ))}
-            </Select>
+            <SearchableSelect
+              name="locationId"
+              required
+              defaultValue={locations[0]?.id ?? ""}
+              options={locations.map((location) => ({ value: location.id, label: location.name }))}
+            />
           </FormField>
-          <FormField label={ar ? "سبب التدقيق" : "Audit reason"} required>
+          <FormField label={ar ? "السبب" : "Reason"} required>
             <TextArea name="reason" minLength={3} maxLength={500} required />
           </FormField>
           <Button type="submit" loading={working} disabled={!locations.length}>
-            {ar ? "تسجيل التصحيح" : "Record correction"}
+            {ar ? "حفظ التعديل" : "Save adjustment"}
           </Button>
         </form>
       </Modal>
@@ -728,6 +820,7 @@ interface PairingResult {
   status: string;
   expiresAt: string;
   staffDisplayName: string;
+  manualPairingCode: string;
   pairingQrSvg: string;
   accessibleLabel: string;
 }
@@ -746,6 +839,7 @@ export function DevicesOperationsScreen({
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [pairingOpen, setPairingOpen] = useState(false);
   const [pairing, setPairing] = useState<PairingResult | null>(null);
+  const [pairingCodeCopied, setPairingCodeCopied] = useState(false);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
 
@@ -789,6 +883,7 @@ export function DevicesOperationsScreen({
           }),
         },
       );
+      setPairingCodeCopied(false);
       setPairing(result);
     } catch (caught) {
       setError(apiMessage(caught, ar ? "تعذر إنشاء الاقتران." : "Unable to create pairing."));
@@ -804,11 +899,12 @@ export function DevicesOperationsScreen({
       { method: "POST" },
     );
     setPairing(null);
+    setPairingCodeCopied(false);
     setPairingOpen(false);
   }
 
   async function deviceAction(deviceId: string, action: "revoke" | "mark-compromised") {
-    const reason = window.prompt(ar ? "أدخل سبباً واضحاً للتدقيق:" : "Enter a clear audit reason:");
+    const reason = window.prompt(ar ? "أدخل سبباً مختصراً:" : "Enter a short reason:");
     if (!reason || reason.trim().length < 3) return;
     setWorking(true);
     try {
@@ -898,6 +994,7 @@ export function DevicesOperationsScreen({
         onClose={() => {
           setPairingOpen(false);
           setPairing(null);
+          setPairingCodeCopied(false);
         }}
       >
         {pairing ? (
@@ -917,6 +1014,32 @@ export function DevicesOperationsScreen({
               height={360}
               unoptimized
             />
+            <div className="dashboard-pairing-manual">
+              <div>
+                <span>{ar ? "رمز الإدخال اليدوي" : "Manual pairing code"}</span>
+                <strong dir="ltr">{pairing.manualPairingCode}</strong>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  void navigator.clipboard.writeText(pairing.manualPairingCode).then(() => {
+                    setPairingCodeCopied(true);
+                  })
+                }
+              >
+                <Copy size={17} aria-hidden="true" />
+                {ar ? "نسخ الرمز" : "Copy code"}
+              </Button>
+              <p>
+                {ar
+                  ? "أدخل هذا الرمز في تطبيق الموظف إذا تعذر مسح رمز QR. تنتهي صلاحية الطريقتين في الوقت نفسه."
+                  : "Enter this code in the Staff app if the QR cannot be scanned. Both methods expire at the same time."}
+              </p>
+              <span className="wf-sr-only" role="status" aria-live="polite">
+                {pairingCodeCopied ? (ar ? "تم نسخ الرمز." : "Code copied.") : ""}
+              </span>
+            </div>
             <p>
               {pairing.staffDisplayName} · {formattedDate(pairing.expiresAt, ar)}
             </p>
@@ -959,398 +1082,6 @@ export function DevicesOperationsScreen({
   );
 }
 
-interface ManagerApprovalItem {
-  publicId: string;
-  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CONSUMED";
-  membership: {
-    publicMembershipId: string;
-    customer: { displayName: string };
-  } | null;
-  rewardEntitlement: {
-    publicId: string;
-    threshold: number;
-    rewardDefinition: { internalName: string };
-  } | null;
-  staffDevice: { publicId: string; displayName: string } | null;
-  location: { name: string } | null;
-  requestedBy: { displayName: string } | null;
-  approvedBy: { displayName: string } | null;
-  expiresAt: string;
-  approvedAt: string | null;
-  rejectedAt: string | null;
-  consumedAt: string | null;
-  createdAt: string;
-}
-
-export function ManagerApprovalsScreen({
-  locale,
-  membership,
-}: {
-  locale: Locale;
-  membership: MembershipView;
-}) {
-  const ar = locale === "ar";
-  const organizationId = membership.organization.id;
-  const [status, setStatus] = useState("");
-  const [approvals, setApprovals] = useState<ManagerApprovalItem[] | null>(null);
-  const [error, setError] = useState("");
-  const [working, setWorking] = useState(false);
-
-  const load = useCallback(async () => {
-    setError("");
-    const parameters = new URLSearchParams({ limit: "50" });
-    if (status) parameters.set("status", status);
-    try {
-      const result = await apiFetch<{ items: ManagerApprovalItem[] }>(
-        `/v1/organizations/${organizationId}/operation-approvals?${parameters}`,
-      );
-      setApprovals(result.items);
-    } catch (caught) {
-      setError(apiMessage(caught, ar ? "تعذر تحميل طلبات الموافقة." : "Unable to load approvals."));
-    }
-  }, [ar, organizationId, status]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function decide(approval: ManagerApprovalItem, decision: "approve" | "reject") {
-    const reason = window.prompt(
-      ar ? "أدخل سبب القرار لأغراض التدقيق:" : "Enter the audited decision reason:",
-    );
-    if (!reason || reason.trim().length < 3) return;
-    setWorking(true);
-    setError("");
-    try {
-      await apiFetch(
-        `/v1/organizations/${organizationId}/operation-approvals/${approval.publicId}/${decision}`,
-        { method: "POST", body: JSON.stringify({ reason }) },
-      );
-      await load();
-    } catch (caught) {
-      setError(apiMessage(caught, ar ? "تعذر تسجيل القرار." : "Unable to record the decision."));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  return (
-    <>
-      <PageHeader
-        eyebrow={ar ? "تفويض قصير العمر" : "Short-lived authorization"}
-        title={ar ? "موافقات المدير" : "Manager approvals"}
-        description={
-          ar
-            ? "راجع سياق العضوية والمكافأة والجهاز والموقع قبل اعتماد العملية أو رفضها."
-            : "Review the bound membership, reward, device, and location before approving or rejecting."
-        }
-      />
-      <Card className="dashboard-form-card">
-        <FormField label={ar ? "الحالة" : "Status"}>
-          <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="">{ar ? "كل الحالات" : "All statuses"}</option>
-            <option value="PENDING">PENDING</option>
-            <option value="APPROVED">APPROVED</option>
-            <option value="REJECTED">REJECTED</option>
-            <option value="EXPIRED">EXPIRED</option>
-            <option value="CONSUMED">CONSUMED</option>
-          </Select>
-        </FormField>
-      </Card>
-      {error ? <Alert tone="danger" title={error} /> : null}
-      {!approvals ? (
-        <Skeleton height="18rem" />
-      ) : approvals.length ? (
-        <Table
-          caption={ar ? "تحديات موافقة المدير" : "Manager approval challenges"}
-          headers={
-            ar
-              ? ["العميل والمكافأة", "الجهاز والموقع", "الحالة", "الصلاحية", "الإجراء"]
-              : ["Customer and reward", "Device and location", "Status", "Expires", "Action"]
-          }
-          rows={approvals.map((approval) => [
-            <span key="context">
-              <strong>{approval.membership?.customer.displayName ?? "—"}</strong>
-              <br />
-              {approval.rewardEntitlement?.rewardDefinition.internalName ?? "—"} ·{" "}
-              {approval.membership?.publicMembershipId ?? "—"}
-            </span>,
-            <span key="device">
-              {approval.staffDevice?.displayName ?? "—"}
-              <br />
-              {approval.location?.name ?? "—"}
-            </span>,
-            <StatusBadge
-              key="status"
-              status={statusTone(approval.status)}
-              label={approval.status}
-            />,
-            formattedDate(approval.expiresAt, ar),
-            approval.status === "PENDING" ? (
-              <div className="dashboard-actions" key="actions">
-                <Button
-                  variant="ghost"
-                  disabled={working}
-                  onClick={() => void decide(approval, "approve")}
-                >
-                  {ar ? "اعتماد" : "Approve"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={working}
-                  onClick={() => void decide(approval, "reject")}
-                >
-                  {ar ? "رفض" : "Reject"}
-                </Button>
-              </div>
-            ) : (
-              <span key="decision">
-                {approval.approvedBy?.displayName ??
-                  (approval.rejectedAt ? (ar ? "مرفوض" : "Rejected") : "—")}
-              </span>
-            ),
-          ])}
-        />
-      ) : (
-        <Card>
-          <EmptyState
-            icon={<CheckCircle2 />}
-            title={ar ? "لا توجد موافقات مطابقة" : "No matching approvals"}
-            description={
-              ar
-                ? "ستظهر طلبات الاسترداد التي تتطلب مديراً هنا."
-                : "Redemptions requiring a manager will appear here."
-            }
-          />
-        </Card>
-      )}
-    </>
-  );
-}
-
-interface RiskItem {
-  publicId: string;
-  ruleCode: string;
-  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED";
-  score: number;
-  safeEvidence: Record<string, unknown> | null;
-  membershipId: string | null;
-  locationId: string | null;
-  createdAt: string;
-  resolutionNote: string | null;
-}
-
-export function RiskOperationsScreen({
-  locale,
-  membership,
-}: {
-  locale: Locale;
-  membership: MembershipView;
-}) {
-  const ar = locale === "ar";
-  const organizationId = membership.organization.id;
-  const [signals, setSignals] = useState<RiskItem[] | null>(null);
-  const [status, setStatus] = useState("OPEN");
-  const [severity, setSeverity] = useState("");
-  const [error, setError] = useState("");
-  const [working, setWorking] = useState(false);
-  const [selectedSignal, setSelectedSignal] = useState<RiskItem | null>(null);
-
-  const load = useCallback(async () => {
-    const parameters = new URLSearchParams({ limit: "50" });
-    if (status) parameters.set("status", status);
-    if (severity) parameters.set("severity", severity);
-    try {
-      const result = await apiFetch<{ items: RiskItem[] }>(
-        `/v1/organizations/${organizationId}/risk-signals?${parameters}`,
-      );
-      setSignals(result.items);
-    } catch (caught) {
-      setError(
-        apiMessage(caught, ar ? "تعذر تحميل إشارات المخاطر." : "Unable to load risk signals."),
-      );
-    }
-  }, [ar, organizationId, severity, status]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function decide(signal: RiskItem, action: "acknowledge" | "resolve" | "dismiss") {
-    const note = window.prompt(ar ? "أدخل ملاحظة المراجعة:" : "Enter the review note:");
-    if (!note || note.trim().length < 3) return;
-    setWorking(true);
-    try {
-      await apiFetch(
-        `/v1/organizations/${organizationId}/risk-signals/${signal.publicId}/${action}`,
-        { method: "POST", body: JSON.stringify({ note }) },
-      );
-      await load();
-    } catch (caught) {
-      setError(apiMessage(caught, ar ? "تعذر تحديث الإشارة." : "Unable to update signal."));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function openSignal(signal: RiskItem) {
-    setWorking(true);
-    setError("");
-    try {
-      const detail = await apiFetch<RiskItem>(
-        `/v1/organizations/${organizationId}/risk-signals/${signal.publicId}`,
-      );
-      setSelectedSignal(detail);
-    } catch (caught) {
-      setError(apiMessage(caught, ar ? "تعذر فتح الإشارة." : "Unable to open the signal."));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  return (
-    <>
-      <PageHeader
-        eyebrow={ar ? "مراجعة تشغيلية" : "Operational review"}
-        title={ar ? "إشارات المخاطر" : "Risk signals"}
-        description={
-          ar
-            ? "راجع التجاوزات والأنماط غير المعتادة باستخدام أدلة آمنة، ثم سجّل القرار."
-            : "Review overrides and unusual patterns using safe evidence, then record the decision."
-        }
-      />
-      <Card className="dashboard-form-card">
-        <div className="studio-form-grid">
-          <FormField label={ar ? "الحالة" : "Status"}>
-            <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option value="">{ar ? "كل الحالات" : "All statuses"}</option>
-              <option value="OPEN">OPEN</option>
-              <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
-              <option value="RESOLVED">RESOLVED</option>
-              <option value="DISMISSED">DISMISSED</option>
-            </Select>
-          </FormField>
-          <FormField label={ar ? "الخطورة" : "Severity"}>
-            <Select value={severity} onChange={(event) => setSeverity(event.target.value)}>
-              <option value="">{ar ? "كل الدرجات" : "All severities"}</option>
-              <option value="CRITICAL">CRITICAL</option>
-              <option value="HIGH">HIGH</option>
-              <option value="MEDIUM">MEDIUM</option>
-              <option value="LOW">LOW</option>
-            </Select>
-          </FormField>
-        </div>
-      </Card>
-      {error ? <Alert tone="danger" title={error} /> : null}
-      {!signals ? (
-        <Skeleton height="18rem" />
-      ) : signals.length ? (
-        <Table
-          caption={ar ? "إشارات المخاطر" : "Operational risk signals"}
-          headers={
-            ar
-              ? ["القاعدة", "الخطورة", "النقاط", "الحالة", "الوقت", "الإجراء"]
-              : ["Rule", "Severity", "Score", "Status", "Created", "Action"]
-          }
-          rows={signals.map((signal) => [
-            signal.ruleCode,
-            <Badge key="severity" tone={signal.severity === "CRITICAL" ? "danger" : "warning"}>
-              {signal.severity}
-            </Badge>,
-            String(signal.score),
-            signal.status,
-            formattedDate(signal.createdAt, ar),
-            signal.status === "OPEN" ? (
-              <div className="dashboard-actions" key="actions">
-                <Button variant="ghost" disabled={working} onClick={() => void openSignal(signal)}>
-                  {ar ? "التفاصيل" : "Details"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={working}
-                  onClick={() => void decide(signal, "acknowledge")}
-                >
-                  {ar ? "إقرار" : "Acknowledge"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={working}
-                  onClick={() => void decide(signal, "resolve")}
-                >
-                  {ar ? "حل" : "Resolve"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={working}
-                  onClick={() => void decide(signal, "dismiss")}
-                >
-                  {ar ? "استبعاد" : "Dismiss"}
-                </Button>
-              </div>
-            ) : (
-              <div className="dashboard-actions" key="actions">
-                <Button variant="ghost" disabled={working} onClick={() => void openSignal(signal)}>
-                  {ar ? "التفاصيل" : "Details"}
-                </Button>
-                <span>{signal.resolutionNote ?? "—"}</span>
-              </div>
-            ),
-          ])}
-        />
-      ) : (
-        <Card>
-          <EmptyState
-            icon={<ShieldAlert />}
-            title={ar ? "لا توجد إشارات مطابقة" : "No matching risk signals"}
-            description={
-              ar
-                ? "لا توجد عناصر تحتاج مراجعة ضمن المرشح."
-                : "Nothing needs review for this filter."
-            }
-          />
-        </Card>
-      )}
-      <Modal
-        open={Boolean(selectedSignal)}
-        title={ar ? "تفاصيل إشارة المخاطر" : "Risk signal detail"}
-        onClose={() => setSelectedSignal(null)}
-      >
-        {selectedSignal ? (
-          <div className="dashboard-form">
-            <div className="dashboard-actions">
-              <Badge tone={selectedSignal.severity === "CRITICAL" ? "danger" : "warning"}>
-                {selectedSignal.severity}
-              </Badge>
-              <StatusBadge
-                status={statusTone(selectedSignal.status)}
-                label={selectedSignal.status}
-              />
-            </div>
-            <Card>
-              <strong>{selectedSignal.ruleCode}</strong>
-              <p>
-                {ar ? "درجة المخاطر" : "Risk score"}: {selectedSignal.score}
-              </p>
-              <p>
-                {ar ? "وقت الإنشاء" : "Created"}: {formattedDate(selectedSignal.createdAt, ar)}
-              </p>
-              <p>
-                {ar ? "سياق العضوية" : "Membership context"}:{" "}
-                {selectedSignal.membershipId ? (ar ? "مرتبط" : "Bound") : "—"}
-              </p>
-            </Card>
-            <Card>
-              <strong>{ar ? "الأدلة الآمنة" : "Safe evidence"}</strong>
-              <pre>{JSON.stringify(selectedSignal.safeEvidence ?? {}, null, 2)}</pre>
-            </Card>
-          </div>
-        ) : null}
-      </Modal>
-    </>
-  );
-}
-
 interface AnalyticsOverview {
   activeMemberships: number;
   newEnrollments: number;
@@ -1362,7 +1093,6 @@ interface AnalyticsOverview {
   completedCycles: number;
   uniqueActiveMembers: number;
   reversals: number;
-  riskSignals: number;
   recentOperations: Array<{
     publicId: string;
     eventType: string;
@@ -1423,30 +1153,14 @@ export function OperationalAnalyticsScreen({
     }
   }
 
-  const metrics = useMemo(
-    () =>
-      data
-        ? [
-            [ar ? "العضويات النشطة" : "Active memberships", data.activeMemberships],
-            [ar ? "الأختام المصدرة" : "Stamp units issued", data.stampUnitsIssued],
-            [ar ? "المكافآت المستردة" : "Rewards redeemed", data.rewardsRedeemed],
-            [ar ? "الدورات المكتملة" : "Completed cycles", data.completedCycles],
-            [ar ? "عمليات العكس" : "Reversals", data.reversals],
-            [ar ? "إشارات المخاطر" : "Risk signals", data.riskSignals],
-          ]
-        : [],
-    [ar, data],
-  );
-
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "بيانات تشغيلية مجمعة" : "Aggregated operational data"}
         title={ar ? "التحليلات" : "Analytics"}
         description={
           ar
-            ? "كل رقم مشتق من أحداث التشغيل والمجاميع اليومية الفعلية."
-            : "Every number is derived from real operation events and daily aggregates."
+            ? "تابع نشاط بطاقات الولاء ومشاركة العملاء."
+            : "Understand loyalty activity and customer engagement."
         }
       />
       {error ? <Alert tone="warning" title={error} /> : null}
@@ -1454,31 +1168,89 @@ export function OperationalAnalyticsScreen({
         <Skeleton height="18rem" />
       ) : (
         <>
-          <div className="dashboard-grid">
-            {metrics.map(([label, value]) => (
-              <Card className="dashboard-card" key={String(label)}>
-                <span className="dashboard-card__label">{label}</span>
-                <span className="dashboard-card__value">{value}</span>
-              </Card>
-            ))}
-            <Card className="dashboard-card">
-              <span className="dashboard-card__label">
-                {ar ? "معدل الاسترداد" : "REDEMPTION RATE"}
-              </span>
-              <span className="dashboard-card__value">
-                {new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {
-                  style: "percent",
-                  maximumFractionDigits: 1,
-                }).format(data.redemptionRate)}
-              </span>
-            </Card>
-          </div>
-          <Card className="dashboard-form-card">
-            <h2>{ar ? "مقارنات متقدمة" : "Advanced comparisons"}</h2>
+          <section className="analytics-overview-card">
+            <div className="dashboard-section-heading">
+              <div>
+                <span className="dashboard-card__label">
+                  {ar ? "مؤشرات الأداء" : "PERFORMANCE OVERVIEW"}
+                </span>
+                <h2>{ar ? "نشاط برنامج الولاء" : "Loyalty activity summary"}</h2>
+              </div>
+              <Badge tone="neutral">{ar ? "آخر 30 يوماً" : "Last 30 days"}</Badge>
+            </div>
+            <dl className="analytics-metric-grid">
+              <div>
+                <dt>{ar ? "العضويات النشطة" : "Active memberships"}</dt>
+                <dd>
+                  <bdi dir="ltr">{data.activeMemberships}</bdi>
+                </dd>
+                <dd className="dashboard-metric-detail">
+                  <small>{ar ? "إجمالي الأعضاء المنضمين" : "Enrolled members"}</small>
+                </dd>
+              </div>
+              <div>
+                <dt>{ar ? "الأختام المضافة" : "Stamps added"}</dt>
+                <dd>
+                  <bdi dir="ltr">{data.stampUnitsIssued}</bdi>
+                </dd>
+                <dd className="dashboard-metric-detail">
+                  <small>{ar ? "إجمالي الأختام الممنوحة" : "Issued to customer cards"}</small>
+                </dd>
+              </div>
+              <div>
+                <dt>{ar ? "المكافآت المستخدمة" : "Rewards used"}</dt>
+                <dd>
+                  <bdi dir="ltr">{data.rewardsRedeemed}</bdi>
+                </dd>
+                <dd className="dashboard-metric-detail">
+                  <small>{ar ? "مكافآت تم استردادها" : "Redemptions completed"}</small>
+                </dd>
+              </div>
+              <div>
+                <dt>{ar ? "معدل استخدام المكافآت" : "Reward use rate"}</dt>
+                <dd>
+                  <bdi dir="ltr">
+                    {new Intl.NumberFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
+                      style: "percent",
+                      maximumFractionDigits: 1,
+                    }).format(data.redemptionRate)}
+                  </bdi>
+                </dd>
+                <dd className="dashboard-metric-detail">
+                  <small>
+                    {ar
+                      ? `${data.completedCycles} دورة مكتملة`
+                      : `${data.completedCycles} cycles completed`}
+                  </small>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="analytics-comparison-card">
+            <div className="dashboard-section-heading">
+              <div>
+                <span className="dashboard-card__label">
+                  {ar ? "تحليلات تفصيلية" : "DEEP DIVE"}
+                </span>
+                <h2>{ar ? "مقارنات متقدمة" : "Advanced comparisons"}</h2>
+              </div>
+              {data.advancedAnalyticsAvailable ? (
+                <Badge tone="brand">{ar ? "الخطة مفعلة" : "Growth / Scale"}</Badge>
+              ) : (
+                <Badge tone="neutral">
+                  {ar ? "يتطلب Growth أو Scale" : "Growth or Scale required"}
+                </Badge>
+              )}
+            </div>
             {data.advancedAnalyticsAvailable ? (
-              <div className="dashboard-actions">
+              <div className="dashboard-actions" style={{ marginTop: "1rem" }}>
                 {(["programs", "locations", "staff", "cohorts"] as const).map((value) => (
-                  <Button key={value} variant="secondary" onClick={() => void loadDimension(value)}>
+                  <Button
+                    key={value}
+                    variant={dimension === value ? "primary" : "secondary"}
+                    onClick={() => void loadDimension(value)}
+                  >
                     {dimensionLabels[value]}
                   </Button>
                 ))}
@@ -1486,112 +1258,141 @@ export function OperationalAnalyticsScreen({
             ) : (
               <Alert
                 tone="info"
-                title={ar ? "متاح في Growth وScale" : "Available on Growth and Scale"}
-              />
-            )}
-          </Card>
-          {dimension ? (
-            <Card className="dashboard-form-card">
-              <p role="status">
+                title={ar ? "متاح في باقات Growth وScale" : "Available on Growth and Scale"}
+              >
                 {ar
-                  ? `${dimensionRows.length} نتيجة من ${dimensionRange?.from ?? "—"} إلى ${dimensionRange?.to ?? "—"}.`
-                  : `${dimensionRows.length} results from ${dimensionRange?.from ?? "—"} to ${dimensionRange?.to ?? "—"}.`}
-              </p>
-              <Table
-                caption={
-                  ar
-                    ? `تحليلات ${dimensionLabels[dimension as keyof typeof dimensionLabels]}`
-                    : `${dimensionLabels[dimension as keyof typeof dimensionLabels]} analytics`
-                }
-                headers={
-                  dimension === "programs"
-                    ? ar
-                      ? [
-                          "بطاقة الولاء والإعداد المحفوظ",
-                          "الاشتراكات",
-                          "عمليات الختم",
-                          "معدل الاسترداد",
-                        ]
-                      : [
-                          "Loyalty card and saved setup",
-                          "Enrollments",
-                          "Stamp operations",
-                          "Redemption rate",
-                        ]
-                    : dimension === "locations"
+                  ? "قم بترقية خطتك للحصول على مقارنات أداء بطاقات الولاء والمواقع والموظفين ومجموعات العملاء."
+                  : "Upgrade your plan to unlock deep-dive comparisons across cards, locations, staff, and customer cohorts."}
+              </Alert>
+            )}
+
+            {dimension ? (
+              <div style={{ marginTop: "1.25rem" }}>
+                <p
+                  role="status"
+                  style={{
+                    marginBottom: "0.85rem",
+                    color: "var(--waflo-muted)",
+                    fontSize: "0.88rem",
+                  }}
+                >
+                  {ar
+                    ? `${dimensionRows.length} نتيجة من ${dimensionRange?.from ?? "—"} إلى ${dimensionRange?.to ?? "—"}.`
+                    : `${dimensionRows.length} results from ${dimensionRange?.from ?? "—"} to ${dimensionRange?.to ?? "—"}.`}
+                </p>
+                <Table
+                  caption={
+                    ar
+                      ? `تحليلات ${dimensionLabels[dimension as keyof typeof dimensionLabels]}`
+                      : `${dimensionLabels[dimension as keyof typeof dimensionLabels]} analytics`
+                  }
+                  headers={
+                    dimension === "programs"
                       ? ar
-                        ? ["الموقع", "النشاط", "الأعضاء الفريدون", "التحويل"]
-                        : ["Location", "Activity", "Unique members", "Conversion"]
-                      : dimension === "staff"
+                        ? ["بطاقة الولاء", "الاشتراكات", "عمليات الختم", "معدل الاسترداد"]
+                        : ["Loyalty card", "Enrollments", "Stamp operations", "Redemption rate"]
+                      : dimension === "locations"
                         ? ar
-                          ? ["الموظف", "العمليات", "وحدات الختم", "معدل المخاطر"]
-                          : ["Staff", "Operations", "Stamp units", "Risk rate"]
-                        : ar
-                          ? ["الفوج", "الحجم", "الاحتفاظ", "ساعات أول ختم"]
-                          : ["Cohort", "Size", "Retention", "Hours to first stamp"]
-                }
-                rows={dimensionRows.map((row) =>
-                  dimension === "programs"
-                    ? [
-                        `${String(row.programName ?? "—")} · ${
-                          ar ? "الإعداد المحفوظ" : "Saved setup"
-                        } ${String(row.versionNumber ?? "—")}`,
-                        String(row.enrollments ?? 0),
-                        String(row.stampOperations ?? 0),
-                        new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {
-                          style: "percent",
-                          maximumFractionDigits: 1,
-                        }).format(Number(row.redemptionRate ?? 0)),
-                      ]
-                    : dimension === "locations"
+                          ? ["الموقع", "النشاط", "الأعضاء الفريدون", "التحويل"]
+                          : ["Location", "Activity", "Unique members", "Conversion"]
+                        : dimension === "staff"
+                          ? ar
+                            ? ["الموظف", "العمليات", "الأختام"]
+                            : ["Staff", "Activity", "Stamps"]
+                          : ar
+                            ? ["الفوج", "الحجم", "الاحتفاظ", "ساعات أول ختم"]
+                            : ["Cohort", "Size", "Retention", "Hours to first stamp"]
+                  }
+                  rows={dimensionRows.map((row) =>
+                    dimension === "programs"
                       ? [
-                          String(row.locationName ?? "—"),
-                          String(row.activity ?? 0),
-                          String(row.uniqueMembers ?? 0),
-                          new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {
+                          String(row.programName ?? "—"),
+                          String(row.enrollments ?? 0),
+                          String(row.stampOperations ?? 0),
+                          new Intl.NumberFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
                             style: "percent",
                             maximumFractionDigits: 1,
-                          }).format(Number(row.conversionRate ?? 0)),
+                          }).format(Number(row.redemptionRate ?? 0)),
                         ]
-                      : dimension === "staff"
+                      : dimension === "locations"
                         ? [
-                            String(row.staffName ?? "—"),
-                            String(row.operations ?? 0),
-                            String(row.stampUnits ?? 0),
-                            new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {
+                            String(row.locationName ?? "—"),
+                            String(row.activity ?? 0),
+                            String(row.uniqueMembers ?? 0),
+                            new Intl.NumberFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
                               style: "percent",
                               maximumFractionDigits: 1,
-                            }).format(Number(row.riskRate ?? 0)),
+                            }).format(Number(row.conversionRate ?? 0)),
                           ]
-                        : [
-                            String(row.cohort ?? "—"),
-                            String(row.cohortSize ?? 0),
-                            new Intl.NumberFormat(ar ? "ar-IQ" : "en-US", {
-                              style: "percent",
-                              maximumFractionDigits: 1,
-                            }).format(Number(row.retainedRate ?? 0)),
-                            row.averageHoursToFirstStamp === null
-                              ? "—"
-                              : String(Number(row.averageHoursToFirstStamp ?? 0).toFixed(1)),
-                          ],
-                )}
+                        : dimension === "staff"
+                          ? [
+                              String(row.staffName ?? "—"),
+                              String(row.operations ?? 0),
+                              String(row.stampUnits ?? 0),
+                            ]
+                          : [
+                              String(row.cohort ?? "—"),
+                              String(row.cohortSize ?? 0),
+                              new Intl.NumberFormat(ar ? "ar-IQ-u-nu-latn" : "en-US", {
+                                style: "percent",
+                                maximumFractionDigits: 1,
+                              }).format(Number(row.retainedRate ?? 0)),
+                              row.averageHoursToFirstStamp === null
+                                ? "—"
+                                : String(Number(row.averageHoursToFirstStamp ?? 0).toFixed(1)),
+                            ],
+                  )}
+                />
+              </div>
+            ) : null}
+          </section>
+
+          <section className="analytics-activity-card">
+            <div className="dashboard-section-heading">
+              <div>
+                <span className="dashboard-card__label">
+                  {ar ? "سجل العمليات" : "ACTIVITY STREAM"}
+                </span>
+                <h2>{ar ? "أحدث العمليات" : "Recent operations"}</h2>
+              </div>
+              <Badge tone="neutral">
+                {ar
+                  ? `${data.recentOperations.length} عملية`
+                  : `${data.recentOperations.length} events`}
+              </Badge>
+            </div>
+            {data.recentOperations.length ? (
+              <Table
+                caption={ar ? "أحدث عمليات الولاء" : "Recent loyalty operations"}
+                headers={ar ? ["الحدث", "تغير الأختام", "الوقت"] : ["Event", "Stamp delta", "Time"]}
+                rows={data.recentOperations.map((operation) => [
+                  operation.eventType === "STAMP_EARNED"
+                    ? ar
+                      ? "إضافة ختم"
+                      : "Stamp added"
+                    : operation.eventType === "REWARD_REDEEMED"
+                      ? ar
+                        ? "استخدام مكافأة"
+                        : "Reward used"
+                      : ar
+                        ? "تحديث بطاقة"
+                        : "Card updated",
+                  String(operation.stampDelta),
+                  formattedDate(operation.occurredAt, ar),
+                ])}
               />
-            </Card>
-          ) : null}
-          <h2>{ar ? "أحدث الأحداث" : "Recent operations"}</h2>
-          {data.recentOperations.length ? (
-            <Table
-              caption={ar ? "أحدث عمليات الولاء" : "Recent loyalty operations"}
-              headers={ar ? ["الحدث", "تغير الأختام", "الوقت"] : ["Event", "Stamp delta", "Time"]}
-              rows={data.recentOperations.map((operation) => [
-                operation.eventType,
-                String(operation.stampDelta),
-                formattedDate(operation.occurredAt, ar),
-              ])}
-            />
-          ) : (
-            <Alert title={ar ? "لا توجد عمليات بعد." : "No operations yet."} />
-          )}
+            ) : (
+              <EmptyState
+                icon={<Activity />}
+                title={ar ? "لا توجد عمليات بعد" : "No operations yet"}
+                description={
+                  ar
+                    ? "ستظهر عمليات الختم والمكافآت هنا."
+                    : "Stamp and reward activity will appear here."
+                }
+              />
+            )}
+          </section>
         </>
       )}
     </>
@@ -1617,6 +1418,8 @@ interface ExportJob {
   safeFailureCode?: string | null;
 }
 
+type VisibleExportType = Exclude<ExportType, "RISK_SIGNALS">;
+
 export function ExportsOperationsScreen({
   locale,
   membership,
@@ -1626,10 +1429,24 @@ export function ExportsOperationsScreen({
 }) {
   const ar = locale === "ar";
   const organizationId = membership.organization.id;
-  const [exportType, setExportType] = useState<ExportType>("MEMBERSHIP_SUMMARY");
+  const [exportType, setExportType] = useState<VisibleExportType>("MEMBERSHIP_SUMMARY");
   const [jobs, setJobs] = useState<ExportJob[]>([]);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const exportLabels: Record<VisibleExportType, string> = {
+    MEMBERSHIP_SUMMARY: ar ? "ملخص العملاء" : "Customer summary",
+    LEDGER_OPERATIONS: ar ? "نشاط بطاقات الولاء" : "Loyalty activity",
+    REWARD_REDEMPTIONS: ar ? "المكافآت المستخدمة" : "Rewards used",
+    LOCATION_PERFORMANCE: ar ? "أداء المواقع" : "Location performance",
+    STAFF_PERFORMANCE: ar ? "أداء الموظفين" : "Staff performance",
+    AGGREGATE_ANALYTICS: ar ? "ملخص التحليلات" : "Analytics summary",
+  };
+  const labelForExport = (value: ExportType | undefined) =>
+    value && value !== "RISK_SIGNALS"
+      ? exportLabels[value]
+      : ar
+        ? "تقرير أمان قديم"
+        : "Legacy security report";
 
   useEffect(() => {
     void apiFetch<{ items: ExportJob[] }>(`/v1/organizations/${organizationId}/exports?limit=50`)
@@ -1675,61 +1492,93 @@ export function ExportsOperationsScreen({
   return (
     <>
       <PageHeader
-        eyebrow={ar ? "Scale" : "Scale"}
-        title={ar ? "تصدير العمليات" : "Operational exports"}
+        title={ar ? "التصدير" : "Exports"}
         description={
           ar
-            ? "تُنشأ الملفات في الخلفية، وتُحفظ بصورة خاصة، وتنتهي صلاحيتها تلقائياً."
-            : "Files are built in the background, stored privately, and expire automatically."
+            ? "أنشئ ملفات CSV للبيانات التي تحتاجها."
+            : "Create CSV files for the information you need."
         }
       />
       {error ? <Alert tone="danger" title={error} /> : null}
-      <Card className="dashboard-form-card">
-        <FormField label={ar ? "نوع التصدير" : "Export type"}>
-          <Select
-            value={exportType}
-            onChange={(event) => setExportType(event.target.value as ExportType)}
-          >
-            <option value="MEMBERSHIP_SUMMARY">MEMBERSHIP_SUMMARY</option>
-            <option value="LEDGER_OPERATIONS">LEDGER_OPERATIONS</option>
-            <option value="REWARD_REDEMPTIONS">REWARD_REDEMPTIONS</option>
-            <option value="LOCATION_PERFORMANCE">LOCATION_PERFORMANCE</option>
-            <option value="STAFF_PERFORMANCE">STAFF_PERFORMANCE</option>
-            <option value="RISK_SIGNALS">RISK_SIGNALS</option>
-            <option value="AGGREGATE_ANALYTICS">AGGREGATE_ANALYTICS</option>
-          </Select>
-        </FormField>
-        <Button onClick={() => void createExport()} loading={working}>
-          <Download size={17} /> {ar ? "إنشاء ملف" : "Create export"}
-        </Button>
-      </Card>
+      <section className="export-composer dashboard-open-section">
+        <div>
+          <span className="dashboard-card__label">{ar ? "تصدير جديد" : "New export"}</span>
+          <h2>{exportLabels[exportType]}</h2>
+          <p>
+            {ar
+              ? "سيكون رابط التنزيل خاصاً ومتاحاً لمدة محدودة."
+              : "The private download link will be available for a limited time."}
+          </p>
+        </div>
+        <div className="export-composer__controls">
+          <FormField label={ar ? "نوع التصدير" : "Export type"}>
+            <Select
+              name="export-type"
+              value={exportType}
+              onChange={(event) => setExportType(event.currentTarget.value as VisibleExportType)}
+            >
+              {(Object.keys(exportLabels) as VisibleExportType[]).map((value) => (
+                <option key={value} value={value}>
+                  {exportLabels[value]}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <Button onClick={() => void createExport()} loading={working}>
+            <Download size={17} /> {ar ? "إنشاء ملف" : "Create export"}
+          </Button>
+        </div>
+      </section>
       {jobs.length ? (
-        <Table
-          caption={ar ? "مهام التصدير الحالية" : "Current export jobs"}
-          headers={
-            ar ? ["النوع", "الحالة", "الصفوف", "الإجراء"] : ["Type", "Status", "Rows", "Action"]
-          }
-          rows={jobs.map((job) => [
-            job.exportType ?? "—",
-            job.status,
-            job.rowCount === null || job.rowCount === undefined ? "—" : String(job.rowCount),
-            <div className="dashboard-actions" key="actions">
-              <Button variant="ghost" onClick={() => void refresh(job)}>
-                <Activity size={16} /> {ar ? "تحديث" : "Refresh"}
-              </Button>
-              {job.status === "COMPLETED" ? (
-                <a
-                  className="wf-button wf-button--secondary"
-                  href={`/api/waflo/v1/organizations/${organizationId}/exports/${job.publicId}/download`}
-                >
-                  {ar ? "تنزيل مصرح" : "Authorized download"}
-                </a>
-              ) : null}
-            </div>,
-          ])}
-        />
+        <section className="dashboard-open-section export-jobs-card">
+          <div className="dashboard-section-heading">
+            <div>
+              <span className="dashboard-card__label">{ar ? "سجل الملفات" : "FILE HISTORY"}</span>
+              <h2>{ar ? "مهام التصدير" : "Export jobs"}</h2>
+            </div>
+            <span className="dashboard-count">{jobs.length}</span>
+          </div>
+          <Table
+            caption={ar ? "مهام التصدير الحالية" : "Current export jobs"}
+            headers={
+              ar ? ["النوع", "الحالة", "الصفوف", "الإجراء"] : ["Type", "Status", "Rows", "Action"]
+            }
+            rows={jobs.map((job) => [
+              labelForExport(job.exportType),
+              <StatusBadge
+                key="status"
+                status={statusTone(job.status)}
+                label={
+                  job.status === "COMPLETED"
+                    ? ar
+                      ? "جاهز"
+                      : "Ready"
+                    : job.status === "PROCESSING" || job.status === "PENDING"
+                      ? ar
+                        ? "جارٍ الإنشاء"
+                        : "Creating"
+                      : job.status
+                }
+              />,
+              job.rowCount === null || job.rowCount === undefined ? "—" : String(job.rowCount),
+              <div className="dashboard-actions" key="actions">
+                <Button variant="tertiary" onClick={() => void refresh(job)}>
+                  <Activity size={16} /> {ar ? "تحديث" : "Refresh"}
+                </Button>
+                {job.status === "COMPLETED" ? (
+                  <a
+                    className="wf-button wf-button--secondary"
+                    href={`/api/waflo/v1/organizations/${organizationId}/exports/${job.publicId}/download`}
+                  >
+                    {ar ? "تنزيل" : "Download"}
+                  </a>
+                ) : null}
+              </div>,
+            ])}
+          />
+        </section>
       ) : (
-        <Card>
+        <div className="dashboard-empty-inline">
           <EmptyState
             icon={<Download />}
             title={ar ? "لا توجد مهام تصدير" : "No export jobs"}
@@ -1737,7 +1586,7 @@ export function ExportsOperationsScreen({
               ar ? "اختر نوعاً وأنشئ أول ملف." : "Choose a type and create the first file."
             }
           />
-        </Card>
+        </div>
       )}
     </>
   );

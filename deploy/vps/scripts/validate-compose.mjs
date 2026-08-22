@@ -1,17 +1,26 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 
 const repository = resolve(import.meta.dirname, "../../..");
 const composeFile = join(repository, "deploy", "vps", "compose.yml");
+const runtimeSmokeRequested = process.argv.includes("--runtime-smoke");
 const scratch = mkdtempSync(join(tmpdir(), "waflo-compose-validation-"));
-const applicationEnvironment = join(scratch, "application.env");
-const secretEnvironment = join(scratch, "application.secret.env");
-writeFileSync(applicationEnvironment, "NODE_ENV=production\n", { mode: 0o600 });
-writeFileSync(secretEnvironment, "DATABASE_URL=postgresql://dummy:dummy@postgres:5432/dummy\n", {
-  mode: 0o600,
-});
+mkdirSync(join(scratch, "secrets", "staging", "provider-files"), { recursive: true });
+mkdirSync(join(scratch, "secrets", "production", "provider-files"), { recursive: true });
+for (const environment of ["staging", "production"]) {
+  const providerDirectory = join(scratch, "secrets", environment, "provider-files");
+  writeFileSync(
+    join(providerDirectory, "google-wallet-service-account.json"),
+    '{"client_email":"dummy@example.invalid","private_key":"DUMMY"}\n',
+    { mode: 0o440 },
+  );
+  writeFileSync(join(providerDirectory, "apple-wallet-pass.p12"), "DUMMY-P12\n", {
+    mode: 0o440,
+  });
+  writeFileSync(join(providerDirectory, "apple-wwdr.pem"), "DUMMY-WWDR\n", { mode: 0o440 });
+}
 
 const secretNames = [
   "postgres_password",
@@ -32,6 +41,60 @@ const secretPaths = Object.fromEntries(
 
 function render(environment) {
   const staging = environment === "staging";
+  const apiOrigin = staging ? "https://api-staging.waflo.app" : "https://api.waflo.app";
+  const customerOrigin = staging ? "https://card-staging.waflo.app" : "https://card.waflo.app";
+  const marketingOrigin = staging ? "https://staging.waflo.app" : "https://waflo.app";
+  const applicationEnvironment = join(scratch, `application-${environment}.env`);
+  const secretEnvironment = join(scratch, `application-${environment}.secret.env`);
+  writeFileSync(
+    applicationEnvironment,
+    [
+      "NODE_ENV=production",
+      `DEPLOYMENT_ENVIRONMENT=${environment}`,
+      "SUPPORT_EMAIL=support@example.invalid",
+      `LEGAL_EFFECTIVE_DATE=${staging ? "" : "2026-08-10"}`,
+      "GOOGLE_WALLET_MODE=REAL",
+      "GOOGLE_WALLET_ISSUER_ID=1234567890123456789",
+      "GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64=/run/waflo-provider-secrets/google-wallet-service-account.json",
+      `GOOGLE_WALLET_ALLOWED_ORIGINS=${customerOrigin}`,
+      `GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL=${apiOrigin}/v1/public/wallet-assets`,
+      `GOOGLE_WALLET_PUBLISHING_MODE=${staging ? "DEMO" : "PUBLISHING"}`,
+      "APPLE_WALLET_MODE=REAL",
+      "APPLE_PASS_TYPE_IDENTIFIER=pass.app.waflo.compose-validation",
+      "APPLE_TEAM_IDENTIFIER=TEAM123456",
+      "APPLE_PASS_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wallet-pass.p12",
+      "APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wwdr.pem",
+      `APPLE_PASS_WEB_SERVICE_URL=${apiOrigin}/v1/apple-wallet`,
+      "APPLE_APNS_ENVIRONMENT=production",
+      `STRIPE_PUBLISHABLE_KEY=${staging ? "pk_test_dummy" : "pk_live_dummy"}`,
+      "STRIPE_STARTER_MONTHLY_PRICE_ID=price_dummy_starter",
+      "STRIPE_GROWTH_MONTHLY_PRICE_ID=price_dummy_growth",
+      "STRIPE_SCALE_MONTHLY_PRICE_ID=price_dummy_scale",
+      "STRIPE_STARTER_QUARTERLY_PRICE_ID=price_dummy_starter_quarterly",
+      "STRIPE_GROWTH_QUARTERLY_PRICE_ID=price_dummy_growth_quarterly",
+      "STRIPE_SCALE_QUARTERLY_PRICE_ID=price_dummy_scale_quarterly",
+      "STRIPE_STARTER_YEARLY_PRICE_ID=price_dummy_starter_yearly",
+      "STRIPE_GROWTH_YEARLY_PRICE_ID=price_dummy_growth_yearly",
+      "STRIPE_SCALE_YEARLY_PRICE_ID=price_dummy_scale_yearly",
+      "STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID=bpc_dummy",
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    secretEnvironment,
+    [
+      "DATABASE_URL=postgresql://dummy:dummy@postgres:5432/dummy",
+      "APPLE_PASS_CERTIFICATE_PASSWORD=dummy-password",
+      'APPLE_PASS_AUTH_SECRETS_JSON={"1":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}',
+      "APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION=1",
+      "APPLE_PASS_AUTH_SECRET_V1=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      `STRIPE_SECRET_KEY=${staging ? "sk_test_dummy" : "sk_live_dummy"}`,
+      "STRIPE_WEBHOOK_SECRET=whsec_dummy",
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
   const childEnvironment = {
     ...process.env,
     DEPLOYMENT_ENVIRONMENT: environment,
@@ -51,10 +114,11 @@ function render(environment) {
     OBJECT_STORAGE_BUCKET: staging ? "waflo-staging-private" : "waflo-production-private",
     WAFLO_EDGE_SUBNET: staging ? "10.210.10.0/24" : "10.210.20.0/24",
     WAFLO_BACKEND_SUBNET: staging ? "10.210.11.0/24" : "10.210.21.0/24",
-    NEXT_PUBLIC_API_URL: staging ? "https://api.staging.waflo.app" : "https://api.waflo.app",
-    NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app.staging.waflo.app" : "https://app.waflo.app",
-    NEXT_PUBLIC_MARKETING_URL: staging ? "https://app.staging.waflo.app" : "https://waflo.app",
-    NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE: "2026-08-10",
+    NEXT_PUBLIC_API_URL: staging ? "https://api-staging.waflo.app" : "https://api.waflo.app",
+    NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app-staging.waflo.app" : "https://app.waflo.app",
+    NEXT_PUBLIC_MARKETING_URL: marketingOrigin,
+    NEXT_PUBLIC_CUSTOMER_URL: customerOrigin,
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: "pk.compose_validation.public",
   };
   const result = spawnSync(
     "docker",
@@ -67,6 +131,35 @@ function render(environment) {
   return JSON.parse(result.stdout);
 }
 
+function assertTmpfsArguments(environment, model) {
+  for (const [serviceName, service] of Object.entries(model.services)) {
+    for (const specification of service.tmpfs ?? []) {
+      if (["noexec", "nosuid", "nodev"].includes(specification)) {
+        throw new Error(
+          `${environment}/${serviceName} has standalone tmpfs token ${specification}.`,
+        );
+      }
+      const [destination, ...options] = specification.split(":");
+      if (!destination.startsWith("/")) {
+        throw new Error(`${environment}/${serviceName} tmpfs target is not absolute.`);
+      }
+      const mountOptions = options.join(":").split(",");
+      for (const required of ["noexec", "nosuid"]) {
+        if (!mountOptions.includes(required)) {
+          throw new Error(`${environment}/${serviceName} tmpfs lost ${required}.`);
+        }
+      }
+    }
+  }
+  const migrationTmpfs = model.services.migrate.tmpfs ?? [];
+  if (migrationTmpfs.length !== 1 || migrationTmpfs[0] !== "/tmp:rw,noexec,nosuid,size=64m") {
+    throw new Error(
+      `${environment} migration tmpfs argv is malformed: ${JSON.stringify(migrationTmpfs)}`,
+    );
+  }
+}
+
+let runtimeSmokeRan = false;
 for (const environment of ["staging", "production"]) {
   const model = render(environment);
   if (model.name !== `waflo-${environment}`) throw new Error("Compose project isolation failed.");
@@ -82,11 +175,80 @@ for (const environment of ["staging", "production"]) {
   if (!model.services.migrate.profiles?.includes("tools")) {
     throw new Error("Migrations are not an explicit one-shot tool service.");
   }
+  assertTmpfsArguments(environment, model);
   if (!model.services.api.image.includes("4357675fad87bc8371e7832b6c0beee22b5caf61")) {
     throw new Error("The release SHA is missing from application image identity.");
   }
+  for (const serviceName of ["merchant-web", "customer-web", "marketing-web"]) {
+    if (model.services[serviceName].build?.args?.DEPLOYMENT_ENVIRONMENT !== environment) {
+      throw new Error(`${serviceName} did not receive the environment-qualified Web build flag.`);
+    }
+  }
+  if (
+    model.services["merchant-web"].build?.args?.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN !==
+    "pk.compose_validation.public"
+  ) {
+    throw new Error("merchant-web did not receive a valid public Mapbox build token.");
+  }
   if (model.services.cloudflared.environment?.TUNNEL_TOKEN) {
     throw new Error("Cloudflare token must not be an environment value.");
+  }
+  if (model.services.cloudflared.user !== "65532:65532") {
+    throw new Error("cloudflared must run as the pinned non-root identity 65532:65532.");
+  }
+  const cloudflareSecret = model.services.cloudflared.secrets?.find(
+    (secret) => secret.source === "cloudflare_tunnel_token",
+  );
+  if (cloudflareSecret?.mode !== "0440") {
+    throw new Error("cloudflared token mount must remain group-readable and non-world-readable.");
+  }
+  for (const serviceName of ["api", "wallet-worker"]) {
+    const providerMount = model.services[serviceName].volumes?.find(
+      (volume) => volume.target === "/run/waflo-provider-secrets",
+    );
+    if (providerMount?.read_only !== true) {
+      throw new Error(`${serviceName} is missing the read-only provider secret-file mount.`);
+    }
+    if (
+      model.services[serviceName].environment.GOOGLE_WALLET_MODE !== "REAL" ||
+      model.services[serviceName].environment.APPLE_WALLET_MODE !== "REAL" ||
+      model.services[serviceName].environment.APPLE_APNS_ENVIRONMENT !== "production"
+    ) {
+      throw new Error(`${serviceName} did not render the safe dummy Wallet provider contract.`);
+    }
+  }
+  const expectedStripePrefix = environment === "staging" ? "sk_test_" : "sk_live_";
+  if (!model.services.api.environment.STRIPE_SECRET_KEY.startsWith(expectedStripePrefix)) {
+    throw new Error(`${environment} did not render the isolated dummy Stripe mode.`);
+  }
+  for (const serviceName of [
+    "merchant-web",
+    "customer-web",
+    "marketing-web",
+    "operational-worker",
+  ]) {
+    if (
+      model.services[serviceName].volumes?.some(
+        (volume) => volume.target === "/run/waflo-provider-secrets",
+      )
+    ) {
+      throw new Error(`${serviceName} must not receive provider secret files.`);
+    }
+  }
+  if (runtimeSmokeRequested && !runtimeSmokeRan) {
+    const smoke = spawnSync(
+      process.execPath,
+      [
+        join(repository, "tests", "deployment", "migration-tmpfs.test.mjs"),
+        ...model.services.migrate.tmpfs,
+      ],
+      { cwd: repository, encoding: "utf8", shell: false },
+    );
+    if (smoke.status !== 0) {
+      throw new Error(`migration runtime smoke failed:\n${smoke.stdout}${smoke.stderr}`);
+    }
+    process.stdout.write(smoke.stdout);
+    runtimeSmokeRan = true;
   }
   process.stdout.write(`${environment} Compose: valid, private, release-addressed\n`);
 }

@@ -7,6 +7,7 @@ import {
   builderReadiness,
   builderReadinessWithValidation,
   builderSections,
+  cardLocaleCompleteness,
   createBuilderDraft,
   isNeutralBuilderDraft,
   languageCompleteness,
@@ -34,9 +35,9 @@ const locations: LocationItem[] = [
 describe("merchant loyalty-card Builder state", () => {
   it("collapses the seven-page wizard into six merchant-intent sections", () => {
     expect(builderSections).toEqual([
+      "languages",
       "basics",
       "reward",
-      "languages",
       "locations",
       "appearance",
       "review",
@@ -55,6 +56,7 @@ describe("merchant loyalty-card Builder state", () => {
     expect(draft.editingMode).toBe("quick");
     expect(draft.requiredStampCount).toBe(coffee.recommendedStampGoal);
     expect(draft.internalName).toBe(coffee.name);
+    expect(draft.translations.en.earningDescription).toBe(coffee.earningDescription);
     expect(draft.locationIds).toEqual([locations[0]?.id]);
     expect(draft.rewards).toHaveLength(1);
     expect(builderReadiness(draft)).toEqual({
@@ -136,6 +138,25 @@ describe("merchant loyalty-card Builder state", () => {
       translations: {
         en: { name: "Free signature drink", description: "Free signature drink" },
       },
+    });
+    const missingMilestoneCopy = {
+      ...copyChanged,
+      rewards: copyChanged.rewards.map((reward) =>
+        reward.clientId === "milestone"
+          ? {
+              ...reward,
+              translations: {
+                ...reward.translations,
+                en: { name: "", description: "" },
+              },
+            }
+          : reward,
+      ),
+    };
+    expect(cardLocaleCompleteness(missingMilestoneCopy, "en")).toMatchObject({
+      complete: false,
+      missing: 2,
+      missingFields: ["rewards.1.name", "rewards.1.description"],
     });
   });
 

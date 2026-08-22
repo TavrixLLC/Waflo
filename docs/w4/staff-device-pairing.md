@@ -11,3 +11,21 @@ pairing session atomically. Installation identity and public key cannot be reass
 Revocation marks the device and all sessions unusable immediately. The development Test Client is
 rejected in production.
 
+Pairing creation, claim, and proof completion each revalidate the Staff user's active state, the
+organization Membership, every active Location, and every Staff Location assignment. Provisioning
+is available only through the Merchant assignment endpoints documented in
+`location-authorization.md`; a Mobile device cannot create its own authority.
+
+Every authenticated or signed Device request performs a DB-backed current-state check at the
+shared authentication boundary. Operational access requires an active Staff user, active
+organization Membership, active device, unrevoked/unexpired session, active Location, active Staff
+Location assignment, and active device Location assignment. Refresh performs the same lifecycle
+checks. The distinguishable denial codes are `STAFF_USER_DEACTIVATED`,
+`STAFF_MEMBERSHIP_INACTIVE`, `STAFF_DEVICE_REVOKED`, and
+`STAFF_LOCATION_ASSIGNMENT_INVALID`.
+
+User deactivation, organization Membership suspension/removal, and Staff Location assignment
+revocation explicitly revoke affected device sessions, cancel unfinished pairings, and expire
+pending/approved manager approvals in the same lifecycle transaction. Device revocation also
+revokes its sessions and expires its approvals. History is retained; neither refresh nor pairing
+silently reactivates an identity.

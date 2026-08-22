@@ -60,6 +60,17 @@ let ownerSessionToken = "";
 let organizationAId = "";
 let organizationBId = "";
 let firstLocationId = "";
+
+function exactLocation(name: string, offset = 0) {
+  return {
+    name,
+    countryCode: "IQ" as const,
+    timezone: "Asia/Baghdad",
+    latitude: 33.3152 + offset,
+    longitude: 44.3661 + offset,
+    coordinatesConfirmed: true as const,
+  };
+}
 let archivedLocationId = "";
 let existingInvitationToken = "";
 let newUserInvitationToken = "";
@@ -94,6 +105,51 @@ async function createVerifiedUser(email: string, displayName: string): Promise<s
     },
   });
   return user.id;
+}
+
+async function activateOrganizationForTest(organizationId: string, ensureLocation = false) {
+  if (ensureLocation) {
+    await prisma.client.location.create({
+      data: {
+        organizationId,
+        name: "Test primary location",
+        countryCode: "IQ",
+        timezone: "Asia/Baghdad",
+        latitude: 33.3152,
+        longitude: 44.3661,
+      },
+    });
+  }
+  await prisma.client.$transaction([
+    prisma.client.organizationBillingProfile.update({
+      where: { organizationId },
+      data: {
+        subscriptionStatus: "ACTIVE",
+        billingName: "Integration account",
+        billingEmail: registeredEmail,
+        billingCountryCode: "IQ",
+        billingAddressLine1: "Test address",
+        billingCity: "Baghdad",
+      },
+    }),
+    prisma.client.organization.update({
+      where: { id: organizationId },
+      data: { onboardingState: "COMPLETE", onboardingCompletedAt: new Date() },
+    }),
+  ]);
+}
+
+async function setPlanFixture(organizationId: string, selectedPlan: "STARTER" | "GROWTH") {
+  await prisma.client.$transaction([
+    prisma.client.organization.update({
+      where: { id: organizationId },
+      data: { selectedPlan },
+    }),
+    prisma.client.organizationBillingProfile.update({
+      where: { organizationId },
+      data: { selectedPlan },
+    }),
+  ]);
 }
 
 describe.sequential("Waflo W1 service and database integration", () => {
@@ -134,12 +190,110 @@ describe.sequential("Waflo W1 service and database integration", () => {
       request,
     );
     expect(result.status).toBe("verification_required");
+    expect(result.emailAcceptedForDelivery).toBe(true);
     expect(latestToken("email_verification", registeredEmail)).toHaveLength(43);
     const user = await prisma.client.user.findUniqueOrThrow({
       where: { normalizedEmail: registeredEmail },
     });
     ownerId = user.id;
     expect(user.emailVerifiedAt).toBeNull();
+    expect(user.termsVersion).toBe(environment.values.LEGAL_TERMS_VERSION);
+    expect(user.privacyVersion).toBe(environment.values.LEGAL_PRIVACY_VERSION);
+    expect(user.legalAcceptedAt.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("does not create a duplicate account and gives the same safe recovery path while unverified", async () => {
+    await expect(
+      auth.register(
+        {
+          displayName: "Duplicate Owner",
+          email: registeredEmail.toLocaleUpperCase("en-US"),
+          password: initialPassword,
+          locale: "en",
+          termsAccepted: true,
+          privacyAccepted: true,
+        },
+        request,
+      ),
+    ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CREATED", status: 409 });
+    expect(await prisma.client.user.count({ where: { normalizedEmail: registeredEmail } })).toBe(1);
+  });
+
+  it("requires verification after valid password authentication without creating a session", async () => {
+    const sessionsBefore = await prisma.client.session.count({ where: { userId: ownerId } });
+    await expect(auth.login(registeredEmail, initialPassword, request)).rejects.toMatchObject({
+      code: "EMAIL_VERIFICATION_REQUIRED",
+      status: 403,
+    });
+    expect(await prisma.client.session.count({ where: { userId: ownerId } })).toBe(sessionsBefore);
+  });
+
+  it("preserves a new unverified account but reports verification transport failure truthfully", async () => {
+    const failedEmail = `delivery-failure-${runId}@integration.waflo.local`;
+    const failingNotifications = {
+      send: vi.fn(async () => {
+        throw new Error("simulated transport rejection");
+      }),
+    } as unknown as NotificationService;
+    const failingAuth = new AuthService(prisma, environment, failingNotifications, audit);
+
+    await expect(
+      failingAuth.register(
+        {
+          displayName: "Delivery Recovery",
+          email: failedEmail,
+          password: initialPassword,
+          locale: "en",
+          termsAccepted: true,
+          privacyAccepted: true,
+        },
+        request,
+      ),
+    ).rejects.toMatchObject({
+      code: "EMAIL_DELIVERY_UNAVAILABLE",
+      status: 503,
+      details: { accountCreated: true, retryAllowed: true },
+    });
+
+    const preserved = await prisma.client.user.findUniqueOrThrow({
+      where: { normalizedEmail: failedEmail },
+    });
+    expect(preserved.emailVerifiedAt).toBeNull();
+    await expect(failingAuth.resendVerification(failedEmail, request)).resolves.toMatchObject({
+      status: "accepted",
+    });
+    await expect(
+      failingAuth.register(
+        {
+          displayName: "Delivery Recovery Duplicate",
+          email: failedEmail,
+          password: initialPassword,
+          locale: "en",
+          termsAccepted: true,
+          privacyAccepted: true,
+        },
+        request,
+      ),
+    ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CREATED", status: 409 });
+  });
+
+  it("creates exactly one account under concurrent normalized-email signup", async () => {
+    const concurrentEmail = `concurrent-${runId}@integration.waflo.local`;
+    const input = {
+      displayName: "Concurrent Owner",
+      email: concurrentEmail,
+      password: initialPassword,
+      locale: "en" as const,
+      termsAccepted: true,
+      privacyAccepted: true,
+    };
+    const attempts = await Promise.allSettled([
+      auth.register(input, request),
+      auth.register({ ...input, email: concurrentEmail.toLocaleUpperCase("en-US") }, request),
+    ]);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    expect(await prisma.client.user.count({ where: { normalizedEmail: concurrentEmail } })).toBe(1);
   });
 
   it("resends verification while invalidating the previous token", async () => {
@@ -282,42 +436,83 @@ describe.sequential("Waflo W1 service and database integration", () => {
       request,
     );
     organizationBId = second.id;
+    await prisma.client.$transaction([
+      prisma.client.location.create({
+        data: {
+          organizationId: organizationBId,
+          name: "Retail Branch",
+          countryCode: "IQ",
+          timezone: "Asia/Baghdad",
+          latitude: 33.3352,
+          longitude: 44.3861,
+          city: "Riyadh",
+        },
+      }),
+      prisma.client.organizationBillingProfile.update({
+        where: { organizationId: organizationBId },
+        data: {
+          subscriptionStatus: "ACTIVE",
+          billingName: "Integration Retail",
+          billingEmail: registeredEmail,
+          billingCountryCode: "IQ",
+          billingAddressLine1: "Test address",
+          billingCity: "Baghdad",
+        },
+      }),
+      prisma.client.organization.update({
+        where: { id: organizationBId },
+        data: { onboardingState: "COMPLETE", onboardingCompletedAt: new Date() },
+      }),
+    ]);
     await organizations.select(ownerId, organizationAId);
     expect((await auth.me(ownerId)).lastSelectedOrganizationId).toBe(organizationAId);
     await organizations.select(ownerId, organizationBId);
     expect((await auth.me(ownerId)).lastSelectedOrganizationId).toBe(organizationBId);
   });
 
-  it("creates the first location and completes onboarding without starting the trial", async () => {
+  it("requires an active 7-day trial before completing onboarding", async () => {
     const location = await locations.create(
       ownerId,
       organizationAId,
       {
-        name: "Main Branch",
+        ...exactLocation("Main Branch"),
         city: "Baghdad",
-        countryCode: "IQ",
-        timezone: "Asia/Baghdad",
       },
       request,
     );
     firstLocationId = location.id;
+    await expect(
+      organizations.completeOnboarding(ownerId, organizationAId, request),
+    ).rejects.toMatchObject({ code: "BILLING_ACTIVATION_REQUIRED" });
+    const trialStart = new Date();
+    const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: organizationAId },
+      data: {
+        subscriptionStatus: "TRIALING",
+        trialStart,
+        trialEnd,
+        billingName: "Integration Coffee",
+        billingEmail: registeredEmail,
+        billingCountryCode: "IQ",
+        billingAddressLine1: "Test address",
+        billingCity: "Baghdad",
+      },
+    });
     const complete = await organizations.completeOnboarding(ownerId, organizationAId, request);
     expect(complete.onboardingState).toBe("COMPLETE");
     expect(complete.billingProfile).toMatchObject({
-      subscriptionStatus: "PENDING_ACTIVATION",
-      trialStart: null,
-      trialEnd: null,
+      subscriptionStatus: "TRIALING",
     });
+    expect(
+      (complete.billingProfile?.trialEnd?.getTime() ?? 0) -
+        (complete.billingProfile?.trialStart?.getTime() ?? 0),
+    ).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   it("enforces the Starter active-location limit", async () => {
     await expect(
-      locations.create(
-        ownerId,
-        organizationAId,
-        { name: "Blocked Branch", timezone: "Asia/Baghdad" },
-        request,
-      ),
+      locations.create(ownerId, organizationAId, exactLocation("Blocked Branch", 0.001), request),
     ).rejects.toMatchObject({
       code: "LOCATION_LIMIT_REACHED",
       details: { limit: 1, recommendedPlan: "growth" },
@@ -325,11 +520,11 @@ describe.sequential("Waflo W1 service and database integration", () => {
   });
 
   it("archives a non-final location after capacity is expanded", async () => {
-    await billing.selectPlan(ownerId, organizationAId, "growth", request);
+    await setPlanFixture(organizationAId, "GROWTH");
     const extra = await locations.create(
       ownerId,
       organizationAId,
-      { name: "Temporary Branch", timezone: "Asia/Baghdad" },
+      exactLocation("Temporary Branch", 0.002),
       request,
     );
     archivedLocationId = extra.id;
@@ -337,8 +532,26 @@ describe.sequential("Waflo W1 service and database integration", () => {
     expect(archived.status).toBe("ARCHIVED");
   });
 
+  it("does not reactivate a legacy location until its map position is confirmed", async () => {
+    const legacy = await prisma.client.location.create({
+      data: {
+        organizationId: organizationAId,
+        name: "Legacy unmapped branch",
+        timezone: "Asia/Baghdad",
+        status: "ARCHIVED",
+        archivedAt: new Date(),
+      },
+    });
+    await expect(
+      locations.restore(ownerId, organizationAId, legacy.id, request),
+    ).rejects.toMatchObject({ code: "LOCATION_MAP_CONFIRMATION_REQUIRED" });
+    expect(
+      await prisma.client.location.findUniqueOrThrow({ where: { id: legacy.id } }),
+    ).toMatchObject({ status: "ARCHIVED", latitude: null, longitude: null });
+  });
+
   it("validates the plan limit again when restoring an archived location", async () => {
-    await billing.selectPlan(ownerId, organizationAId, "starter", request);
+    await setPlanFixture(organizationAId, "STARTER");
     await expect(
       locations.restore(ownerId, organizationAId, archivedLocationId, request),
     ).rejects.toMatchObject({
@@ -347,7 +560,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     });
   });
 
-  it("blocks a billing downgrade when current usage exceeds the requested plan", async () => {
+  it("does not change a provider-backed subscription plan in local state", async () => {
     const downgradeOrganization = await organizations.create(
       ownerId,
       {
@@ -362,20 +575,20 @@ describe.sequential("Waflo W1 service and database integration", () => {
     await locations.create(
       ownerId,
       downgradeOrganization.id,
-      { name: "Downgrade Location A" },
+      exactLocation("Downgrade Location A", 0.003),
       request,
     );
+    await activateOrganizationForTest(downgradeOrganization.id);
     await locations.create(
       ownerId,
       downgradeOrganization.id,
-      { name: "Downgrade Location B" },
+      exactLocation("Downgrade Location B", 0.004),
       request,
     );
     await expect(
       billing.selectPlan(ownerId, downgradeOrganization.id, "starter", request),
     ).rejects.toMatchObject({
-      code: "PLAN_DOWNGRADE_BLOCKED",
-      details: { requestedPlan: "starter", locationUsage: 2, locationLimit: 1 },
+      code: "BILLING_PLAN_CHANGE_UNAVAILABLE",
     });
     expect(
       await prisma.client.organization.findUniqueOrThrow({
@@ -433,6 +646,12 @@ describe.sequential("Waflo W1 service and database integration", () => {
         where: { id: downgradeOrganization.id },
       }),
     ).toMatchObject({ selectedPlan: "GROWTH" });
+    await billing.selectPlan(ownerId, downgradeOrganization.id, "scale", request);
+    expect(
+      await prisma.client.organization.findUniqueOrThrow({
+        where: { id: downgradeOrganization.id },
+      }),
+    ).toMatchObject({ selectedPlan: "SCALE" });
   });
 
   it("rejects cross-tenant organization, location, member, and billing access", async () => {
@@ -465,7 +684,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
   });
 
   it("allows Manager location work but denies organization and billing administration", async () => {
-    await billing.selectPlan(ownerId, organizationAId, "growth", request);
+    await setPlanFixture(organizationAId, "GROWTH");
     managerId = await createVerifiedUser(
       `manager-${runId}@integration.waflo.local`,
       "Integration Manager",
@@ -476,7 +695,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     const managerLocation = await locations.create(
       managerId,
       organizationAId,
-      { name: "Manager Branch", timezone: "Asia/Baghdad" },
+      exactLocation("Manager Branch", 0.005),
       request,
     );
     expect(managerLocation.organizationId).toBe(organizationAId);
@@ -645,6 +864,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
       },
       request,
     );
+    await activateOrganizationForTest(organization.id, true);
     for (let index = 0; index < 3; index += 1) {
       const userId = await createVerifiedUser(
         `seat-${index}-${runId}@integration.waflo.local`,
@@ -699,6 +919,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
       organizationAId,
       next,
       currentPassword,
+      ownerSessionId,
       request,
     );
     expect(changed.merchantSlug).toBe(next);
@@ -739,30 +960,117 @@ describe.sequential("Waflo W1 service and database integration", () => {
     });
   });
 
-  it("authorizes billing reads for Owners and keeps the trial pending", async () => {
+  it("authorizes billing reads for Owners and reports the active 7-day trial", async () => {
     const state = await billing.get(ownerId, organizationAId);
     expect(state.profile).toMatchObject({
-      subscriptionStatus: "PENDING_ACTIVATION",
-      trialStart: null,
-      trialEnd: null,
+      subscriptionStatus: "TRIALING",
     });
     expect(state.trialPolicy).toEqual({
-      durationDays: 15,
-      startsOnFirstProgramPublication: true,
-      startedInW1: false,
+      durationDays: 7,
+      startsOnFirstProgramPublication: false,
+      paymentMethodRequired: true,
     });
   });
 
-  it("uses a safe explicit error when Stripe Checkout credentials are absent", async () => {
+  it("returns the authoritative saved Stripe card instead of a stale blank state", async () => {
+    const previous = {
+      STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+      STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+      STRIPE_STARTER_MONTHLY_PRICE_ID: process.env.STRIPE_STARTER_MONTHLY_PRICE_ID,
+      STRIPE_GROWTH_MONTHLY_PRICE_ID: process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID,
+      STRIPE_SCALE_MONTHLY_PRICE_ID: process.env.STRIPE_SCALE_MONTHLY_PRICE_ID,
+    };
+    process.env.STRIPE_SECRET_KEY = "sk_test_saved_card";
+    process.env.STRIPE_WEBHOOK_SECRET = `whsec_${randomUUID().replaceAll("-", "")}`;
+    process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
+    process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
+    process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: organizationAId },
+      data: { stripeCustomerId: "cus_authoritative_card" },
+    });
+    try {
+      const stripeBilling = new BillingService(
+        prisma,
+        new EnvironmentService(),
+        tenant,
+        audit,
+        notificationProvider,
+      );
+      const stripe = (
+        stripeBilling as unknown as {
+          stripe: {
+            customers: { retrieve: () => Promise<unknown> };
+            paymentMethods: { list: () => Promise<unknown> };
+          };
+        }
+      ).stripe;
+      stripe.customers.retrieve = async () => ({
+        id: "cus_authoritative_card",
+        deleted: false,
+        invoice_settings: { default_payment_method: { id: "pm_primary" } },
+      });
+      stripe.paymentMethods.list = async () => ({
+        data: [
+          {
+            id: "pm_primary",
+            card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
+          },
+        ],
+      });
+      const billingState = await stripeBilling.get(ownerId, organizationAId);
+      expect(billingState).toMatchObject({
+        paymentMethod: {
+          status: "saved",
+          brand: "visa",
+          last4: "4242",
+          expMonth: 12,
+          expYear: 2030,
+          isDefault: true,
+        },
+      });
+      expect(billingState.paymentMethod).not.toHaveProperty("id");
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: organizationAId },
+        data: { stripeCustomerId: null },
+      });
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it("keeps the retired hosted Checkout entry point disabled", async () => {
     await expect(billing.checkout(ownerId, organizationAId, request)).rejects.toMatchObject({
-      code: "STRIPE_NOT_CONFIGURED",
+      code: "HOSTED_CHECKOUT_REMOVED",
     });
   });
 
-  it("blocks unauthorized Checkout and Customer Portal before external calls", async () => {
-    await expect(billing.checkout(intruderId, organizationAId, request)).rejects.toMatchObject({
-      code: "ORGANIZATION_ACCESS_DENIED",
-    });
+  it("blocks unauthorized embedded billing and Customer Portal before external calls", async () => {
+    await expect(
+      billing.prepareTrialSetup(
+        intruderId,
+        organizationAId,
+        {
+          plan: "starter",
+          cadence: "monthly",
+          billingIdentity: {
+            name: "Unauthorized Merchant",
+            email: "unauthorized@example.test",
+            countryCode: "US",
+            addressLine1: "1 Test Street",
+            addressLine2: null,
+            city: "Austin",
+            region: "TX",
+            postalCode: "78701",
+          },
+        },
+        request,
+        randomUUID(),
+      ),
+    ).rejects.toMatchObject({ code: "ORGANIZATION_ACCESS_DENIED" });
     await expect(billing.portal(managerId, organizationAId, request)).rejects.toMatchObject({
       code: "PERMISSION_DENIED",
     });
@@ -849,7 +1157,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
 
   it("records auditable organization and location changes", async () => {
     const events = await prisma.client.auditLog.findMany({
-      where: { organizationId: organizationAId },
+      where: { actorUserId: ownerId },
       select: { action: true },
     });
     const actions = new Set(events.map((event) => event.action));
@@ -857,6 +1165,47 @@ describe.sequential("Waflo W1 service and database integration", () => {
     expect(actions.has("location.created")).toBe(true);
     expect(actions.has("organization.slug_changed")).toBe(true);
     expect(actions.has("billing.selected_plan_changed")).toBe(true);
+  });
+
+  it("enforces read-only billing recovery centrally across representative mutation permissions", async () => {
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: organizationAId },
+      data: { subscriptionStatus: "SUSPENDED", trialEnd: null, gracePeriodEnd: null },
+    });
+    try {
+      for (const permission of [
+        "locations.create",
+        "programs.edit",
+        "programs.publish",
+        "team.invite",
+        "exports.create",
+        "organization.slug.change",
+        "devices.pair",
+      ] as const) {
+        await expect(
+          tenant.requireMembership(ownerId, organizationAId, permission),
+        ).rejects.toMatchObject({
+          code: "BILLING_ACTION_REQUIRED",
+          status: 402,
+          details: {
+            accessState: "read_only_billing_recovery",
+            billingState: "paused",
+            billingUrl: "/dashboard/billing",
+          },
+        });
+      }
+      await expect(
+        tenant.requireMembership(ownerId, organizationAId, "billing.manage"),
+      ).resolves.toMatchObject({ organizationId: organizationAId });
+      await expect(
+        tenant.requireMembership(ownerId, organizationAId, "organization.view"),
+      ).resolves.toMatchObject({ organizationId: organizationAId });
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: organizationAId },
+        data: { subscriptionStatus: "ACTIVE" },
+      });
+    }
   });
 
   it("persists dashboard locale preference independently of organization locale", async () => {

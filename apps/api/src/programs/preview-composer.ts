@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
-import { programPlatformCapabilities, type ProgramTemplatePresentation } from "@waflo/contracts";
+import {
+  canonicalizeCardLocale,
+  directionForCardLocale,
+  fontStackForCardLocale,
+  programPlatformCapabilities,
+  type ProgramTemplatePresentation,
+} from "@waflo/contracts";
 import type { StampOutputProfile } from "@waflo/stamp-engine";
 
 export interface ProgramPreviewCompositionInput {
   profile: StampOutputProfile;
-  locale: "EN" | "AR";
+  locale: string;
   organizationName: string;
   programName: string;
   shortDescription: string;
@@ -18,6 +24,12 @@ export interface ProgramPreviewCompositionInput {
   foregroundColor: string;
   accentColor: string;
   secondaryColor: string;
+  /**
+   * The organization-owned issuer identity. This is deliberately separate from
+   * a program's decorative visual asset: Wallet and customer card previews
+   * must represent the same merchant logo that issued passes use.
+   */
+  merchantBrandLogoDataUri?: string;
   logoDataUri?: string;
   identityDataUri?: string;
   heroDataUri?: string;
@@ -61,6 +73,22 @@ function escapeXml(value: string): string {
   );
 }
 
+function localizeSvgRoot(svg: string, locale: string): string {
+  const canonicalLocale = canonicalizeCardLocale(locale) ?? "en";
+  const localized = svg.replace(
+    "<svg ",
+    `<svg lang="${canonicalLocale}" xml:lang="${canonicalLocale}" `,
+  );
+  if (directionForCardLocale(canonicalLocale) !== "rtl") return localized;
+  // Left-side Wallet fields use the physical left edge as their origin. Under
+  // an RTL root, `start` points into the margin; `end` makes content flow back
+  // into the card while right-side fields retain their logical `start` anchor.
+  return localized.replace(
+    /x="48" y="(188|210|440|464)" text-anchor="start"/g,
+    'x="48" y="$1" text-anchor="end"',
+  );
+}
+
 function truncate(value: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, Math.max(1, limit - 1))}…` : value;
 }
@@ -78,11 +106,38 @@ function imageTag(
   width: number,
   height: number,
   radius = 12,
+  fit: "slice" | "meet" = "slice",
 ): string {
   const href = safeDataImage(value);
   if (!href) return "";
   const clipId = `clip-${x}-${y}-${width}-${height}`;
-  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})"/>`;
+  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid ${fit}" clip-path="url(#${clipId})"/>`;
+}
+
+function wafloIssuerMark(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): string {
+  const scale = Math.min(width, height) / 26;
+  const insetX = x + (width - 26 * scale) / 2;
+  const insetY = y + (height - 26 * scale) / 2;
+  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="#E4572E"/><path d="M${insetX + 5.5 * scale} ${insetY + 6 * scale}l4.5 ${13 * scale} 3.6 ${-6.5 * scale} 3.6 ${6.5 * scale} 4.5 ${-13 * scale}" fill="none" stroke="#fff" stroke-width="${2.3 * scale}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function issuerBrandMark(
+  value: string | undefined,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): string {
+  return value
+    ? imageTag(value, x, y, width, height, radius, "meet")
+    : wafloIssuerMark(x, y, width, height, radius);
 }
 
 function barcode(x: number, y: number, width: number, height: number): string {
@@ -104,10 +159,13 @@ function composeLegacyCustomer(
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 820;
   const height = input.customerWebVariant === "HERO" ? 600 : 560;
-  const direction = input.locale === "AR" ? "rtl" : "ltr";
+  const rtl = directionForCardLocale(input.locale) === "rtl";
+  const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
-  const textX = input.locale === "AR" ? width - 74 : 74;
-  const motifX = input.locale === "AR" ? 62 : width - 158;
+  const issuerSize = 40;
+  const issuerX = rtl ? width - 74 - issuerSize : 74;
+  const textX = rtl ? issuerX - 14 : issuerX + issuerSize + 14;
+  const motifX = rtl ? 62 : width - 158;
   const brandArtwork = input.logoDataUri ?? input.identityDataUri;
   const warnings: ProgramPreviewComposition["warnings"] = [];
   if (input.terms.length > 180)
@@ -122,29 +180,30 @@ function composeLegacyCustomer(
     ? `<rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" opacity=".84"/>`
     : "";
   const title = (y: number, size: number) =>
-    `<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${size}" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 48))}</text>`;
+    `<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="${size}" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 48))}</text>`;
   const description = (y: number) =>
-    `<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" fill="${input.foregroundColor}" opacity=".72">${escapeXml(truncate(input.shortDescription, 76))}</text>`;
+    `<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="16" fill="${input.foregroundColor}" opacity=".72">${escapeXml(truncate(input.shortDescription, 76))}</text>`;
   const reward = (y: number, boxed = true) =>
-    `${boxed ? `<rect x="58" y="${y - 27}" width="${width - 116}" height="68" rx="16" fill="${input.accentColor}" opacity=".12"/>` : `<path d="M58 ${y - 24}H762" stroke="${input.foregroundColor}" stroke-width="2" opacity=".14"/>`}<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="13" font-weight="700" fill="${input.accentColor}">${input.locale === "AR" ? "المكافأة التالية" : "NEXT REWARD"}</text><text x="${textX}" y="${y + 24}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="17" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, 68))}</text>`;
-  const terms = `<text x="${textX}" y="${height - 38}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" fill="${input.foregroundColor}" opacity=".58">${escapeXml(truncate(input.terms, 106))}</text>`;
+    `${boxed ? `<rect x="58" y="${y - 27}" width="${width - 116}" height="68" rx="16" fill="${input.accentColor}" opacity=".12"/>` : `<path d="M58 ${y - 24}H762" stroke="${input.foregroundColor}" stroke-width="2" opacity=".14"/>`}<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="13" font-weight="700" fill="${input.accentColor}">${input.locale === "ar" ? "المكافأة التالية" : "NEXT REWARD"}</text><text x="${textX}" y="${y + 24}" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="17" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, 68))}</text>`;
+  const terms = `<text x="${textX}" y="${height - 38}" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" fill="${input.foregroundColor}" opacity=".58">${escapeXml(truncate(input.terms, 106))}</text>`;
   const motif = (x: number, y: number, size: number, opacity = 1) =>
     brandArtwork
       ? `<g opacity="${opacity}"><circle cx="${x + size / 2}" cy="${y + size / 2}" r="${size / 2}" fill="${input.secondaryColor}" opacity=".22"/>${imageTag(brandArtwork, x + 10, y + 10, size - 20, size - 20, size / 4)}</g>`
       : "";
+  const issuer = `<g data-issuer-brand="organization">${issuerBrandMark(input.merchantBrandLogoDataUri, issuerX, 54, issuerSize, issuerSize, 11)}</g>`;
 
   let surface = "";
   if (input.customerWebVariant === "HERO") {
     const heroArtwork = imageTag(input.heroDataUri, 42, 42, width - 84, 160, 24);
     surface = `${heroArtwork}<rect x="42" y="42" width="${width - 84}" height="160" rx="24" fill="${input.accentColor}" opacity="${input.heroDataUri ? ".32" : ".14"}"/>${motif(motifX, 54, 132)}${title(103, 32)}${description(136)}${stampImage(input.stampSvg, 60, 218, width - 120, 178)}${reward(446)}${terms}`;
   } else if (input.customerWebVariant === "MINIMAL") {
-    const railX = input.locale === "AR" ? width - 36 : 24;
+    const railX = rtl ? width - 36 : 24;
     surface = `<rect x="${railX}" y="20" width="12" height="${height - 40}" rx="6" fill="${input.accentColor}"/>${motif(motifX, 42, 142, 0.22)}${title(94, 29)}${description(126)}${stampImage(input.stampSvg, 60, 160, width - 120, 184)}${reward(402, false)}${terms}`;
   } else {
     surface = `${motif(motifX, 46, 112)}${title(96, 30)}${description(128)}${stampImage(input.stampSvg, 60, 158, width - 120, 184)}${reward(400)}${terms}`;
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}"><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}${surface}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="organization"><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}${issuer}${surface}</svg>`;
   return { svg, width, height, warnings };
 }
 
@@ -156,9 +215,10 @@ function composeCustomer(
   const presentation = input.presentation;
   const width = 820;
   const height = 580;
-  const rtl = input.locale === "AR";
+  const rtl = directionForCardLocale(input.locale) === "rtl";
   const direction = rtl ? "rtl" : "ltr";
-  const font = "Arial,Noto Sans Arabic,sans-serif";
+  const font = fontStackForCardLocale(input.locale);
+  const fontAttribute = escapeXml(font);
   const card = { x: 24, y: 20, width: 772, height: 540 };
   const cornerRadius =
     presentation.cornerTreatment === "ROUND"
@@ -201,12 +261,15 @@ function composeCustomer(
     options: { centered?: boolean; descriptionWidth?: number; compact?: boolean } = {},
   ) => {
     const centered = options.centered ?? false;
-    const textX = centered ? width / 2 : logicalTextX(x);
+    const issuerSize = 40;
+    const textX = centered ? width / 2 : logicalTextX(x + issuerSize + 14);
     const anchor = centered ? "middle" : "start";
     const localTitleSize = options.compact ? Math.max(22, titleSize - 4) : titleSize;
     const descriptionLimit =
       options.descriptionWidth && options.descriptionWidth < 360 ? (rtl ? 30 : 42) : rtl ? 52 : 68;
-    return `<g data-preview-block="header" data-title-treatment="${presentation.titleTreatment}"><text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${font}" font-size="${localTitleSize}" font-weight="800" letter-spacing="${presentation.titleTreatment === "EDITORIAL" ? "-.5" : "0"}" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 46))}</text><text x="${textX}" y="${y + 32}" text-anchor="${anchor}" font-family="${font}" font-size="${options.compact ? 13 : 15}" fill="${input.foregroundColor}" opacity=".7">${escapeXml(truncate(input.shortDescription, descriptionLimit))}</text></g>`;
+    const issuerX = centered ? width / 2 - issuerSize / 2 : logicalRectX(x, issuerSize);
+    const issuerY = centered ? y - 66 : y - 35;
+    return `<g data-preview-block="header" data-title-treatment="${presentation.titleTreatment}" data-issuer-brand="organization">${issuerBrandMark(input.merchantBrandLogoDataUri, issuerX, issuerY, issuerSize, issuerSize, 11)}<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${fontAttribute}" font-size="${localTitleSize}" font-weight="800" letter-spacing="${presentation.titleTreatment === "EDITORIAL" ? "-.5" : "0"}" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 46))}</text><text x="${textX}" y="${y + 32}" text-anchor="${anchor}" font-family="${fontAttribute}" font-size="${options.compact ? 13 : 15}" fill="${input.foregroundColor}" opacity=".7">${escapeXml(truncate(input.shortDescription, descriptionLimit))}</text></g>`;
   };
 
   const motif = () => {
@@ -269,11 +332,11 @@ function composeCustomer(
               ? `<path d="M${actualX} ${y}H${actualX + blockWidth}" stroke="${input.accentColor}" stroke-width="3"/>`
               : `<path d="M${rtl ? actualX + blockWidth - 34 : actualX} ${y + blockHeight / 2}H${rtl ? actualX + blockWidth : actualX + 34}" stroke="${input.accentColor}" stroke-width="5" stroke-linecap="round"/>`;
     const labelY = treatment === "RULE" ? y + 26 : y + 27;
-    return `<g data-preview-block="reward" data-reward-treatment="${treatment}">${shape}<text x="${textX}" y="${labelY}" text-anchor="start" font-family="${font}" font-size="11" font-weight="800" letter-spacing=".35" fill="${input.accentColor}">${rewardLabel}</text><text x="${textX}" y="${labelY + 25}" text-anchor="start" font-family="${font}" font-size="${blockWidth < 230 ? 14 : 16}" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, summaryLimit))}</text></g>`;
+    return `<g data-preview-block="reward" data-reward-treatment="${treatment}">${shape}<text x="${textX}" y="${labelY}" text-anchor="start" font-family="${fontAttribute}" font-size="11" font-weight="800" letter-spacing=".35" fill="${input.accentColor}">${rewardLabel}</text><text x="${textX}" y="${labelY + 25}" text-anchor="start" font-family="${fontAttribute}" font-size="${blockWidth < 230 ? 14 : 16}" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, summaryLimit))}</text></g>`;
   };
 
   const footer = (x = 64) =>
-    `<g data-preview-block="footer"><text x="${logicalTextX(x)}" y="538" text-anchor="start" font-family="${font}" font-size="11" fill="${input.foregroundColor}" opacity=".54">${escapeXml(truncate(input.terms, 100))}</text></g>`;
+    `<g data-preview-block="footer"><text x="${logicalTextX(x)}" y="538" text-anchor="start" font-family="${fontAttribute}" font-size="11" fill="${input.foregroundColor}" opacity=".54">${escapeXml(truncate(input.terms, 100))}</text></g>`;
 
   const backgroundArtwork = imageTag(
     input.backgroundDataUri,
@@ -331,29 +394,31 @@ function composeApple(
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
   const height = 690;
-  const rtl = input.locale === "AR";
+  const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
+  const rtl = directionForCardLocale(canonicalLocale) === "rtl";
+  const arabic = canonicalLocale === "ar";
   const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
   const contentX = rtl ? 412 : 48;
   const headerX = rtl ? 48 : 412;
-  const headerAnchor = rtl ? "start" : "end";
+  const headerAnchor = "end";
   const previewBadgeX = rtl ? 24 : 316;
   const previewBadgeCenter = previewBadgeX + 60;
-  const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
-  const stampsLabel = rtl ? "الأختام" : "STAMPS";
-  const memberLabel = rtl ? "العضو" : "MEMBER";
-  const memberValue = rtl ? "عميل تجريبي" : "Demo customer";
-  const statusLabel = rtl ? "الحالة" : "STATUS";
+  const previewOnly = arabic ? "للمعاينة فقط" : "PREVIEW ONLY";
+  const stampsLabel = arabic ? "الأختام" : "STAMPS";
+  const memberLabel = arabic ? "العضو" : "MEMBER";
+  const memberValue = arabic ? "عميل تجريبي" : "Demo customer";
+  const statusLabel = arabic ? "الحالة" : "STATUS";
   const statusValue =
     input.progress >= input.goal
-      ? rtl
+      ? arabic
         ? "المكافأة جاهزة"
         : "Reward ready"
-      : rtl
+      : arabic
         ? "نشطة"
         : "Active";
-  const backRewardLabel = rtl ? "خلف البطاقة · المكافأة" : "BACK OF PASS · REWARD";
-  const barcodeLabel = rtl
+  const backRewardLabel = arabic ? "خلف البطاقة · المكافأة" : "BACK OF PASS · REWARD";
+  const barcodeLabel = arabic
     ? "رمز العضوية بعد حفظ العميل للبطاقة"
     : "Membership QR after the customer saves the card";
   const warnings: ProgramPreviewComposition["warnings"] = [];
@@ -378,7 +443,7 @@ function composeApple(
       platform: "APPLE_WALLET",
       message: programPlatformCapabilities.APPLE_WALLET.heroArtwork.explanation,
     });
-  if (input.logoDataUri)
+  if (input.logoDataUri && !input.merchantBrandLogoDataUri)
     warnings.push({
       code: "APPLE_CUSTOM_LOGO_NOT_MAPPED",
       severity: "warning",
@@ -387,7 +452,7 @@ function composeApple(
     });
   const markX = rtl ? 386 : 48;
   const organizationX = rtl ? 376 : 84;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}"><rect width="100%" height="100%" fill="#F1F3F6"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="580" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/><rect x="${markX}" y="66" width="26" height="26" rx="7" fill="#E4572E"/><path d="M${markX + 6} 74l4 12 4-7 4 7 4-12" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><text x="${organizationX}" y="85" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="72" text-anchor="${headerAnchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="96" text-anchor="${headerAnchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text><text x="${contentX}" y="154" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="29" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text x="${contentX}" y="188" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${memberLabel}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${memberValue}</text><text x="${rtl ? 48 : 412}" y="188" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text>${stampImage(input.stampSvg, 42, 232, 376, 170)}<rect x="48" y="424" width="364" height="130" rx="18" fill="#FFFFFF" opacity=".82"/>${barcode(104, 446, 252, 58)}<text x="230" y="532" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text><text x="230" y="650" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="230" y="673" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 48))}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization"><rect width="100%" height="100%" fill="#F1F3F6"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="580" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/>${issuerBrandMark(input.merchantBrandLogoDataUri, markX, 66, 26, 26, 7)}<text x="${organizationX}" y="85" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="72" text-anchor="${headerAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="96" text-anchor="${headerAnchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text><text x="${contentX}" y="154" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="29" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text x="${contentX}" y="188" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${memberLabel}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${memberValue}</text><text x="${rtl ? 48 : 412}" y="188" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text>${stampImage(input.stampSvg, 42, 232, 376, 170)}<rect x="48" y="424" width="364" height="130" rx="18" fill="#FFFFFF" opacity=".82"/>${barcode(104, 446, 252, 58)}<text x="230" y="532" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text><text x="230" y="650" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="230" y="673" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 48))}</text></svg>`;
   return { svg, width, height, warnings };
 }
 
@@ -396,28 +461,30 @@ function composeGoogle(
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
   const height = 690;
-  const rtl = input.locale === "AR";
+  const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
+  const rtl = directionForCardLocale(canonicalLocale) === "rtl";
+  const arabic = canonicalLocale === "ar";
   const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
   const contentX = rtl ? 412 : 48;
   const logoX = rtl ? 350 : 48;
   const previewBadgeX = rtl ? 24 : 316;
   const previewBadgeCenter = previewBadgeX + 60;
-  const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
-  const pointsLabel = rtl ? "الأختام" : "Stamps";
-  const accountLabel = rtl ? "الحساب" : "Account";
-  const accountValue = rtl ? "عميل تجريبي" : "Demo customer";
-  const statusLabel = rtl ? "الحالة" : "Status";
+  const previewOnly = arabic ? "للمعاينة فقط" : "PREVIEW ONLY";
+  const pointsLabel = arabic ? "الأختام" : "Stamps";
+  const accountLabel = arabic ? "الحساب" : "Account";
+  const accountValue = arabic ? "عميل تجريبي" : "Demo customer";
+  const statusLabel = arabic ? "الحالة" : "Status";
   const statusValue =
     input.progress >= input.goal
-      ? rtl
+      ? arabic
         ? "المكافأة جاهزة"
         : "Reward ready"
-      : rtl
+      : arabic
         ? "نشطة"
         : "Active";
-  const rewardLabel = rtl ? "المكافأة" : "Reward";
-  const barcodeLabel = rtl
+  const rewardLabel = arabic ? "المكافأة" : "Reward";
+  const barcodeLabel = arabic
     ? "رمز العضوية بعد حفظ العميل للبطاقة"
     : "Membership QR after the customer saves the card";
   const warnings: ProgramPreviewComposition["warnings"] = [];
@@ -442,9 +509,12 @@ function composeGoogle(
       platform: "GOOGLE_WALLET",
       message: programPlatformCapabilities.GOOGLE_WALLET.heroArtwork.explanation,
     });
-  const logo = imageTag(input.logoDataUri, logoX, 72, 62, 62, 15);
-  const issuerX = input.logoDataUri ? (rtl ? 338 : 120) : contentX;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}"><rect width="100%" height="100%" fill="#EEF3FA"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#1F2937"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="626" rx="28" fill="#FFFFFF" stroke="#D2DAE5" stroke-width="2"/><rect x="24" y="40" width="412" height="136" rx="28" fill="${input.backgroundColor}"/>${logo}<text x="${issuerX}" y="92" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" font-weight="700" fill="${input.foregroundColor}" opacity=".75">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="126" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="24" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 36))}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${accountLabel}</text><text x="${contentX}" y="232" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="15" font-weight="700" fill="#1F2937">${accountValue}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${pointsLabel}</text><text x="${rtl ? 48 : 412}" y="234" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="800" fill="#1F2937">${input.progress}/${input.goal}</text>${stampImage(input.stampSvg, 42, 252, 376, 158)}<text x="${contentX}" y="440" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${rewardLabel}</text><text x="${contentX}" y="464" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 46))}</text><text x="${rtl ? 48 : 412}" y="440" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="464" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="15" font-weight="700" fill="#1F2937">${statusValue}</text><rect x="62" y="492" width="336" height="130" rx="18" fill="#F7F8FA"/>${barcode(112, 512, 236, 56)}<text x="230" y="600" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" fill="#4B5563">${barcodeLabel}</text></svg>`;
+  const logo = issuerBrandMark(input.merchantBrandLogoDataUri, logoX, 72, 62, 62, 15);
+  const issuerX = rtl ? 338 : 120;
+  const counterCenterX = rtl ? 92 : 368;
+  const oppositeX = rtl ? 48 : 412;
+  const oppositeAnchor = rtl ? "start" : "end";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}"><rect width="100%" height="100%" fill="#EEF3FA"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect data-google-card-surface="true" x="24" y="40" width="412" height="626" rx="28" fill="${input.backgroundColor}" stroke="#D2DAE5" stroke-width="2"/><rect x="24" y="40" width="412" height="136" rx="28" fill="${input.accentColor}" opacity=".10"/>${logo}<text x="${issuerX}" y="92" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="${input.foregroundColor}" opacity=".75">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="126" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="24" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 36))}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${input.foregroundColor}" opacity=".68">${accountLabel}</text><text x="${contentX}" y="232" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${input.foregroundColor}">${accountValue}</text><text x="${oppositeX}" y="210" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${input.foregroundColor}" opacity=".68">${pointsLabel}</text><text data-stamp-counter="true" data-card-left="24" data-card-right="436" x="${counterCenterX}" y="234" text-anchor="middle" direction="ltr" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text>${stampImage(input.stampSvg, 42, 252, 376, 158)}<text x="${contentX}" y="440" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${input.foregroundColor}" opacity=".68">${rewardLabel}</text><text x="${contentX}" y="464" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, 46))}</text><text x="${oppositeX}" y="440" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${input.foregroundColor}" opacity=".68">${statusLabel}</text><text x="${oppositeX}" y="464" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text><rect x="62" y="492" width="336" height="130" rx="18" fill="#FFFFFF" opacity=".88"/>${barcode(112, 512, 236, 56)}<text x="230" y="600" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text></svg>`;
   return { svg, width, height, warnings };
 }
 
@@ -457,8 +527,10 @@ export function composeProgramPreview(
       : input.profile === "GOOGLE_WALLET"
         ? composeGoogle(input)
         : composeCustomer(input);
+  const svg = localizeSvgRoot(result.svg, input.locale);
   return {
     ...result,
-    digest: createHash("sha256").update(result.svg).digest("hex"),
+    svg,
+    digest: createHash("sha256").update(svg).digest("hex"),
   };
 }

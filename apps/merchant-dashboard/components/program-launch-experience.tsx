@@ -23,12 +23,14 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { apiUrl } from "../lib/api-client";
+import { MerchantBrandMark } from "./merchant-brand-mark";
 import type {
   EnrollmentPolicy,
   EnrollmentSettings,
   WalletHealth,
 } from "./program-enrollment-settings";
 import {
+  canonicalPublicUrlForDisplay,
   deriveProgramSharingPresentation,
   isLocalPreviewUrl,
   type PublicationFailurePresentation,
@@ -49,6 +51,7 @@ export interface OrganizationPublicationContext {
     trialStart: string | null;
     trialEnd: string | null;
   } | null;
+  brandLogoAsset?: { contentUrl: string } | null;
 }
 
 export interface PublicationCommandResult {
@@ -204,7 +207,7 @@ export function PublicationConfirmationDialog({
               >
                 {ar
                   ? "تبدأ الفترة التجريبية الحالية لمدة 15 يوماً عند نجاح النشر."
-                  : "The existing 15-day trial starts when publication succeeds."}
+                  : "Publishing makes this loyalty card available to customers. Your billing trial is managed separately."}
               </Alert>
             ) : null}
             {paused ? (
@@ -296,13 +299,14 @@ export function ShareLoyaltyCard({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const publicUrl = access?.publicUrl ?? null;
+  const displayedPublicUrl = canonicalPublicUrlForDisplay(publicUrl);
   const qrAvailable = Boolean(access?.publicSlug);
   const qrBase = `${apiUrl}/v1/organizations/${organizationId}/programs/${programId}/enrollment-qr`;
 
   async function copyLink() {
     if (!publicUrl || !presentation.canCopyJoinLink) return;
     try {
-      await navigator.clipboard.writeText(publicUrl);
+      await navigator.clipboard.writeText(displayedPublicUrl ?? publicUrl);
       setCopied(true);
       setCopyError(false);
       window.setTimeout(() => setCopied(false), 2_500);
@@ -348,11 +352,11 @@ export function ShareLoyaltyCard({
             {!presentation.canShare ? (
               <small>{ar ? "رابط محفوظ وغير نشط" : "Saved inactive link"}</small>
             ) : isLocalPreviewUrl(publicUrl) ? (
-              <small>{ar ? "معاينة محلية للتطوير" : "Local development preview"}</small>
+              <small>{ar ? "رابط المعاينة" : "Preview link"}</small>
             ) : (
               <small>{ar ? "رابط الانضمام العام" : "Public join link"}</small>
             )}
-            <code dir="ltr">{publicUrl}</code>
+            <code dir="ltr">{displayedPublicUrl}</code>
           </div>
           {presentation.canCopyJoinLink || presentation.canOpenJoinPage ? (
             <div className="publication-share__actions">
@@ -434,10 +438,12 @@ function PublicationCardAnchor({
   draft,
   locations,
   ar,
+  brandLogoUrl,
 }: {
   draft: ProgramDraftInput;
   locations: LocationItem[];
   ar: boolean;
+  brandLogoUrl?: string | undefined;
 }) {
   const content = draft.translations[ar ? "ar" : "en"];
   const reward = [...draft.rewards].sort(
@@ -462,7 +468,13 @@ function PublicationCardAnchor({
           borderRadius: `${Math.max(14, draft.visualTheme.borderRadius)}px`,
         }}
       >
-        <span>{ar ? "ملخص الإطلاق" : "LAUNCH SUMMARY"}</span>
+        <div className="publication-card-anchor__issuer">
+          <MerchantBrandMark
+            className="publication-card-anchor__issuer-mark"
+            contentUrl={brandLogoUrl}
+          />
+          <span>{ar ? "ملخص الإطلاق" : "LAUNCH SUMMARY"}</span>
+        </div>
         <h4>{content.programName}</h4>
         <p>{rewardName}</p>
         <div className="publication-card-anchor__stamps" aria-hidden="true">
@@ -525,7 +537,12 @@ function LaunchReview({
 
   return (
     <div className="publication-review">
-      <PublicationCardAnchor draft={draft} locations={locations} ar={ar} />
+      <PublicationCardAnchor
+        ar={ar}
+        brandLogoUrl={organization?.brandLogoAsset?.contentUrl}
+        draft={draft}
+        locations={locations}
+      />
       <div className="publication-review__docket">
         <section>
           <div className="publication-section-heading">
@@ -714,7 +731,7 @@ function LaunchReview({
             >
               {ar
                 ? "يبدأ هذا الإطلاق الفترة التجريبية الحالية لمدة 15 يوماً داخل عملية النشر نفسها."
-                : "This first launch starts the existing 15-day trial in the same publication transaction."}
+                : "This first launch makes the loyalty card available to customers. It does not change your billing dates."}
             </Alert>
           ) : null}
           {detail.status === "PAUSED" && mode === "update" ? (
@@ -969,6 +986,8 @@ export function LiveAccessSummary({
     customerAccessState: access?.enrollmentLinkStatus === "ACTIVE" ? "available" : "unavailable",
     locale: ar ? "ar" : "en",
   });
+  const publishedVersion = detail.currentPublishedVersion;
+  const publishedAt = publishedVersion?.publishedAt ?? null;
   return (
     <section
       className="live-access-summary"
@@ -976,34 +995,62 @@ export function LiveAccessSummary({
       aria-labelledby="live-access-summary-title"
       tabIndex={-1}
     >
+      <div className="live-access-summary__heading">
+        <div>
+          <span className="dashboard-card__label">
+            {ar ? "الإصدار المنشور الحالي" : "CURRENT PUBLISHED VERSION"}
+          </span>
+          <h3 id="live-access-summary-title">
+            <bdi dir="ltr">v{publishedVersion?.versionNumber ?? "—"}</bdi>
+            <span aria-hidden="true"> · </span>
+            {sharing.canShare ? (ar ? "متاحة للعملاء" : "Available to customers") : sharing.label}
+          </h3>
+        </div>
+        <Badge tone={sharing.tone}>{sharing.label}</Badge>
+      </div>
+      <dl className="current-published-version__facts">
+        <div>
+          <dt>{ar ? "الإصدار" : "Version"}</dt>
+          <dd dir="ltr">v{publishedVersion?.versionNumber ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>{ar ? "النشر" : "Published"}</dt>
+          <dd>
+            {publishedAt ? (
+              <time dateTime={publishedAt}>
+                {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en-IQ", {
+                  dateStyle: "medium",
+                }).format(new Date(publishedAt))}
+              </time>
+            ) : ar ? (
+              "محفوظ"
+            ) : (
+              "Recorded"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{ar ? "حالة العملاء" : "Customer access"}</dt>
+          <dd>{sharing.label}</dd>
+        </div>
+      </dl>
+      <p>{sharing.description}</p>
       {hasUnpublishedChanges ? (
         <div className="unpublished-change-indicator" role="status">
           <span>
             <RefreshCcw size={18} aria-hidden="true" />
           </span>
           <div>
-            <strong>{ar ? "تغييرات بانتظار النشر" : "Changes waiting to be published"}</strong>
+            <strong>{ar ? "تغييرات غير منشورة" : "Unpublished changes"}</strong>
             <small>
-              {ar ? "البطاقة المباشرة الحالية لم تتغير." : "The current live card is unchanged."}
+              {ar
+                ? "بطاقتك الحالية متاحة للعملاء. راجع التغييرات المحفوظة وانشرها عندما تكون جاهزاً."
+                : "Your current card remains live. Review the saved changes and publish them when you are ready."}
             </small>
           </div>
           <Button onClick={onReviewChanges}>{ar ? "مراجعة التغييرات" : "Review changes"}</Button>
         </div>
       ) : null}
-      <div className="live-access-summary__heading">
-        <div>
-          <span className="dashboard-card__label">{ar ? "الوصول المباشر" : "LIVE ACCESS"}</span>
-          <h3 id="live-access-summary-title">
-            {sharing.canShare
-              ? ar
-                ? "شارك البطاقة وأدر العملاء"
-                : "Share the card and manage customers"
-              : sharing.label}
-          </h3>
-        </div>
-        <Badge tone={sharing.tone}>{sharing.label}</Badge>
-      </div>
-      <p>{sharing.description}</p>
       <ShareLoyaltyCard
         access={access}
         presentation={sharing}

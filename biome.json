@@ -11,6 +11,8 @@
       "!**/playwright-report",
       "!**/test-results",
       "!**/artifacts",
+      "!**/docs/contracts/m2",
+      "!docs/mobile",
       "!**/packages/brand/assets/original",
       "!**/packages/database/src/generated",
       "!**/tmp"

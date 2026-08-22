@@ -8,7 +8,7 @@ Phase W1 deliberately does **not** implement loyalty-program creation, customer 
 
 W2 adds the merchant Programs surface for stamp-based loyalty programs: Quick Mode, Pro Mode entitlements, eight built-in templates, English/Arabic content, deterministic stamp previews, safe local image uploads, validation, synthetic Test Mode, immutable versioned publication, program state transitions, and atomic first-publication trial activation.
 
-W2 intentionally does not add real customers, memberships, Wallet issuance, QR enrollment, staff scanning, POS integrations, or Flutter. See [docs/w2/overview.md](docs/w2/overview.md) and the W2 handoff under `artifacts/handoff-w2/`.
+W2 intentionally does not add real customers, memberships, Wallet issuance, QR enrollment, staff scanning, POS integrations, or Flutter. See [docs/w2/overview.md](docs/w2/overview.md).
 
 ## Repository
 
@@ -32,7 +32,6 @@ packages/
   ui/                   Accessible shared React design system
 docs/                   Architecture, security, operations, and ADRs
 tests/                  Unit, integration, Playwright, and accessibility suites
-artifacts/screenshots/  Actual critical-screen browser captures
 ```
 
 ## Requirements
@@ -106,6 +105,7 @@ These accounts are development-only and are never suitable for a shared or produ
 - [Security and threat model](docs/security.md)
 - [Operations](docs/operations.md)
 - [Architecture decisions](docs/adr/README.md)
-- [Screenshot manifest](artifacts/screenshots/README.md)
+- [M2 mobile contract provenance](docs/release/m2-contract-provenance.md)
+- [Launch surfaces and indexing](docs/release/launch-surfaces.md)
 
 The public Terms and Privacy pages are product-quality legal placeholders, not approved legal advice. Tavrix LLC must complete legal review before production launch.

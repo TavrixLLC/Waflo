@@ -1,16 +1,18 @@
-import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { AuthLayout } from "../../../components/auth-layout";
+import { authPageMetadata } from "../../../components/auth-page-metadata";
 import { SignupForm } from "../../../components/auth-forms";
 
-export const metadata: Metadata = { title: "Create account" };
+export function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
+  return authPageMetadata(params, "signup");
+}
 
 export default async function SignupPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
+  if (!isInterfaceLocale(locale)) notFound();
   return (
-    <AuthLayout locale={locale}>
+    <AuthLayout locale={locale} routePath="/signup">
       <SignupForm locale={locale} />
     </AuthLayout>
   );

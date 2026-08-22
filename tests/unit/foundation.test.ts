@@ -6,15 +6,29 @@ import {
   sessionExpiresAt,
   verifyPassword,
 } from "../../packages/auth/src/index";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   calculateTrialState,
   canCreateLocation,
   canInviteTeamMember,
+  hasMerchantOperationalBillingAccess,
   planCatalog,
 } from "../../packages/billing/src/index";
 import { createErrorEnvelope } from "../../packages/contracts/src/index";
 import { parseEnvironment } from "../../packages/config/src/index";
-import { directionFor, formatUsd, isLocale, localePath } from "../../packages/i18n/src/index";
+import { merchantPublicOrigin } from "../../packages/qr-core/src/index";
+import {
+  contentLocaleForInterface,
+  directionFor,
+  directionForInterface,
+  formatUsd,
+  isInterfaceLocale,
+  isLocale,
+  interfaceTextLocaleFor,
+  localePath,
+  localeRegistry,
+} from "../../packages/i18n/src/index";
 import {
   allowedInvitationRoles,
   assertRoleAssignment,
@@ -32,6 +46,7 @@ import {
   oldSlugReservedUntil,
   validateSlug,
 } from "../../apps/api/src/tenancy/slug";
+import { resolveMerchantOrganizationAccess } from "../../apps/api/src/account/account-access.service";
 
 describe("identity primitives", () => {
   it("normalizes email with Unicode normalization, trimming, and lowercase", () => {
@@ -102,19 +117,146 @@ describe("merchant slug policy", () => {
     },
   );
 
-  it.each(["www", "api", "admin", "waflo", "wallet", "stripe", "localhost"])(
-    "rejects reserved slug %s",
-    (slug) => {
-      expect(validateSlug(slug)).toMatchObject({
-        valid: false,
-        reason: "SLUG_RESERVED",
-      });
-    },
-  );
+  it.each([
+    "www",
+    "api",
+    "card",
+    "app-staging",
+    "api-staging",
+    "card-staging",
+    "admin",
+    "waflo",
+    "wallet",
+    "stripe",
+    "localhost",
+    "smtp",
+    "mobile",
+  ])("rejects reserved slug %s", (slug) => {
+    expect(validateSlug(slug)).toMatchObject({
+      valid: false,
+      reason: "SLUG_RESERVED",
+    });
+  });
 
   it("reserves an old slug for the 90-day cooldown", () => {
     const releasedAt = new Date("2026-07-27T12:00:00.000Z");
     expect(oldSlugReservedUntil(releasedAt).toISOString()).toBe("2026-10-25T12:00:00.000Z");
+  });
+
+  it("rejects punycode labels to keep merchant identities ASCII and non-spoofable", () => {
+    expect(isSlugFormatValid("xn--tday-9za")).toBe(false);
+  });
+});
+
+describe("merchant account access authority", () => {
+  const base = {
+    id: "org-1",
+    onboardingState: "COMPLETE" as const,
+    activeLocationCount: 1,
+    latestBillingCommandStatus: null,
+    outstandingInvoice: null,
+    billingProfile: {
+      subscriptionStatus: "ACTIVE" as const,
+      trialEnd: null,
+      gracePeriodEnd: null,
+      billingName: null,
+      billingEmail: null,
+      billingCountryCode: null,
+      billingAddressLine1: null,
+      billingCity: null,
+    },
+  };
+
+  it("grants full access to an active completed legacy organization", () => {
+    expect(resolveMerchantOrganizationAccess(base)).toMatchObject({
+      onboarding: "complete",
+      billing: "active",
+      access: "full",
+    });
+  });
+
+  it("keeps onboarding completion durable when operational location state later changes", () => {
+    expect(resolveMerchantOrganizationAccess({ ...base, activeLocationCount: 0 })).toMatchObject({
+      onboarding: "complete",
+      billing: "active",
+      access: "full",
+    });
+  });
+
+  it("keeps an active grace window operational and restricts it at the exact boundary", () => {
+    const now = new Date("2026-08-14T12:00:00.000Z");
+    const graceEnd = new Date("2026-08-14T12:01:00.000Z");
+    const inGrace = {
+      ...base,
+      billingProfile: {
+        ...base.billingProfile,
+        subscriptionStatus: "GRACE_PERIOD" as const,
+        gracePeriodEnd: graceEnd,
+      },
+      outstandingInvoice: { failureCategory: "CARD_DECLINED", graceEndsAt: graceEnd },
+    };
+    expect(resolveMerchantOrganizationAccess(inGrace, now).access).toBe("full");
+    expect(resolveMerchantOrganizationAccess(inGrace, graceEnd)).toMatchObject({
+      billing: "restricted",
+      access: "read_only_billing_recovery",
+    });
+  });
+
+  it.each(["PAST_DUE", "SUSPENDED", "CANCELED"] as const)(
+    "restricts completed organizations in %s",
+    (subscriptionStatus) => {
+      expect(
+        resolveMerchantOrganizationAccess({
+          ...base,
+          billingProfile: { ...base.billingProfile, subscriptionStatus },
+        }).access,
+      ).toBe("read_only_billing_recovery");
+    },
+  );
+
+  it("keeps incomplete onboarding out of full access even with active billing", () => {
+    expect(
+      resolveMerchantOrganizationAccess({
+        ...base,
+        onboardingState: "LOCATION",
+        activeLocationCount: 0,
+      }),
+    ).toMatchObject({ onboarding: "location_required", access: "onboarding_only" });
+  });
+});
+
+describe("worker-safe merchant billing entitlement policy", () => {
+  const now = new Date("2026-08-14T12:00:00.000Z");
+
+  it("allows active, live trial, and live grace states", () => {
+    expect(hasMerchantOperationalBillingAccess({ status: "ACTIVE" }, now)).toBe(true);
+    expect(
+      hasMerchantOperationalBillingAccess(
+        { status: "TRIALING", trialEnd: new Date("2026-08-14T12:00:01.000Z") },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      hasMerchantOperationalBillingAccess(
+        { status: "GRACE_PERIOD", gracePeriodEnd: new Date("2026-08-14T12:00:01.000Z") },
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("restricts missing or elapsed trial/grace evidence at the exact boundary", () => {
+    expect(hasMerchantOperationalBillingAccess({ status: "TRIALING", trialEnd: null }, now)).toBe(
+      false,
+    );
+    expect(hasMerchantOperationalBillingAccess({ status: "TRIALING", trialEnd: now }, now)).toBe(
+      false,
+    );
+    expect(
+      hasMerchantOperationalBillingAccess({ status: "GRACE_PERIOD", gracePeriodEnd: now }, now),
+    ).toBe(false);
+    expect(hasMerchantOperationalBillingAccess({ status: "PAST_DUE" }, now)).toBe(false);
+    expect(hasMerchantOperationalBillingAccess({ status: "SUSPENDED" }, now)).toBe(false);
+    expect(hasMerchantOperationalBillingAccess({ status: "CANCELED" }, now)).toBe(false);
   });
 });
 
@@ -217,7 +359,211 @@ describe("API and localization utilities", () => {
     expect(isLocale("fr")).toBe(false);
     expect(directionFor("en")).toBe("ltr");
     expect(directionFor("ar")).toBe("rtl");
+    expect(directionForInterface("ar")).toBe("rtl");
     expect(localePath("ar", "/pricing")).toBe("/ar/pricing");
+    expect(isInterfaceLocale("ku-badini")).toBe(true);
+    expect(isInterfaceLocale("ku-sorani")).toBe(true);
+    expect(isInterfaceLocale("ku")).toBe(false);
+    expect(directionForInterface("ku-badini")).toBe("rtl");
+    expect(directionForInterface("ku-sorani")).toBe("rtl");
+    expect(localeRegistry.en.typography).toBe("default");
+    expect(localeRegistry.ar.typography).toBe("cairo");
+    expect(localeRegistry["ku-badini"].typography).toBe("cairo");
+    expect(localeRegistry["ku-sorani"].typography).toBe("cairo");
+    expect(localeRegistry["ku-badini"].htmlLang).toBe("kmr-Arab-IQ");
+    expect(localeRegistry["ku-sorani"].htmlLang).toBe("ckb-Arab-IQ");
+    expect(contentLocaleForInterface("ku-badini")).toBe("en");
+    expect(contentLocaleForInterface("ku-sorani")).toBe("en");
+    expect(contentLocaleForInterface("ar")).toBe("ar");
+    expect(interfaceTextLocaleFor("en")).toBe("en");
+    expect(interfaceTextLocaleFor("ar")).toBe("ar");
+    expect(interfaceTextLocaleFor("ku-badini")).toBe("ku-badini");
+    expect(interfaceTextLocaleFor("ku-sorani")).toBe("ku-sorani");
+    expect(localeRegistry["ku-badini"].messages.navigation.home).not.toBe(
+      localeRegistry.ar.messages.navigation.home,
+    );
+  });
+
+  it("keeps Builder and Studio structural direction tied to interface-locale metadata", () => {
+    const root = resolve(import.meta.dirname, "../..");
+    const files = [
+      "apps/merchant-dashboard/components/program-card-builder.tsx",
+      "apps/merchant-dashboard/components/program-studio-editor.tsx",
+      "apps/merchant-dashboard/components/programs-screen.tsx",
+      "apps/merchant-dashboard/components/template-gallery.tsx",
+    ];
+
+    for (const relativePath of files) {
+      const source = readFileSync(resolve(root, relativePath), "utf8");
+      expect(source).toContain("directionForInterface");
+      expect(source).toContain("interfaceLocale");
+    }
+
+    const builder = readFileSync(resolve(root, files[0]), "utf8");
+    const studio = readFileSync(resolve(root, files[1]), "utf8");
+    expect(builder).toContain('className="builder-shell" dir={interfaceDirection}');
+    expect(studio).toContain('className="studio-shell studio-shell--p4" dir={interfaceDirection}');
+  });
+
+  it("keeps the four-language picker metadata-driven, keyboard-operable, and portal-backed", () => {
+    const root = resolve(import.meta.dirname, "../..");
+    const picker = readFileSync(resolve(root, "packages/ui/src/index.tsx"), "utf8");
+    const dashboard = readFileSync(
+      resolve(root, "apps/merchant-dashboard/components/dashboard.tsx"),
+      "utf8",
+    );
+    const layout = readFileSync(
+      resolve(root, "apps/merchant-dashboard/app/[locale]/layout.tsx"),
+      "utf8",
+    );
+    const merchantPicker = readFileSync(
+      resolve(root, "apps/merchant-dashboard/components/merchant-language-picker.tsx"),
+      "utf8",
+    );
+    const merchantStyles = readFileSync(
+      resolve(root, "apps/merchant-dashboard/app/globals.css"),
+      "utf8",
+    );
+    const customerLayout = readFileSync(resolve(root, "apps/customer-web/app/layout.tsx"), "utf8");
+    const customerStyles = readFileSync(resolve(root, "apps/customer-web/app/globals.css"), "utf8");
+
+    expect(picker).toContain("interfaceLocales.map");
+    expect(picker).toContain("interfaceLanguageGroups");
+    expect(picker).toContain('role="menuitemradio"');
+    expect(picker).toContain("createPortal(menu, document.body)");
+    expect(picker).toContain('event.key === "Escape"');
+    expect(picker).toContain("focusOption");
+    expect(dashboard).toContain("InterfaceLanguagePicker");
+    expect(dashboard).toContain("waflo_interface_locale");
+    expect(dashboard).toContain("ku-badini|ku-sorani");
+    expect(dashboard).toContain("router.prefetch(localePath(target.id))");
+    expect(merchantPicker).toContain("router.prefetch(hrefForLocale(target.id))");
+    expect(merchantPicker).toContain("router.push(hrefForLocale(target))");
+    expect(layout).toContain("definition.htmlLang");
+    expect(layout).toContain("definition.direction");
+    expect(layout).toContain("Noto_Sans_Arabic");
+    expect(layout).not.toContain("kurdistan-24-light.ttf");
+    expect(merchantStyles).toContain("font-variant-ligatures: common-ligatures contextual");
+    expect(merchantStyles).toContain('html[data-interface-typography="cairo"] body *');
+    expect(customerLayout).toContain("Noto_Sans_Arabic");
+    expect(customerStyles).toContain(":lang(ckb)");
+    expect(customerStyles).toContain(":lang(kmr)");
+    expect(localeRegistry["ku-badini"].messages.merchant.shell.programs).not.toBe(
+      localeRegistry["ku-sorani"].messages.merchant.shell.programs,
+    );
+  });
+
+  it("keeps every interface catalog structurally complete and removes legacy loyalty copy maps", () => {
+    const flatten = (value: unknown, prefix = ""): Array<readonly [string, string]> => {
+      if (typeof value === "string") return [[prefix, value]];
+      if (!value || typeof value !== "object") return [];
+      return Object.entries(value).flatMap(([key, nested]) => {
+        return flatten(nested, prefix ? `${prefix}.${key}` : key);
+      });
+    };
+    const interfaceIds = ["en", "ar", "ku-badini", "ku-sorani"] as const;
+    const englishEntries = flatten(localeRegistry.en.messages);
+    const englishKeys = englishEntries.map(([key]) => key).sort();
+
+    for (const id of interfaceIds) {
+      const messages = localeRegistry[id].messages;
+      const entries = flatten(messages);
+      expect(entries.map(([key]) => key).sort()).toEqual(englishKeys);
+      expect(entries.every(([, value]) => value.trim().length > 0)).toBe(true);
+      expect(Object.values(messages).length).toBeGreaterThan(0);
+    }
+
+    expect(localeRegistry.en.direction).toBe("ltr");
+    expect(localeRegistry.ar.direction).toBe("rtl");
+    expect(localeRegistry["ku-badini"].direction).toBe("rtl");
+    expect(localeRegistry["ku-sorani"].direction).toBe("rtl");
+    expect(JSON.stringify(localeRegistry["ku-badini"].messages)).not.toBe(
+      JSON.stringify(localeRegistry["ku-sorani"].messages),
+    );
+    const englishGlobalCopy = new Map(
+      englishEntries.filter(([key]) => /^(?:auth|onboarding)\./u.test(key)),
+    );
+    const arabicGlobalCopy = new Map(
+      flatten(localeRegistry.ar.messages).filter(([key]) => /^(?:auth|onboarding)\./u.test(key)),
+    );
+    for (const id of ["ku-badini", "ku-sorani"] as const) {
+      for (const [key, value] of flatten(localeRegistry[id].messages).filter(([key]) =>
+        /^(?:auth|onboarding)\./u.test(key),
+      )) {
+        expect(value, `${id}:${key} must not fall back to English`).not.toBe(
+          englishGlobalCopy.get(key),
+        );
+        expect(value, `${id}:${key} must not copy Arabic`).not.toBe(arabicGlobalCopy.get(key));
+        expect(value, `${id}:${key} must use Western digits`).not.toMatch(/[٠-٩۰-۹]/u);
+      }
+    }
+
+    const root = resolve(import.meta.dirname, "../..");
+    const legacyMapSymbols = [
+      ["apps/merchant-dashboard/components/program-card-builder.tsx", "const copy = {"],
+      ["apps/merchant-dashboard/components/programs-screen.tsx", "loyaltyCardCopy"],
+      ["apps/merchant-dashboard/components/template-gallery.tsx", "galleryCopy"],
+      [
+        "apps/merchant-dashboard/components/program-studio-presentation.ts",
+        "studioOperationErrorCopy",
+      ],
+      ["apps/merchant-dashboard/components/program-studio-presentation.ts", "studioAreaCopy"],
+      ["apps/merchant-dashboard/components/program-studio-presentation.ts", "stateCopy"],
+      ["apps/merchant-dashboard/components/program-studio-presentation.ts", "journeyCopy"],
+    ] as const;
+    for (const [relativePath, symbol] of legacyMapSymbols) {
+      expect(readFileSync(resolve(root, relativePath), "utf8")).not.toContain(symbol);
+    }
+  });
+
+  it("keeps auth and onboarding interface copy centralized without a legacy locale fallback", () => {
+    const root = resolve(import.meta.dirname, "../..");
+    const formerFallbackConsumers = [
+      "apps/merchant-dashboard/app/[locale]/forgot-password/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/invite/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/logged-out/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/login/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/not-found.tsx",
+      "apps/merchant-dashboard/app/[locale]/onboarding/business/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/onboarding/complete/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/reset-password/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/session-expired/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/signup/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/verify-email/page.tsx",
+    ] as const;
+    for (const relativePath of formerFallbackConsumers) {
+      expect(readFileSync(resolve(root, relativePath), "utf8")).not.toContain(
+        "interfaceTextLocaleFor",
+      );
+    }
+
+    const migratedInterfaceFiles = [
+      "apps/merchant-dashboard/components/auth-layout.tsx",
+      "apps/merchant-dashboard/components/auth-forms.tsx",
+      "apps/merchant-dashboard/components/invite-client.tsx",
+      "apps/merchant-dashboard/components/onboarding.tsx",
+      "apps/merchant-dashboard/components/location-map-picker.tsx",
+      "apps/merchant-dashboard/app/[locale]/oauth/callback/page.tsx",
+      "apps/merchant-dashboard/app/[locale]/not-found.tsx",
+    ] as const;
+    const retiredEnglishInterfaceLiterals = [
+      "Every visit becomes a reason to return.",
+      "Create your merchant account",
+      "Welcome back",
+      "Reset your password",
+      "Invitation unavailable.",
+      "Set up your organization",
+      "Choose your plan",
+      "Billing details",
+      "Place the pin on the storefront",
+      "This page could not be found",
+    ] as const;
+    for (const relativePath of migratedInterfaceFiles) {
+      const source = readFileSync(resolve(root, relativePath), "utf8");
+      for (const retiredLiteral of retiredEnglishInterfaceLiterals) {
+        expect(source).not.toContain(retiredLiteral);
+      }
+    }
   });
 });
 
@@ -241,6 +587,35 @@ describe("merchant hostname parsing and resolution", () => {
     expect(parseMerchantHostname("www.waflo.app", "waflo.app").status).toBe("reserved");
     expect(parseMerchantHostname("a.b.waflo.app", "waflo.app").status).toBe("malformed");
     expect(parseMerchantHostname("evil.example.com", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("xn--tday-9za.waflo.app", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app,evil.example", "waflo.app").status).toBe(
+      "malformed",
+    );
+    expect(parseMerchantHostname("today.waflo.app:evil", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app:70000", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app::443", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("today.waflo.app./path", "waflo.app").status).toBe("malformed");
+    expect(parseMerchantHostname("TODAY.WAFLO.APP.", "waflo.app")).toMatchObject({
+      status: "merchant",
+      slug: "today",
+    });
+  });
+
+  it("uses the merchant slug as the production customer origin", () => {
+    expect(
+      merchantPublicOrigin({
+        merchantSlug: "today",
+        customerBaseUrl: "https://card.waflo.app",
+        merchantBaseDomain: "waflo.app",
+      }),
+    ).toBe("https://today.waflo.app");
+    expect(
+      merchantPublicOrigin({
+        merchantSlug: "today",
+        customerBaseUrl: "http://localhost:3002",
+        merchantBaseDomain: "waflo.app",
+      }),
+    ).toBe("http://today.localhost:3002");
   });
 
   it.each([
@@ -273,7 +648,7 @@ describe("merchant hostname parsing and resolution", () => {
     expect(result.status).toBe(expected);
   });
 
-  it("supports tenant query override only outside production", async () => {
+  it("supports the explicit tenant query on the shared staging Customer Web host", async () => {
     const findUnique = vi.fn().mockResolvedValue({
       id: "org-1",
       name: "Today Coffee",
@@ -286,14 +661,101 @@ describe("merchant hostname parsing and resolution", () => {
       {
         values: {
           NODE_ENV: "test",
+          DEPLOYMENT_ENVIRONMENT: "staging",
           MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
         },
       } as never,
     );
-    const result = await service.resolve("localhost:3002", "today");
+    const result = await service.resolve("card-staging.waflo.app", "today");
     expect(result).toMatchObject({
       status: "active",
-      merchant: { slug: "today", defaultLocale: "ar" },
+      merchant: {
+        slug: "today",
+        defaultLocale: "ar",
+        hostname: "card-staging.waflo.app",
+      },
+    });
+  });
+
+  it("keeps tenant overrides scoped to the exact staging compatibility hostname", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      id: "org-1",
+      name: "Today Coffee",
+      merchantSlug: "today",
+      defaultLocale: "EN",
+      status: "ACTIVE",
+    });
+    const service = new HostResolutionService(
+      { client: { organization: { findUnique } } } as never,
+      {
+        values: {
+          NODE_ENV: "test",
+          DEPLOYMENT_ENVIRONMENT: "staging",
+          MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+        },
+      } as never,
+    );
+
+    await expect(service.resolve("card-staging.waflo.app")).resolves.toMatchObject({
+      status: "reserved",
+    });
+    await expect(service.resolve("card-staging.waflo.app", "not valid")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_INVALID",
+      status: 400,
+    });
+    await expect(service.resolve("today.waflo.app", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+    await expect(service.resolve("today.waflo.app", "other-merchant")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+    await expect(service.resolve("hostile.example.test", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
+    });
+    await expect(service.resolve("today.lvh.me")).resolves.toMatchObject({
+      status: "active",
+      merchant: { slug: "today" },
+    });
+    expect(parseMerchantHostname("app.waflo.app", "waflo.app").status).toBe("reserved");
+  });
+
+  it("rejects tenant query overrides in production", async () => {
+    const service = new HostResolutionService(
+      { client: { organization: { findUnique: vi.fn() } } } as never,
+      {
+        values: {
+          NODE_ENV: "production",
+          DEPLOYMENT_ENVIRONMENT: "production",
+          MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card.waflo.app",
+        },
+      } as never,
+    );
+    await expect(service.resolve("card.waflo.app", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_FORBIDDEN",
+      status: 400,
+    });
+  });
+
+  it("rejects staging tenant overrides outside the authoritative Customer host", async () => {
+    const service = new HostResolutionService(
+      { client: { organization: { findUnique: vi.fn() } } } as never,
+      {
+        values: {
+          DEPLOYMENT_ENVIRONMENT: "staging",
+          MERCHANT_BASE_DOMAIN: "waflo.app",
+          CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+        },
+      } as never,
+    );
+    await expect(service.resolve("app-staging.waflo.app", "today")).rejects.toMatchObject({
+      code: "TENANT_OVERRIDE_HOST_FORBIDDEN",
+      status: 400,
     });
   });
 });

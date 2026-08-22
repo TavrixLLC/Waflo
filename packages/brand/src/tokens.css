@@ -4,16 +4,22 @@
   --waflo-ember: #7d2311;
   --waflo-ink: #241916;
   --waflo-soft: #fff0ec;
-  --waflo-cloud: #f7f9ff;
+  --waflo-cloud: #f8f9fb;
   --waflo-white: #ffffff;
   --waflo-muted: #76645f;
   --waflo-success: #1f8f6a;
   --waflo-warning: #e6a23c;
   --waflo-danger: #c93c2b;
   --waflo-border: #eadfdc;
+  --waflo-border-strong: #cdbbb6;
   --waflo-focus: #ff6b4a;
-  --waflo-font-latin: "Manrope", system-ui, sans-serif;
-  --waflo-font-arabic: "Noto Sans Arabic", system-ui, sans-serif;
+  --waflo-surface: #ffffff;
+  --waflo-surface-subtle: #fcfaf9;
+  --waflo-surface-warm: #fff0ec;
+  --waflo-text: #241916;
+  --waflo-text-muted: #76645f;
+  --waflo-font-latin: var(--font-manrope, "Manrope"), system-ui, sans-serif;
+  --waflo-font-arabic: var(--font-cairo, "Cairo"), system-ui, sans-serif;
   --waflo-radius-sm: 8px;
   --waflo-radius-md: 14px;
   --waflo-radius-lg: 22px;
@@ -21,10 +27,13 @@
   --waflo-radius-pill: 999px;
   --waflo-shadow-card: 0 12px 32px rgba(36, 25, 22, 0.1);
   --waflo-shadow-raised: 0 18px 48px rgba(36, 25, 22, 0.14);
+  --waflo-shadow-lift: 0 28px 70px -24px rgba(36, 25, 22, 0.32);
+  --waflo-shadow-pass: 0 32px 80px -28px rgba(125, 35, 17, 0.55);
   --waflo-motion-quick: 160ms;
   --waflo-motion-standard: 200ms;
   --waflo-motion-reassuring: 240ms;
-  --waflo-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --waflo-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --waflo-page-gutter: clamp(1.25rem, 3vw, 2.5rem);
 }
 
 html {

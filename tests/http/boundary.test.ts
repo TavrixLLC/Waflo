@@ -13,6 +13,7 @@ const allowedOrigin = "http://localhost:3001";
 const webhookSecret = `whsec_${randomUUID().replaceAll("-", "")}`;
 const previousStripeEnvironment = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+  STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
   STRIPE_STARTER_MONTHLY_PRICE_ID: process.env.STRIPE_STARTER_MONTHLY_PRICE_ID,
   STRIPE_GROWTH_MONTHLY_PRICE_ID: process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID,
@@ -108,6 +109,7 @@ function mutationHeaders(
 describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
   beforeAll(async () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_waflo_http";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_waflo_http";
     process.env.STRIPE_WEBHOOK_SECRET = webhookSecret;
     process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
     process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
@@ -134,6 +136,16 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       data: { organizationId, name: "HTTP location", timezone: "UTC" },
     });
     locationId = location.id;
+    await prisma.client.$transaction([
+      prisma.client.organization.update({
+        where: { id: organizationId },
+        data: { onboardingState: "COMPLETE", onboardingCompletedAt: new Date() },
+      }),
+      prisma.client.organizationBillingProfile.update({
+        where: { organizationId },
+        data: { subscriptionStatus: "ACTIVE" },
+      }),
+    ]);
   });
 
   afterAll(async () => {
@@ -317,6 +329,18 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(allowed.headers["access-control-allow-origin"]).toBe(allowedOrigin);
     expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
 
+    const putPreflight = await app.inject({
+      method: "OPTIONS",
+      url: "/v1/organizations/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/members/44444444-4444-4444-8444-444444444444/location-assignments/a1111111-1111-4111-8111-111111111111",
+      headers: {
+        origin: allowedOrigin,
+        "access-control-request-method": "PUT",
+        "access-control-request-headers": "content-type,x-csrf-token",
+      },
+    });
+    expect(putPreflight.statusCode).toBe(204);
+    expect(putPreflight.headers["access-control-allow-methods"]).toContain("PUT");
+
     const denied = await app.inject({
       method: "GET",
       url: "/health",
@@ -386,6 +410,150 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       headers: { cookie: staff.sessionCookie },
     });
     expect(staffTeam.statusCode).toBe(403);
+  });
+
+  it("validates exact branch coordinates and derives timezone without trusting the client", async () => {
+    const csrfState = await csrf();
+    const coordinate = await app.inject({
+      method: "POST",
+      url: "/v1/location-tools/coordinate",
+      headers: mutationHeaders(csrfState, owner),
+      payload: { latitude: 33.3152, longitude: 44.3661 },
+    });
+    expect(coordinate.statusCode).toBe(201);
+    expect(coordinate.json().data).toEqual({
+      latitude: 33.3152,
+      longitude: 44.3661,
+      timezone: "Asia/Baghdad",
+    });
+
+    const missingCoordinate = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, owner),
+      payload: {
+        name: "Missing map confirmation",
+        countryCode: "IQ",
+        timezone: "Asia/Baghdad",
+      },
+    });
+    expect(missingCoordinate.statusCode).toBe(422);
+    expect(missingCoordinate.json().error.code).toBe("VALIDATION_FAILED");
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, owner),
+      payload: {
+        name: "Mapped branch",
+        countryCode: "US",
+        timezone: "UTC",
+        latitude: 40.7128,
+        longitude: -74.006,
+        coordinatesConfirmed: true,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().data).toMatchObject({
+      timezone: "America/New_York",
+      latitude: "40.7128",
+      longitude: "-74.006",
+    });
+
+    const staffDenied = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, staff),
+      payload: {
+        name: "Denied branch",
+        countryCode: "IQ",
+        timezone: "Asia/Baghdad",
+        latitude: 33.3152,
+        longitude: 44.3661,
+        coordinatesConfirmed: true,
+      },
+    });
+    expect(staffDenied.statusCode).toBe(403);
+    expect(staffDenied.json().error.code).toBe("PERMISSION_DENIED");
+
+    const tenantDenied = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, intruder),
+      payload: {
+        name: "Cross tenant branch",
+        countryCode: "IQ",
+        timezone: "Asia/Baghdad",
+        latitude: 33.3152,
+        longitude: 44.3661,
+        coordinatesConfirmed: true,
+      },
+    });
+    expect(tenantDenied.statusCode).toBe(403);
+    expect(tenantDenied.json().error.code).toBe("ORGANIZATION_ACCESS_DENIED");
+  });
+
+  it("enforces refund ownership and tenant isolation at the HTTP boundary", async () => {
+    const paidAt = new Date();
+    const invoice = await prisma.client.billingInvoice.create({
+      data: {
+        organizationId,
+        stripeInvoiceId: `in_http_refund_${runId}_${randomUUID().slice(0, 8)}`,
+        invoiceNumber: `WF-HTTP-${runId}`,
+        status: "paid",
+        billingReason: "subscription_cycle",
+        amountDue: 6900,
+        amountPaid: 6900,
+        amountRemaining: 0,
+        currency: "USD",
+        invoiceDate: paidAt,
+        paidAt,
+      },
+    });
+    const csrfState = await csrf();
+    const idempotencyKey = randomUUID();
+    const url = `/v1/organizations/${organizationId}/billing/invoices/${invoice.id}/refunds`;
+    const payload = { reason: "incorrect_charge", amount: 1700 };
+
+    const created = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        ...mutationHeaders(csrfState, owner),
+        "x-idempotency-key": idempotencyKey,
+      },
+      payload,
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().data).toMatchObject({
+      status: "REQUESTED",
+      requestedAmount: 1700,
+      currency: "USD",
+    });
+
+    const staffDenied = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        ...mutationHeaders(csrfState, staff),
+        "x-idempotency-key": randomUUID(),
+      },
+      payload,
+    });
+    expect(staffDenied.statusCode).toBe(403);
+    expect(staffDenied.json().error.code).toBe("PERMISSION_DENIED");
+
+    const crossTenant = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        ...mutationHeaders(csrfState, intruder),
+        "x-idempotency-key": randomUUID(),
+      },
+      payload,
+    });
+    expect(crossTenant.statusCode).toBe(403);
+    expect(crossTenant.json().error.code).toBe("ORGANIZATION_ACCESS_DENIED");
   });
 
   it("blocks cross-tenant organization, location, member, billing, and audit routes", async () => {
@@ -468,6 +636,18 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       headers: mutationHeaders(csrfState, owner),
       payload: { selectedPlan: "starter" },
     });
+    const invalidCountry = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, owner),
+      payload: { name: "Invalid country", countryCode: "ZZ", timezone: "UTC" },
+    });
+    const invalidTimezone = await app.inject({
+      method: "POST",
+      url: `/v1/organizations/${organizationId}/locations`,
+      headers: mutationHeaders(csrfState, owner),
+      payload: { name: "Invalid timezone", countryCode: "IQ", timezone: "UTC+03:00" },
+    });
     for (const response of [
       malformedUuid,
       malformedCursor,
@@ -476,13 +656,15 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       malformedHost,
       malformedToken,
       selectedPlanOutsideBilling,
+      invalidCountry,
+      invalidTimezone,
     ]) {
       expect(response.statusCode).toBe(422);
       expect(response.json().error.code).toBe("VALIDATION_FAILED");
     }
   });
 
-  it("validates Checkout command IDs at the HTTP boundary before Stripe access", async () => {
+  it("validates embedded trial command IDs at the HTTP boundary before Stripe access", async () => {
     const csrfState = await csrf();
     const cases = [
       {
@@ -505,41 +687,70 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
         code: "CHECKOUT_IDEMPOTENCY_KEY_INVALID",
       },
     ];
+    const payload = {
+      plan: "growth",
+      cadence: "monthly",
+      billingIdentity: {
+        name: "HTTP Merchant",
+        email: "billing-http@example.test",
+        countryCode: "US",
+        addressLine1: "1 Test Street",
+        addressLine2: null,
+        city: "Austin",
+        region: "TX",
+        postalCode: "78701",
+      },
+    };
     for (const item of cases) {
       const response = await app.inject({
         method: "POST",
-        url: `/v1/organizations/${organizationId}/billing/checkout`,
+        url: `/v1/organizations/${organizationId}/billing/trial/setup`,
         headers: item.headers,
-        payload: {},
+        payload,
       });
       expect(response.statusCode).toBe(422);
       expect(response.json().error.code).toBe(item.code);
     }
   });
 
-  it("replays concurrent Checkout requests through the HTTP boundary", async () => {
+  it("replays concurrent embedded payment setup through the HTTP boundary", async () => {
     const replayOwner = await createIdentity("replay-owner");
     const replayOrganizationId = await createOrganization(replayOwner.userId, "replay");
     const billing = app.get(BillingService);
     const stripe = (
       billing as unknown as {
         stripe: {
-          customers: { create: (...args: never[]) => Promise<{ id: string }> };
-          checkout: {
-            sessions: {
-              create: (...args: never[]) => Promise<{ id: string; url: string }>;
-            };
+          customers: {
+            create: (...args: never[]) => Promise<{ id: string }>;
+            search: (...args: never[]) => Promise<{ data: Array<{ id: string }> }>;
+            update: (...args: never[]) => Promise<{ id: string }>;
+          };
+          prices: {
+            retrieve: (...args: never[]) => Promise<unknown>;
+          };
+          setupIntents: {
+            create: (...args: never[]) => Promise<{ id: string; client_secret: string }>;
           };
           billingPortal: { sessions: { create: (...args: never[]) => Promise<{ url: string }> } };
         };
       }
     ).stripe;
+    stripe.customers.search = async () => ({ data: [] });
     stripe.customers.create = async () => ({ id: `cus_http_${runId}` });
-    stripe.checkout.sessions.create = async () => {
+    stripe.customers.update = async () => ({ id: `cus_http_${runId}` });
+    stripe.prices.retrieve = async () => ({
+      id: "price_test_growth",
+      active: true,
+      type: "recurring",
+      unit_amount: 6900,
+      currency: "usd",
+      recurring: { interval: "month", interval_count: 1 },
+    });
+    stripe.setupIntents.create = async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       return {
-        id: `cs_http_${runId}`,
-        url: `https://checkout.stripe.com/pay/cs_http_${runId}`,
+        id: `seti_http_${runId}`,
+        client_secret: `seti_http_${runId}_secret_test`,
       };
     };
     const csrfState = await csrf();
@@ -548,9 +759,22 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       [1, 2].map(() =>
         app.inject({
           method: "POST",
-          url: `/v1/organizations/${replayOrganizationId}/billing/checkout`,
+          url: `/v1/organizations/${replayOrganizationId}/billing/trial/setup`,
           headers: { ...mutationHeaders(csrfState, replayOwner), "x-idempotency-key": key },
-          payload: {},
+          payload: {
+            plan: "growth",
+            cadence: "monthly",
+            billingIdentity: {
+              name: "Replay Merchant",
+              email: "replay-billing@example.test",
+              countryCode: "US",
+              addressLine1: "1 Replay Street",
+              addressLine2: null,
+              city: "Austin",
+              region: "TX",
+              postalCode: "78701",
+            },
+          },
           remoteAddress: "127.0.0.2",
         }),
       ),
@@ -559,9 +783,24 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(second.statusCode).toBe(201);
     const firstResult = first.json().data;
     const secondResult = second.json().data;
-    expect(firstResult.sessionId).toBeTruthy();
-    expect(firstResult.url).toBeTruthy();
-    expect(secondResult).toEqual(firstResult);
+    expect(firstResult.setupIntentId).toBe(`seti_http_${runId}`);
+    expect(firstResult.clientSecret).toBe(`seti_http_${runId}_secret_test`);
+    expect(firstResult.trialDays).toBe(7);
+    expect(firstResult).not.toHaveProperty("url");
+    expect(secondResult).toMatchObject({
+      completed: false,
+      setupIntentId: firstResult.setupIntentId,
+      clientSecret: firstResult.clientSecret,
+      trialDays: 7,
+      amount: firstResult.amount,
+      currency: firstResult.currency,
+    });
+    expect(
+      Math.abs(
+        new Date(secondResult.expectedFirstChargeAt).getTime() -
+          new Date(firstResult.expectedFirstChargeAt).getTime(),
+      ),
+    ).toBeLessThan(50);
     expect(
       await prisma.client.checkoutIdempotencyKey.count({
         where: { organizationId: replayOrganizationId, idempotencyKey: key },
@@ -569,7 +808,7 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     ).toBe(1);
   });
 
-  it("keeps Portal requests separate from Checkout idempotency semantics", async () => {
+  it("keeps the operational Portal fallback separate from embedded billing commands", async () => {
     const billing = app.get(BillingService);
     const stripe = (
       billing as unknown as {
@@ -629,15 +868,20 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
   });
 
   it("rejects production tenant query overrides without exposing organization UUIDs", async () => {
-    const originalNodeEnvironment = environment.values.NODE_ENV;
-    Object.assign(environment.values, { NODE_ENV: "production" });
-    const rejected = await app.inject({
-      method: "GET",
-      url: "/v1/public/merchant-host/resolve?host=unknown.localhost&tenant=boundary",
-    });
-    Object.assign(environment.values, { NODE_ENV: originalNodeEnvironment });
-    expect(rejected.statusCode).toBe(400);
-    expect(rejected.json().error.code).toBe("TENANT_OVERRIDE_FORBIDDEN");
+    const originalDeploymentEnvironment = environment.values.DEPLOYMENT_ENVIRONMENT;
+    try {
+      Object.assign(environment.values, { DEPLOYMENT_ENVIRONMENT: "production" });
+      const rejected = await app.inject({
+        method: "GET",
+        url: "/v1/public/merchant-host/resolve?host=unknown.localhost&tenant=boundary",
+      });
+      expect(rejected.statusCode).toBe(400);
+      expect(rejected.json().error.code).toBe("TENANT_OVERRIDE_FORBIDDEN");
+    } finally {
+      Object.assign(environment.values, {
+        DEPLOYMENT_ENVIRONMENT: originalDeploymentEnvironment,
+      });
+    }
 
     const organization = await prisma.client.organization.findUniqueOrThrow({
       where: { id: organizationId },

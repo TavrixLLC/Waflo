@@ -1,15 +1,17 @@
+import { createHash } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import { verifyPassword } from "@waflo/auth";
 import type { OrganizationInput } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
+import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withOrganizationInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { AuditService } from "../audit/audit.service.js";
-import { TenantService } from "../tenancy/tenant.service.js";
+import { validateBusinessCoordinate } from "../locations/location-coordinate.js";
+import { requireSensitiveReauthentication } from "../auth/sensitive-reauthentication.js";
 import { oldSlugReservedUntil, validateSlug } from "../tenancy/slug.js";
+import { TenantService } from "../tenancy/tenant.service.js";
 
 const localeToDb = (locale: "en" | "ar"): "EN" | "AR" => (locale === "ar" ? "AR" : "EN");
 const planToDb = (plan: "starter" | "growth" | "scale") =>
@@ -62,6 +64,28 @@ export class OrganizationsService {
         HttpStatus.FORBIDDEN,
       );
     }
+    const requestFingerprint = createHash("sha256")
+      .update(JSON.stringify(input), "utf8")
+      .digest("hex");
+    const replay = input.commandId
+      ? await this.prisma.client.organization.findUnique({
+          where: { onboardingCommandId: input.commandId },
+          include: { members: { where: { userId, status: "ACTIVE" }, take: 1 } },
+        })
+      : null;
+    if (replay) {
+      if (
+        replay.members.length !== 1 ||
+        replay.onboardingRequestFingerprint !== requestFingerprint
+      ) {
+        throw new AppError(
+          "ONBOARDING_COMMAND_CONFLICT",
+          "This onboarding action was already used with different details.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      return replay;
+    }
     const availability = await this.slugAvailability(input.merchantSlug);
     if (!availability.available) {
       throw new AppError(
@@ -72,6 +96,9 @@ export class OrganizationsService {
     }
     const merchantSlug = availability.slug;
     const selectedPlan = planToDb(input.selectedPlan);
+    const firstLocationCoordinate = input.firstLocation
+      ? validateBusinessCoordinate(input.firstLocation.latitude, input.firstLocation.longitude)
+      : null;
     const organization = await this.prisma.client.$transaction(
       async (transaction: Prisma.TransactionClient) => {
         const created = await transaction.organization.create({
@@ -81,9 +108,15 @@ export class OrganizationsService {
             merchantSlug,
             businessCategory: input.businessCategory ?? null,
             defaultLocale: localeToDb(input.defaultLocale),
-            timezone: input.timezone,
+            timezone: firstLocationCoordinate?.timezone ?? input.timezone,
             selectedPlan,
             onboardingState: "LOCATION",
+            ...(input.commandId
+              ? {
+                  onboardingCommandId: input.commandId,
+                  onboardingRequestFingerprint: requestFingerprint,
+                }
+              : {}),
           },
         });
         await transaction.organizationMember.create({
@@ -98,15 +131,34 @@ export class OrganizationsService {
             trialEnd: null,
           },
         });
-        await transaction.organizationDomain.create({
-          data: {
-            organizationId: created.id,
-            hostname: `${merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
-            type: "SUBDOMAIN",
-            status: "ACTIVE",
-            isPrimary: true,
-          },
-        });
+        if (input.firstLocation && firstLocationCoordinate) {
+          await transaction.location.create({
+            data: {
+              organizationId: created.id,
+              name: input.firstLocation.name,
+              addressLine1: input.firstLocation.addressLine1 ?? null,
+              addressLine2: input.firstLocation.addressLine2 ?? null,
+              city: input.firstLocation.city ?? null,
+              region: input.firstLocation.region ?? null,
+              postalCode: input.firstLocation.postalCode ?? null,
+              countryCode: input.firstLocation.countryCode,
+              timezone: firstLocationCoordinate.timezone,
+              latitude: firstLocationCoordinate.latitude,
+              longitude: firstLocationCoordinate.longitude,
+            },
+          });
+        }
+        if (this.environment.values.DEPLOYMENT_ENVIRONMENT !== "staging") {
+          await transaction.organizationDomain.create({
+            data: {
+              organizationId: created.id,
+              hostname: `${merchantSlug}.${this.environment.values.MERCHANT_BASE_DOMAIN}`,
+              type: "SUBDOMAIN",
+              status: "ACTIVE",
+              isPrimary: true,
+            },
+          });
+        }
         await transaction.user.update({
           where: { id: userId },
           data: { lastSelectedOrganizationId: created.id },
@@ -130,10 +182,13 @@ export class OrganizationsService {
 
   async get(userId: string, organizationId: string) {
     await this.tenant.requireMembership(userId, organizationId, "organization.view");
-    return this.prisma.client.organization.findUniqueOrThrow({
+    const organization = await this.prisma.client.organization.findUniqueOrThrow({
       where: { id: organizationId },
       include: {
         billingProfile: true,
+        brandLogoAsset: {
+          include: { variants: { orderBy: { variantCode: "asc" } } },
+        },
         domains: { where: { isPrimary: true }, take: 1 },
         locations: {
           where: { status: "ACTIVE" },
@@ -148,6 +203,15 @@ export class OrganizationsService {
         },
       },
     });
+    return {
+      ...organization,
+      brandLogoAsset: organization.brandLogoAsset
+        ? {
+            ...organization.brandLogoAsset,
+            contentUrl: `/v1/organizations/${organizationId}/assets/${organization.brandLogoAsset.id}/content?variant=THUMBNAIL_96`,
+          }
+        : null,
+    };
   }
 
   async update(
@@ -158,12 +222,33 @@ export class OrganizationsService {
       businessCategory?: string | null | undefined;
       defaultLocale?: "en" | "ar" | undefined;
       timezone?: string | undefined;
+      brandLogoAssetId?: string | null | undefined;
     },
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "organization.manage");
     const organization = await this.prisma.client.$transaction(
       async (transaction: Prisma.TransactionClient) => {
+        if (input.brandLogoAssetId) {
+          const brandLogo = await transaction.merchantAsset.findFirst({
+            where: {
+              id: input.brandLogoAssetId,
+              organizationId,
+              category: "LOGO",
+              source: "MERCHANT_UPLOAD",
+              processingStatus: "READY",
+              archivedAt: null,
+            },
+            select: { id: true },
+          });
+          if (!brandLogo) {
+            throw new AppError(
+              "BRAND_LOGO_INVALID",
+              "Choose a processed logo uploaded by this organization.",
+              HttpStatus.UNPROCESSABLE_ENTITY,
+            );
+          }
+        }
         const updated = await transaction.organization.update({
           where: { id: organizationId },
           data: {
@@ -178,6 +263,9 @@ export class OrganizationsService {
               : {}),
             ...(input.defaultLocale ? { defaultLocale: localeToDb(input.defaultLocale) } : {}),
             ...(input.timezone ? { timezone: input.timezone } : {}),
+            ...(input.brandLogoAssetId !== undefined
+              ? { brandLogoAssetId: input.brandLogoAssetId }
+              : {}),
           },
         });
         return updated;
@@ -194,6 +282,47 @@ export class OrganizationsService {
       },
       request,
     );
+    if (
+      input.name !== undefined ||
+      input.businessCategory !== undefined ||
+      input.brandLogoAssetId !== undefined
+    ) {
+      const nearbyConfiguration = await this.prisma.client.walletNearbyConfiguration.findUnique({
+        where: { organizationId },
+        select: { enabled: true },
+      });
+      const refreshWalletBranding = input.brandLogoAssetId !== undefined;
+      const affectedPrograms =
+        refreshWalletBranding || nearbyConfiguration?.enabled
+          ? await this.prisma.client.loyaltyProgram.findMany({
+              where: {
+                organizationId,
+                OR: [
+                  { walletBindings: { some: {} } },
+                  { memberships: { some: { walletPassInstances: { some: {} } } } },
+                ],
+              },
+              select: { id: true },
+            })
+          : [];
+      if (affectedPrograms.length) {
+        await this.prisma.client.programWalletSyncJob.createMany({
+          data: affectedPrograms.map(({ id: programId }) => ({
+            organizationId,
+            programId,
+            action: "update" as const,
+            reason:
+              input.brandLogoAssetId !== undefined
+                ? ("MERCHANT_BRANDING_CHANGED" as const)
+                : ("NEARBY_RELEVANCE_CHANGED" as const),
+            commandType: "UPDATE" as const,
+            idempotencyKey: `program-wallet-${input.brandLogoAssetId !== undefined ? "branding" : "nearby"}-organization:${programId}:${organization.updatedAt.toISOString()}`,
+            batchSize: 500,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
     return organization;
   }
 
@@ -240,17 +369,16 @@ export class OrganizationsService {
     organizationId: string,
     slugInput: string,
     password: string,
+    sessionId: string,
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "organization.slug.change");
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
-      throw new AppError(
-        "SENSITIVE_ACTION_CONFIRMATION_FAILED",
-        "Password confirmation failed.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId,
+      currentPassword: password,
+      message: "Re-enter your password or verify with Google before changing the merchant URL.",
+    });
     const availability = await this.slugAvailability(slugInput, organizationId);
     if (!availability.available) {
       throw new AppError(
@@ -301,7 +429,7 @@ export class OrganizationsService {
   }
 
   async completeOnboarding(userId: string, organizationId: string, request: WafloRequest) {
-    await this.tenant.requireMembership(userId, organizationId, "organization.manage");
+    await this.tenant.requireOnboardingMembership(userId, organizationId, "organization.manage");
     const activeLocations = await this.prisma.client.location.count({
       where: { organizationId, status: "ACTIVE" },
     });
@@ -309,6 +437,23 @@ export class OrganizationsService {
       throw new AppError(
         "FIRST_LOCATION_REQUIRED",
         "Create your first active location before completing onboarding.",
+      );
+    }
+    const billing = await this.prisma.client.organizationBillingProfile.findUnique({
+      where: { organizationId },
+    });
+    if (
+      !billing ||
+      !["TRIALING", "ACTIVE", "GRACE_PERIOD"].includes(billing.subscriptionStatus) ||
+      (billing.subscriptionStatus === "TRIALING" &&
+        (!billing.trialEnd || billing.trialEnd <= new Date())) ||
+      (billing.subscriptionStatus === "GRACE_PERIOD" &&
+        (!billing.gracePeriodEnd || billing.gracePeriodEnd <= new Date()))
+    ) {
+      throw new AppError(
+        "BILLING_ACTIVATION_REQUIRED",
+        "Complete payment setup and start your 7-day trial before finishing onboarding.",
+        HttpStatus.PAYMENT_REQUIRED,
       );
     }
     const organization = await this.prisma.client.organization.update({
@@ -336,37 +481,26 @@ export class OrganizationsService {
     request: WafloRequest,
   ) {
     await this.tenant.requireOwner(userId, organizationId);
-    if (input.confirmation !== "CLOSE ORGANIZATION") {
+    const confirmationTarget = await this.prisma.client.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+    if (
+      input.confirmation.normalize("NFKC").trim() !==
+      confirmationTarget.name.normalize("NFKC").trim()
+    ) {
       throw new AppError(
         "SENSITIVE_ACTION_CONFIRMATION_FAILED",
         "Organization confirmation did not match.",
         HttpStatus.BAD_REQUEST,
       );
     }
-    const user = await this.prisma.client.user.findUniqueOrThrow({ where: { id: userId } });
-    const recentExternalSession = !user.passwordHash
-      ? await this.prisma.client.session.findFirst({
-          where: {
-            id: input.sessionId,
-            userId,
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-            createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (
-      user.passwordHash
-        ? !(await verifyPassword(user.passwordHash, input.currentPassword))
-        : !recentExternalSession
-    ) {
-      throw new AppError(
-        "REAUTHENTICATION_REQUIRED",
-        "Re-enter your password to close this organization.",
-        HttpStatus.FORBIDDEN,
-      );
-    }
+    await requireSensitiveReauthentication(this.prisma.client, {
+      userId,
+      sessionId: input.sessionId,
+      currentPassword: input.currentPassword,
+      message: "Re-enter your password or verify with Google to close this organization.",
+    });
     const now = new Date();
     return withOrganizationInvariantLock(
       this.prisma.client,

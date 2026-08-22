@@ -12,7 +12,8 @@ The initial VPS is a single failure domain. It is not high availability: losing 
 
 Release source lives at `/opt/waflo-platform/releases/<full-git-sha>`. Environment pointers are `/opt/waflo-platform/current/staging` and `/opt/waflo-platform/current/production`; they may point at different releases. Live source is never edited and deployment never performs `git pull` over a running release.
 
-Images are environment-qualified because Next.js public variables are compiled into its browser bundles:
+Images keep the existing environment-qualified Compose tags because Next.js public variables are
+compiled into browser bundles:
 
 ```text
 <registry>/waflo-api:<git-sha>-<environment>
@@ -26,6 +27,13 @@ Images are environment-qualified because Next.js public variables are compiled i
 
 Every image also has the OCI revision label and `RELEASE_SHA`. The Dockerfile uses Node 24.14.1, pnpm 11.5.2, a frozen workspace lockfile, one cached build graph, production deploy subsets for Node services, Next standalone output, and non-root runtime users. No `.env`, Git metadata, or secret is copied into images.
 
+GitHub Actions builds API, migration, and both workers once and assigns the identical manifest both
+environment tags. Merchant, Customer, and Marketing Web receive distinct staging and production
+builds from the same SHA. Staging noindex behavior is therefore preserved without duplicating the
+environment-invariant builds. See
+[`docs/release/github-actions-deployment.md`](../../docs/release/github-actions-deployment.md) for
+the exact GHCR matrix and operator setup.
+
 ## Host layout
 
 ```text
@@ -33,9 +41,10 @@ Every image also has the OCI revision label and `RELEASE_SHA`. The Dockerfile us
   releases/<git-sha>/
   current/{staging,production} -> release
   env/{staging,production}/{compose.env,application.env}
-  secrets/{staging,production}/
+  secrets/{staging,production}/{application.env,provider-files/}
   data/{staging,production}/{postgres,redis,object-storage}/
   backups/{staging,production}/{postgres,restore-drills}/
+  deploy-logs/{staging,production}/
   scripts/
 ```
 
@@ -45,9 +54,14 @@ Before selecting the example subnets, inspect `docker network ls` and `docker ne
 
 ## Configuration and secrets
 
-Copy the matching tracked templates to the paths above. `compose.env` and `application.env` are non-sensitive and mode `0640` is suitable. The entire environment secret directory and every file within it must be restricted; deployment enforces mode `0600` for files.
+Copy the matching tracked templates to the paths above. `compose.env` and `application.env` are non-sensitive and mode `0640` is suitable. The entire environment secret directory must remain mode `0700`. Deployment enforces mode `0600` for top-level secret files except `cloudflare_tunnel_token`, whose narrow contract is `root:65532` mode `0440` so the explicitly non-root cloudflared process can read it. Deployment repairs only that token's metadata and rejects symlinks or non-regular files.
 
-`secrets/<environment>/application.env` holds secret application values. Individual Docker secret files are described in [templates/secrets/README.md](templates/secrets/README.md). PostgreSQL, Redis, object-storage application credentials, encryption keyrings, OAuth secrets, Wallet credentials, Stripe secrets, SMTP password, Sentry DSN, and the Cloudflare token never belong in Git.
+`secrets/<environment>/application.env` holds secret application values. Individual Docker and
+provider secret files are described in [templates/secrets/README.md](templates/secrets/README.md).
+The API and Wallet worker receive the provider directory through a read-only bind mount; browser
+applications do not. PostgreSQL, Redis, object-storage application credentials, encryption
+keyrings, OAuth secrets, Wallet credentials, Stripe secrets, SMTP password, Sentry DSN, and the
+Cloudflare token never belong in Git.
 
 All replicas in one environment receive exactly the same active and legacy versioned keyrings. Rotate by adding the new version to each JSON keyring, deploying it everywhere, changing the active version only after every participant can read the new key, and retaining legacy versions until their data is re-encrypted or expired. Do not generate per-node application encryption identities.
 
@@ -57,13 +71,20 @@ All replicas in one environment receive exactly the same active and legacy versi
 
 ## First staging deploy
 
-1. Review and commit the release outside this task, then create a clean archive named by its full SHA.
-2. Install that immutable archive into `/opt/waflo-platform/releases/<sha>`.
-3. Copy staging templates, populate all secrets, use test/sandbox provider credentials, and apply restrictive permissions.
+1. Review and commit the release, configure the GitHub staging environment, and push the protected
+   `release/production-v1` branch.
+2. The workflow streams only the non-secret `deploy/vps` descriptor into a new immutable
+   `/opt/waflo-platform/releases/<sha>` directory through the dedicated staging identity.
+3. Copy staging templates, populate all secrets, use Google Demo Mode, Stripe TEST mode, and the
+   real Apple Pass Type ID certificate with production Wallet APNs, then apply restrictive
+   permissions.
 4. Configure the remotely managed `waflo-staging` tunnel routes from [CLOUDFLARE.md](CLOUDFLARE.md).
+   The required public hosts are `staging.waflo.app`, `app-staging.waflo.app`,
+   `card-staging.waflo.app`, and `api-staging.waflo.app`.
 5. Run Compose validation and the production configuration readiness command.
-6. Build or pull the immutable images.
-7. Run `deploy.sh staging <sha>`. The script starts state, initializes the private bucket/user, migrates once, waits for application health, then advances the staging current pointer.
+6. The release job pulls the immutable GHCR images; it never builds source on the VPS.
+7. `deploy.sh staging <sha>` starts state, initializes the private bucket/user, migrates once, waits
+   for internal and public health, then advances the staging current pointer.
 8. Perform external HTTPS, OAuth, Stripe webhook, SMTP, and Wallet verification. A successful build is not external verification.
 
 ## Staging update
@@ -76,11 +97,17 @@ Repeat the staging process with production templates and completely separate cre
 
 ## Production update
 
-Prepare and validate a new immutable release, take an off-server-confirmed backup, run one forward migration through `deploy.sh`, wait for `/ready`, then perform domain/provider smoke tests. Do not run concurrent builds on this shared 11 GiB host; `build-images.sh` deliberately builds service targets sequentially.
+Prepare and validate a new immutable release, take an off-server-confirmed backup, pull the approved
+GHCR image set, run one forward migration through `deploy.sh`, wait for internal and public
+readiness, then perform domain/provider smoke tests. Production promotion reuses images already
+built from the staging-approved SHA and never builds source on the VPS.
 
 ## Rollback
 
-Run `rollback.sh <environment> <previous-sha>`. It changes application images and the current pointer only. It never invokes Prisma and never reverses schema. If the new schema is not backward-compatible, application rollback is blocked and must be handled as an incident with a forward database repair.
+Run `rollback.sh <environment> <previous-sha>`. It pulls and changes application images and the
+current pointer only after health checks. It never invokes Prisma and never reverses schema. If the
+new schema is not backward-compatible, application rollback is blocked and must be handled as an
+incident with a forward database repair.
 
 ## Provider readiness
 
@@ -103,4 +130,7 @@ The API exposes the existing `/health` liveness and `/ready` dependency readines
 
 ## Mobile compatibility
 
-This platform does not change Flutter, Staff/M2 request or response schemas, command-status schema, stamp payload, or redeem payload. Mobile endpoints are `https://api.staging.waflo.app` and `https://api.waflo.app`.
+This platform does not change Flutter, Staff/M2 request or response schemas, command-status schema,
+stamp payload, or redeem payload. The Mobile-facing API contract is unchanged. After Backend
+staging cutover is confirmed, Staff Mobile must change only its staging API base URL to
+`https://api-staging.waflo.app`; production remains `https://api.waflo.app`.

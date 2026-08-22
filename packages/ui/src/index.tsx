@@ -1,22 +1,44 @@
 "use client";
 
-import { planCatalog } from "@waflo/billing";
-import type { Locale, PlanCode } from "@waflo/contracts";
-import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
+import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
+import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
+import {
+  interfaceLanguageGroups,
+  interfaceLocales,
+  type InterfaceLocale,
+  type InterfaceLanguageGroup,
+} from "@waflo/i18n";
+import {
+  AlertTriangle,
+  Building2,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Languages,
+  Menu,
+  X,
+} from "lucide-react";
 import {
   type ButtonHTMLAttributes,
+  Fragment,
   type HTMLAttributes,
   type InputHTMLAttributes,
+  type KeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
+  useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "tertiary" | "ghost" | "destructive" | "danger";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -111,13 +133,343 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   error?: boolean;
 }
 
-export function Select({ className = "", error = false, ...props }: SelectProps) {
+export function Select({ className = "", error = false, children, ...props }: SelectProps) {
   return (
     <select
+      {...props}
       className={`wf-input wf-select ${error ? "wf-input--error" : ""} ${className}`}
       aria-invalid={error || undefined}
-      {...props}
-    />
+    >
+      {children}
+    </select>
+  );
+}
+
+export interface SearchableSelectOption {
+  value: string;
+  label: string;
+  group?: string;
+  disabled?: boolean;
+  searchText?: string;
+}
+
+export function SearchableSelect({
+  name,
+  options,
+  value,
+  defaultValue = "",
+  placeholder,
+  required = false,
+  disabled = false,
+  className = "",
+  onValueChange,
+  ariaLabel,
+  ariaDescribedBy,
+  id,
+  invalid = false,
+}: {
+  name?: string | undefined;
+  options: readonly SearchableSelectOption[];
+  value?: string | undefined;
+  defaultValue?: string | undefined;
+  placeholder?: string | undefined;
+  required?: boolean | undefined;
+  disabled?: boolean | undefined;
+  className?: string | undefined;
+  onValueChange?: ((value: string) => void) | undefined;
+  ariaLabel?: string | undefined;
+  ariaDescribedBy?: string | undefined;
+  id?: string | undefined;
+  invalid?: boolean | undefined;
+}) {
+  const listboxId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
+  const hasInteractedRef = useRef(false);
+  const controlled = value !== undefined;
+  const [selectedValue, setSelectedValue] = useState(value ?? defaultValue);
+  const selected = options.find((option) => option.value === selectedValue) ?? null;
+  const controlledLabel = options.find((option) => option.value === value)?.label ?? "";
+  const [query, setQuery] = useState(selected?.label ?? "");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [menuPosition, setMenuPosition] = useState<{
+    direction: "ltr" | "rtl";
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!controlled) return;
+    setSelectedValue(value ?? "");
+    setQuery(controlledLabel);
+  }, [controlled, controlledLabel, value]);
+
+  useEffect(() => {
+    if (controlled || hasInteractedRef.current || selectedValue || !defaultValue) return;
+    const defaultOption = options.find((option) => option.value === defaultValue);
+    if (!defaultOption) return;
+    setSelectedValue(defaultOption.value);
+    setQuery(defaultOption.label);
+  }, [controlled, defaultValue, options, selectedValue]);
+
+  const filtered = useMemo(() => {
+    const normalized = query.normalize("NFKC").trim().toLocaleLowerCase();
+    if (!normalized) return options;
+    return options.filter((option) =>
+      `${option.label} ${option.value} ${option.group ?? ""} ${option.searchText ?? ""}`
+        .normalize("NFKC")
+        .toLocaleLowerCase()
+        .includes(normalized),
+    );
+  }, [options, query]);
+
+  const firstEnabledIndex = useCallback(
+    (from: number, direction: 1 | -1) => {
+      if (!filtered.length) return 0;
+      for (let offset = 0; offset < filtered.length; offset += 1) {
+        const index = (from + direction * offset + filtered.length) % filtered.length;
+        if (!filtered[index]?.disabled) return index;
+      }
+      return 0;
+    },
+    [filtered],
+  );
+
+  useEffect(() => {
+    setActiveIndex((index) =>
+      firstEnabledIndex(Math.min(index, Math.max(0, filtered.length - 1)), 1),
+    );
+  }, [filtered.length, firstEnabledIndex]);
+
+  const updateMenuPosition = useCallback(() => {
+    const rect = inputRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const maxMenuHeight = Math.min(352, window.innerHeight * 0.48);
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const openAbove = spaceBelow < Math.min(maxMenuHeight, 180) && rect.top > spaceBelow;
+    const nearestDirection = inputRef.current?.closest("[dir]")?.getAttribute("dir");
+    setMenuPosition({
+      direction: nearestDirection === "rtl" ? "rtl" : "ltr",
+      left: rect.left,
+      top: openAbove ? Math.max(8, rect.top - maxMenuHeight - 6) : rect.bottom + 6,
+      width: rect.width,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (inputRef.current?.contains(target) || listboxRef.current?.contains(target)) return;
+      setOpen(false);
+      setQuery(selected?.label ?? "");
+      setActiveIndex(0);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+  }, [open, selected?.label]);
+
+  function choose(option: SearchableSelectOption) {
+    if (option.disabled) return;
+    hasInteractedRef.current = true;
+    if (!controlled) {
+      setSelectedValue(option.value);
+    }
+    // Keep the visible label intact when a controlled field re-selects its
+    // existing value. Its parent may legitimately keep the same value, so the
+    // controlled-value effect will not run to restore a query cleared on open.
+    setQuery(option.label);
+    setOpen(false);
+    setActiveIndex(0);
+    inputRef.current?.setCustomValidity("");
+    onValueChange?.(option.value);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((index) => firstEnabledIndex(index + 1, 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((index) => firstEnabledIndex(index - 1, -1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(firstEnabledIndex(0, 1));
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(firstEnabledIndex(filtered.length - 1, -1));
+    } else if (
+      event.key === "Enter" &&
+      open &&
+      filtered[activeIndex] &&
+      !filtered[activeIndex].disabled
+    ) {
+      event.preventDefault();
+      choose(filtered[activeIndex]);
+    } else if (event.key === "Escape") {
+      setOpen(false);
+      setQuery(selected?.label ?? "");
+      setActiveIndex(0);
+    }
+  }
+
+  // Native modal dialogs render in the browser top layer. A listbox portalled
+  // to document.body would sit underneath that layer even with a large z-index,
+  // so keep modal-owned lists inside their dialog while ordinary lists still
+  // portal to the document body to avoid clipping.
+  const portalRoot =
+    typeof document === "undefined" ? null : (inputRef.current?.closest("dialog") ?? document.body);
+
+  return (
+    <div className={`wf-search-select ${open ? "wf-search-select--open" : ""} ${className}`}>
+      <input type="hidden" name={name} value={selectedValue} />
+      <input
+        ref={inputRef}
+        id={id}
+        type="search"
+        className={`wf-input wf-search-select__input ${invalid ? "wf-input--error" : ""}`}
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={invalid || undefined}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-activedescendant={
+          open && filtered[activeIndex] ? `${listboxId}-${activeIndex}` : undefined
+        }
+        autoComplete="off"
+        placeholder={placeholder}
+        value={query}
+        required={required}
+        disabled={disabled}
+        onFocus={() => {
+          // Clear the search query so all options are visible when the dropdown opens.
+          // The selected value (selectedValue) is preserved; the label is restored on blur
+          // if the user does not pick a different option.
+          setQuery("");
+          setOpen(true);
+          setActiveIndex(firstEnabledIndex(0, 1));
+        }}
+        onClick={() => {
+          setQuery("");
+          setOpen(true);
+          setActiveIndex(firstEnabledIndex(0, 1));
+        }}
+        onBlur={() => {
+          setOpen(false);
+          const exact = options.find(
+            (option) =>
+              option.value.toLocaleLowerCase() === query.trim().toLocaleLowerCase() ||
+              option.label.toLocaleLowerCase() === query.trim().toLocaleLowerCase(),
+          );
+          if (exact) choose(exact);
+          else {
+            setQuery(selected?.label ?? "");
+            inputRef.current?.setCustomValidity(
+              required && !selectedValue ? "Choose an option." : "",
+            );
+          }
+        }}
+        onKeyDown={onKeyDown}
+        onChange={(event) => {
+          hasInteractedRef.current = true;
+          setQuery(event.currentTarget.value);
+          setSelectedValue("");
+          event.currentTarget.setCustomValidity(required ? "Choose a listed option." : "");
+          setActiveIndex(0);
+          setOpen(true);
+        }}
+      />
+      {open && menuPosition && portalRoot
+        ? createPortal(
+            <div
+              ref={listboxRef}
+              className="wf-search-select__list"
+              id={listboxId}
+              role="listbox"
+              dir={menuPosition.direction}
+              style={{
+                left: menuPosition.left,
+                top: menuPosition.top,
+                width: menuPosition.width,
+              }}
+            >
+              {filtered.length ? (
+                filtered.map((option, index) => {
+                  const previousGroup = filtered[index - 1]?.group;
+                  return (
+                    <div key={option.value}>
+                      {option.group && option.group !== previousGroup ? (
+                        <div className="wf-search-select__group" aria-hidden="true">
+                          {option.group}
+                        </div>
+                      ) : null}
+                      <button
+                        id={`${listboxId}-${index}`}
+                        type="button"
+                        role="option"
+                        aria-selected={option.value === selectedValue}
+                        aria-disabled={option.disabled || undefined}
+                        className="wf-search-select__option"
+                        data-active={index === activeIndex || undefined}
+                        onPointerDown={(event) => event.preventDefault()}
+                        disabled={option.disabled}
+                        onClick={() => choose(option)}
+                        onMouseEnter={() => setActiveIndex(index)}
+                      >
+                        <span>{option.label}</span>
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="wf-search-select__empty">No matching option</div>
+              )}
+            </div>,
+            portalRoot,
+          )
+        : null}
+    </div>
+  );
+}
+
+export function ColorInput({
+  className = "",
+  value,
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const color = typeof value === "string" ? value : "#000000";
+  return (
+    <div className={`wf-color-input ${className}`}>
+      <input type="color" value={color} {...props} />
+      <span
+        className="wf-color-input__swatch"
+        style={{ backgroundColor: color }}
+        aria-hidden="true"
+      />
+      <code>{color.toLocaleUpperCase("en-US")}</code>
+      <span className="wf-color-input__action" aria-hidden="true">
+        Edit
+      </span>
+    </div>
   );
 }
 
@@ -511,13 +863,15 @@ export function Table({
   headers,
   rows,
   caption,
+  className = "",
 }: {
   headers: readonly string[];
   rows: readonly (readonly ReactNode[])[];
   caption: string;
+  className?: string;
 }) {
   return (
-    <div className="wf-table-wrap">
+    <div className={`wf-table-wrap ${className}`}>
       <table className="wf-table">
         <caption className="wf-sr-only">{caption}</caption>
         <thead>
@@ -533,7 +887,9 @@ export function Table({
           {rows.map((row, rowIndex) => (
             <tr key={`row-${rowIndex.toString()}`}>
               {row.map((cell, cellIndex) => (
-                <td key={`cell-${cellIndex.toString()}`}>{cell}</td>
+                <td key={`cell-${cellIndex.toString()}`} data-label={headers[cellIndex]}>
+                  {cell}
+                </td>
               ))}
             </tr>
           ))}
@@ -661,6 +1017,230 @@ export function LanguageSwitcher({ locale, href }: { locale: Locale; href: strin
   );
 }
 
+interface InterfaceLanguageOption {
+  readonly id: InterfaceLocale;
+  readonly label: string;
+  readonly language: string;
+  readonly group?: InterfaceLanguageGroup;
+}
+
+/**
+ * The locale registry is the single source for selectable interface locales,
+ * their native labels, script metadata, and group membership. This keeps the
+ * menu from becoming a second locale registry inside the UI package.
+ */
+const interfaceLanguageOptions: readonly InterfaceLanguageOption[] = interfaceLocales.map(
+  (definition) => ({
+    id: definition.id,
+    label: definition.nativeName,
+    language: definition.htmlLang,
+    ...(definition.languageGroup ? { group: definition.languageGroup } : {}),
+  }),
+);
+
+const englishInterfaceLanguage: InterfaceLanguageOption = interfaceLanguageOptions.find(
+  (option) => option.id === "en",
+) ?? {
+  id: "en",
+  label: "English",
+  language: "en",
+};
+
+/**
+ * A route-agnostic, portal-backed language picker. Applications keep route
+ * construction and persistence at their boundary, while this primitive owns
+ * keyboard behavior and the consistent Waflo menu surface.
+ */
+export function InterfaceLanguagePicker({
+  locale,
+  hrefForLocale,
+  routePath,
+  onLocaleChange,
+  persistSelection = false,
+  label = "Language",
+  className = "",
+}: {
+  locale: InterfaceLocale;
+  hrefForLocale?: (locale: InterfaceLocale) => string;
+  /** A serializable path suffix for server-rendered shells, such as `/login`. */
+  routePath?: string;
+  onLocaleChange?: (locale: InterfaceLocale) => void | Promise<void>;
+  persistSelection?: boolean;
+  label?: string;
+  className?: string;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLAnchorElement | null>>([]);
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const resolveHref = useCallback(
+    (target: InterfaceLocale) => {
+      if (routePath !== undefined)
+        return `/${target}${routePath.startsWith("/") ? routePath : `/${routePath}`}`;
+      if (hrefForLocale) return hrefForLocale(target);
+      return `/${target}`;
+    },
+    [hrefForLocale, routePath],
+  );
+
+  const updatePosition = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect || typeof window === "undefined") return;
+    const width = Math.min(264, window.innerWidth - 16);
+    const rightAligned = document.documentElement.dir === "rtl";
+    const left = rightAligned
+      ? Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width))
+      : Math.max(8, Math.min(window.innerWidth - width - 8, rect.left));
+    setPosition({ left, top: Math.min(window.innerHeight - 8, rect.bottom + 8) });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (triggerRef.current?.contains(target)) return;
+      if (optionRefs.current.some((option) => option?.contains(target))) return;
+      setOpen(false);
+    };
+    const onResize = () => updatePosition();
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+    };
+  }, [open, updatePosition]);
+
+  const focusOption = useCallback((index: number) => {
+    optionRefs.current[
+      (index + interfaceLanguageOptions.length) % interfaceLanguageOptions.length
+    ]?.focus();
+  }, []);
+
+  function openMenu() {
+    setOpen(true);
+    updatePosition();
+  }
+
+  function onTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape") {
+      setOpen(false);
+      return;
+    }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      openMenu();
+      const selected = Math.max(
+        0,
+        interfaceLanguageOptions.findIndex((option) => option.id === locale),
+      );
+      const target =
+        event.key === "ArrowUp" || event.key === "End"
+          ? interfaceLanguageOptions.length - 1
+          : event.key === "Home"
+            ? 0
+            : selected;
+      window.setTimeout(() => focusOption(target));
+    }
+  }
+
+  function onOptionKeyDown(event: KeyboardEvent<HTMLAnchorElement>, index: number) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      if (event.key === "Home") focusOption(0);
+      else if (event.key === "End") focusOption(interfaceLanguageOptions.length - 1);
+      else focusOption(index + (event.key === "ArrowDown" ? 1 : -1));
+    }
+  }
+
+  const current =
+    interfaceLanguageOptions.find((option) => option.id === locale) ?? englishInterfaceLanguage;
+  const menu =
+    open && position ? (
+      <div
+        id={menuId}
+        className="wf-language-menu"
+        role="menu"
+        aria-label={label}
+        style={{ left: position.left, top: position.top }}
+      >
+        {interfaceLanguageOptions.map((option, index) => (
+          <Fragment key={option.id}>
+            {option.group &&
+            (index === 0 || interfaceLanguageOptions[index - 1]?.group !== option.group) ? (
+              <div className="wf-language-menu__group" role="presentation">
+                <span>{interfaceLanguageGroups[option.group].englishName}</span>
+                <small lang="ku" dir="rtl">
+                  {interfaceLanguageGroups[option.group].nativeName}
+                </small>
+              </div>
+            ) : null}
+            <a
+              ref={(element) => {
+                optionRefs.current[index] = element;
+              }}
+              className="wf-language-menu__option"
+              href={resolveHref(option.id)}
+              lang={option.language}
+              aria-current={option.id === locale ? "true" : undefined}
+              role="menuitemradio"
+              aria-checked={option.id === locale}
+              onKeyDown={(event) => onOptionKeyDown(event, index)}
+              onClick={(event) => {
+                setOpen(false);
+                if (persistSelection) {
+                  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+                  // Cookie Store is not yet available in every supported browser. The value is a closed locale union.
+                  // biome-ignore lint/suspicious/noDocumentCookie: Browser-compatible persistence for the selected interface locale.
+                  document.cookie = `waflo_interface_locale=${option.id}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+                }
+                if (onLocaleChange) {
+                  event.preventDefault();
+                  void onLocaleChange(option.id);
+                }
+              }}
+            >
+              <span>{option.label}</span>
+              {option.id === locale ? <Check size={16} strokeWidth={2} aria-hidden="true" /> : null}
+            </a>
+          </Fragment>
+        ))}
+      </div>
+    ) : null;
+
+  return (
+    <div className={`wf-language-picker ${className}`.trim()}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="wf-language-switcher wf-language-picker__trigger"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={onTriggerKeyDown}
+      >
+        <Languages size={17} aria-hidden="true" />
+        <span lang={current.language}>{current.label}</span>
+        <ChevronDown size={15} aria-hidden="true" />
+      </button>
+      {typeof document !== "undefined" ? createPortal(menu, document.body) : null}
+    </div>
+  );
+}
+
 export function OrganizationSwitcher({
   label,
   organizations,
@@ -672,18 +1252,42 @@ export function OrganizationSwitcher({
   value: string;
   onChange: (organizationId: string) => void;
 }) {
+  const selected = organizations.find((organization) => organization.id === value);
+  const [open, setOpen] = useState(false);
   return (
-    <label className="wf-org-switcher">
-      <span className="wf-sr-only">{label}</span>
-      <Building2 size={18} aria-hidden="true" />
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
-        {organizations.map((organization) => (
-          <option key={organization.id} value={organization.id}>
-            {organization.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="wf-org-switcher">
+      <button
+        type="button"
+        className="wf-org-switcher__trigger"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Building2 size={18} strokeWidth={1.75} aria-hidden="true" />
+        <span>{selected?.name ?? label}</span>
+        <ChevronRight className="wf-org-switcher__chevron" size={16} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="wf-org-switcher__menu" role="listbox" aria-label={label}>
+          {organizations.map((organization) => (
+            <button
+              key={organization.id}
+              type="button"
+              role="option"
+              aria-selected={organization.id === value}
+              onClick={() => {
+                onChange(organization.id);
+                setOpen(false);
+              }}
+            >
+              <span>{organization.name}</span>
+              {organization.id === value ? <Check size={16} aria-hidden="true" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -691,34 +1295,91 @@ export function PlanCard({
   plan,
   selected,
   locale,
+  cadence = "monthly",
   onSelect,
 }: {
   plan: PlanCode;
   selected: boolean;
   locale: Locale;
+  cadence?: BillingCadence;
   onSelect?: (plan: PlanCode) => void;
 }) {
   const definition = planCatalog[plan];
+  const pricing = cadencePrice(plan, cadence);
+  const cadenceDefinition = billingCadenceCatalog[cadence];
   const copy = locale === "ar";
+  const cadenceLabel = copy
+    ? cadence === "monthly"
+      ? "شهري"
+      : cadence === "quarterly"
+        ? "كل ثلاثة أشهر"
+        : "سنوي"
+    : cadenceDefinition.label;
+  const discountLabel = cadence === "quarterly" ? "8.33%" : cadence === "yearly" ? "16.67%" : "";
+  const savings = pricing.undiscountedAmountUsd - pricing.billedAmountUsd;
+  const count = (value: number | null, singular: string, plural: string, unboundedLabel: string) =>
+    value === null ? unboundedLabel : `${value} ${value === 1 ? singular : plural}`;
+  const benefits = [
+    count(
+      definition.limits.programs,
+      copy ? "بطاقة ولاء نشطة" : "active loyalty card",
+      copy ? "بطاقات ولاء نشطة" : "active loyalty cards",
+      copy ? "بطاقات ولاء نشطة غير محدودة" : "Unlimited active loyalty cards",
+    ),
+    count(
+      definition.limits.locations,
+      copy ? "موقع" : "location",
+      copy ? "مواقع" : "locations",
+      copy ? "حد مواقع Scale قابل للضبط" : "Configurable Scale location limit",
+    ),
+    count(
+      definition.limits.teamSeats,
+      copy ? "مقعد مدير أو موظف" : "Manager or Staff seat",
+      copy ? "مقاعد للمديرين والموظفين" : "Manager and Staff seats",
+      copy ? "حد مقاعد Scale قابل للضبط" : "Configurable Scale Manager and Staff limit",
+    ),
+    definition.features.advancedExports
+      ? copy
+        ? "تخصيص وتحليلات وتصدير متقدم"
+        : "Advanced customization, analytics, and exports"
+      : definition.features.advancedAnalytics
+        ? copy
+          ? "تخصيص وتحليلات متقدمة"
+          : "Advanced customization and analytics"
+        : copy
+          ? "التحليلات الأساسية"
+          : "Essential analytics",
+  ];
   return (
     <Card className={`wf-plan-card ${selected ? "wf-plan-card--selected" : ""}`}>
       <div className="wf-plan-card__heading">
-        <h3>{definition.name}</h3>
+        <h3>
+          <bdi dir="ltr">{definition.name}</bdi>
+        </h3>
         {selected ? <Badge tone="brand">{copy ? "الخطة المختارة" : "Selected"}</Badge> : null}
       </div>
       <p className="wf-plan-card__price">
-        ${definition.monthlyPriceUsd}
-        <span>/{copy ? "شهرياً" : "month"}</span>
+        <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>
+        <span>/{copy ? "شهر" : "month"}</span>
       </p>
-      <ul>
-        <li>
-          {definition.limits.locations ?? (copy ? "حد مرن" : "Configurable")}{" "}
-          {copy ? "مواقع" : "locations"}
-        </li>
-        <li>
-          {definition.limits.teamSeats ?? (copy ? "حد مرن" : "Configurable")}{" "}
-          {copy ? "مقاعد فريق" : "team seats"}
-        </li>
+      <small className="wf-plan-card__cadence">
+        <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi> {copy ? "يُحصّل" : "billed"}{" "}
+        {copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}
+      </small>
+      {cadenceDefinition.discountRate ? (
+        <small className="wf-plan-card__equivalent">
+          {cadence === "yearly" ? (copy ? "شهران مجاناً" : "2 months free") : null}
+          {cadence === "yearly" ? " · " : null}
+          {copy ? "وفّر" : "Save"} <bdi dir="ltr">${savings.toFixed(2)}</bdi> ({discountLabel})
+        </small>
+      ) : null}
+      <ul className="wf-plan-card__benefits">
+        {benefits.map((benefit) => (
+          <li key={benefit}>
+            <Check size={16} aria-hidden="true" />
+            <span>{benefit}</span>
+          </li>
+        ))}
       </ul>
       {onSelect ? (
         <Button
@@ -737,10 +1398,12 @@ export function UsageMeter({
   label,
   current,
   limit,
+  unlimitedLabel,
 }: {
   label: string;
   current: number;
   limit: number | null;
+  unlimitedLabel?: string;
 }) {
   const percentage = limit === null ? 0 : Math.min(100, Math.round((current / limit) * 100));
   return (
@@ -748,10 +1411,10 @@ export function UsageMeter({
       <div>
         <span>{label}</span>
         <strong>
-          {current} / {limit ?? "∞"}
+          {limit === null ? (unlimitedLabel ?? `${current} · Unlimited`) : `${current} / ${limit}`}
         </strong>
       </div>
-      <progress max={100} value={percentage} aria-label={label} />
+      {limit === null ? null : <progress max={100} value={percentage} aria-label={label} />}
     </div>
   );
 }

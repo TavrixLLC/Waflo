@@ -5,13 +5,20 @@ import {
   renderTemplateGalleryPreviews,
   renderTemplateGalleryThumbnail,
 } from "../../apps/api/src/programs/template-gallery-preview.js";
-import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { createBuilderDraft } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
+import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { apiDraft } from "../../apps/merchant-dashboard/components/program-studio-types.js";
-import { findProgramTemplate, latestProgramTemplates } from "../../packages/contracts/src/index.js";
+import {
+  canonicalizeCardLocale,
+  findProgramTemplate,
+  latestProgramTemplates,
+} from "../../packages/contracts/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
 export const templateGalleryOrganizationId = "merchant-template-gallery-fixture";
+
+const isolatedLoopbackApiRoute =
+  /https?:\/\/(?:(?:localhost|127\.0\.0\.1)(?::\d+)?|api\.waflo\.app)\/v1\/.*/u;
 
 function artworkPreviewUrl(content: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(content, "utf8").toString("base64")}`;
@@ -85,6 +92,7 @@ export async function mockTemplateGalleryApi(
     onPreviewRequest,
     patchDelayMs = 0,
     previewDelayMs = 0,
+    studioLoadDelayMs = 0,
     publishedPreviewAvailable = true,
     patchFailures = 0,
     patchConflicts = 0,
@@ -102,6 +110,8 @@ export async function mockTemplateGalleryApi(
     fixtureLocations = [{ id: "gallery-location", name: "Gallery Main Branch", status: "ACTIVE" }],
     seededProgram = false,
     arabicEarningCopy = "present",
+    memberRole = "OWNER",
+    merchantBrandLogoDataUri,
   }: {
     businessCategory?: string | null;
     onCreate?: (body: Record<string, unknown>) => void;
@@ -114,6 +124,7 @@ export async function mockTemplateGalleryApi(
     onPreviewRequest?: (templateCode: string, presentation: string) => void;
     patchDelayMs?: number;
     previewDelayMs?: number;
+    studioLoadDelayMs?: number;
     publishedPreviewAvailable?: boolean;
     patchFailures?: number;
     patchConflicts?: number;
@@ -147,6 +158,8 @@ export async function mockTemplateGalleryApi(
     fixtureLocations?: Array<{ id: string; name: string; status: string }>;
     seededProgram?: boolean;
     arabicEarningCopy?: "present" | "missing";
+    memberRole?: "OWNER" | "MANAGER" | "STAFF";
+    merchantBrandLogoDataUri?: string;
   } = {},
 ): Promise<void> {
   await page.route("https://fonts.googleapis.com/**", async (route) => {
@@ -157,12 +170,19 @@ export async function mockTemplateGalleryApi(
   });
   const filledAssetId = "55555555-5555-4555-8555-555555555555";
   const emptyAssetId = "66666666-6666-4666-8666-666666666666";
+  const merchantBrandLogoAssetId = "77777777-5555-4555-8555-555555555555";
   const seededTemplate = templateGalleryFixtures()[0];
   let storedDraft: Record<string, unknown> | null =
     seededProgram && seededTemplate
-      ? apiDraft(
-          createBuilderDraft(seededTemplate, fixtureLocations, { locale: "en", blank: false }),
-        )
+      ? {
+          ...apiDraft(
+            createBuilderDraft(seededTemplate, fixtureLocations, { locale: "en", blank: false }),
+          ),
+          // Seeded programs represent legacy EN/AR cards whose authored Arabic
+          // content was already customer-visible before the dynamic locale model.
+          // Newly created fixture cards still start with English only.
+          enabledLocales: ["en", "ar"],
+        }
       : null;
   if (storedDraft && arabicEarningCopy === "missing") {
     const translations = storedDraft.translations as Record<"en" | "ar", Record<string, string>>;
@@ -183,6 +203,12 @@ export async function mockTemplateGalleryApi(
   let remainingPublicationFailures = publicationFailures;
   let publicationRequestCount = 0;
   let currentStudioState = studioState;
+  let walletNearbyEnabled = false;
+  let walletNearbyRevision = 1;
+  let walletNearbyLocationIds: string[] = [];
+  let walletNearbyCustomEn: string | null = null;
+  let walletNearbyCustomAr: string | null = null;
+  const walletCampaigns: Array<Record<string, unknown>> = [];
 
   function currentArtwork() {
     if (!storedDraft) return null;
@@ -206,6 +232,18 @@ export async function mockTemplateGalleryApi(
     const artwork = currentArtwork();
     if (!artwork) return [];
     return [
+      ...(merchantBrandLogoDataUri
+        ? [
+            {
+              id: merchantBrandLogoAssetId,
+              category: "LOGO",
+              source: "MERCHANT_UPLOAD",
+              originalFilename: "gallery-merchant-brand.svg",
+              processingStatus: "READY",
+              contentUrl: `/v1/organizations/${templateGalleryOrganizationId}/assets/${merchantBrandLogoAssetId}/content?variant=THUMBNAIL_96`,
+            },
+          ]
+        : []),
       {
         id: filledAssetId,
         category: "STAMP_FILLED",
@@ -228,10 +266,14 @@ export async function mockTemplateGalleryApi(
   function programDetail() {
     if (!storedDraft) return null;
     const translations = storedDraft.translations as Record<
-      "en" | "ar",
+      string,
       Record<string, string | undefined>
     >;
     const rewards = storedDraft.rewards as Array<Record<string, unknown>>;
+    const defaultCardLocale = String(storedDraft.defaultLocale ?? "en");
+    const enabledLocales = Array.isArray(storedDraft.enabledLocales)
+      ? (storedDraft.enabledLocales as string[])
+      : ["en"];
     const visualTheme = storedDraft.visualTheme as Record<string, unknown>;
     const requiredStampCount = Number(storedDraft.requiredStampCount ?? 8);
     const publishedLifecycle = [
@@ -282,6 +324,26 @@ export async function mockTemplateGalleryApi(
       staffOwnReversalWindowSeconds: storedDraft.staffOwnReversalWindowSeconds,
       managerReversalWindowMinutes: storedDraft.managerReversalWindowMinutes,
       managerOverrideAllowed: storedDraft.managerOverrideAllowed,
+      defaultCardLocale,
+      cardLocales: Object.entries(translations).map(([locale, content], localeIndex) => ({
+        id: `88888888-8888-4888-8888-${String(localeIndex + 1).padStart(12, "0")}`,
+        locale,
+        enabled: enabledLocales.includes(locale),
+        position:
+          enabledLocales.indexOf(locale) < 0 ? localeIndex + 100 : enabledLocales.indexOf(locale),
+        ...content,
+        rewardTranslations: rewards.map((reward, rewardIndex) => {
+          const localized = (
+            reward.translations as Record<string, Record<string, string | undefined>>
+          )[locale];
+          return {
+            id: `99999999-9999-4999-8999-${String(localeIndex * 100 + rewardIndex + 1).padStart(12, "0")}`,
+            rewardId: `44444444-4444-4444-8444-${String(rewardIndex + 1).padStart(12, "0")}`,
+            locale,
+            ...localized,
+          };
+        }),
+      })),
       translations: (["en", "ar"] as const).map((locale) => ({
         locale: locale.toUpperCase(),
         ...translations[locale],
@@ -364,14 +426,15 @@ export async function mockTemplateGalleryApi(
 
   function builderPreview(url: URL) {
     if (!storedDraft) return null;
-    const locale = url.searchParams.get("locale") === "AR" ? "AR" : "EN";
+    const locale = canonicalizeCardLocale(url.searchParams.get("locale") ?? "en") ?? "en";
     const requestedProfile = url.searchParams.get("profile");
     const profile =
       requestedProfile === "APPLE_WALLET" || requestedProfile === "GOOGLE_WALLET"
         ? requestedProfile
         : "CUSTOMER_WEB";
-    const translations = storedDraft.translations as Record<"en" | "ar", Record<string, string>>;
-    const content = translations[locale === "AR" ? "ar" : "en"];
+    const translations = storedDraft.translations as Record<string, Record<string, string>>;
+    const defaultLocale = canonicalizeCardLocale(String(storedDraft.defaultLocale ?? "en")) ?? "en";
+    const content = translations[locale] ?? translations[defaultLocale] ?? translations.en;
     const goal = Number(storedDraft.requiredStampCount ?? 8);
     const progress = Math.max(0, Math.min(goal, Number(url.searchParams.get("progress") ?? 0)));
     const template = findProgramTemplate(
@@ -416,7 +479,7 @@ export async function mockTemplateGalleryApi(
       emptyArtwork: { kind: "svg", content: empty.content, trusted: true },
       label: `${progress}/${goal}`,
       rewardLabel: rewardReady
-        ? locale === "AR"
+        ? locale === "ar"
           ? `المكافأة جاهزة: ${content.rewardSummary}`
           : `Reward ready: ${content.rewardSummary}`
         : content.rewardSummary,
@@ -427,7 +490,7 @@ export async function mockTemplateGalleryApi(
     const result = composeProgramPreview({
       profile,
       locale,
-      organizationName: locale === "AR" ? "مقهى المعرض" : "Gallery Coffee",
+      organizationName: locale === "ar" ? "مقهى المعرض" : "Gallery Coffee",
       programName: content.programName,
       shortDescription: content.shortDescription,
       rewardSummary: content.rewardSummary,
@@ -441,6 +504,7 @@ export async function mockTemplateGalleryApi(
       accentColor,
       secondaryColor,
       identityDataUri: artworkPreviewUrl(filled.content),
+      ...(merchantBrandLogoDataUri ? { merchantBrandLogoDataUri } : {}),
       customerWebVariant: visual.customerWebVariant as "CARD" | "MINIMAL" | "HERO",
       ...(blank
         ? {
@@ -494,7 +558,9 @@ export async function mockTemplateGalleryApi(
     };
   }
 
-  await page.route(/https?:\/\/(?:localhost:4000|api\.waflo\.app)\/v1\/.*/u, async (route) => {
+  // Isolated browser runs allocate a fresh loopback API port. Keep this fixture
+  // origin-scoped so mocked Studio pages cannot fall through to real auth.
+  await page.route(isolatedLoopbackApiRoute, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
@@ -512,7 +578,7 @@ export async function mockTemplateGalleryApi(
         memberships: [
           {
             id: "merchant-template-gallery-membership",
-            role: "OWNER",
+            role: memberRole,
             organization: {
               id: templateGalleryOrganizationId,
               name: "Gallery Coffee",
@@ -529,12 +595,33 @@ export async function mockTemplateGalleryApi(
     if (path === `/v1/organizations/${templateGalleryOrganizationId}`) {
       await fulfill(route, {
         id: templateGalleryOrganizationId,
+        name: "Gallery Coffee",
+        merchantSlug: "gallery-coffee",
         businessCategory,
+        defaultLocale: "EN",
+        timezone: "Asia/Baghdad",
+        status: "ACTIVE",
+        selectedPlan,
+        onboardingState: "COMPLETE",
+        onboardingCompletedAt: "2026-08-01T10:00:00.000Z",
+        brandLogoAsset: merchantBrandLogoDataUri
+          ? {
+              id: merchantBrandLogoAssetId,
+              category: "LOGO",
+              source: "MERCHANT_UPLOAD",
+              originalFilename: "gallery-merchant-brand.svg",
+              processingStatus: "READY",
+              contentUrl: `/v1/organizations/${templateGalleryOrganizationId}/assets/${merchantBrandLogoAssetId}/content?variant=THUMBNAIL_96`,
+            }
+          : null,
         billingProfile: {
           subscriptionStatus: billingStatus,
           trialStart: null,
           trialEnd: null,
         },
+        domains: [],
+        locations: [{ name: "Gallery Main Branch" }],
+        _count: { locations: 1, members: 1 },
       });
       return;
     }
@@ -585,6 +672,144 @@ export async function mockTemplateGalleryApi(
       });
       return;
     }
+    const walletEngagementBase = `/v1/organizations/${templateGalleryOrganizationId}/programs/created-program-id/wallet-engagement`;
+    if (path === walletEngagementBase && request.method() === "GET") {
+      await fulfill(route, {
+        program: {
+          id: "created-program-id",
+          name: String(storedDraft?.internalName ?? "Gallery Coffee Rewards"),
+          status: "PUBLISHED",
+          templateCode: String(storedDraft?.templateCode ?? "COFFEE_WARM_LATTE"),
+        },
+        capabilities: {
+          apple: {
+            configured: true,
+            manualPromotion: "PROVIDER_CONFIRMATION_REQUIRED",
+            nearbyRelevance: "AVAILABLE",
+            customNearbyText: true,
+            providerControlsNearbyText: false,
+            selectableForManualPromotion: false,
+          },
+          google: {
+            configured: true,
+            manualPromotion: "AVAILABLE",
+            nearbyRelevance: "AVAILABLE",
+            customNearbyText: false,
+            providerControlsNearbyText: true,
+            selectableForManualPromotion: true,
+          },
+        },
+        nearby: {
+          scope: "ORGANIZATION",
+          enabled: walletNearbyEnabled,
+          revision: walletNearbyRevision,
+          locationIds: walletNearbyLocationIds,
+          desiredAppleMaxDistanceMeters: 2000,
+          appleCustomTextEn: walletNearbyCustomEn,
+          appleCustomTextAr: walletNearbyCustomAr,
+          preview: {
+            en: {
+              text:
+                walletNearbyCustomEn ??
+                "You’re near Gallery Coffee. Your loyalty card is ready for your next coffee visit.",
+              vertical: "COFFEE",
+              usedCustomText: Boolean(walletNearbyCustomEn),
+            },
+            ar: {
+              text:
+                walletNearbyCustomAr ??
+                "أنت بالقرب من جاليري كوفي. بطاقة الولاء جاهزة لزيارتك القادمة.",
+              vertical: "COFFEE",
+              usedCustomText: Boolean(walletNearbyCustomAr),
+            },
+          },
+        },
+        eligibleLocations: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "Gallery Main Branch",
+            city: "Baghdad",
+            latitude: 33.3024,
+            longitude: 44.3882,
+            coordinatesConfigured: true,
+            participatesInThisCard: true,
+          },
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            name: "Gallery Riverside",
+            city: "Baghdad",
+            latitude: null,
+            longitude: null,
+            coordinatesConfigured: false,
+            participatesInThisCard: true,
+          },
+        ],
+        disclosures: {
+          policy:
+            "Nearby is a business-wide Wallet policy. Participating locations apply to each published Loyalty Card where that location participates.",
+          delivery:
+            "Apple, Google, and the customer’s device settings control whether and when a card is surfaced.",
+          apple:
+            "Apple determines when the pass becomes relevant and uses the smaller of Waflo’s requested maximum and Apple’s default distance.",
+          google: "Google Wallet determines nearby distance, dwell time, and the system reminder.",
+        },
+      });
+      return;
+    }
+    if (path === `${walletEngagementBase}/nearby` && request.method() === "PATCH") {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      walletNearbyEnabled = body.enabled === true;
+      walletNearbyLocationIds = Array.isArray(body.locationIds) ? body.locationIds.map(String) : [];
+      walletNearbyCustomEn =
+        typeof body.appleCustomTextEn === "string" ? body.appleCustomTextEn : null;
+      walletNearbyCustomAr =
+        typeof body.appleCustomTextAr === "string" ? body.appleCustomTextAr : null;
+      walletNearbyRevision += 1;
+      await fulfill(route, {
+        enabled: walletNearbyEnabled,
+        revision: walletNearbyRevision,
+        updateQueued: true,
+      });
+      return;
+    }
+    if (path === `${walletEngagementBase}/audience-estimate` && request.method() === "GET") {
+      await fulfill(route, {
+        audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+        total: 12,
+        providers: { apple: 0, google: 12 },
+        capped: false,
+        exclusions: ["NO_CURRENT_CONSENT", "NO_ELIGIBLE_WALLET_PASS"],
+      });
+      return;
+    }
+    if (path === `${walletEngagementBase}/campaigns` && request.method() === "GET") {
+      await fulfill(route, { items: walletCampaigns });
+      return;
+    }
+    if (path === `${walletEngagementBase}/campaigns` && request.method() === "POST") {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      const id = `campaign-${walletCampaigns.length + 1}`;
+      walletCampaigns.unshift({
+        id,
+        createdAt: "2026-08-12T09:00:00.000Z",
+        scheduledAt: "2026-08-12T09:00:00.000Z",
+        title: body.title,
+        body: body.body,
+        locale: body.locale,
+        providers: ["GOOGLE"],
+        audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+        status: "PENDING",
+        counts: { eligible: 12, queued: 0, succeeded: 0, skipped: 0, failed: 0 },
+        creator: "Gallery Merchant",
+      });
+      await fulfill(route, {
+        id,
+        status: "PENDING",
+        scheduledAt: "2026-08-12T09:00:00.000Z",
+        replayed: false,
+      });
+      return;
+    }
     if (
       path ===
         `/v1/organizations/${templateGalleryOrganizationId}/programs/created-program-id/versions` &&
@@ -602,6 +827,8 @@ export async function mockTemplateGalleryApi(
         await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
         return;
       }
+      if (studioLoadDelayMs > 0)
+        await new Promise((resolve) => setTimeout(resolve, studioLoadDelayMs));
       await fulfill(route, detail);
       return;
     }
@@ -764,8 +991,26 @@ export async function mockTemplateGalleryApi(
     const assetContentMatch = path.match(/\/assets\/([^/]+)\/content$/u);
     if (assetContentMatch) {
       const artwork = currentArtwork();
+      const assetId = assetContentMatch[1];
       const content =
-        assetContentMatch[1] === filledAssetId ? artwork?.filled.content : artwork?.empty.content;
+        assetId === filledAssetId
+          ? artwork?.filled.content
+          : assetId === emptyAssetId
+            ? artwork?.empty.content
+            : undefined;
+      if (assetId === merchantBrandLogoAssetId && merchantBrandLogoDataUri) {
+        const [metadata, encoded] = merchantBrandLogoDataUri.split(",", 2);
+        await route.fulfill({
+          status: 200,
+          contentType: metadata?.includes("image/svg+xml") ? "image/svg+xml" : "image/png",
+          headers: {
+            "access-control-allow-origin": request.headers().origin ?? "http://localhost:3001",
+            "access-control-allow-credentials": "true",
+          },
+          body: Buffer.from(encoded ?? "", "base64"),
+        });
+        return;
+      }
       if (!content) {
         await route.fulfill({ status: 404, contentType: "text/plain", body: "Not found" });
         return;

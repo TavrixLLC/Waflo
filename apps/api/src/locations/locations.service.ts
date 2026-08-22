@@ -8,6 +8,7 @@ import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { validateBusinessCoordinate } from "./location-coordinate.js";
 
 function toPlanCode(plan: "STARTER" | "GROWTH" | "SCALE"): "starter" | "growth" | "scale" {
   return plan.toLocaleLowerCase("en-US") as "starter" | "growth" | "scale";
@@ -21,6 +22,10 @@ export class LocationsService {
     private readonly environment: EnvironmentService,
     private readonly audit: AuditService,
   ) {}
+
+  resolveCoordinate(_userId: string, latitude: number, longitude: number) {
+    return validateBusinessCoordinate(latitude, longitude);
+  }
 
   async list(userId: string, organizationId: string, cursor?: string) {
     const membership = await this.tenant.requireMembership(
@@ -70,6 +75,7 @@ export class LocationsService {
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "locations.create");
+    const coordinate = validateBusinessCoordinate(input.latitude, input.longitude);
     const location = await withOrganizationInvariantLock(
       this.prisma.client,
       organizationId,
@@ -120,7 +126,9 @@ export class LocationsService {
             postalCode: input.postalCode ?? null,
             countryCode: input.countryCode ?? null,
             phone: input.phone ?? null,
-            timezone: input.timezone ?? organization.timezone,
+            timezone: coordinate.timezone,
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
           },
         });
       },
@@ -153,11 +161,18 @@ export class LocationsService {
       countryCode?: string | undefined;
       phone?: string | undefined;
       timezone?: string | undefined;
+      latitude?: number | undefined;
+      longitude?: number | undefined;
+      coordinatesConfirmed?: true | undefined;
     },
     request: WafloRequest,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "locations.manage");
     await this.get(userId, organizationId, locationId);
+    const coordinate =
+      input.latitude !== undefined && input.longitude !== undefined
+        ? validateBusinessCoordinate(input.latitude, input.longitude)
+        : null;
     const location = await this.prisma.client.location.update({
       where: { id: locationId },
       data: {
@@ -169,9 +184,18 @@ export class LocationsService {
         ...(input.postalCode !== undefined ? { postalCode: input.postalCode } : {}),
         ...(input.countryCode !== undefined ? { countryCode: input.countryCode } : {}),
         ...(input.phone !== undefined ? { phone: input.phone } : {}),
-        ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(coordinate
+          ? {
+              timezone: coordinate.timezone,
+              latitude: coordinate.latitude,
+              longitude: coordinate.longitude,
+            }
+          : {}),
       },
     });
+    if (coordinate) {
+      await this.queueNearbyLocationRefresh(organizationId, locationId, location.updatedAt);
+    }
     await this.audit.record(
       {
         organizationId,
@@ -237,6 +261,13 @@ export class LocationsService {
       },
       request,
     );
+    await this.removeArchivedNearbyLocation(
+      userId,
+      organizationId,
+      locationId,
+      updated.updatedAt,
+      request,
+    );
     return updated;
   }
 
@@ -264,6 +295,13 @@ export class LocationsService {
           throw new AppError("LOCATION_NOT_FOUND", "Location not found.", HttpStatus.NOT_FOUND);
         }
         if (location.status === "ACTIVE") return location;
+        if (location.latitude === null || location.longitude === null) {
+          throw new AppError(
+            "LOCATION_MAP_CONFIRMATION_REQUIRED",
+            "Confirm this location on the map before restoring it.",
+            HttpStatus.CONFLICT,
+          );
+        }
         const activeCount = await transaction.location.count({
           where: { organizationId, status: "ACTIVE" },
         });
@@ -303,5 +341,113 @@ export class LocationsService {
       request,
     );
     return updated;
+  }
+
+  private async queueNearbyLocationRefresh(
+    organizationId: string,
+    locationId: string,
+    changedAt: Date,
+  ) {
+    const selection = await this.prisma.client.walletNearbyLocation.findFirst({
+      where: { locationId, configuration: { organizationId, enabled: true } },
+    });
+    if (!selection) return;
+    const programs = await this.prisma.client.loyaltyProgram.findMany({
+      where: {
+        organizationId,
+        OR: [
+          { walletBindings: { some: {} } },
+          { memberships: { some: { walletPassInstances: { some: {} } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    for (const program of programs) {
+      const programId = program.id;
+      const fingerprint = `${locationId}:${changedAt.toISOString()}`;
+      await this.prisma.client.programWalletSyncJob.upsert({
+        where: { idempotencyKey: `program-wallet-nearby-location:${programId}:${fingerprint}` },
+        create: {
+          organizationId,
+          programId,
+          action: "update",
+          reason: "NEARBY_RELEVANCE_CHANGED",
+          commandType: "UPDATE",
+          idempotencyKey: `program-wallet-nearby-location:${programId}:${fingerprint}`,
+          batchSize: 500,
+        },
+        update: {},
+      });
+    }
+  }
+
+  private async removeArchivedNearbyLocation(
+    userId: string,
+    organizationId: string,
+    locationId: string,
+    changedAt: Date,
+    request: WafloRequest,
+  ) {
+    const configuration = await this.prisma.client.walletNearbyConfiguration.findFirst({
+      where: { organizationId, locations: { some: { locationId } } },
+      select: { id: true, revision: true },
+    });
+    if (configuration) {
+      await this.prisma.client.$transaction(async (transaction) => {
+        await transaction.walletNearbyLocation.deleteMany({
+          where: { configurationId: configuration.id, locationId },
+        });
+        const remainingLocations = await transaction.walletNearbyLocation.count({
+          where: { configurationId: configuration.id },
+        });
+        await transaction.walletNearbyConfiguration.update({
+          where: { id: configuration.id },
+          data: {
+            revision: { increment: 1 },
+            ...(remainingLocations === 0 ? { enabled: false } : {}),
+          },
+        });
+        const programs = await transaction.loyaltyProgram.findMany({
+          where: {
+            organizationId,
+            OR: [
+              { walletBindings: { some: {} } },
+              { memberships: { some: { walletPassInstances: { some: {} } } } },
+            ],
+          },
+          select: { id: true },
+        });
+        await transaction.programWalletSyncJob.createMany({
+          data: programs.map(({ id: programId }) => ({
+            organizationId,
+            programId,
+            action: "update",
+            reason: "NEARBY_RELEVANCE_CHANGED",
+            commandType: "UPDATE",
+            idempotencyKey: `program-wallet-nearby-archive:${programId}:${changedAt.toISOString()}`,
+            batchSize: 500,
+          })),
+          skipDuplicates: true,
+        });
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "wallet.nearby_location_selection_changed",
+            targetType: "wallet_nearby_configuration",
+            targetId: configuration.id,
+            metadata: {
+              scope: "ORGANIZATION",
+              affectedProgramIds: programs.map((program) => program.id),
+              removedLocationId: locationId,
+              nearbyDisabled: remainingLocations === 0,
+              revision: configuration.revision + 1,
+            },
+          },
+          request,
+        );
+      });
+    }
   }
 }

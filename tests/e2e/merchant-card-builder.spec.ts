@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
@@ -36,6 +35,69 @@ async function enterBuilder(page: Page, templateName = "Classic Roast"): Promise
   ).toBeVisible();
 }
 
+async function addCardLanguage(page: Page, englishName: string): Promise<void> {
+  const picker = page.getByRole("combobox", { name: "Add language" });
+  await picker.fill(englishName);
+  await page.getByRole("option", { name: new RegExp(`^${englishName}\\b`, "u") }).click();
+  await expect(
+    page.getByRole("list", { name: "Enabled languages" }).getByText(englishName, { exact: true }),
+  ).toBeVisible();
+}
+
+test("uses the organization brand as the unmirrored issuer mark in every Builder preview", async ({
+  page,
+}) => {
+  const merchantBrandLogoDataUri = `data:image/svg+xml;base64,${Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" rx="20" fill="#125B72"/><path d="M26 28h44L48 70z" fill="#F8E3B1"/></svg>',
+    "utf8",
+  ).toString("base64")}`;
+  const previews: Array<{ profile: string; locale: string; svg: string }> = [];
+  await mockTemplateGalleryApi(page, {
+    merchantBrandLogoDataUri,
+    onBuilderPreview: (profile, locale, preview) => previews.push({ ...preview, profile, locale }),
+  });
+  await enterBuilder(page);
+
+  for (const [tab, profile] of [
+    ["Customer", "CUSTOMER_WEB"],
+    ["Apple Wallet", "APPLE_WALLET"],
+    ["Google Wallet", "GOOGLE_WALLET"],
+  ] as const) {
+    await page.getByRole("tab", { name: tab }).click();
+    await expect
+      .poll(() => previews.findLast((preview) => preview.profile === profile)?.svg ?? "")
+      .toContain(merchantBrandLogoDataUri);
+  }
+
+  const previewCountBeforeArabicInterface = previews.length;
+  await page.goto("/ar/dashboard/programs/created-program-id/edit");
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  await page.getByRole("tab", { name: /Apple Wallet/u }).click();
+  await expect.poll(() => previews.length).toBeGreaterThan(previewCountBeforeArabicInterface);
+  await expect
+    .poll(
+      () =>
+        previews.findLast(
+          (preview) => preview.profile === "APPLE_WALLET" && preview.locale === "en",
+        )?.svg ?? "",
+    )
+    .toContain(merchantBrandLogoDataUri);
+  expect(previews.findLast((preview) => preview.profile === "APPLE_WALLET")?.locale).toBe("en");
+
+  for (const preview of previews) {
+    if (!preview.svg.includes(merchantBrandLogoDataUri)) continue;
+    expect(preview.svg).toContain('data-issuer-brand="organization"');
+    expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
+  }
+  expect(
+    await page
+      .locator(".builder-preview-canvas img")
+      .evaluateAll((images) =>
+        images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
+      ),
+  ).toBe(true);
+});
+
 test("builds one continuously saved card with combined languages and lazy truthful previews", async ({
   page,
 }) => {
@@ -56,12 +118,12 @@ test("builds one continuously saved card with combined languages and lazy truthf
   await expect(page.locator(".builder-preview-desktop")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Card builder sections" })).toBeVisible();
   for (const section of [
+    "Languages",
     "Basics",
     "Reward",
-    "Languages",
     "Locations",
     "Appearance",
-    "Review & test",
+    "Review & validate",
     "Advanced settings",
   ]) {
     await expect(
@@ -69,19 +131,39 @@ test("builds one continuously saved card with combined languages and lazy truthf
     ).toBeVisible();
   }
 
+  await addCardLanguage(page, "Arabic");
+  await expect
+    .poll(() =>
+      patchBodies.some(
+        (body) => Array.isArray(body.enabledLocales) && body.enabledLocales.includes("ar"),
+      ),
+    )
+    .toBe(true);
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Exact stamp goal").fill("10");
+  await expect.poll(() => patchBodies.at(-1)?.requiredStampCount).toBe(10);
   await page
     .getByRole("button", { name: /^Reward/u })
     .first()
     .click();
+  await page.getByRole("tab", { name: /English/u }).click();
   await page.getByLabel("What does the customer get?").fill("Free house roast");
-  await expect.poll(() => patchBodies.length).toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(
+      () =>
+        (patchBodies.at(-1)?.translations as Record<string, Record<string, unknown>> | undefined)
+          ?.en?.rewardSummary ?? "",
+    )
+    .toBe("Free house roast");
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   expect(createBodies).toHaveLength(1);
   expect(patchBodies.at(-1)).toMatchObject({
     requiredStampCount: 10,
     templateCode: "COFFEE",
-    revision: 1,
+    revision: 3,
     translations: { en: { rewardSummary: "Free house roast" } },
   });
   const accessibility = await new AxeBuilder({ page }).analyze();
@@ -123,6 +205,10 @@ test("builds one continuously saved card with combined languages and lazy truthf
     .toBe(true);
 
   await page.reload();
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await expect(page.getByLabel("Exact stamp goal")).toHaveValue("10");
   await page
     .getByRole("button", { name: /^Reward/u })
@@ -138,6 +224,10 @@ test("builds one continuously saved card with combined languages and lazy truthf
   await expect(
     page.getByRole("heading", { level: 1, name: "Customize your loyalty card" }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await expect(page.getByLabel("Exact stamp goal")).toHaveValue("10");
   expect(createBodies).toHaveLength(1);
 });
@@ -253,6 +343,10 @@ test("uses an explicit Wallet loading state and preserves the last good preview"
   await expect(preview.locator(".builder-preview-empty")).toContainText("Preparing your preview");
   await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
 
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("Updated coffee card");
   await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
   await expect(preview.locator(".builder-preview-status")).toBeVisible();
@@ -264,6 +358,10 @@ test("gives each customer field one owner and presents current built-in artwork"
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);
 
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await expect(page.getByLabel("Card name in your dashboard")).toHaveCount(1);
   await expect(page.getByLabel(/Customer-facing card title/u)).toHaveCount(0);
   await page
@@ -275,10 +373,11 @@ test("gives each customer field one owner and presents current built-in artwork"
     .getByRole("button", { name: /^Languages/u })
     .first()
     .click();
+  await addCardLanguage(page, "Arabic");
   await expect(page.getByLabel("Card name")).toHaveCount(1);
   await expect(page.getByLabel("Reward summary")).toHaveCount(0);
   await page.getByRole("tab", { name: /العربية/u }).click();
-  const arabicTitle = page.getByLabel("اسم البطاقة");
+  const arabicTitle = page.locator('.builder-language-panel[lang="ar"] input').first();
   await arabicTitle.fill("بطاقة قهوة عربية طويلة للتحقق من اتجاه النص داخل الواجهة الإنجليزية");
   await expect(arabicTitle).toHaveAttribute("dir", "rtl");
   await expect(arabicTitle).toHaveAttribute("lang", "ar");
@@ -307,6 +406,10 @@ test("gives each customer field one owner and presents current built-in artwork"
 test("keeps readiness navigation and server validation on one status truth", async ({ page }) => {
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("x");
   await page.getByRole("button", { name: "Review card" }).click();
   const readiness = page.locator(".builder-readiness-list");
@@ -333,6 +436,10 @@ test("surfaces save failure and revision conflict without silently overwriting",
   });
   await enterBuilder(page);
 
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("Conflict-safe card");
   await expect(page.getByText("Save failed", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
@@ -347,9 +454,7 @@ test("surfaces save failure and revision conflict without silently overwriting",
   expect(patchBodies.map((body) => body.revision)).toEqual([1, 1, 2]);
 });
 
-test("turns review into readiness and isolated Test Mode rather than a field dump", async ({
-  page,
-}) => {
+test("turns review into automatic readiness and continues directly to Studio", async ({ page }) => {
   const observedApiPaths: string[] = [];
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
@@ -365,15 +470,10 @@ test("turns review into readiness and isolated Test Mode rather than a field dum
   await page.getByRole("button", { name: "Review card" }).click();
   await expect(page.getByText("Readiness checks passed", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/Publishing remains in Studio/u)).toBeVisible();
-  await page.getByRole("button", { name: "Start Test Mode" }).click();
-  await expect(page.locator(".builder-test-meter strong")).toHaveText("0/8");
-  await page.getByRole("button", { name: "Add one stamp" }).click();
-  await expect(page.locator(".builder-test-meter strong")).toHaveText("1/8");
-
-  expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(true);
-  expect(
-    observedApiPaths.some((path) => /memberships|ledger|reward-entitlements/u.test(path)),
-  ).toBe(false);
+  await expect(page.getByRole("button", { name: "Start Test Mode" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Continue to Studio" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/programs\/created-program-id$/u);
+  expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(false);
 });
 
 test("blocks a Starter merchant at the real card limit before creating an impossible draft", async ({
@@ -414,6 +514,8 @@ test("keeps Arabic intentional and adapts from split desktop to a mobile preview
 }) => {
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);
+  await addCardLanguage(page, "Arabic");
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.goto("/ar/dashboard/programs/created-program-id/edit");
 
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
@@ -421,7 +523,7 @@ test("keeps Arabic intentional and adapts from split desktop to a mobile preview
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   await page.getByRole("button", { name: /اللغات/u }).click();
   await page.getByRole("tab", { name: /English/u }).click();
-  const englishTitle = page.getByLabel("Card name");
+  const englishTitle = page.locator('.builder-language-panel[lang="en"] input').first();
   await englishTitle.fill(
     "Classic Roast loyalty card with a deliberately long English customer-facing name",
   );
@@ -476,10 +578,7 @@ test("reserves sticky-footer space and keeps active section navigation visible",
     await expect(activeNavigation).toHaveAttribute("aria-current", "page");
     await activeNavigation.scrollIntoViewIfNeeded();
     await expect(activeNavigation).toBeInViewport();
-    await page
-      .locator(".builder-editor")
-      .getByRole("button", { name: "Start Test Mode" })
-      .scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Continue to Studio" }).scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollBy(0, 1_000));
     const geometry = await page.evaluate(() => {
       const footer = document.querySelector<HTMLElement>(".builder-footer");
@@ -551,6 +650,10 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
     onBuilderPreview: (profile, locale) => previewRequests.push([profile, locale]),
   });
   await enterBuilder(page);
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await expect.poll(() => previewRequests.length).toBeGreaterThan(0);
   previewRequests.length = 0;
 
@@ -565,6 +668,7 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
   await expect.poll(() => patchBodies.length).toBe(1);
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await expect.poll(() => previewRequests.length).toBe(1);
+  expect(patchBodies).toHaveLength(1);
   expect(previewRequests[0]?.[0]).toBe("CUSTOMER_WEB");
   expect(editingMs).toBeGreaterThanOrEqual(58_000);
   expect(editingMs).toBeLessThan(90_000);
@@ -575,11 +679,13 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
 
 test("captures the P3 builder journey and old-wizard comparison evidence", async ({ page }) => {
   test.setTimeout(300_000);
-  const evidenceDirectory = "artifacts/uiux/create-card-p3";
+  const evidenceDirectory = "test-results/evidence/uiux/create-card-p3";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { patchDelayMs: 1_200 });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await enterBuilder(page);
+  await addCardLanguage(page, "Arabic");
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 
   await page.screenshot({
     path: `${evidenceDirectory}/01-builder-en-desktop.png`,
@@ -590,6 +696,10 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
     path: `${evidenceDirectory}/03-coffee-template-builder.png`,
     animations: "disabled",
   });
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.locator(".builder-editor").screenshot({
     path: `${evidenceDirectory}/06-basics.png`,
     animations: "disabled",
@@ -680,6 +790,7 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
   });
 
   await page.getByLabel("Card name in your dashboard").fill("");
+  await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Review card" }).click();
   await expect(page.getByText("Needs attention", { exact: true }).first()).toBeVisible();
@@ -693,6 +804,7 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
     .first()
     .click();
   await page.getByLabel("Card name in your dashboard").fill("P3 evidence card");
+  await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Review card" }).click();
   await expect(page.getByText("Readiness checks passed", { exact: true }).first()).toBeVisible();
@@ -823,12 +935,13 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
 
 test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   test.setTimeout(240_000);
-  const evidenceDirectory = "artifacts/uiux/create-card-p3-repair-round1";
-  const previousCustomerPreview = "artifacts/uiux/create-card-p3/12-customer-live-preview.png";
+  const evidenceDirectory = "test-results/evidence/uiux/create-card-p3-repair-round1";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { patchDelayMs: 350 });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await enterBuilder(page);
+  await addCardLanguage(page, "Arabic");
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 
   const preview = page.locator(".builder-preview-desktop");
   const slider = preview.locator('input[type="range"]');
@@ -906,14 +1019,14 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   });
 
   await page.setViewportSize({ width: 1024, height: 860 });
-  await page.getByRole("button", { name: "Start Test Mode" }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Continue to Studio" }).scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 1_000));
   await page.screenshot({
     path: `${evidenceDirectory}/09-tablet-no-overlap.png`,
     animations: "disabled",
   });
   await page.setViewportSize({ width: 390, height: 780 });
-  await page.getByRole("button", { name: "Start Test Mode" }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Continue to Studio" }).scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 1_000));
   await page.screenshot({
     path: `${evidenceDirectory}/10-mobile-390-no-overlap.png`,
@@ -924,7 +1037,7 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: /اللغات/u }).click();
   await page.getByRole("tab", { name: "English" }).click();
-  const mixedDirectionTitle = page.getByLabel("Card name");
+  const mixedDirectionTitle = page.locator('.builder-language-panel[lang="en"] input').first();
   await mixedDirectionTitle.fill(
     "Classic Roast loyalty card with a long English name inside the Arabic interface",
   );
@@ -973,33 +1086,29 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
     .png()
     .toFile(`${evidenceDirectory}/13-wallet-mapping-evidence.png`);
 
-  const after = await sharp(`${evidenceDirectory}/02-customer-preview-0-of-8.png`)
+  const currentPreview = await sharp(`${evidenceDirectory}/02-customer-preview-0-of-8.png`)
     .resize({ width: 600 })
     .png()
     .toBuffer();
-  const beforeSource = existsSync(previousCustomerPreview)
-    ? previousCustomerPreview
-    : `${evidenceDirectory}/02-customer-preview-0-of-8.png`;
-  const before = await sharp(beforeSource).resize({ width: 600 }).png().toBuffer();
-  const [beforeMetadata, afterMetadata] = await Promise.all([
-    sharp(before).metadata(),
-    sharp(after).metadata(),
-  ]);
-  const comparisonHeight = Math.max(beforeMetadata.height ?? 0, afterMetadata.height ?? 0);
+  const currentMetadata = await sharp(currentPreview).metadata();
   await sharp({
-    create: { width: 1240, height: comparisonHeight + 72, channels: 4, background: "#FCFBFA" },
+    create: {
+      width: 640,
+      height: (currentMetadata.height ?? 0) + 72,
+      channels: 4,
+      background: "#FCFBFA",
+    },
   })
     .composite([
       {
         input: Buffer.from(
-          '<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="72"><text x="20" y="44" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#241916">Before · sparse debug fixture</text><text x="640" y="44" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#241916">After · shared renderer truth</text></svg>',
+          '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="72"><text x="20" y="44" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#241916">Current · shared renderer truth</text></svg>',
         ),
         left: 0,
         top: 0,
       },
-      { input: before, left: 20, top: 72 },
-      { input: after, left: 640, top: 72 },
+      { input: currentPreview, left: 20, top: 72 },
     ])
     .png()
-    .toFile(`${evidenceDirectory}/14-before-after-repair-contact-sheet.png`);
+    .toFile(`${evidenceDirectory}/14-current-repair-contact-sheet.png`);
 });

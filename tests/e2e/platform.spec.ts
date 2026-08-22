@@ -2,16 +2,17 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-w2-round-5/screenshots";
+const screenshots = "test-results/evidence/handoff-w2-round-5/screenshots";
 const runId = randomUUID().slice(0, 8);
 const ownerEmail = `browser-owner-${runId}@waflo.local`;
-const staffEmail = `browser-staff-${runId}@waflo.local`;
+const localStaffName = "Layla Abbas";
 const resetEmail = `browser-reset-${runId}@waflo.local`;
 const initialPassword = "Browser Waflo 2026!";
 const changedPassword = "Browser Waflo Changed 2026!";
 const resetPassword = "Browser Waflo Reset 2026!";
 const initialSlug = `browser-${runId}`;
 const changedSlug = `flow-${runId}`;
+const apiOrigin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 let browserOrganizationId = "";
 
 interface MailpitAddress {
@@ -108,6 +109,52 @@ async function login(page: Page, email: string, password: string): Promise<void>
   await expect(page).toHaveURL(/\/en\/(?:dashboard(?:\/|$)|onboarding\/)/);
 }
 
+async function csrfToken(page: Page): Promise<string> {
+  const response = await page.request.get(`${apiOrigin}/v1/auth/csrf`);
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as { data: { csrfToken: string } }).data.csrfToken;
+}
+
+async function postOrganizationWithExactLocation(
+  page: Page,
+  name: string,
+  slug: string,
+  locationName: string,
+): Promise<string> {
+  const token = await csrfToken(page);
+  const response = await page.request.post(`${apiOrigin}/v1/organizations`, {
+    headers: { origin: "http://localhost:3001", "x-csrf-token": token },
+    data: {
+      name,
+      merchantSlug: slug,
+      businessCategory: "Cafe",
+      defaultLocale: "en",
+      timezone: "UTC",
+      selectedPlan: "starter",
+      commandId: randomUUID(),
+      firstLocation: {
+        name: locationName,
+        addressLine1: "Main Street, Baghdad, Iraq",
+        city: "Baghdad",
+        countryCode: "IQ",
+        timezone: "UTC",
+        latitude: 33.3152,
+        longitude: 44.3661,
+        coordinatesConfirmed: true,
+      },
+    },
+  });
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as { data: { id: string } }).data.id;
+}
+
+async function switchOrganization(page: Page, organizationName: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Choose organization" });
+  await trigger.click();
+  await page.getByRole("option", { name: organizationName, exact: true }).click();
+  await expect(trigger).toContainText(organizationName);
+}
+
 async function chooseGalleryTemplate(page: Page, templateName: string): Promise<void> {
   await expect(
     page.getByRole("heading", { level: 1, name: "Choose a starting design" }),
@@ -139,6 +186,7 @@ async function finishQuickWizard(page: Page, name: string): Promise<void> {
     await expect(builderHeading).toBeVisible();
   }
   if ((await builderHeading.count()) > 0) {
+    await page.getByRole("button", { name: /^Basics/u }).click();
     await page.getByLabel("Card name in your dashboard").fill(name);
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Review card" }).click();
@@ -166,7 +214,9 @@ test.describe
   .serial("Waflo W2 browser flows", () => {
     test("marketing pages render in English and Arabic with real RTL", async ({ page }) => {
       await page.goto("http://localhost:3000/en");
-      await expect(page.getByRole("heading", { level: 1 })).toContainText("Turn every visit");
+      await expect(page.getByRole("heading", { level: 1 })).toContainText(
+        "Turn every visit into a reason to return.",
+      );
       await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
       await screenshot(page, "01-marketing-home-en");
 
@@ -176,15 +226,64 @@ test.describe
       await screenshot(page, "02-marketing-home-ar");
 
       await page.goto("http://localhost:3000/en/pricing");
-      await expect(page.getByText("$29")).toBeVisible();
-      await expect(page.getByText("$69")).toBeVisible();
-      await expect(page.getByText("$129")).toBeVisible();
+      await expect(page.locator(".wf-plan-card__price")).toHaveText([
+        /\$24\.17\/month/u,
+        /\$57\.50\/month/u,
+        /\$107\.50\/month/u,
+      ]);
+      await expect(page.locator(".wf-plan-card__cadence")).toHaveText([
+        /\$290\.00 billed yearly/u,
+        /\$690\.00 billed yearly/u,
+        /\$1290\.00 billed yearly/u,
+      ]);
+      await expect(page.getByText(/Save 8\.33%/u).first()).toBeVisible();
+      await expect(page.getByText(/2 months free · Save 16\.67%/u).first()).toBeVisible();
       await screenshot(page, "03-pricing");
+
+      await page.goto("http://localhost:3000/en/refunds");
+      await expect(
+        page.getByRole("heading", { name: "Waflo Billing & Refund Policy" }),
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          "Stops renewal according to the subscription state; it does not automatically reverse a past payment.",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await page.goto("http://localhost:3000/ar/refunds");
+      await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
     });
 
-    test("registers, opens the Mailpit verification action, and completes onboarding", async ({
-      page,
-    }) => {
+    test("keeps signup state while Terms and Privacy open safely in new tabs", async ({ page }) => {
+      await page.goto("/en/signup");
+      await page.locator('input[name="displayName"]').fill("Legal State Preserved");
+      await page.locator('input[name="email"]').fill(`legal-state-${runId}@waflo.local`);
+      await expect(page.locator('input[name="terms"]')).not.toBeChecked();
+      await expect(page.locator('input[name="privacy"]')).not.toBeChecked();
+
+      for (const [name, path] of [
+        ["Terms of Service", "/en/terms"],
+        ["Privacy Policy", "/en/privacy"],
+      ] as const) {
+        const link = page.getByRole("link", { name });
+        await expect(link).toHaveAttribute("target", "_blank");
+        await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+        const opened = page.context().waitForEvent("page");
+        await link.click();
+        const legalPage = await opened;
+        await legalPage.waitForLoadState("domcontentloaded");
+        await expect(legalPage).toHaveURL(new RegExp(`${path}$`));
+        await legalPage.close();
+        await expect(page.locator('input[name="displayName"]')).toHaveValue(
+          "Legal State Preserved",
+        );
+        await expect(page.locator('input[name="email"]')).toHaveValue(
+          `legal-state-${runId}@waflo.local`,
+        );
+      }
+    });
+
+    test("registers, verifies email, and reaches payment-gated onboarding", async ({ page }) => {
       await page.goto("/en/signup");
       await screenshot(page, "04-signup");
       await signup(page, ownerEmail, initialPassword);
@@ -193,7 +292,7 @@ test.describe
 
       await verifyLatestEmail(page, ownerEmail);
       await screenshot(page, "06-email-verification-complete");
-      await page.getByRole("button", { name: "Continue to sign in" }).click();
+      await page.getByRole("link", { name: "Continue to sign in" }).click();
       await expect(page).toHaveURL(/\/en\/login/);
       await screenshot(page, "07-login");
 
@@ -206,21 +305,21 @@ test.describe
       await page.locator('input[name="name"]').fill(`Browser Coffee ${runId}`);
       await page.locator('input[name="slug"]').fill(initialSlug);
       await expect(page.getByText("URL is available")).toBeVisible();
-      await page.getByRole("button", { name: "Save and continue" }).click();
-      await expect(page).toHaveURL(/\/en\/onboarding\/location/);
-      await screenshot(page, "09-onboarding-location");
+      await page.locator('input[name="locationName"]').fill("Browser Main Branch");
+      await expect(page.getByText("The map is unavailable right now")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Save and continue" })).toBeDisabled();
 
-      await page.locator('input[name="name"]').fill("Browser Main Branch");
-      await page.locator('input[name="address"]').fill("Main Street");
-      await page.locator('input[name="city"]').fill("Baghdad");
-      await page.getByRole("button", { name: "Create location and finish setup" }).click();
-      await expect(page).toHaveURL(/\/en\/onboarding\/complete/);
-      await expect(page.getByText("Not started", { exact: true })).toBeVisible();
-      await expect(page.getByText("no payment was taken")).toBeVisible();
-      browserOrganizationId = new URL(page.url()).searchParams.get("organization") ?? "";
+      browserOrganizationId = await postOrganizationWithExactLocation(
+        page,
+        `Browser Coffee ${runId}`,
+        initialSlug,
+        "Browser Main Branch",
+      );
+      await page.goto(`/en/onboarding/business?organization=${browserOrganizationId}`);
+      await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
       expect(browserOrganizationId).toBeTruthy();
       const organizationResponse = await page.request.get(
-        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
+        `${apiOrigin}/v1/organizations/${browserOrganizationId}`,
       );
       const organizationEnvelope = (await organizationResponse.json()) as {
         data: {
@@ -236,21 +335,72 @@ test.describe
         trialStart: null,
         trialEnd: null,
       });
-      await screenshot(page, "10-onboarding-completion");
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(page.getByRole("heading", { name: "Billing details" })).toBeVisible();
+      await page.locator('input[name="billingName"]').fill(`Browser Coffee ${runId}`);
+      await page.locator('input[name="billingEmail"]').fill(ownerEmail);
+      await page.locator('input[name="addressLine1"]').fill("Main Street");
+      await page.locator('input[name="billingCity"]').fill("Baghdad");
+      await screenshot(page, "10-onboarding-billing-details");
 
-      await page.getByRole("button", { name: "Continue to dashboard" }).click();
-      await expect(page).toHaveURL(/\/en\/dashboard/);
-      await expect(page.getByText("Not started yet")).toBeVisible();
-      await expect(page.getByText("pending_activation")).toBeVisible();
-      await expect(page.getByText(/15-day free trial has not started/)).toBeVisible();
-      await expect(page.getByText(/no fabricated loyalty metrics/i)).toBeVisible();
+      await page.getByRole("button", { name: "Continue to payment" }).click();
+      await expect(
+        page.getByText(
+          "Billing setup is not configured right now. Try again or contact Waflo support.",
+        ),
+      ).toBeVisible();
+      const paymentGatedOrganizationResponse = await page.request.get(
+        `${apiOrigin}/v1/organizations/${browserOrganizationId}`,
+      );
+      const paymentGatedOrganizationEnvelope = (await paymentGatedOrganizationResponse.json()) as {
+        data: {
+          billingProfile: {
+            subscriptionStatus: string;
+            trialStart: string | null;
+            trialEnd: string | null;
+          };
+        };
+      };
+      expect(paymentGatedOrganizationEnvelope.data.billingProfile).toMatchObject({
+        subscriptionStatus: "PENDING_ACTIVATION",
+        trialStart: null,
+        trialEnd: null,
+      });
+
+      // The browser CI deliberately has no Stripe credentials. Downstream
+      // loyalty lifecycle tests use an explicit existing-trial fixture; the
+      // product path above remains payment-gated and is covered end-to-end at
+      // the service boundary by the embedded-trial concurrency suite.
+      const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
+      const database = createPrismaClient(
+        process.env.DATABASE_URL ??
+          "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
+      );
+      const trialStart = new Date();
+      const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      try {
+        await database.$transaction([
+          database.organization.update({
+            where: { id: browserOrganizationId },
+            data: { onboardingState: "COMPLETE", onboardingCompletedAt: trialStart },
+          }),
+          database.organizationBillingProfile.update({
+            where: { organizationId: browserOrganizationId },
+            data: { subscriptionStatus: "TRIALING", trialStart, trialEnd },
+          }),
+        ]);
+      } finally {
+        await database.$disconnect();
+      }
+
+      await page.goto("/en/dashboard");
+      await expect(page.getByText("Free trial", { exact: true })).toBeVisible();
+      await expect(page.getByText(/Choose a plan and add a payment method/)).toHaveCount(0);
       await expect(page.getByText(/stamps issued/i)).toHaveCount(0);
       await screenshot(page, "11-dashboard-en");
     });
 
-    test("completes Quick Mode, autosaves Studio, validates, tests, and publishes", async ({
-      page,
-    }) => {
+    test("completes Quick Mode, autosaves Studio, validates, and publishes", async ({ page }) => {
       await login(page, ownerEmail, initialPassword);
       await page.goto("/en/dashboard/programs");
       await expect(
@@ -258,13 +408,11 @@ test.describe
       ).toBeVisible();
       await page.getByRole("button", { name: "Create loyalty card" }).click();
       await chooseGalleryTemplate(page, "Simple Visits");
-      await page.getByLabel("Card name in your dashboard").fill("Browser Studio Rewards Updated");
       await page
-        .getByRole("button", { name: /^Languages/u })
+        .getByRole("button", { name: /^Basics/u })
         .first()
         .click();
-      await page.getByRole("tab", { name: /العربية/u }).click();
-      await page.getByLabel("اسم البطاقة").fill("مكافآت استوديو المتصفح");
+      await page.getByLabel("Card name in your dashboard").fill("Browser Studio Rewards Updated");
       await expect(page.getByText("Saved", { exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Review card" }).click();
       await expect(
@@ -275,7 +423,9 @@ test.describe
       await expect(
         page.getByRole("heading", { level: 1, name: "Browser Studio Rewards Updated" }),
       ).toBeVisible();
-      await expect(page.locator(".studio-section-nav button")).toHaveCount(6);
+      await expect(
+        page.getByRole("navigation", { name: "Studio sections" }).getByRole("button"),
+      ).toHaveCount(6);
       await expect(page.locator(".studio-device-frame img")).toBeVisible();
       await screenshot(page, "23-loyalty-studio-customer-preview");
       const previewProgress = page.locator(".studio-preview-panel input[type=range]");
@@ -306,25 +456,14 @@ test.describe
         .filter({ hasText: "Browser Studio Rewards Updated" });
       await englishProgramCard.getByRole("button", { name: "Open card" }).click();
 
-      await page.locator(".studio-section-nav").getByRole("button", { name: /^Test/u }).click();
-      await page.getByRole("button", { name: "Start demo customer" }).click();
-      await screenshot(page, "44-r4-test-mode-cycle-start-empty");
-      await page.getByRole("button", { name: "+5 stamps" }).click();
-      await page.getByRole("button", { name: "Correct latest stamp" }).click();
-      await expect(page.locator(".test-mode-meter")).toContainText("4 / 8");
-      for (let stamp = 0; stamp < 4; stamp += 1) {
-        await page.getByRole("button", { name: "Add a stamp" }).click();
-      }
-      await expect(page.getByText("Reward ready", { exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Use demo reward" }).click();
-      await expect(page.getByText("Reward ready", { exact: true })).toHaveCount(0);
-      await expect(page.getByText("0 / 8", { exact: true })).toBeVisible();
-      await screenshot(page, "48-r4-after-redemption-all-empty");
-      await screenshot(page, "25-loyalty-studio-test-mode");
+      await expect(
+        page.locator(".studio-section-nav").getByRole("button", { name: /^Test/u }),
+      ).toHaveCount(0);
+      await screenshot(page, "25-loyalty-studio-automatic-checks");
 
       await page
         .locator(".studio-section-nav")
-        .getByRole("button", { name: /^Launch/u })
+        .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
         .click();
       await page.getByRole("button", { name: "Launch loyalty card" }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Launch card" }).click();
@@ -343,7 +482,7 @@ test.describe
       await expect(page.getByRole("button", { name: "Share loyalty card" })).toBeVisible();
 
       const billingResponse = await page.request.get(
-        `http://localhost:4000/v1/organizations/${browserOrganizationId}`,
+        `${apiOrigin}/v1/organizations/${browserOrganizationId}`,
       );
       expect(billingResponse.ok()).toBe(true);
       const billingEnvelope = (await billingResponse.json()) as {
@@ -357,14 +496,14 @@ test.describe
       };
       expect(billingEnvelope.data.billingProfile.subscriptionStatus).toBe("TRIALING");
       expect(billingEnvelope.data.billingProfile.trialStart).toBeTruthy();
-      expect(billingEnvelope.data.billingProfile.trialTriggeringProgramId).toBeTruthy();
+      expect(billingEnvelope.data.billingProfile.trialTriggeringProgramId).toBeNull();
 
       await page
         .getByRole("navigation", { name: "Studio sections" })
         .getByRole("button", { name: /^How it works/u })
         .click();
       await page.getByRole("button", { name: "Create update" }).click();
-      await expect(page.getByText(/Saved changes .* Not live yet/u).first()).toBeVisible();
+      await expect(page.getByText(/Live .* Unpublished changes/u).first()).toBeVisible();
       await page.getByRole("button", { name: "Edit design" }).click();
       await expect(page.locator(".builder-shell")).toBeVisible();
       await page.getByRole("button", { name: "Review card" }).click();
@@ -374,15 +513,9 @@ test.describe
       await page.getByRole("button", { name: "Continue to Studio" }).click();
 
       const studioNavigation = page.getByRole("navigation", { name: "Studio sections" });
-      await studioNavigation.getByRole("button", { name: /^Test/u }).click();
-      await page.getByRole("button", { name: "Start demo customer" }).click();
-      await page.getByRole("button", { name: "+5 stamps" }).click();
-      for (let stamp = 0; stamp < 3; stamp += 1) {
-        await page.getByRole("button", { name: "Add a stamp" }).click();
-      }
-      await page.getByRole("button", { name: "Use demo reward" }).click();
+      await expect(studioNavigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 
-      await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
+      await studioNavigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
       await page.getByRole("button", { name: "Publish changes" }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Publish changes" }).click();
       await expect(page.getByRole("heading", { name: "Changes published" })).toBeVisible();
@@ -425,10 +558,8 @@ test.describe
       test.setTimeout(120_000);
       await page.context().clearCookies();
       await login(page, "owner@waflo.local", "Waflo-Development-2026");
-      const switcher = page.locator(".wf-org-switcher select");
-      const growthOrganizationId = await switcher.locator("option").nth(1).getAttribute("value");
-      expect(growthOrganizationId).toBeTruthy();
-      await switcher.selectOption(growthOrganizationId as string);
+      const growthOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      await switchOrganization(page, "مخبز النهر");
       await page.goto("/en/dashboard/programs?create=quick");
 
       const legacyDialog = page.getByRole("dialog", { name: "Create a loyalty card" });
@@ -500,7 +631,7 @@ test.describe
       await expect(page.getByText("Password changed", { exact: true })).toBeVisible();
     });
 
-    test("edits settings, reaches the location limit, upgrades setup plan, and creates a location", async ({
+    test("edits settings and keeps plan-limited operations blocked without billing configuration", async ({
       page,
     }) => {
       await login(page, ownerEmail, initialPassword);
@@ -514,148 +645,296 @@ test.describe
 
       await page.goto("/en/dashboard/locations");
       await expect(page.getByText("Location limit reached")).toBeVisible();
-      await expect(page.getByText(/Upgrade to growth/)).toBeVisible();
+      await expect(page.getByText(/Change plan or archive a location/)).toBeVisible();
       await screenshot(page, "12-locations-limit");
 
       await page.goto("/en/dashboard/billing");
       await expect(
-        page.getByRole("main").getByRole("heading", { name: "Billing and plans" }),
+        page.getByRole("main").getByRole("heading", { name: "Billing", exact: true }),
       ).toBeVisible();
-      await expect(page.getByText("Stripe test configuration required")).toBeVisible();
+      await expect(page.getByText("Billing configuration is incomplete")).toBeVisible();
       await screenshot(page, "13-billing");
+      const stripeMutationPaths: string[] = [];
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (
+          request.method() !== "GET" &&
+          (path.endsWith("/billing/subscription/change") ||
+            /\/billing\/(?:trial|payment-method)(?:\/|$)/u.test(path))
+        ) {
+          stripeMutationPaths.push(path);
+        }
+      });
       const growthCard = page.locator(".wf-plan-card").filter({ hasText: "Growth" });
+      const unavailablePreview = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname.endsWith("/billing/subscription/change/preview"),
+      );
       await growthCard.getByRole("button", { name: "Choose plan" }).click();
-      await expect(growthCard.getByRole("button", { name: "Selected" })).toBeDisabled();
+      expect((await unavailablePreview).status()).toBe(503);
+      await expect(page.getByText("Billing configuration is incomplete")).toBeVisible();
+      const starterCard = page.locator(".wf-plan-card").filter({ hasText: "Starter" });
+      await expect(starterCard.getByRole("button", { name: "Selected" })).toBeDisabled();
+      await expect(growthCard.getByRole("button", { name: "Choose plan" })).toBeVisible();
+      expect(stripeMutationPaths).toEqual([]);
 
       await page.goto("/en/dashboard/locations");
-      await page.getByRole("button", { name: "Add location" }).click();
-      await page.locator('input[name="name"]').fill("Browser Second Branch");
-      await page.locator('input[name="city"]').fill("Basra");
-      await page.getByRole("button", { name: "Create location" }).click();
-      await expect(page.getByText("Browser Second Branch")).toBeVisible();
+      await expect(page.getByText("Location limit reached")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Add location" })).toBeDisabled();
       await screenshot(page, "14-locations");
     });
 
-    test("sends a Checkout command ID, suppresses double clicks, and reuses uncertain retries", async ({
+    test("keeps routine billing inside Waflo and removes hosted Checkout from the UI", async ({
       page,
     }) => {
       await login(page, ownerEmail, initialPassword);
-      const checkoutKeys: string[] = [];
-      let checkoutCalls = 0;
-      let uncertainRetry = false;
+      await page.goto("/en/dashboard/billing");
+      await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
+      await expect(page.getByText(/Stripe Checkout/i)).toHaveCount(0);
+      await expect(page.getByRole("link", { name: /customer portal/i })).toHaveCount(0);
+      await expect(page.getByText("Payment method", { exact: true }).first()).toBeVisible();
+    });
+
+    test("shows authoritative Billing details and submits a bounded refund review", async ({
+      page,
+    }) => {
+      await login(page, ownerEmail, initialPassword);
+      let refundRequested = false;
+      let refundPosts = 0;
+      const invoiceId = "f1111111-1111-4111-8111-111111111111";
       await page.route("**/v1/organizations/*/billing", async (route) => {
         if (route.request().method() !== "GET") return route.continue();
-        const upstream = await route.fetch();
-        const body = (await upstream.json()) as {
-          data: { stripeConfigured: boolean; profile: { stripeCustomerId: string | null } };
-        };
-        body.data.stripeConfigured = true;
-        body.data.profile.stripeCustomerId = "cus_browser_checkout";
-        await route.fulfill({ response: upstream, json: body });
+        const refund = refundRequested
+          ? [
+              {
+                id: "f2222222-2222-4222-8222-222222222222",
+                status: "REQUESTED",
+                reason: "INCORRECT_CHARGE",
+                explanation: "The billed amount needs review.",
+                requestedAmount: 1700,
+                approvedAmount: null,
+                currency: "USD",
+                requestedAt: "2026-08-12T12:00:00.000Z",
+                completedAt: null,
+                failureCode: null,
+              },
+            ]
+          : [];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: {
+              selectedPlan: "GROWTH",
+              canManageBilling: true,
+              selectedCadence: "quarterly",
+              profile: {
+                subscriptionStatus: "ACTIVE",
+                trialStart: "2026-07-01T09:00:00.000Z",
+                trialEnd: "2026-07-15T09:00:00.000Z",
+              },
+              customerPortalAvailable: true,
+              subscriptions: [
+                {
+                  id: "sub_local_browser",
+                  status: "ACTIVE",
+                  planCode: "GROWTH",
+                  cadence: "QUARTERLY",
+                  currentPeriodEnd: "2026-10-01T09:00:00.000Z",
+                  cancelAtPeriodEnd: false,
+                  createdAt: "2026-07-01T09:00:00.000Z",
+                },
+              ],
+              stripeConfigured: true,
+              cadenceAvailability: { monthly: true, quarterly: true, yearly: true },
+              paymentMethod: {
+                status: "saved",
+                brand: "visa",
+                last4: "4242",
+                expMonth: 8,
+                expYear: 2029,
+                isDefault: true,
+              },
+              billingIdentity: {
+                name: "Browser Coffee",
+                email: ownerEmail,
+                countryCode: "IQ",
+                addressLine1: "Main Street",
+                addressLine2: null,
+                city: "Baghdad",
+                region: "Baghdad",
+                postalCode: "10001",
+                locale: "en",
+                timezone: "Asia/Baghdad",
+                syncedAt: "2026-08-12T10:00:00.000Z",
+              },
+              authoritativeState: {
+                subscriptionStatus: "ACTIVE",
+                trialStart: "2026-07-01T09:00:00.000Z",
+                trialEnd: "2026-07-15T09:00:00.000Z",
+                renewalDate: "2026-10-01T09:00:00.000Z",
+                nextExpectedChargeDate: "2026-10-01T09:00:00.000Z",
+                nextExpectedAmount: 19251,
+                currency: "USD",
+                latestPaymentStatus: "paid",
+                gracePeriodEnd: null,
+                outstandingInvoice: null,
+              },
+              invoices: [
+                {
+                  id: invoiceId,
+                  number: "WF-2026-0042",
+                  status: "paid",
+                  paymentStatus: "paid",
+                  amountDue: 19251,
+                  amountPaid: 19251,
+                  amountRemaining: 0,
+                  currency: "USD",
+                  date: "2026-07-01T09:00:00.000Z",
+                  periodStart: "2026-07-01T09:00:00.000Z",
+                  periodEnd: "2026-10-01T09:00:00.000Z",
+                  paidAt: "2026-07-01T09:00:00.000Z",
+                  hostedInvoiceUrl: "https://invoice.stripe.test/hosted",
+                  invoicePdfUrl: "https://invoice.stripe.test/invoice.pdf",
+                  refundable: !refundRequested,
+                  amountRefunded: 0,
+                  remainingRefundableAmount: refundRequested ? 17551 : 19251,
+                  paymentMethod: {
+                    brand: "visa",
+                    last4: "4242",
+                    expMonth: 8,
+                    expYear: 2029,
+                  },
+                  refunds: refund,
+                },
+              ],
+              downgradeOptions: [
+                {
+                  plan: "starter",
+                  violations: [
+                    {
+                      code: "TEAM_SEATS",
+                      actual: 4,
+                      limit: 3,
+                      message:
+                        "Remove or cancel Staff and Manager seats until the team fits the target plan.",
+                    },
+                  ],
+                },
+              ],
+            },
+            requestId: `billing-browser-${runId}`,
+          }),
+        });
       });
-      await page.route("**/v1/organizations/*/billing/checkout", async (route) => {
-        checkoutCalls += 1;
-        const key = route.request().headers()["x-idempotency-key"];
-        if (key) checkoutKeys.push(key);
-        if (checkoutCalls === 2 && uncertainRetry) {
-          await route.abort("failed");
-          return;
-        }
-        if (checkoutCalls === 1) await new Promise((resolve) => setTimeout(resolve, 150));
+      await page.route("**/v1/organizations/*/billing/invoices/*/refunds", async (route) => {
+        refundPosts += 1;
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().headers()["x-idempotency-key"]).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        );
+        expect(route.request().postDataJSON()).toMatchObject({
+          reason: "incorrect_charge",
+          amount: 1700,
+          explanation: "The billed amount needs review.",
+        });
+        refundRequested = true;
         await route.fulfill({
           status: 201,
           contentType: "application/json",
           body: JSON.stringify({
             data: {
-              sessionId: `cs_browser_${checkoutCalls}`,
-              url: "http://localhost:3001/en/dashboard/billing?checkout=returned",
+              id: "f2222222-2222-4222-8222-222222222222",
+              status: "REQUESTED",
             },
-            requestId: `browser-checkout-${runId}`,
+            requestId: `refund-browser-${runId}`,
           }),
         });
       });
 
+      await page.setViewportSize({ width: 1440, height: 1000 });
       await page.goto("/en/dashboard/billing");
-      const checkout = page.getByRole("button", { name: "Continue to Stripe Checkout" });
-      await expect(checkout).toBeEnabled();
-      await checkout.dblclick();
-      await expect.poll(() => checkoutCalls).toBe(1);
-      expect(checkoutKeys[0]).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
+      await expect(page.getByText("$189.75").first()).toBeVisible();
+      await expect(page.getByText(/VISA .*4242/).first()).toBeVisible();
+      await expect(page.getByText("Expires 08/2029", { exact: false }).first()).toBeVisible();
+      await expect(page.getByText("WF-2026-0042")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Invoice / receipt" })).toHaveAttribute(
+        "target",
+        "_blank",
       );
+      await expect(page.getByText(/8\.33%/u).first()).toBeVisible();
+      await expect(page.getByText(/2 months free/u).first()).toBeVisible();
+      await expect(
+        page.getByText("You need to resolve these items before downgrading."),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Remove or cancel Staff and Manager seats", { exact: false }),
+      ).toBeVisible();
 
-      uncertainRetry = true;
-      await page.goto("/en/dashboard/billing");
-      await checkout.click();
-      await expect(page.getByText("Waflo could not reach the server. Try again.")).toBeVisible();
-      await checkout.click();
-      await expect.poll(() => checkoutCalls).toBe(3);
-      expect(checkoutKeys[2]).toBe(checkoutKeys[1]);
-      await expect(page).toHaveURL(/checkout=returned/);
+      await page.getByRole("button", { name: "Request refund for invoice WF-2026-0042" }).click();
+      const refundDialog = page.getByRole("dialog", { name: "Request a refund review" });
+      await expect(refundDialog.getByText("Originally paid")).toBeVisible();
+      await expect(refundDialog.getByText("Remaining refundable")).toBeVisible();
+      const refundReason = refundDialog.getByRole("combobox", { name: "Reason" });
+      await refundReason.selectOption({ label: "Incorrect charge" });
+      await expect(refundReason).toHaveValue("incorrect_charge");
+      await refundDialog.getByRole("spinbutton", { name: "Amount (USD)" }).fill("17.00");
+      await refundDialog
+        .getByRole("textbox", { name: "Optional explanation" })
+        .fill("The billed amount needs review.");
+      await refundDialog.getByRole("button", { name: "Submit refund request" }).click();
+      await expect(page.getByText("Requested", { exact: true })).toBeVisible();
+      expect(refundPosts).toBe(1);
 
-      await page.goto("/en/dashboard/billing");
-      await checkout.click();
-      await expect.poll(() => checkoutCalls).toBe(4);
-      expect(checkoutKeys[3]).not.toBe(checkoutKeys[2]);
-      await expect(page).toHaveURL(/checkout=returned/);
+      for (const width of [768, 390, 360]) {
+        await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+        ).toBe(true);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.evaluate(() => {
+        document.documentElement.style.zoom = "2";
+      });
+      await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
+      await screenshot(page, "13b-billing-refund-responsive");
     });
 
-    test("invites a Staff user who registers, verifies, and accepts the invitation", async ({
-      browser,
+    test("creates a local Staff identity and generates its only valid sign-in QR", async ({
       page,
     }) => {
       await login(page, ownerEmail, initialPassword);
       await page.goto("/en/dashboard/team");
-      await page.getByRole("button", { name: "Invite member" }).click();
-      await page.locator('input[name="email"]').fill(staffEmail);
-      await screenshot(page, "15-invitation-dialog");
-      await page.getByRole("button", { name: "Send invitation" }).click();
-      await expect(page.getByText(staffEmail)).toBeVisible();
+      await page.getByRole("button", { name: "Add staff" }).click();
+      await page.locator('input[name="name"]').fill(localStaffName);
+      await expect(page.getByText(/No email is needed/)).toBeVisible();
+      await screenshot(page, "15-local-staff-dialog");
+      await page.getByRole("button", { name: "Create staff" }).click();
+      const staffRow = page.getByRole("row").filter({ hasText: localStaffName });
+      await expect(staffRow).toContainText("QR sign-in · no email");
       await screenshot(page, "16-team");
 
-      const invitationUrl = await latestMailAction(
-        page.request,
-        staffEmail,
-        "invited to a Waflo team",
-      );
-      const staffContext = await browser.newContext();
-      const staffPage = await staffContext.newPage();
-      await signup(staffPage, staffEmail, initialPassword);
-      await verifyLatestEmail(staffPage, staffEmail);
-      await login(staffPage, staffEmail, initialPassword);
-      await expect(staffPage).toHaveURL(/\/en\/onboarding\/business/);
-      const invitationParsed = new URL(invitationUrl);
-      invitationParsed.searchParams.set("round3", "fragment");
-      await staffPage.goto(invitationParsed.toString());
-      await expect(staffPage.getByRole("heading", { name: /Join Browser Coffee/ })).toBeVisible();
-      await staffPage.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(staffPage.getByText("Invitation accepted")).toBeVisible();
-      await screenshot(staffPage, "17-invitation-accepted");
-      await staffPage.getByRole("button", { name: "Open dashboard" }).click();
-      await expect(staffPage).toHaveURL(/\/en\/dashboard/);
-      await expect(staffPage.locator(".dashboard-nav-link", { hasText: "Locations" })).toHaveCount(
-        0,
-      );
-      await staffPage.goto("/en/dashboard/locations");
-      await expect(staffPage.getByText("Your role does not allow this action.")).toBeVisible();
-      await staffPage.goto("/en/dashboard/programs");
-      await expect(
-        staffPage.getByText("Your role does not allow access to Loyalty Studio."),
-      ).toBeVisible();
-      await page.reload();
-      const roleSelect = page.getByRole("combobox", { name: "Role for Browser Staff" });
-      await expect(roleSelect).toBeVisible();
-      await roleSelect.selectOption("MANAGER");
-      await expect(roleSelect).toHaveValue("MANAGER");
-      await staffPage.goto("/en/dashboard/programs");
-      await expect(
-        staffPage.getByRole("main").getByRole("heading", { name: "Loyalty cards", exact: true }),
-      ).toBeVisible();
-      await expect(staffPage.getByRole("button", { name: "Create loyalty card" })).toBeVisible();
-      await staffContext.close();
+      await staffRow.getByRole("button", { name: "Pair phone" }).click();
+      await expect(page.getByText("Regeneration signs out prior access")).toBeVisible();
+      await page.getByRole("button", { name: "Generate QR" }).click();
+      const pairingDialog = page.getByRole("dialog", { name: "Pair staff device" });
+      await expect(pairingDialog.getByText("This is the only valid code")).toBeVisible();
+      const pairingImage = pairingDialog.locator("img");
+      await expect(pairingImage).toBeVisible();
+      await expect
+        .poll(() => pairingImage.evaluate((image) => image.naturalWidth))
+        .toBeGreaterThan(0);
+      await screenshot(page, "17-staff-sign-in-qr");
+      await page.getByRole("button", { name: "Done" }).click();
+
+      await staffRow.getByText("More", { exact: true }).click();
+      await staffRow.getByRole("button", { name: "Change role to Manager" }).click();
+      await expect(staffRow).toContainText("Manager");
     });
 
-    test("shows audit history, manages sessions, changes slug and password, and resolves the new host", async ({
+    test("removes standalone audit UI, manages sessions, changes slug and password, and resolves the new host", async ({
       browser,
       page,
     }) => {
@@ -665,28 +944,23 @@ test.describe
       await login(otherPage, ownerEmail, initialPassword);
       await expect(otherPage).toHaveURL(/\/en\/dashboard/);
 
-      await page.goto("/en/dashboard/audit");
-      await expect(
-        page.getByRole("main").getByRole("heading", { name: "Audit log" }),
-      ).toBeVisible();
-      await expect(page.getByText("location.created").first()).toBeVisible();
-      await screenshot(page, "18-audit");
+      for (const removedScreen of ["Manager approvals", "Risk", "Audit"]) {
+        await expect(page.getByRole("link", { name: removedScreen })).toHaveCount(0);
+      }
+      for (const removedRoute of ["approvals", "risk", "audit"]) {
+        const response = await page.goto(`/en/dashboard/${removedRoute}`);
+        expect(response?.status()).toBe(404);
+      }
 
       await page.goto("/en/dashboard/security");
-      await expect(
-        page.getByRole("main").getByRole("heading", { name: "Sessions and password" }),
-      ).toBeVisible();
+      await expect(page.getByRole("main").getByRole("heading", { name: "Security" })).toBeVisible();
+      await page.getByText("Other devices", { exact: true }).click();
       const sessionRows = page.locator("table").first().locator("tbody tr");
-      await expect.poll(() => sessionRows.count()).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => sessionRows.count()).toBeGreaterThanOrEqual(1);
       const initialSessionCount = await sessionRows.count();
       await screenshot(page, "19-security-sessions");
-      const otherSessionRow = page
-        .locator("table")
-        .first()
-        .locator("tbody tr")
-        .filter({ hasNotText: "Current" })
-        .first();
-      await otherSessionRow.getByRole("button", { name: "Revoke" }).click();
+      const otherSessionRow = page.locator("table").first().locator("tbody tr").first();
+      await otherSessionRow.getByRole("button", { name: "Sign out" }).click();
       await expect(sessionRows).toHaveCount(initialSessionCount - 1);
 
       await page.goto("/en/dashboard/settings");
@@ -733,7 +1007,7 @@ test.describe
       await page.locator('input[name="currentPassword"]').fill(initialPassword);
       await page.locator('input[name="newPassword"]').fill(changedPassword);
       await page.locator('input[name="confirmPassword"]').fill(changedPassword);
-      await page.getByRole("button", { name: "Change password" }).click();
+      await page.getByRole("button", { name: "Change Waflo password" }).click();
       await expect(page.getByText("Password changed and session rotated.")).toBeVisible();
       await otherContext.close();
     });
@@ -750,22 +1024,19 @@ test.describe
       await page.context().clearCookies();
       await login(page, "owner@waflo.local", "Waflo-Development-2026");
       await expect(page).toHaveURL(/\/en\/dashboard/);
-      const switcher = page.locator(".wf-org-switcher select");
-      const options = await switcher.locator("option").allTextContents();
-      expect(options).toContain("Today Coffee");
-      expect(options).toContain("مخبز النهر");
-      await switcher.selectOption({ label: "Today Coffee" });
-      await expect(page.getByRole("heading", { name: "Welcome to Today Coffee" })).toBeVisible();
-      await switcher.selectOption({ label: "مخبز النهر" });
-      await expect(page.getByRole("heading", { name: "Welcome to مخبز النهر" })).toBeVisible();
+      await switchOrganization(page, "Today Coffee");
+      await expect(page.getByRole("heading", { name: "Welcome, Today Coffee" })).toBeVisible();
+      await switchOrganization(page, "مخبز النهر");
+      await expect(page.getByRole("heading", { name: "Welcome, مخبز النهر" })).toBeVisible();
 
-      await page.getByRole("button", { name: "العربية" }).click();
+      await page.getByRole("button", { name: "Language" }).click();
+      await page.getByRole("menuitemradio", { name: "العربية" }).click();
       await expect(page).toHaveURL(/\/ar\/dashboard/);
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       await expect(page.locator(".wf-sidebar")).toBeVisible();
       await page.goto("/ar/dashboard/team");
       await expect(page.locator("table").first()).toBeVisible();
-      await page.getByRole("button", { name: "دعوة عضو" }).click();
+      await page.getByRole("button", { name: "إضافة موظف" }).click();
       await expect(page.getByRole("dialog")).toHaveCSS("direction", "rtl");
       await screenshot(page, "22-dashboard-ar-rtl");
     });
@@ -789,8 +1060,7 @@ test.describe
       try {
         await page.context().clearCookies();
         await login(page, "owner@waflo.local", "Waflo-Development-2026");
-        const switcher = page.locator(".wf-org-switcher select");
-        await switcher.selectOption({ label: "Today Coffee" });
+        await switchOrganization(page, "Today Coffee");
         await page.goto("/en/dashboard/programs");
         await expect
           .poll(
@@ -855,18 +1125,50 @@ test.describe
 
       await signup(page, round4Email, round4Password);
       await verifyLatestEmail(page, round4Email);
-      await page.getByRole("button", { name: "Continue to sign in" }).click();
+      await page.getByRole("link", { name: "Continue to sign in" }).click();
       await login(page, round4Email, round4Password);
       await page.locator('input[name="name"]').fill(`Round 4 Coffee ${runId}`);
       await page.locator('input[name="slug"]').fill(`round4-${runId}`);
-      await page.getByRole("button", { name: "Save and continue" }).click();
-      await expect(page).toHaveURL(/\/en\/onboarding\/location/);
-      await page.locator('input[name="name"]').fill("Round 4 Main Branch");
-      await page.getByRole("button", { name: "Create location and finish setup" }).click();
-      await expect(page).toHaveURL(/\/en\/onboarding\/complete/);
+      await expect(page.getByText("URL is available")).toBeVisible();
+      await page.locator('input[name="locationName"]').fill("Round 4 Main Branch");
+      await expect(page.getByText("The map is unavailable right now")).toBeVisible();
+      const createdRound4OrganizationId = await postOrganizationWithExactLocation(
+        page,
+        `Round 4 Coffee ${runId}`,
+        `round4-${runId}`,
+        "Round 4 Main Branch",
+      );
+      await page.goto(`/en/onboarding/business?organization=${createdRound4OrganizationId}`);
+      await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
       const round4OrganizationId = new URL(page.url()).searchParams.get("organization");
       expect(round4OrganizationId).toBeTruthy();
-      await page.getByRole("button", { name: "Continue to dashboard" }).click();
+      const { createPrismaClient: createSetupPrismaClient } = await import(
+        "../../packages/database/dist/src/client.js"
+      );
+      const setupDatabase = createSetupPrismaClient(
+        process.env.DATABASE_URL ??
+          "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
+      );
+      const round4TrialStart = new Date();
+      const round4TrialEnd = new Date(round4TrialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      try {
+        await setupDatabase.$transaction([
+          setupDatabase.organization.update({
+            where: { id: round4OrganizationId as string },
+            data: { onboardingState: "COMPLETE", onboardingCompletedAt: round4TrialStart },
+          }),
+          setupDatabase.organizationBillingProfile.update({
+            where: { organizationId: round4OrganizationId as string },
+            data: {
+              subscriptionStatus: "TRIALING",
+              trialStart: round4TrialStart,
+              trialEnd: round4TrialEnd,
+            },
+          }),
+        ]);
+      } finally {
+        await setupDatabase.$disconnect();
+      }
       await page.goto("/en/dashboard/programs");
 
       await page.getByRole("button", { name: "Create loyalty card" }).click();
@@ -944,9 +1246,9 @@ test.describe
         .getByRole("button", { name: /^Appearance/u })
         .first()
         .click();
-      const uploadToPicker = async (label: "Logo" | "Stamped icon", expectProgramSave = true) => {
+      const uploadStampToPicker = async (expectProgramSave = true) => {
         const picker = page.locator(".studio-asset-picker").filter({
-          has: page.getByRole("heading", { name: label }),
+          has: page.getByRole("heading", { name: "Stamped icon" }),
         });
         await picker.locator('input[type="file"]').setInputFiles({
           name: "round4-same-image.png",
@@ -955,6 +1257,27 @@ test.describe
         });
         const cropDialog = page.getByRole("dialog").filter({ hasText: "Crop image safely" });
         await expect(cropDialog).toBeVisible();
+        await expect(cropDialog.getByText("Horizontal position")).toHaveCount(0);
+        await expect(cropDialog.getByText("Vertical position")).toHaveCount(0);
+        const cropSurface = cropDialog.getByRole("button", { name: /Crop area/ });
+        const cropBounds = await cropSurface.boundingBox();
+        if (!cropBounds) throw new Error("Crop surface bounds are unavailable.");
+        await page.mouse.move(
+          cropBounds.x + cropBounds.width / 2,
+          cropBounds.y + cropBounds.height / 2,
+        );
+        await page.mouse.down();
+        await page.mouse.move(
+          cropBounds.x + cropBounds.width * 0.6,
+          cropBounds.y + cropBounds.height * 0.6,
+        );
+        await page.mouse.up();
+        await cropDialog.getByRole("slider").fill("1.5");
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1.5");
+        await cropDialog.getByRole("button", { name: "Zoom in" }).click();
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1.7");
+        await cropDialog.getByRole("button", { name: "Zoom out" }).click();
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1.5");
         const uploaded = page.waitForResponse(
           (response) =>
             response.request().method() === "POST" &&
@@ -977,10 +1300,42 @@ test.describe
         };
         return envelope.data;
       };
-      const logoAsset = await uploadToPicker("Logo");
-      const stampAsset = await uploadToPicker("Stamped icon");
-      expect(logoAsset.id).not.toBe(stampAsset.id);
-      await screenshot(page, "55-r4-identical-image-two-visual-categories");
+      const stampAsset = await uploadStampToPicker();
+      const builderPath = new URL(page.url()).pathname;
+      await expect(
+        page.locator(".studio-asset-picker").filter({
+          has: page.getByRole("heading", { name: "Logo" }),
+        }),
+      ).toHaveCount(0);
+
+      await page.goto("/en/dashboard/settings");
+      const merchantBrandPicker = page.locator(".studio-asset-picker").filter({
+        has: page.getByRole("heading", { name: "Merchant logo" }),
+      });
+      await merchantBrandPicker.locator('input[type="file"]').setInputFiles({
+        name: "round4-same-image.png",
+        mimeType: "image/png",
+        buffer: sameImage,
+      });
+      const merchantCropDialog = page.getByRole("dialog", { name: "Crop image safely" });
+      await expect(merchantCropDialog).toBeVisible();
+      const merchantLogoUploaded = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().includes("/assets") &&
+          response.status() === 201,
+      );
+      await merchantCropDialog.getByRole("button", { name: "Process and upload" }).click();
+      await merchantLogoUploaded;
+      await expect(
+        page.getByText(/Your merchant logo is saved\. Existing Wallet passes will refresh safely/u),
+      ).toBeVisible();
+      await page.goto(builderPath);
+      await page
+        .getByRole("button", { name: /^Appearance/u })
+        .first()
+        .click();
+      await screenshot(page, "55-r4-merchant-brand-and-stamp-identity");
 
       const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
       const database = createPrismaClient(
@@ -988,11 +1343,16 @@ test.describe
           "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
       );
       try {
+        const storedOrganization = await database.organization.findUniqueOrThrow({
+          where: { id: round4OrganizationId as string },
+        });
+        expect(storedOrganization.brandLogoAssetId).toBeTruthy();
+        expect(storedOrganization.brandLogoAssetId).not.toBe(stampAsset.id);
         await database.merchantAsset.update({
           where: { id: stampAsset.id },
           data: { archivedAt: new Date(), processingStatus: "ARCHIVED" },
         });
-        const restoredStamp = await uploadToPicker("Stamped icon", false);
+        const restoredStamp = await uploadStampToPicker(false);
         expect(restoredStamp).toMatchObject({
           id: stampAsset.id,
           uploadDisposition: "RESTORED",
@@ -1012,15 +1372,7 @@ test.describe
         ).toBeVisible();
         await page.getByRole("button", { name: "Continue to Studio" }).click();
         const studioNavigation = page.getByRole("navigation", { name: "Studio sections" });
-        await studioNavigation.getByRole("button", { name: /^Test/u }).click();
-        await page.getByRole("button", { name: "Start demo customer" }).click();
-        await page.getByRole("button", { name: "+5 stamps" }).click();
-        for (let stamp = 0; stamp < 3; stamp += 1) {
-          await page.getByRole("button", { name: "Add a stamp" }).click();
-        }
-        await expect(page.getByText("Reward ready", { exact: true })).toBeVisible();
-        await page.getByRole("button", { name: "Use demo reward" }).click();
-        await expect(page.getByText("0 / 8", { exact: true })).toBeVisible();
+        await expect(studioNavigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 
         const storedProgram = await database.loyaltyProgram.findFirstOrThrow({
           where: {
@@ -1053,7 +1405,7 @@ test.describe
           .click();
         await page
           .getByRole("navigation", { name: "Studio sections" })
-          .getByRole("button", { name: /^Launch/u })
+          .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
           .click();
         await expect(page.getByText("Launch unavailable", { exact: true })).toBeVisible();
         await expect(
@@ -1063,7 +1415,7 @@ test.describe
         await screenshot(page, "60-r5-suspended-publication-blocked");
         await database.loyaltyProgram.update({
           where: { id: storedProgram.id },
-          data: { status: "TEST" },
+          data: { status: "VALIDATED" },
         });
         await page.getByRole("button", { name: /^Loyalty cards$/iu }).click();
         await page
@@ -1073,7 +1425,7 @@ test.describe
           .click();
         await page
           .getByRole("navigation", { name: "Studio sections" })
-          .getByRole("button", { name: /^Launch/u })
+          .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
           .click();
 
         await database.location.update({

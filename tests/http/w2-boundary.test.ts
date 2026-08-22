@@ -90,9 +90,16 @@ async function createOrganization(
       defaultLocale: "EN",
       timezone: "UTC",
       selectedPlan: plan,
+      onboardingState: "COMPLETE",
+      onboardingCompletedAt: new Date(),
       members: { create: { userId: ownerId, role: "OWNER" } },
       billingProfile: {
-        create: { selectedPlan: plan, subscriptionStatus: "PENDING_ACTIVATION" },
+        create: {
+          selectedPlan: plan,
+          subscriptionStatus: "TRIALING",
+          trialStart: new Date(),
+          trialEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
       },
     },
   });
@@ -506,7 +513,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
     expect(crossTenantProgram.json().error.code).toBe("PROGRAM_NOT_FOUND");
   });
 
-  it("covers create, edit, preview, validation, Test Mode, publication, versions, and lifecycle", async () => {
+  it("covers create, edit, preview, automatic validation, publication, versions, and lifecycle", async () => {
     const baseUrl = `/v1/organizations/${growth.organizationId}/programs`;
     const csrfState = await csrf();
     const createdResponse = await app.inject({
@@ -676,8 +683,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
       headers: mutationHeaders(csrfState, owner),
       payload: {},
     });
-    expect(prematureTest.statusCode).toBe(409);
-    expect(prematureTest.json().error.code).toBe("PROGRAM_NOT_TEST_READY");
+    expect(prematureTest.statusCode).toBe(404);
 
     const customerPreview = await app.inject({
       method: "GET",
@@ -699,7 +705,10 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
         headers: getHeaders(owner),
       });
       expect(response.statusCode).toBe(200);
-      expect(data<{ profile: string; locale: string }>(response)).toMatchObject(preview);
+      expect(data<{ profile: string; locale: string }>(response)).toMatchObject({
+        profile: preview.profile,
+        locale: preview.locale.toLowerCase(),
+      });
     }
 
     const validationPass = await app.inject({
@@ -711,96 +720,100 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
     expect(validationPass.statusCode).toBe(201);
     expect(data<{ errors: unknown[] }>(validationPass).errors).toEqual([]);
 
-    const reversibleSessionResponse = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/${created.id}/test-sessions`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: {},
-    });
-    expect(reversibleSessionResponse.statusCode).toBe(201);
-    const reversibleSession = data<{ id: string }>(reversibleSessionResponse);
-    const addOne = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/test-sessions/${reversibleSession.id}/stamps`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: { amount: 1, idempotencyKey: randomUUID() },
-    });
-    expect(addOne.statusCode).toBe(201);
-    const reverse = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/test-sessions/${reversibleSession.id}/reverse`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: { idempotencyKey: randomUUID() },
-    });
-    expect(reverse.statusCode).toBe(201);
-    expect(data<{ currentStampCount: number }>(reverse).currentStampCount).toBe(0);
-    const resetKey = randomUUID();
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const reset = await app.inject({
+    // Historical synthetic-session behavior is deliberately unreachable now that
+    // publish preflight is automatic and the public Test routes are removed.
+    if (prematureTest.statusCode !== 404) {
+      const reversibleSessionResponse = await app.inject({
         method: "POST",
-        url: `${baseUrl}/test-sessions/${reversibleSession.id}/reset`,
+        url: `${baseUrl}/${created.id}/test-sessions`,
         headers: mutationHeaders(csrfState, owner),
-        payload: { idempotencyKey: resetKey },
+        payload: {},
       });
-      expect(reset.statusCode).toBe(201);
+      expect(reversibleSessionResponse.statusCode).toBe(201);
+      const reversibleSession = data<{ id: string }>(reversibleSessionResponse);
+      const addOne = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/test-sessions/${reversibleSession.id}/stamps`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: { amount: 1, idempotencyKey: randomUUID() },
+      });
+      expect(addOne.statusCode).toBe(201);
+      const reverse = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/test-sessions/${reversibleSession.id}/reverse`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: { idempotencyKey: randomUUID() },
+      });
+      expect(reverse.statusCode).toBe(201);
+      expect(data<{ currentStampCount: number }>(reverse).currentStampCount).toBe(0);
+      const resetKey = randomUUID();
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const reset = await app.inject({
+          method: "POST",
+          url: `${baseUrl}/test-sessions/${reversibleSession.id}/reset`,
+          headers: mutationHeaders(csrfState, owner),
+          payload: { idempotencyKey: resetKey },
+        });
+        expect(reset.statusCode).toBe(201);
+      }
+
+      const testSessionResponse = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/${created.id}/test-sessions`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: {},
+      });
+      expect(testSessionResponse.statusCode).toBe(201);
+      const testSession = data<{
+        id: string;
+        version: { rewards: Array<{ id: string; thresholdStampCount: number }> };
+      }>(testSessionResponse);
+      const milestone = testSession.version.rewards.find(
+        (reward) => reward.thresholdStampCount === 3,
+      );
+      const finalReward = testSession.version.rewards.find(
+        (reward) => reward.thresholdStampCount === 8,
+      );
+      expect(milestone?.id).toBeTruthy();
+      expect(finalReward?.id).toBeTruthy();
+
+      const addThree = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/test-sessions/${testSession.id}/stamps`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: { amount: 3, idempotencyKey: randomUUID() },
+      });
+      expect(addThree.statusCode).toBe(201);
+      const redeemMilestone = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/test-sessions/${testSession.id}/redeem/${milestone?.id}`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: { idempotencyKey: randomUUID() },
+      });
+      expect(redeemMilestone.statusCode).toBe(201);
+      const addFinal = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/test-sessions/${testSession.id}/stamps`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: { amount: 5, idempotencyKey: randomUUID() },
+      });
+      expect(addFinal.statusCode).toBe(201);
+      const redeemFinal = await app.inject({
+        method: "POST",
+        url: `${baseUrl}/test-sessions/${testSession.id}/redeem/${finalReward?.id}`,
+        headers: mutationHeaders(csrfState, owner),
+        payload: { idempotencyKey: randomUUID() },
+      });
+      expect(redeemFinal.statusCode).toBe(201);
+
+      const completedSession = await app.inject({
+        method: "GET",
+        url: `${baseUrl}/test-sessions/${testSession.id}`,
+        headers: getHeaders(owner),
+      });
+      expect(completedSession.statusCode).toBe(200);
+      expect(data<{ status: string }>(completedSession).status).toBe("COMPLETED");
     }
-
-    const testSessionResponse = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/${created.id}/test-sessions`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: {},
-    });
-    expect(testSessionResponse.statusCode).toBe(201);
-    const testSession = data<{
-      id: string;
-      version: { rewards: Array<{ id: string; thresholdStampCount: number }> };
-    }>(testSessionResponse);
-    const milestone = testSession.version.rewards.find(
-      (reward) => reward.thresholdStampCount === 3,
-    );
-    const finalReward = testSession.version.rewards.find(
-      (reward) => reward.thresholdStampCount === 8,
-    );
-    expect(milestone?.id).toBeTruthy();
-    expect(finalReward?.id).toBeTruthy();
-
-    const addThree = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/test-sessions/${testSession.id}/stamps`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: { amount: 3, idempotencyKey: randomUUID() },
-    });
-    expect(addThree.statusCode).toBe(201);
-    const redeemMilestone = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/test-sessions/${testSession.id}/redeem/${milestone?.id}`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: { idempotencyKey: randomUUID() },
-    });
-    expect(redeemMilestone.statusCode).toBe(201);
-    const addFinal = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/test-sessions/${testSession.id}/stamps`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: { amount: 5, idempotencyKey: randomUUID() },
-    });
-    expect(addFinal.statusCode).toBe(201);
-    const redeemFinal = await app.inject({
-      method: "POST",
-      url: `${baseUrl}/test-sessions/${testSession.id}/redeem/${finalReward?.id}`,
-      headers: mutationHeaders(csrfState, owner),
-      payload: { idempotencyKey: randomUUID() },
-    });
-    expect(redeemFinal.statusCode).toBe(201);
-
-    const completedSession = await app.inject({
-      method: "GET",
-      url: `${baseUrl}/test-sessions/${testSession.id}`,
-      headers: getHeaders(owner),
-    });
-    expect(completedSession.statusCode).toBe(200);
-    expect(data<{ status: string }>(completedSession).status).toBe("COMPLETED");
 
     const publishKey = randomUUID();
     for (let attempt = 0; attempt < 2; attempt += 1) {

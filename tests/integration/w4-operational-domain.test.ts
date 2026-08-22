@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app.js";
@@ -9,7 +9,6 @@ import { LoyaltyOperationService } from "../../apps/api/src/loyalty/loyalty-oper
 import { MerchantOperationsService } from "../../apps/api/src/operations/merchant-operations.service.js";
 import { OperationalWorker } from "../../apps/operational-worker/src/main.js";
 import { parseEnvironment } from "../../packages/config/src/index.js";
-import { canonicalJson } from "../../packages/loyalty-ledger/src/index.js";
 
 const ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OWNER_ID = "11111111-1111-4111-8111-111111111111";
@@ -70,25 +69,6 @@ describe.sequential("W4 repaired operational domain lifecycle", () => {
   afterAll(async () => {
     await app?.close();
   });
-
-  function redeemFingerprint(input: {
-    qrPayload: string;
-    entitlementPublicId: string;
-    approvalPublicId: string;
-  }) {
-    return createHash("sha256")
-      .update(
-        canonicalJson({
-          type: "REDEEM_REWARD",
-          qr: createHash("sha256").update(input.qrPayload, "utf8").digest("hex"),
-          entitlement: input.entitlementPublicId,
-          approval: input.approvalPublicId,
-          note: null,
-        }),
-        "utf8",
-      )
-      .digest("hex");
-  }
 
   it("executes stamp, reward, redemption, reversal, status, and privacy erasure end to end", async () => {
     const customerId = randomUUID();
@@ -154,34 +134,44 @@ describe.sequential("W4 repaired operational domain lifecycle", () => {
     const milestone = await prisma.client.rewardEntitlement.findFirstOrThrow({
       where: { membershipId, threshold: 4 },
     });
-    const approvalPublicId = randomUUID();
-    await prisma.client.managerApprovalChallenge.create({
-      data: {
-        publicId: approvalPublicId,
-        organizationId: ORGANIZATION_ID,
-        membershipId,
-        rewardEntitlementId: milestone.id,
-        staffDeviceId: DEVICE_ID,
-        locationId: LOCATION_ID,
-        requestFingerprint: redeemFingerprint({
+    const redemptionCommandId = randomUUID();
+    await expect(
+      loyalty.redeemReward(
+        context,
+        redemptionCommandId,
+        {
           qrPayload: credential.payload,
-          entitlementPublicId: milestone.publicId,
-          approvalPublicId,
-        }),
-        status: "APPROVED",
-        requestedByMemberId: context.organizationMemberId,
-        approvedByUserId: OWNER_ID,
-        approvedAt: new Date(),
-        expiresAt: new Date(Date.now() + 5 * 60_000),
+          rewardEntitlementPublicId: milestone.publicId,
+        },
+        request,
+      ),
+    ).rejects.toMatchObject({ code: "MANAGER_APPROVAL_REQUIRED" });
+    const pendingCommand = await prisma.client.loyaltyOperationCommand.findUniqueOrThrow({
+      where: {
+        organizationId_idempotencyKey: {
+          organizationId: ORGANIZATION_ID,
+          idempotencyKey: redemptionCommandId,
+        },
       },
     });
+    const approval = await prisma.client.managerApprovalChallenge.findFirstOrThrow({
+      where: { pendingOperationId: pendingCommand.id },
+    });
+    await operations.decideApproval(
+      OWNER_ID,
+      ORGANIZATION_ID,
+      approval.publicId,
+      "APPROVED",
+      undefined,
+      request,
+    );
     const milestoneRedemption = await loyalty.redeemReward(
       context,
-      randomUUID(),
+      redemptionCommandId,
       {
         qrPayload: credential.payload,
         rewardEntitlementPublicId: milestone.publicId,
-        managerApprovalPublicId: approvalPublicId,
+        managerApprovalPublicId: approval.publicId,
       },
       request,
     );

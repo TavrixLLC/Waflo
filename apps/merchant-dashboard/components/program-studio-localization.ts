@@ -1,4 +1,3 @@
-import type { Locale } from "@waflo/contracts";
 import type {
   ProgramDraftInput,
   ProgramTranslationInput,
@@ -11,13 +10,16 @@ function present(value: string | null | undefined): string | undefined {
 
 function localizedProgramField(
   draft: ProgramDraftInput,
-  locale: Locale,
+  locale: string,
   field: keyof ProgramTranslationInput,
 ): string | undefined {
-  return present(draft.translations[locale]?.[field]) ?? present(draft.translations.en?.[field]);
+  return (
+    present(draft.translations[locale]?.[field]) ??
+    present(draft.translations[draft.defaultLocale]?.[field])
+  );
 }
 
-export function selectStudioLocalizedProgramContent(draft: ProgramDraftInput, locale: Locale) {
+export function selectStudioLocalizedProgramContent(draft: ProgramDraftInput, locale: string) {
   const shortDescription =
     localizedProgramField(draft, locale, "shortDescription") ??
     present(draft.earningDescription) ??
@@ -38,17 +40,21 @@ export function selectStudioLocalizedProgramContent(draft: ProgramDraftInput, lo
   };
 }
 
-export function selectStudioLocalizedRewardContent(reward: RewardInput, locale: Locale) {
+export function selectStudioLocalizedRewardContent(
+  reward: RewardInput,
+  locale: string,
+  defaultLocale = "en",
+) {
   const requested = reward.translations[locale];
-  const english = reward.translations.en;
-  const name = present(requested?.name) ?? present(english?.name) ?? reward.internalName;
+  const fallback = reward.translations[defaultLocale];
+  const name = present(requested?.name) ?? present(fallback?.name) ?? reward.internalName;
 
   return {
     name,
     description:
-      present(requested?.description) ?? present(english?.description) ?? reward.internalName,
+      present(requested?.description) ?? present(fallback?.description) ?? reward.internalName,
     redemptionInstructions:
-      present(requested?.redemptionInstructions) ?? present(english?.redemptionInstructions) ?? "",
+      present(requested?.redemptionInstructions) ?? present(fallback?.redemptionInstructions) ?? "",
   };
 }
 
@@ -57,7 +63,7 @@ export function selectStudioLocalizedServerRewardName(
     internalName: string;
     translations: Array<{ locale: "EN" | "AR"; name: string }>;
   },
-  locale: Locale,
+  locale: "en" | "ar",
 ): string {
   const requestedLocale = locale === "ar" ? "AR" : "EN";
   return (

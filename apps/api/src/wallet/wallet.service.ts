@@ -6,6 +6,11 @@ import type {
   WalletProgramInput,
   WalletProviderCode,
 } from "@waflo/wallet-core";
+import { resolveCardLocale } from "@waflo/contracts";
+import {
+  APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+  resolveWalletNearbyText,
+} from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
@@ -13,33 +18,46 @@ import type { WafloRequest } from "../common/request-context.js";
 import { CustomerCardService } from "../customer/customer-card.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { TenantService } from "../tenancy/tenant.service.js";
-import { WalletProviderRegistry } from "./wallet-provider.registry.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
 import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
+import { TenantService } from "../tenancy/tenant.service.js";
+import { WalletProviderRegistry } from "./wallet-provider.registry.js";
 
 const walletPassInclude = {
   walletProgramBinding: true,
   membershipCredential: true,
   membership: {
     include: {
-      organization: true,
+      organization: {
+        include: {
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
+            },
+          },
+        },
+      },
       customer: true,
-      program: true,
+      program: { include: { walletNearbyProgramCopy: true } },
       progress: true,
       enrollmentProgramVersion: {
         include: {
           translations: true,
+          cardLocales: {
+            where: { enabled: true },
+            orderBy: [{ position: "asc" }, { locale: "asc" }],
+          },
           stampRule: true,
+          locations: { select: { locationId: true } },
           visualTheme: publishedVisualThemeInclude,
         },
       },
     },
   },
-} as const;
+} satisfies Prisma.WalletPassInstanceInclude;
 
 @Injectable()
 export class WalletService {
@@ -55,7 +73,7 @@ export class WalletService {
 
   async providerHealth(userId: string, organizationId: string, request: WafloRequest) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
-    const health = await Promise.all(this.registry.all().map((provider) => provider.healthCheck()));
+    const health = await this.registry.healthChecks();
     await Promise.allSettled(
       health
         .filter((provider) => !["HEALTHY", "NOT_CONFIGURED"].includes(provider.status))
@@ -307,11 +325,31 @@ export class WalletService {
   ): Promise<WalletMembershipInput> {
     const membership = pass.membership;
     const version = membership.enrollmentProgramVersion;
-    const locale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const localizedContent = version.cardLocales.length
+      ? version.cardLocales.map((item) => ({
+          locale: item.locale,
+          programName: item.programName ?? membership.program.internalName,
+          description: item.shortDescription ?? "",
+          rewardSummary: item.rewardSummary ?? "",
+        }))
+      : version.translations.map((item) => ({
+          locale: item.locale === "AR" ? "ar" : "en",
+          programName: item.programName,
+          description: item.shortDescription,
+          rewardSummary: item.rewardSummary,
+        }));
+    const enabledLocales = localizedContent.map((item) => item.locale);
+    const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+      ? version.defaultCardLocale
+      : (enabledLocales[0] ?? "en");
+    const locale = resolveCardLocale({
+      enabledLocales,
+      defaultLocale,
+      explicitLocale: nearbyLocale,
+    });
     const translation =
-      version.translations.find((item) => item.locale === (locale === "ar" ? "AR" : "EN")) ??
-      version.translations.find((item) => item.locale === "EN") ??
-      version.translations[0];
+      localizedContent.find((item) => item.locale === locale) ?? localizedContent[0];
     const goal = version.stampRule?.requiredStampCount ?? 8;
     const progress = membership.progress?.currentCycleStampCount ?? 0;
     if (!version.visualTheme) throw new Error("Published Wallet stamp artwork is unavailable.");
@@ -334,7 +372,7 @@ export class WalletService {
       programId: membership.programId,
       programVersionId: version.id,
       programName: translation?.programName ?? membership.program.internalName,
-      description: translation?.shortDescription ?? "",
+      description: translation?.description ?? "",
       rewardSummary: translation?.rewardSummary ?? "",
       backgroundColor: version.visualTheme?.backgroundColor ?? "#F7F4EE",
       foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
@@ -343,6 +381,21 @@ export class WalletService {
         version.renderFingerprint ??
         createHash("sha256").update(version.id).digest("hex"),
       locale,
+      defaultLocale,
+      localizedContent,
+      nearbyRelevance: walletNearbyRelevance({
+        enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
+        locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
+        allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
+        templateCode: version.baseTemplateCode,
+        businessCategory: membership.organization.businessCategory,
+        merchantName: membership.organization.name,
+        locale: nearbyLocale,
+        customText:
+          nearbyLocale === "ar"
+            ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
+            : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
+      }),
     };
     return {
       ...programInput,
@@ -360,4 +413,52 @@ export class WalletService {
       stampRenderInput: stampRender.renderInput,
     };
   }
+}
+
+function walletNearbyRelevance(input: {
+  enabled: boolean;
+  allowedLocationIds: ReadonlySet<string>;
+  locations: ReadonlyArray<{
+    location: {
+      id: string;
+      name: string;
+      status: "ACTIVE" | "ARCHIVED";
+      latitude: unknown;
+      longitude: unknown;
+    };
+  }>;
+  templateCode?: string | null | undefined;
+  businessCategory?: string | null | undefined;
+  merchantName: string;
+  locale: "en" | "ar";
+  customText?: string | null | undefined;
+}) {
+  const locations = input.locations
+    .filter(
+      ({ location }) =>
+        input.allowedLocationIds.has(location.id) &&
+        location.status === "ACTIVE" &&
+        location.latitude !== null &&
+        location.longitude !== null,
+    )
+    .slice(0, 10)
+    .map(({ location }) => ({
+      locationId: location.id,
+      displayName: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      relevantText: resolveWalletNearbyText({
+        templateCode: input.templateCode,
+        businessCategory: input.businessCategory,
+        merchantName: input.merchantName,
+        locationName: location.name,
+        locale: input.locale,
+        customText: input.customText,
+      }).text,
+    }));
+  return {
+    enabled: input.enabled && locations.length > 0,
+    desiredAppleMaxDistanceMeters: APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+    locations,
+  };
 }

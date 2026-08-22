@@ -99,6 +99,8 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
         merchantSlug,
         timezone: "UTC",
         selectedPlan: "GROWTH",
+        onboardingState: "COMPLETE",
+        onboardingCompletedAt: new Date(),
         members: { create: { userId: user.id, role: "OWNER" } },
         billingProfile: {
           create: { selectedPlan: "GROWTH", subscriptionStatus: "ACTIVE" },
@@ -384,6 +386,21 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     const newSessionCookie = cookie(rotated, environment.values.CUSTOMER_COOKIE_NAME);
     expect(newSessionCookie).not.toBe(sessionCookie);
 
+    const staleRotation = await app.inject({
+      method: "POST",
+      url: "/v1/customer/session/rotate",
+      headers: {
+        host: merchantHost,
+        origin: new URL(environment.values.CUSTOMER_WEB_URL).origin,
+        cookie: `${sessionCookie}; ${csrfCookie}`,
+        "x-csrf-token": csrf,
+        "content-type": "application/json",
+      },
+      payload: {},
+    });
+    expect(staleRotation.statusCode).toBe(401);
+    expect(staleRotation.body).toContain("CUSTOMER_SESSION_EXPIRED");
+
     const staleSession = await app.inject({
       method: "GET",
       url: "/v1/customer/csrf",
@@ -544,4 +561,62 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     expect(verified.verificationStatus).toBe("VERIFIED");
     expect(verified.verifiedAt).toBeInstanceOf(Date);
   }, 120_000);
+
+  it("keeps existing customer state viewable but blocks new loyalty operations for a restricted merchant", async () => {
+    const existing = await enroll(
+      { displayName: "Restricted Program Member" },
+      `enroll:${randomUUID()}`,
+    );
+    expect(existing.statusCode).toBe(201);
+    const existingCookie = cookie(existing, environment.values.CUSTOMER_COOKIE_NAME);
+    const cardBeforeRestriction = await app.inject({
+      method: "GET",
+      url: "/v1/customer/card",
+      headers: { host: merchantHost, cookie: existingCookie },
+    });
+    const qrPayload = data<{ membershipQr: { payload: string } }>(cardBeforeRestriction)
+      .membershipQr.payload;
+
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId },
+      data: { subscriptionStatus: "SUSPENDED", trialEnd: null, gracePeriodEnd: null },
+    });
+    try {
+      const safeView = await app.inject({
+        method: "GET",
+        url: "/v1/customer/card",
+        headers: { host: merchantHost, cookie: existingCookie },
+      });
+      expect(safeView.statusCode).toBe(200);
+
+      const blockedEnrollment = await enroll(
+        { displayName: "Blocked Enrollment" },
+        `enroll:${randomUUID()}`,
+      );
+      expect(blockedEnrollment.statusCode).toBe(402);
+      expect(blockedEnrollment.json().error.code).toBe("ORGANIZATION_ENROLLMENT_BILLING_BLOCKED");
+
+      const blockedTransfer = await app.inject({
+        method: "POST",
+        url: "/v1/public/transfers/request",
+        headers: {
+          host: merchantHost,
+          "content-type": "application/json",
+          "x-idempotency-key": `transfer:${randomUUID()}`,
+        },
+        payload: { qrPayload, preferredLocale: "en" },
+      });
+      expect(blockedTransfer.statusCode).toBe(402);
+      expect(blockedTransfer.json().error).toMatchObject({
+        code: "LOYALTY_PROGRAM_TEMPORARILY_UNAVAILABLE",
+        message: "This loyalty program is temporarily unavailable.",
+      });
+      expect(blockedTransfer.json().error.details).toEqual({ accessState: "restricted" });
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId },
+        data: { subscriptionStatus: "ACTIVE" },
+      });
+    }
+  });
 });

@@ -10,12 +10,12 @@ import {
 import { describe, expect, it } from "vitest";
 
 describe("W2 Round 4 publication and policy decisions", () => {
-  it.each(["pending_activation", "trialing", "active", "grace_period"] as const)(
+  it.each(["trialing", "active", "grace_period"] as const)(
     "allows publication in billing status %s",
     (status) => expect(canPublishForBillingStatus(status)).toBe(true),
   );
 
-  it.each(["past_due", "suspended", "canceled"] as const)(
+  it.each(["pending_activation", "past_due", "suspended", "canceled"] as const)(
     "blocks publication in billing status %s",
     (status) => expect(canPublishForBillingStatus(status)).toBe(false),
   );
@@ -40,7 +40,7 @@ describe("W2 Round 4 publication and policy decisions", () => {
         requiredStampCount: 8,
         layoutType: "PATH",
       }),
-    ).toEqual(["PRO_MODE", "MULTIPLE_REWARDS", "MILESTONE_REWARDS", "ADVANCED_LAYOUT"]);
+    ).toEqual(["PRO_MODE", "MULTIPLE_REWARDS", "MILESTONE_REWARDS"]);
   });
 
   it("preserves W2 defaults while confirming W4 operational execution is implemented", () => {

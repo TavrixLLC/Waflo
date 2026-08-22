@@ -15,6 +15,7 @@ const jsQrDecoder =
 const PUBLIC_CREDENTIAL_PATTERN = /^cred_[A-Za-z0-9_-]{16,80}$/;
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{24,64}$/;
 const PROGRAM_SLUG_PATTERN = /^(?=.{3,50}$)[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MERCHANT_SLUG_PATTERN = /^(?=.{3,40}$)(?!xn--)[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface MembershipQrPayloadV1 {
   readonly version: "wfl1";
@@ -84,14 +85,60 @@ export function canonicalJoinUrl(input: {
   merchantSlug: string;
   programSlug: string;
   customerBaseUrl: string;
+  merchantBaseDomain?: string;
+}): string {
+  return canonicalCustomerUrl({
+    merchantSlug: input.merchantSlug,
+    customerBaseUrl: input.customerBaseUrl,
+    ...(input.merchantBaseDomain ? { merchantBaseDomain: input.merchantBaseDomain } : {}),
+    pathname: `/join/${validateProgramPublicSlug(input.programSlug)}`,
+  });
+}
+
+export function merchantPublicOrigin(input: {
+  merchantSlug: string;
+  customerBaseUrl: string;
+  merchantBaseDomain?: string;
+}): string {
+  if (!MERCHANT_SLUG_PATTERN.test(input.merchantSlug)) {
+    throw new Error("Invalid merchant slug.");
+  }
+  const base = new URL(input.customerBaseUrl);
+  if (base.hostname === "card-staging.waflo.app") return base.origin;
+  if (base.hostname === "localhost" || base.hostname === "127.0.0.1") {
+    base.hostname = `${input.merchantSlug}.localhost`;
+  } else if (base.hostname.endsWith(".localhost") || base.hostname.endsWith(".lvh.me")) {
+    const labels = base.hostname.split(".");
+    base.hostname = `${input.merchantSlug}.${labels.slice(1).join(".")}`;
+  } else {
+    const domain = input.merchantBaseDomain ?? base.hostname.replace(/^card\./, "");
+    base.hostname = `${input.merchantSlug}.${domain}`;
+  }
+  base.pathname = "/";
+  base.search = "";
+  base.hash = "";
+  return base.origin;
+}
+
+export function canonicalCustomerUrl(input: {
+  merchantSlug: string;
+  customerBaseUrl: string;
+  merchantBaseDomain?: string;
+  pathname: string;
 }): string {
   const base = new URL(input.customerBaseUrl);
-  const local = base.hostname === "localhost" || base.hostname.endsWith(".lvh.me");
-  base.hostname = local
-    ? `${input.merchantSlug}.${base.hostname}`
-    : `${input.merchantSlug}.${base.hostname}`;
-  base.pathname = `/join/${validateProgramPublicSlug(input.programSlug)}`;
-  base.search = "";
+  const sharedStagingHost = base.hostname === "card-staging.waflo.app";
+  if (sharedStagingHost) {
+    base.searchParams.set("tenant", input.merchantSlug);
+  } else {
+    const merchantOrigin = merchantPublicOrigin(input);
+    const merchantUrl = new URL(merchantOrigin);
+    base.protocol = merchantUrl.protocol;
+    base.hostname = merchantUrl.hostname;
+    base.port = merchantUrl.port;
+  }
+  base.pathname = input.pathname;
+  if (!sharedStagingHost) base.search = "";
   base.hash = "";
   return base.toString();
 }

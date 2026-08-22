@@ -244,6 +244,19 @@ export function isLocalPreviewUrl(value: string | null | undefined): boolean {
   }
 }
 
+/** Local QA routes may be local; shareable merchant copy is always canonical. */
+export function canonicalPublicUrlForDisplay(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (!url.hostname.endsWith(".localhost") && !url.hostname.endsWith(".lvh.me")) return value;
+    const merchantSlug = url.hostname.split(".")[0];
+    return `https://${merchantSlug}.waflo.app${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return value;
+  }
+}
+
 export function walletSurfacePresentation(
   provider: WalletHealth | undefined,
   ar: boolean,
@@ -266,19 +279,42 @@ export function walletSurfacePresentation(
       tone: "neutral",
     };
 
-  if (provider.status === "HEALTHY")
+  if (provider.status === "EXTERNALLY_UNCERTIFIED")
+    return {
+      label: ar ? "يلزم اختبار على جهاز" : "Device verification required",
+      explanation: ar
+        ? "إعداد Apple والتوقيع صالحان محلياً، لكن يجب إكمال اختبار الحفظ والتحديث على iPhone فعلي قبل اعتباره جاهزاً."
+        : "Apple signing is locally valid, but save and update must pass on a physical iPhone before this is considered ready.",
+      tone: "warning",
+    };
+
+  if (provider.status === "HEALTHY") {
+    if (provider.mode === "TEST_ADAPTER")
+      return {
+        label: ar ? "للاختبار فقط" : "Test only",
+        explanation: ar
+          ? "هذا محاكي محلي ولا ينشئ بطاقة قابلة للحفظ في Wallet."
+          : "This local adapter does not create a pass that can be saved to Wallet.",
+        tone: "neutral",
+      };
+
+    if (provider.externallyCertified !== true)
+      return {
+        label: ar ? "متصل — اختبار الجهاز معلّق" : "Connected — device test pending",
+        explanation: ar
+          ? "تم التحقق من وصول المزود، لكن يجب إكمال حفظ البطاقة وتحديثها على جهاز فعلي قبل اعتبار المسار جاهزاً للبيع."
+          : "Provider access is verified, but a physical-device save and update must pass before the path is sales-ready.",
+        tone: "warning",
+      };
+
     return {
       label: ar ? "جاهزة" : "Ready",
-      explanation:
-        provider.mode === "TEST_ADAPTER"
-          ? ar
-            ? "جاهزة في وضع الاختبار؛ لا يمثل ذلك اعتماداً خارجياً للإنتاج."
-            : "Ready in test-adapter mode; this is not external production certification."
-          : ar
-            ? "إعداد المزود متاح حالياً."
-            : "Provider configuration is currently available.",
+      explanation: ar
+        ? "تم التحقق من إعداد المزود ومسار الجهاز الفعلي."
+        : "Provider configuration and the physical-device path have been verified.",
       tone: "success",
     };
+  }
 
   if (provider.status === "NOT_CONFIGURED" || provider.configured === false)
     return {
@@ -331,7 +367,7 @@ export function publicationFailurePresentation(
       {
         title: "Launch checks changed",
         whatHappened:
-          "The saved card changed after its latest checks or test. Review it and run the checks again.",
+          "The saved card changed after its latest checks. Review it and run the checks again.",
         actionLabel: "Run checks again",
         action: "checks",
         retrySafe: false,

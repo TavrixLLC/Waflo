@@ -122,28 +122,44 @@ describe.sequential("production manager approval intent binding", () => {
   async function approval(
     overrides: Partial<Prisma.ManagerApprovalChallengeUncheckedCreateInput> = {},
   ) {
-    return prisma.client.managerApprovalChallenge.create({
-      data: {
-        publicId: randomUUID(),
-        organizationId: ORGANIZATION_ID,
-        membershipId,
-        rewardEntitlementId: milestoneEntitlementId,
-        staffDeviceId: DEVICE_ID,
-        locationId: LOCATION_ID,
-        requestFingerprint: "a".repeat(64),
-        operationType: "REDEEM",
-        status: "APPROVED",
-        requestedByMemberId: context.organizationMemberId,
-        approvedByUserId: OWNER_ID,
-        approvedAt: new Date(),
-        expiresAt: new Date(Date.now() + 60_000),
-        ...overrides,
-      },
+    return prisma.client.$transaction(async (transaction) => {
+      const command = await transaction.loyaltyOperationCommand.create({
+        data: {
+          organizationId: ORGANIZATION_ID,
+          membershipId,
+          operationType: "REDEEM_REWARD",
+          idempotencyKey: randomUUID(),
+          requestFingerprint: "a".repeat(64),
+          actorMemberId: context.organizationMemberId,
+          actorDeviceId: DEVICE_ID,
+          locationId: LOCATION_ID,
+        },
+      });
+      const item = await transaction.managerApprovalChallenge.create({
+        data: {
+          publicId: randomUUID(),
+          organizationId: ORGANIZATION_ID,
+          membershipId,
+          rewardEntitlementId: milestoneEntitlementId,
+          pendingOperationId: command.id,
+          staffDeviceId: DEVICE_ID,
+          locationId: LOCATION_ID,
+          requestFingerprint: "a".repeat(64),
+          operationType: "REDEEM",
+          status: "APPROVED",
+          requestedByMemberId: context.organizationMemberId,
+          approvedByUserId: OWNER_ID,
+          approvedAt: new Date(),
+          expiresAt: new Date(Date.now() + 60_000),
+          ...overrides,
+        },
+      });
+      return { ...item, operationCommandId: command.id };
     });
   }
 
   async function consume(
-    publicId: string,
+    item: Awaited<ReturnType<typeof approval>>,
     input: {
       membershipId?: string;
       entitlementId?: string;
@@ -160,19 +176,21 @@ describe.sequential("production manager approval intent binding", () => {
     return prisma.client.$transaction((tx) =>
       (
         loyalty as unknown as {
-          managerOverrideValid(
+          consumeManagerApproval(
             transaction: Prisma.TransactionClient,
             context: typeof context,
             approvalPublicId: string,
+            operationCommandId: string,
             membershipId: string,
             entitlementId: string,
             requestFingerprint: string,
-          ): Promise<boolean>;
+          ): Promise<void>;
         }
-      ).managerOverrideValid(
+      ).consumeManagerApproval(
         tx,
         candidateContext,
-        publicId,
+        item.publicId,
+        item.operationCommandId,
         input.membershipId ?? membershipId,
         input.entitlementId ?? milestoneEntitlementId,
         input.fingerprint ?? "a".repeat(64),
@@ -206,38 +224,47 @@ describe.sequential("production manager approval intent binding", () => {
   });
 
   it("rejects a different operation", async () =>
-    expect(consume((await approval({ operationType: "ISSUE_STAMPS" })).publicId)).resolves.toBe(
-      false,
-    ));
+    expect(consume(await approval({ operationType: "ISSUE_STAMPS" }))).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_MISMATCH",
+    }));
   it("rejects a different entitlement/policy", async () =>
-    expect(
-      consume((await approval()).publicId, { entitlementId: finalEntitlementId }),
-    ).resolves.toBe(false));
+    expect(consume(await approval(), { entitlementId: finalEntitlementId })).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_MISMATCH",
+    }));
   it("rejects a changed amount/request fingerprint", async () =>
-    expect(consume((await approval()).publicId, { fingerprint: "b".repeat(64) })).resolves.toBe(
-      false,
-    ));
+    expect(consume(await approval(), { fingerprint: "b".repeat(64) })).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_MISMATCH",
+    }));
   it("rejects a changed membership", async () =>
-    expect(consume((await approval()).publicId, { membershipId: randomUUID() })).resolves.toBe(
-      false,
-    ));
+    expect(consume(await approval(), { membershipId: randomUUID() })).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_MISMATCH",
+    }));
   it("rejects a changed device", async () =>
-    expect(consume((await approval()).publicId, { deviceId: randomUUID() })).resolves.toBe(false));
+    expect(consume(await approval(), { deviceId: randomUUID() })).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_MISMATCH",
+    }));
   it("rejects a changed location", async () =>
-    expect(consume((await approval()).publicId, { locationId: randomUUID() })).resolves.toBe(
-      false,
-    ));
+    expect(consume(await approval(), { locationId: randomUUID() })).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_MISMATCH",
+    }));
   it("rejects an expired approval", async () =>
     expect(
-      consume((await approval({ expiresAt: new Date(Date.now() - 1_000) })).publicId),
-    ).resolves.toBe(false));
+      consume(await approval({ expiresAt: new Date(Date.now() - 1_000) })),
+    ).rejects.toMatchObject({ code: "MANAGER_APPROVAL_EXPIRED" }));
+  it("rejects a rejected approval", async () =>
+    expect(
+      consume(await approval({ status: "REJECTED", rejectedAt: new Date() })),
+    ).rejects.toMatchObject({
+      code: "MANAGER_APPROVAL_REJECTED",
+    }));
   it("rejects an already-consumed approval", async () =>
     expect(
-      consume((await approval({ status: "CONSUMED", consumedAt: new Date() })).publicId),
-    ).resolves.toBe(false));
+      consume(await approval({ status: "CONSUMED", consumedAt: new Date() })),
+    ).rejects.toMatchObject({ code: "MANAGER_APPROVAL_CONSUMED" }));
   it("allows exactly one concurrent consumption", async () => {
     const item = await approval();
-    const results = await Promise.all([consume(item.publicId), consume(item.publicId)]);
-    expect(results.filter(Boolean)).toHaveLength(1);
+    const results = await Promise.allSettled([consume(item), consume(item)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 });

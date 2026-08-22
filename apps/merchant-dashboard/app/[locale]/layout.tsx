@@ -1,21 +1,44 @@
 import type { Metadata } from "next";
+import { Cairo, Manrope, Noto_Sans_Arabic } from "next/font/google";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { directionFor, isLocale } from "@waflo/i18n";
+import { interfaceLocaleFor } from "@waflo/i18n";
 import "../globals.css";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Waflo merchant dashboard",
-    template: "%s · Waflo",
-  },
-  description: "Secure merchant administration for Waflo.",
-  manifest: "/site.webmanifest",
-  icons: {
-    icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],
-    apple: "/apple-touch-icon-180.png",
-  },
-};
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", display: "swap" });
+const notoSansArabic = Noto_Sans_Arabic({
+  subsets: ["arabic"],
+  variable: "--font-noto-sans-arabic",
+  display: "swap",
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const definition = interfaceLocaleFor(locale);
+  if (!definition) return {};
+  return {
+    title: {
+      default: definition.messages.auth.metadata.merchantDashboard,
+      template: "%s · Waflo",
+    },
+    description: definition.messages.auth.metadata.merchantDescription,
+    robots: {
+      index: false,
+      follow: false,
+      nocache: true,
+    },
+    manifest: "/site.webmanifest",
+    icons: {
+      icon: [{ url: "/brand/favicon.svg?v=2", type: "image/svg+xml" }, { url: "/favicon.ico?v=2" }],
+      apple: "/apple-touch-icon-180.png",
+    },
+  };
+}
 
 export default async function LocaleLayout({
   children,
@@ -25,19 +48,18 @@ export default async function LocaleLayout({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
-  const productionFontStylesheet =
-    "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700;800&display=swap";
+  const definition = interfaceLocaleFor(locale);
+  if (!definition) notFound();
+  const fontVariables = `${manrope.variable} ${cairo.variable}${
+    locale.startsWith("ku-") ? ` ${notoSansArabic.variable}` : ""
+  }`;
   return (
-    <html lang={locale} dir={directionFor(locale)}>
-      {process.env.NODE_ENV === "production" ? (
-        <head>
-          <link rel="preconnect" href="https://fonts.googleapis.com" />
-          <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-          <link rel="stylesheet" href={productionFontStylesheet} />
-        </head>
-      ) : null}
-      <body>{children}</body>
+    <html
+      lang={definition.htmlLang}
+      dir={definition.direction}
+      data-interface-typography={definition.typography}
+    >
+      <body className={fontVariables}>{children}</body>
     </html>
   );
 }

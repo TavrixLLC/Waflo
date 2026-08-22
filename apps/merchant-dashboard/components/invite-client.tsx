@@ -1,6 +1,6 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
+import { messages, type InterfaceLocale } from "@waflo/i18n";
 import { Alert, Badge, Button } from "@waflo/ui";
 import { useEffect, useState } from "react";
 import { apiFetch, ApiClientError } from "../lib/api-client";
@@ -12,8 +12,8 @@ interface InvitationView {
   expiresAt: string;
 }
 
-export function InviteClient({ locale }: { locale: Locale }) {
-  const ar = locale === "ar";
+export function InviteClient({ locale }: { locale: InterfaceLocale }) {
+  const copy = messages[locale].auth;
   const [token, setToken] = useState("");
   const [invitation, setInvitation] = useState<InvitationView | null>(null);
   const [error, setError] = useState("");
@@ -29,9 +29,7 @@ export function InviteClient({ locale }: { locale: Locale }) {
     if (legacyUrl.searchParams.get("token")) {
       legacyUrl.searchParams.delete("token");
       window.history.replaceState(null, "", `${legacyUrl.pathname}${legacyUrl.search}`);
-      setError(
-        ar ? "رابط الدعوة غير صالح أو منتهي." : "Invitation link is invalid or has expired.",
-      );
+      setError(copy.invite.invalidOrExpired);
       return;
     }
 
@@ -44,7 +42,7 @@ export function InviteClient({ locale }: { locale: Locale }) {
       : "";
     setToken(fragmentToken);
     if (!fragmentToken) {
-      setError(ar ? "الدعوة غير متاحة." : "Invitation unavailable.");
+      setError(copy.invite.unavailable);
       return;
     }
     void apiFetch<InvitationView>("/v1/invitations/inspect", {
@@ -52,10 +50,20 @@ export function InviteClient({ locale }: { locale: Locale }) {
       body: JSON.stringify({ token: fragmentToken }),
     })
       .then(setInvitation)
-      .catch((caught: unknown) =>
-        setError(caught instanceof ApiClientError ? caught.message : "Invitation unavailable."),
-      );
-  }, [ar]);
+      .catch((caught: unknown) => {
+        if (!(caught instanceof ApiClientError)) {
+          setError(copy.invite.unavailable);
+          return;
+        }
+        const mapped =
+          caught.code === "INVITATION_EXPIRED"
+            ? copy.apiErrors.invitationExpired
+            : caught.code === "INVITATION_ALREADY_ACCEPTED"
+              ? copy.apiErrors.invitationAccepted
+              : copy.apiErrors.invitationUnavailable;
+        setError(mapped);
+      });
+  }, [copy]);
   async function accept() {
     setLoading(true);
     try {
@@ -69,7 +77,11 @@ export function InviteClient({ locale }: { locale: Locale }) {
         window.location.assign(`/${locale}/login`);
         return;
       }
-      setError(caught instanceof ApiClientError ? caught.message : "Unable to accept.");
+      setError(
+        caught instanceof ApiClientError && caught.code === "INVITATION_EMAIL_MISMATCH"
+          ? copy.apiErrors.invitationEmailMismatch
+          : copy.invite.acceptError,
+      );
     } finally {
       setLoading(false);
     }
@@ -78,35 +90,30 @@ export function InviteClient({ locale }: { locale: Locale }) {
   if (accepted) {
     return (
       <>
-        <Alert tone="success" title={ar ? "تم قبول الدعوة" : "Invitation accepted"} />
+        <Alert tone="success" title={copy.invite.accepted} />
         <a href={`/${locale}/dashboard`}>
-          <Button style={{ width: "100%", marginTop: "1rem" }}>
-            {ar ? "فتح لوحة التحكم" : "Open dashboard"}
-          </Button>
+          <Button style={{ width: "100%", marginTop: "1rem" }}>{copy.common.openDashboard}</Button>
         </a>
       </>
     );
   }
-  if (!invitation) return <p>{ar ? "جارٍ تحميل الدعوة…" : "Loading invitation…"}</p>;
+  if (!invitation) return <p>{copy.invite.loading}</p>;
   return (
     <>
       <h2>
-        {ar ? `دعوة إلى ${invitation.organizationName}` : `Join ${invitation.organizationName}`}
+        {copy.invite.joinOrganization.replace("{organizationName}", invitation.organizationName)}
       </h2>
       <p className="auth-card__intro">
-        {ar
-          ? `تمت دعوتك باستخدام ${invitation.invitedEmail}. سجّل الدخول بالبريد نفسه للقبول.`
-          : `You were invited as ${invitation.invitedEmail}. Sign in with the same email to accept.`}
+        {copy.invite.invitedAs.replace("{email}", invitation.invitedEmail)}
       </p>
-      <Badge tone="brand">{invitation.role}</Badge>
+      <Badge tone="brand">
+        {invitation.role === "MANAGER" ? copy.invite.roleManager : copy.invite.roleStaff}
+      </Badge>
       <Button onClick={accept} loading={loading} style={{ width: "100%", marginTop: "1.5rem" }}>
-        {ar ? "قبول الدعوة" : "Accept invitation"}
+        {copy.invite.accept}
       </Button>
       <p className="auth-form__footer">
-        {ar ? "ليس لديك حساب؟" : "Need an account?"}{" "}
-        <a href={`/${locale}/signup`}>
-          {ar ? "أنشئ حساباً بالبريد المدعو" : "Register with the invited email"}
-        </a>
+        {copy.invite.needAccount} <a href={`/${locale}/signup`}>{copy.invite.register}</a>
       </p>
     </>
   );

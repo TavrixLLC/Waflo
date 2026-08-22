@@ -186,6 +186,31 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
   });
 
+  it("uses provider-correct merchant logo package slots when generated branding is supplied", async () => {
+    const provider = new AppleWalletProvider({
+      mode: "TEST_ADAPTER",
+      configuration: {
+        passTypeIdentifier: "pass.app.waflo.test-adapter",
+        teamIdentifier: "WAFLOTEST",
+        organizationName: "Waflo Test Adapter",
+        webServiceUrl: "https://api.example.test/v1/apple-wallet",
+      },
+      signer: new TestApplePassSigner("merchant-logo-test-signature"),
+      authenticationToken: () => "a".repeat(43),
+      passDownloadUrl: "https://example.test/pass",
+    });
+    const issued = await provider.issueMembershipPass({
+      ...walletInput,
+      applePassImages: {
+        "logo.png": Buffer.from("merchant-logo-1x"),
+        "logo@2x.png": Buffer.from("merchant-logo-2x"),
+      },
+    });
+    const files = unzipSync(issued.artifact as Uint8Array);
+    expect(Buffer.from(files["logo.png"] ?? []).toString("utf8")).toBe("merchant-logo-1x");
+    expect(Buffer.from(files["logo@2x.png"] ?? []).toString("utf8")).toBe("merchant-logo-2x");
+  });
+
   it("separates Apple local signing health from external device certification", async () => {
     const signer = {
       mode: "REAL" as const,

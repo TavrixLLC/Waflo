@@ -211,6 +211,8 @@ export interface NextContentSecurityPolicyOptions {
   apiUrl?: string;
   allowLoopbackApi?: boolean;
   googleFonts?: boolean;
+  stripeJs?: boolean;
+  mapboxGl?: boolean;
 }
 
 function contentSecurityPolicyOrigin(
@@ -244,6 +246,17 @@ export function createNextContentSecurityPolicy(
   const externalFontConnectSource = options.googleFonts
     ? " https://fonts.googleapis.com https://fonts.gstatic.com"
     : "";
+  const stripeScriptSource = options.stripeJs
+    ? " https://*.js.stripe.com https://js.stripe.com"
+    : "";
+  const stripeFrameSource = options.stripeJs
+    ? " https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com"
+    : "";
+  const stripeConnectSource = options.stripeJs ? " https://api.stripe.com" : "";
+  const mapboxConnectSource = options.mapboxGl
+    ? " https://api.mapbox.com https://events.mapbox.com"
+    : "";
+  const mapboxWorkerSource = options.mapboxGl ? " blob:" : "";
 
   const developmentConnectSource =
     nodeEnvironment === "development" ? " http://localhost:4000" : "";
@@ -251,12 +264,9 @@ export function createNextContentSecurityPolicy(
     options.apiUrl,
     options.allowLoopbackApi === true,
   );
-  const configuredApiSource =
-    configuredApiOrigin && configuredApiOrigin !== "https://api.waflo.app"
-      ? ` ${configuredApiOrigin}`
-      : "";
+  const apiSource = configuredApiOrigin ?? "https://api.waflo.app";
 
-  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource}${configuredApiSource} https://api.waflo.app`;
+  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'self'${stripeFrameSource}; form-action 'self'; img-src 'self' data: blob: ${apiSource}; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}${stripeScriptSource}; worker-src 'self'${mapboxWorkerSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource}${stripeConnectSource}${mapboxConnectSource} ${apiSource}`;
 }
 
 export const securityHeaders = {

@@ -11,7 +11,6 @@ import {
   studioAreaForValidationPath,
   studioAreas,
   studioOperationError,
-  studioTestActionError,
 } from "../../apps/merchant-dashboard/components/program-studio-presentation.js";
 
 const baseLifecycleInput = {
@@ -69,21 +68,13 @@ describe("merchant Loyalty Studio information architecture", () => {
     expect(arabic).not.toMatch(/request|revision|enum|provider/iu);
   });
 
-  it("explains known Test Mode policy blocks without exposing backend diagnostics", () => {
-    expect(studioTestActionError("DAILY_STAMP_LIMIT_REACHED", "en")).toContain("daily stamp limit");
-    expect(studioTestActionError("PURCHASE_CURRENCY_MISMATCH", "ar")).toMatch(/[\u0600-\u06ff]/u);
-    expect(studioTestActionError("UNKNOWN_CODE", "en")).toBe(
-      studioOperationError("test-action", "en"),
-    );
-  });
-
-  it("exposes six task-oriented areas in the intended order", () => {
+  it("exposes the six task-oriented areas without a Test stage", () => {
     expect(studioAreas).toEqual([
       "overview",
       "how-it-works",
       "customers-locations",
-      "test",
       "launch",
+      "engagement",
       "settings",
     ]);
   });
@@ -94,14 +85,14 @@ describe("merchant Loyalty Studio information architecture", () => {
     expect(studioAreaForValidationPath("locations.active")).toBe("customers-locations");
     expect(studioAreaForValidationPath("content.ar.programName")).toBe("overview");
     expect(studioAreaForValidationPath("apple.preview")).toBe("overview");
-    expect(studioAreaForValidationPath("test.completed")).toBe("test");
+    expect(studioAreaForValidationPath("test.completed")).toBe("launch");
   });
 
   it("routes publication failures to the place where a merchant can act", () => {
     expect(studioAreaForPublicationError("PROGRAM_PUBLICATION_LOCATION_STALE")).toBe(
       "customers-locations",
     );
-    expect(studioAreaForPublicationError("PROGRAM_TEST_REQUIRED")).toBe("test");
+    expect(studioAreaForPublicationError("PROGRAM_TEST_REQUIRED")).toBe("launch");
     expect(studioAreaForPublicationError("PROGRAM_PUBLICATION_ASSET_STALE")).toBe("overview");
     expect(studioAreaForPublicationError("PROGRAM_PUBLICATION_VALIDATION_STALE")).toBe("launch");
   });
@@ -144,13 +135,13 @@ describe("merchant Loyalty Studio lifecycle presentation", () => {
       setting: "canArchive",
     },
     {
-      name: "draft after checks",
+      name: "ready after automatic checks",
       input: { draftVersionStatus: "VALIDATED", validationState: "passed" },
-      label: "Draft",
-      guidance: "Automated checks passed",
-      primary: "Start test",
-      liveStage: "pending",
-      launch: "Go to Test",
+      label: "Ready to launch",
+      guidance: "Ready to launch",
+      primary: "Review launch",
+      liveStage: "current",
+      launch: "Launch loyalty card",
       setting: "canArchive",
     },
     {
@@ -295,28 +286,32 @@ describe("merchant Loyalty Studio lifecycle presentation", () => {
     expect(changes).toMatchObject({
       label: "Live",
       guidance: {
-        title: "Saved changes · Not live yet",
+        title: "Live · Unpublished changes",
         description:
-          "Review the saved changes before publishing them. The current live card is unchanged.",
+          "Your current card is live. You have unpublished changes. Review and publish them when you are ready. Customers continue to see the current live version.",
       },
       primaryAction: { label: "Review changes" },
     });
   });
 
-  it("keeps automated checks scoped when the demo cycle is incomplete", () => {
+  it("allows publish after automatic checks without a manual Test requirement", () => {
     const presentation = deriveStudioLifecyclePresentation({
       ...baseLifecycleInput,
       draftVersionStatus: "VALIDATED",
       validationState: "passed",
     });
-    expect(presentation.launch.label).toBe("Not ready to launch");
+    expect(presentation.launch.label).toBe("Ready to launch");
     expect(presentation.launch.requirements).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: "automated", status: "Passed", complete: true }),
-        expect.objectContaining({ key: "test", status: "Required", blocking: true }),
       ]),
     );
-    expect(presentation.launch.action).toMatchObject({ label: "Go to Test", area: "test" });
+    expect(presentation.launch.action).toMatchObject({ label: "Launch loyalty card" });
+    expect(presentation.journeyStages.map((stage) => stage.key)).toEqual([
+      "design",
+      "checks",
+      "live",
+    ]);
   });
 
   it("reports location, plan, and asset blockers without weakening publish guards", () => {

@@ -51,6 +51,26 @@ async function enterStudio(page: Page, locale: "en" | "ar"): Promise<void> {
   await continueToStudio.click();
 }
 
+test("keeps the dashboard shell visible while a slow Studio route renders its destination skeleton", async ({
+  page,
+}) => {
+  await mockTemplateGalleryApi(page, { studioLoadDelayMs: 900 });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await enterStudio(page, "en");
+
+  const sidebar = page.locator(".wf-sidebar");
+  const skeleton = page.locator(".studio-loading-skeleton");
+  await expect(sidebar).toBeVisible();
+  await expect(skeleton).toBeVisible();
+  await expect(skeleton.locator(".studio-loading-skeleton__header")).toBeVisible();
+  await expect(skeleton.locator(".studio-loading-skeleton__status")).toBeVisible();
+  await expect(skeleton.locator(".studio-loading-skeleton__body")).toBeVisible();
+  await expect(page.locator(".dashboard-route-loading")).toHaveCount(0);
+
+  await expect(page.locator(".studio-shell--p4")).toBeVisible();
+  await expect(skeleton).toHaveCount(0);
+});
+
 test("continues from Builder into a six-area merchant Studio without duplicate design editors", async ({
   page,
 }) => {
@@ -64,8 +84,8 @@ test("continues from Builder into a six-area merchant Studio without duplicate d
     "Overview",
     "How it works",
     "Customers & locations",
-    "Test",
-    "Launch",
+    "Wallet Engagement",
+    "Review & launch",
     "Settings",
   ]) {
     await expect(navigation.getByRole("button", { name: new RegExp(label, "u") })).toBeVisible();
@@ -87,11 +107,9 @@ test("continues from Builder into a six-area merchant Studio without duplicate d
   await expect(page.getByLabel("Valid for (days)").first()).toBeVisible();
   await expect(page.getByLabel("Require manager approval to redeem").first()).toBeVisible();
 
-  await navigation.getByRole("button", { name: /^Test/u }).click();
-  await expect(page.getByText("Test safely with a demo customer", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start demo customer" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 
-  await navigation.getByRole("button", { name: /^Launch/u }).click();
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page.getByRole("heading", { name: "Not ready to launch" })).toBeVisible();
   await expect(
     page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }),
@@ -130,14 +148,13 @@ test("uses a discoverable mobile menu and complete Arabic RTL navigation", async
     "نظرة عامة",
     "طريقة العمل",
     "العملاء والمواقع",
-    "الاختبار",
+    "تفاعل Wallet",
     "الإطلاق",
     "الإعدادات",
   ]) {
     await expect(navigation.getByRole("button", { name: new RegExp(label, "u") })).toBeVisible();
   }
-  await navigation.getByRole("button", { name: /^الاختبار/u }).click();
-  await expect(page.getByText("اختبر بأمان مع عميل تجريبي", { exact: true })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: /^الاختبار/u })).toHaveCount(0);
   await expect(mobileTrigger).toBeFocused();
 
   const noOverflow = await page.evaluate(
@@ -186,7 +203,7 @@ test("routes launch blockers to the merchant area that can fix them", async ({ p
   });
   await enterStudio(page, "en");
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
-  await navigation.getByRole("button", { name: /^Launch/u }).click();
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }).click();
   await expect(page.getByText("1 launch blockers", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Choose at least one participating location/u }).click();
@@ -228,19 +245,19 @@ const lifecycleScenarios = [
   ],
   [
     "CHECKED",
-    "Draft",
-    "Not visible to real customers until it is launched.",
-    "Automated checks passed",
-    "Pending",
-    "Start test",
-    "Not ready to launch",
-    "Go to Test",
+    "Ready to launch",
+    "Required checks are complete. The card is not live yet.",
+    "Ready to launch",
+    "Next required",
+    "Review launch",
+    "Ready to launch",
+    "Launch loyalty card",
     "Archive card",
   ],
   [
     "READY",
     "Ready to launch",
-    "Required checks and testing are complete. The card is not live yet.",
+    "Required checks are complete. The card is not live yet.",
     "Ready to launch",
     "Next required",
     "Review launch",
@@ -342,7 +359,7 @@ for (const [
     ).toBeVisible();
 
     const navigation = page.getByRole("navigation", { name: "Studio sections" });
-    await navigation.getByRole("button", { name: /^Launch/u }).click();
+    await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
     await expect(page.getByRole("heading", { name: launchStatus })).toBeVisible();
     await expect(
       page.locator(".studio-launch-action").getByRole("button", { name: launchAction }),
@@ -373,10 +390,14 @@ test("shows complete customer access controls and truthful optional Wallet avail
   await expect(page.getByRole("heading", { name: "How customers join" })).toBeVisible();
   await expect(page.getByLabel("Card link name")).toHaveValue("gallery-coffee-rewards");
   await expect(page.getByRole("button", { name: "Download enrollment QR as PNG" })).toBeVisible();
-  await expect(page.getByLabel("Primary customer language")).toHaveValue("en");
+  const primaryCustomerLanguage = page.getByRole("combobox", {
+    name: "Primary customer language",
+  });
+  await expect(primaryCustomerLanguage).toBeDisabled();
+  await expect(primaryCustomerLanguage).toHaveValue("en");
   await expect(page.getByLabel("Show separate marketing consent")).toBeChecked();
 
-  await navigation.getByRole("button", { name: /^Launch/u }).click();
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
   await expect(page.getByText("Apple Wallet", { exact: true })).toBeVisible();
   await expect(page.getByText("Google Wallet", { exact: true })).toBeVisible();
   await expect(page.getByText("Status unavailable", { exact: true })).toHaveCount(2);
@@ -387,24 +408,14 @@ test("shows complete customer access controls and truthful optional Wallet avail
   ).toHaveCount(2);
 });
 
-test("uses spaced Test stats, one primary progression action, and a truthful reset label", async ({
-  page,
-}) => {
+test("removes Test navigation and keeps automatic launch checks actionable", async ({ page }) => {
   await mockTemplateGalleryApi(page);
   await enterStudio(page, "en");
   const navigation = page.getByRole("navigation", { name: "Studio sections" });
-  await navigation.getByRole("button", { name: /^Test/u }).click();
-  await page.getByRole("button", { name: "Start demo customer" }).click();
-
-  await expect(page.getByText("Current progress", { exact: true })).toBeVisible();
-  await expect(page.getByText("0 / 8", { exact: true })).toBeVisible();
-  await expect(page.getByText("Completed cycles", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add a stamp" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "+5 stamps" })).toHaveAttribute(
-    "class",
-    /secondary/u,
-  );
-  await expect(page.getByRole("button", { name: "Reset demo customer" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  await navigation.getByRole("button", { name: /^(?:Review & launch|Launch)/u }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "Launch" })).toBeVisible();
+  await expect(page.getByText(/Automated checks/u).first()).toBeVisible();
 });
 
 test("separates the current Studio location from the next required journey stage in LTR and RTL", async ({

@@ -61,6 +61,7 @@ export async function createApiApplication(
                 "req.headers['x-waflo-body-sha256']",
                 "*.qrPayload",
                 "*.pairingToken",
+                "*.manualCode",
                 "*.refreshToken",
                 "*.signature",
                 "*.nonce",
@@ -121,7 +122,7 @@ export async function createApiApplication(
   app.enableCors({
     origin: [...environment.allowedOrigins],
     credentials: true,
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "content-type",
       "authorization",
@@ -144,6 +145,7 @@ export async function createApiApplication(
     reply.header("x-request-id", request.id);
     reply.header("cache-control", "no-store");
     reply.header("referrer-policy", "no-referrer");
+    reply.header("x-robots-tag", "noindex, nofollow, noarchive");
     done();
   });
 

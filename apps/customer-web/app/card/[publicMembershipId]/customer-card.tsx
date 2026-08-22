@@ -1,11 +1,18 @@
 "use client";
 
-import { Alert, Badge, Button, Card } from "@waflo/ui";
+import {
+  cardLocaleMetadata,
+  directionForCardLocale,
+  fontStackForCardLocale,
+} from "@waflo/contracts";
+import { Alert, Badge, Button, Card, SearchableSelect } from "@waflo/ui";
 import { ArrowRightLeft, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
-import { customerApi, CustomerApiError } from "../../client-api";
+import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
+import { CustomerApiError, customerApi } from "../../client-api";
+import { type WalletPlatform, walletPlatform } from "../../wallet-platform";
 
 interface CardView {
   publicMembershipId: string;
@@ -14,8 +21,11 @@ interface CardView {
     preferredLocale: "en" | "ar";
     maskedEmail: string | null;
   };
-  merchant: { name: string; slug: string };
+  merchant: { name: string; slug: string; brandLogoDataUri?: string | null | undefined };
   program: {
+    defaultLocale: string;
+    enabledLocales: string[];
+    contentLocale: string;
     name: string;
     description: string;
     rewardSummary: string;
@@ -59,35 +69,73 @@ interface CardView {
   };
 }
 
-export function CustomerCard({ publicMembershipId }: { publicMembershipId: string }) {
+function walletStatusLabel(status: string, ar: boolean): string {
+  if (status === "READY") return ar ? "جاهزة" : "Ready";
+  if (status === "PREPARING" || status === "PENDING") return ar ? "قيد التجهيز" : "Preparing";
+  return ar ? "غير متاحة" : "Unavailable";
+}
+
+function membershipStateLabel(state: string, ar: boolean): string {
+  if (state === "ACTIVE") return ar ? "نشطة" : "Active";
+  if (state === "TRANSFERRED") return ar ? "منقولة" : "Transferred";
+  if (state === "SUSPENDED") return ar ? "موقوفة" : "Suspended";
+  return ar ? "غير متاحة" : "Unavailable";
+}
+
+export function CustomerCard({
+  publicMembershipId,
+  tenant,
+}: {
+  publicMembershipId: string;
+  tenant?: string;
+}) {
   const [card, setCard] = useState<CardView | null>(null);
   const [qrUrl, setQrUrl] = useState("");
   const [error, setError] = useState("");
   const [walletBusy, setWalletBusy] = useState<"apple" | "google" | null>(null);
-  const [tenantQuery, setTenantQuery] = useState("");
+  const [platform, setPlatform] = useState<WalletPlatform>("desktop");
+  const [selectedCardLocale, setSelectedCardLocale] = useState<string | undefined>();
+  const tenantQuery = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
 
   useEffect(() => {
-    const tenant = new URLSearchParams(window.location.search).get("tenant");
-    setTenantQuery(tenant ? `?tenant=${encodeURIComponent(tenant)}` : "");
+    setPlatform(walletPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints));
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      setCard(
-        await customerApi<CardView>(`/v1/customer/card/${encodeURIComponent(publicMembershipId)}`),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof CustomerApiError ? caught.message : "This card could not be opened.",
-      );
-    }
-  }, [publicMembershipId]);
+  const load = useCallback(
+    async (localeOverride?: string) => {
+      try {
+        const query = new URLSearchParams();
+        if (tenant) query.set("tenant", tenant);
+        if (localeOverride) query.set("locale", localeOverride);
+        setCard(
+          await customerApi<CardView>(
+            `/v1/customer/card/${encodeURIComponent(publicMembershipId)}${query.size ? `?${query.toString()}` : ""}`,
+          ),
+        );
+      } catch (caught) {
+        setError(
+          caught instanceof CustomerApiError ? caught.message : "This card could not be opened.",
+        );
+      }
+    },
+    [publicMembershipId, tenant],
+  );
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 15_000);
+    const saved =
+      window.localStorage.getItem(`waflo:card-locale:${publicMembershipId}`) ?? undefined;
+    setSelectedCardLocale(saved);
+    void load(saved);
+    const timer = window.setInterval(() => void load(saved), 15_000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, publicMembershipId]);
+
+  function chooseCardLocale(locale: string) {
+    if (!card?.program.enabledLocales.includes(locale)) return;
+    setSelectedCardLocale(locale);
+    window.localStorage.setItem(`waflo:card-locale:${publicMembershipId}`, locale);
+    void load(locale);
+  }
 
   useEffect(() => {
     if (!card?.membershipQr) {
@@ -105,9 +153,12 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
   async function addGoogle() {
     setWalletBusy("google");
     try {
-      const action = await customerApi<{ url: string }>("/v1/customer/wallet/google/add-action", {
-        method: "POST",
-      });
+      const action = await customerApi<{ url: string }>(
+        `/v1/customer/wallet/google/add-action${tenantQuery}`,
+        {
+          method: "POST",
+        },
+      );
       window.location.assign(action.url);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Google Wallet is unavailable.");
@@ -142,28 +193,60 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
   return (
     <main className="customer-page card-page" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
       <header className="customer-header card-header">
-        <span className="waflo-wordmark">waflo</span>
-        <button type="button" className="customer-language" onClick={() => void logout()}>
-          <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
-        </button>
+        <CustomerMerchantIdentity
+          locale={ar ? "ar" : "en"}
+          logoDataUri={card.merchant.brandLogoDataUri}
+          name={card.merchant.name}
+        />
+        <div className="customer-card-actions">
+          {card.program.enabledLocales.length > 1 ? (
+            <SearchableSelect
+              ariaLabel={ar ? "لغة محتوى البطاقة" : "Card content language"}
+              value={selectedCardLocale ?? card.program.contentLocale}
+              onValueChange={chooseCardLocale}
+              options={card.program.enabledLocales.map((locale) => {
+                const metadata = cardLocaleMetadata(locale);
+                return {
+                  value: locale,
+                  label: metadata ? `${metadata.englishName} · ${metadata.nativeName}` : locale,
+                  ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+                };
+              })}
+            />
+          ) : null}
+          <button type="button" className="customer-language" onClick={() => void logout()}>
+            <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
+          </button>
+        </div>
       </header>
       <section
         className={`digital-card ${active ? "" : "digital-card--inactive"}`}
+        lang={card.program.contentLocale}
+        dir={directionForCardLocale(card.program.contentLocale)}
         style={
           {
             "--card-bg": card.theme.backgroundColor,
             "--card-ink": card.theme.foregroundColor,
             "--card-accent": card.theme.accentColor,
+            fontFamily: fontStackForCardLocale(card.program.contentLocale),
           } as React.CSSProperties
         }
       >
         <div className="digital-card__brand">
-          <div>
-            <small>{card.merchant.name}</small>
-            <h1>{card.program.name}</h1>
+          <div className="digital-card__issuer">
+            <CustomerMerchantIdentity
+              locale={ar ? "ar" : "en"}
+              logoDataUri={card.merchant.brandLogoDataUri}
+              name={card.merchant.name}
+              showName={false}
+            />
+            <div>
+              <small>{card.merchant.name}</small>
+              <h1>{card.program.name}</h1>
+            </div>
           </div>
           <Badge tone={active ? "success" : "warning"}>
-            {card.membership.state.replaceAll("_", " ")}
+            {membershipStateLabel(card.membership.state, ar)}
           </Badge>
         </div>
         {!active ? (
@@ -201,7 +284,7 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
           unoptimized
         />
         <div className="progress-copy">
-          <strong>
+          <strong dir="ltr" className="numeric-fraction">
             {card.progress.currentCycleStampCount} / {card.progress.goal}
           </strong>
           <span>
@@ -224,7 +307,9 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
             />
             <p>
               <ShieldCheck />{" "}
-              {ar ? "يحتوي على بيانات اعتماد عشوائية فقط" : "Contains an opaque credential only"}
+              {ar
+                ? "استخدم رمز QR هذا مع بطاقة الولاء."
+                : "Use this QR code with your loyalty card."}
             </p>
           </div>
         ) : null}
@@ -234,43 +319,59 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
           <div className="card-actions__heading">
             <WalletCards />
             <div>
-              <h2>{ar ? "أضف إلى Wallet" : "Add to Wallet"}</h2>
+              <h2>{ar ? "أضف إلى المحفظة" : "Add to Wallet"}</h2>
               <p>
                 {ar
-                  ? "تظهر الأزرار فقط عندما تصبح البطاقة جاهزة."
-                  : "Buttons appear only when provider issuance is ready."}
+                  ? "ستظهر خيارات المحفظة هنا عند توفرها."
+                  : "Wallet options will appear here when available."}
               </p>
             </div>
           </div>
           <div className="wallet-buttons">
-            {card.wallet.apple.status === "READY" ? (
-              <a
-                className="wallet-button wallet-button--apple"
-                href="/api/waflo/v1/customer/wallet/apple/pass"
-              >
-                Add to Apple Wallet
-              </a>
+            {platform === "ios" ? (
+              card.wallet.apple.status === "READY" ? (
+                <a
+                  className="wallet-button wallet-button--apple"
+                  href={`/api/waflo/v1/customer/wallet/apple/pass${tenantQuery}`}
+                >
+                  Add to Apple Wallet
+                </a>
+              ) : (
+                <span className="wallet-state">
+                  Apple Wallet · {walletStatusLabel(card.wallet.apple.status, ar)}
+                </span>
+              )
+            ) : platform === "android" ? (
+              card.wallet.google.status === "READY" ? (
+                <Button
+                  className="wallet-button wallet-button--google"
+                  onClick={() => void addGoogle()}
+                  loading={walletBusy === "google"}
+                >
+                  Add to Google Wallet
+                </Button>
+              ) : (
+                <span className="wallet-state">
+                  Google Wallet · {walletStatusLabel(card.wallet.google.status, ar)}
+                </span>
+              )
             ) : (
-              <span className="wallet-state">Apple Wallet · {card.wallet.apple.status}</span>
-            )}
-            {card.wallet.google.status === "READY" ? (
-              <Button onClick={() => void addGoogle()} loading={walletBusy === "google"}>
-                Add to Google Wallet
-              </Button>
-            ) : (
-              <span className="wallet-state">Google Wallet · {card.wallet.google.status}</span>
+              <p className="wallet-platform-note">
+                {ar
+                  ? "افتح هذه البطاقة على iPhone أو Android لإضافتها إلى محفظة جهازك."
+                  : "Open this card on iPhone or Android to add it to that device's wallet."}
+              </p>
             )}
           </div>
-          {card.wallet.apple.testAdapter || card.wallet.google.testAdapter ? (
-            <Alert tone="info" title={ar ? "وضع اختبار" : "Test Adapter mode"}>
-              {ar
-                ? "لا يمثل هذا تثبيتًا حقيقيًا لدى مزود Wallet."
-                : "This does not claim a real provider installation."}
-            </Alert>
-          ) : null}
         </Card>
         {card.transfer.allowed ? (
-          <a className="transfer-action" href={`/transfer${tenantQuery}`}>
+          <a
+            className="transfer-action"
+            href={`/transfer?${new URLSearchParams({
+              lang: ar ? "ar" : "en",
+              ...(tenant ? { tenant } : {}),
+            }).toString()}`}
+          >
             <ArrowRightLeft />
             <span>
               <strong>{ar ? "نقل البطاقة إلى جهاز آخر" : "Transfer to another device"}</strong>
@@ -280,13 +381,16 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
                     ? "يتطلب تأكيد البريد"
                     : "Email confirmation required"
                   : ar
-                    ? "مسار أقل أمانًا باستخدام رمز البطاقة"
-                    : "Lower-security QR proof path"}
+                    ? "استخدم رمز QR الخاص ببطاقتك للمتابعة"
+                    : "Use your card QR code to continue"}
               </small>
             </span>
           </a>
         ) : null}
       </section>
+      <footer className="customer-footer">
+        <ShieldCheck size={15} /> {ar ? "مدعوم من Waflo" : "Powered by Waflo"}
+      </footer>
     </main>
   );
 }

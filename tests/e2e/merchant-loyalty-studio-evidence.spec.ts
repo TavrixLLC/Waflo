@@ -1,10 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { expect, type BrowserContext, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/loyalty-studio-p4a-repair-round1");
+const evidenceDirectory = path.resolve(
+  "test-results/evidence/uiux/loyalty-studio-p4a-repair-round1",
+);
 
 type StudioState =
   | "DRAFT"
@@ -112,8 +114,9 @@ test("captures exactly the focused repair evidence set", async ({ context }) => 
 
   const launch = await context.newPage();
   await openStudio(launch, { state: "CHECKED" });
-  await openArea(launch, /^Launch/u);
-  await expect(launch.getByRole("heading", { name: "Not ready to launch" })).toBeVisible();
+  await openArea(launch, /^Review & launch/u);
+  await expect(launch.getByRole("heading", { name: "Ready to launch" })).toBeVisible();
+  await expect(launch.getByRole("button", { name: "Launch loyalty card" })).toBeVisible();
   await capture(launch, "06-launch-status-consistency.png");
   await launch.close();
 
@@ -168,17 +171,18 @@ test("captures exactly the focused repair evidence set", async ({ context }) => 
     .png()
     .toFile(path.join(evidenceDirectory, "09-arabic-lifecycle-states.png"));
 
-  const testPage = await context.newPage();
-  await openStudio(testPage, { width: 1100, height: 760 });
-  await openArea(testPage, /^Test/u);
-  await testPage.getByRole("button", { name: "Start demo customer" }).click();
-  await testPage.getByRole("button", { name: "Add a stamp" }).click();
-  await expect(testPage.getByText("1 / 8", { exact: true })).toBeVisible();
-  const testPanel = await labeledPanel(
-    await testPage.screenshot({ animations: "disabled" }),
-    "Test spacing and action hierarchy",
+  const checksPage = await context.newPage();
+  await openStudio(checksPage, { width: 1100, height: 760 });
+  await openArea(checksPage, /^(?:Review & launch|Launch)/u);
+  await expect(
+    checksPage.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }),
+  ).toBeVisible();
+  await expect(checksPage.getByRole("button", { name: /^Test/u })).toHaveCount(0);
+  const checksPanel = await labeledPanel(
+    await checksPage.screenshot({ animations: "disabled" }),
+    "Automatic publish validation",
   );
-  await testPage.close();
+  await checksPage.close();
 
   const historyPage = await context.newPage();
   await openStudio(historyPage, { width: 1440, height: 800 });
@@ -194,55 +198,37 @@ test("captures exactly the focused repair evidence set", async ({ context }) => 
   })
     .composite([
       { input: historyPanel, top: 0, left: 0 },
-      { input: testPanel, top: 0, left: 900 },
+      { input: checksPanel, top: 0, left: 900 },
     ])
     .png()
-    .toFile(path.join(evidenceDirectory, "10-history-and-test-spacing.png"));
+    .toFile(path.join(evidenceDirectory, "10-history-and-automatic-checks.png"));
 
-  const comparisons = [
-    [
-      "Live",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/03-studio-overview-live-desktop.png"),
-      path.join(evidenceDirectory, "03-live-correct.png"),
-    ],
-    [
-      "Paused",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/14-paused-state.png"),
-      path.join(evidenceDirectory, "04-paused-correct.png"),
-    ],
-    [
-      "Archived",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/15-archived-state.png"),
-      path.join(evidenceDirectory, "05-archived-correct.png"),
-    ],
-    [
-      "Launch",
-      path.resolve("artifacts/uiux/loyalty-studio-p4a/07-launch-readiness.png"),
-      path.join(evidenceDirectory, "06-launch-status-consistency.png"),
-    ],
+  const lifecycleStates = [
+    ["Live", path.join(evidenceDirectory, "03-live-correct.png")],
+    ["Paused", path.join(evidenceDirectory, "04-paused-correct.png")],
+    ["Archived", path.join(evidenceDirectory, "05-archived-correct.png")],
+    ["Launch", path.join(evidenceDirectory, "06-launch-status-consistency.png")],
   ] as const;
-  const comparisonPanels: Buffer[] = [];
-  for (const [label, before, after] of comparisons) {
-    comparisonPanels.push(await labeledPanel(before, `${label} · before`, 760, 470));
-    comparisonPanels.push(await labeledPanel(after, `${label} · repaired`, 760, 470));
-  }
+  const lifecyclePanels = await Promise.all(
+    lifecycleStates.map(([label, source]) => labeledPanel(source, label, 760, 470)),
+  );
   const comparisonWidth = 760;
   const comparisonHeight = 528;
   await sharp({
     create: {
       width: comparisonWidth * 2,
-      height: comparisonHeight * 4,
+      height: comparisonHeight * 2,
       channels: 4,
       background: "#e9ecee",
     },
   })
     .composite(
-      comparisonPanels.map((input, index) => ({
+      lifecyclePanels.map((input, index) => ({
         input,
         top: Math.floor(index / 2) * comparisonHeight,
         left: (index % 2) * comparisonWidth,
       })),
     )
     .png()
-    .toFile(path.join(evidenceDirectory, "11-before-after-lifecycle-contact-sheet.png"));
+    .toFile(path.join(evidenceDirectory, "11-current-lifecycle-contact-sheet.png"));
 });

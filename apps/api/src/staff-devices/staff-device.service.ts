@@ -4,26 +4,35 @@ import type {
   CreateDevicePairingSessionInput,
   DevicePairingClaimInput,
   DevicePairingCompleteInput,
+  StaffLocationAssignmentUpsertInput,
 } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
+import { hasPermission } from "@waflo/permissions";
 import { createQrSvg } from "@waflo/qr-core";
 import {
   assertStaffMobileAppVersion,
+  createManualPairingCode,
   createOpaqueDeviceSessionToken,
   createPairingToken,
   hashOpaqueDeviceToken,
+  hashManualPairingCode,
   hashPairingToken,
   normalizeEd25519PublicKey,
   parsePairingToken,
   verifyEd25519Message,
 } from "@waflo/staff-device-security";
 import { AuditService } from "../audit/audit.service.js";
+import { AccountAccessService } from "../account/account-access.service.js";
 import { AppError } from "../common/app-error.js";
 import { withOrderedInvariantLocks } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import {
+  revokeStaffAccessForLocation,
+  revokeStaffAccessForMembership,
+} from "./staff-device-lifecycle.js";
 
 const PAIRING_CHALLENGE_VERSION = "waflo-pair-challenge-v1";
 
@@ -76,6 +85,7 @@ export class StaffDeviceService {
     private readonly tenant: TenantService,
     private readonly audit: AuditService,
     private readonly environment: EnvironmentService,
+    private readonly accountAccess: AccountAccessService,
   ) {}
 
   async list(userId: string, organizationId: string, cursor?: string, limit = 30) {
@@ -133,6 +143,304 @@ export class StaffDeviceService {
     };
   }
 
+  async listLocationAssignments(userId: string, organizationId: string, memberId: string) {
+    const actor = await this.tenant.requireMembership(userId, organizationId, "devices.view");
+    const target = await this.prisma.client.organizationMember.findFirst({
+      where: { id: memberId, organizationId },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        user: { select: { displayName: true, status: true } },
+      },
+    });
+    if (!target || (actor.role === "MANAGER" && target.role !== "STAFF")) {
+      throw new AppError("STAFF_MEMBER_NOT_FOUND", "Staff member not found.", HttpStatus.NOT_FOUND);
+    }
+    const assignments = await this.prisma.client.staffLocationAssignment.findMany({
+      where: { organizationId, organizationMemberId: memberId },
+      orderBy: [{ active: "desc" }, { createdAt: "asc" }],
+    });
+    const locations = await this.prisma.client.location.findMany({
+      where: { id: { in: assignments.map((assignment) => assignment.locationId) }, organizationId },
+      select: { id: true, name: true, status: true },
+    });
+    const locationById = new Map(locations.map((location) => [location.id, location]));
+    return {
+      staffMember: target,
+      items: assignments.map((assignment) => ({
+        locationId: assignment.locationId,
+        location: locationById.get(assignment.locationId) ?? null,
+        earningAllowed: assignment.earningAllowed,
+        redemptionAllowed: assignment.redemptionAllowed,
+        active: assignment.active,
+        createdAt: assignment.createdAt,
+        revokedAt: assignment.revokedAt,
+      })),
+    };
+  }
+
+  async putLocationAssignment(
+    userId: string,
+    organizationId: string,
+    memberId: string,
+    locationId: string,
+    input: StaffLocationAssignmentUpsertInput,
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "devices.pair");
+    const outcome = await withOrderedInvariantLocks(
+      this.prisma.client,
+      [`organization:${organizationId}`, `staff-assignment:${memberId}:${locationId}`],
+      async (transaction) => {
+        const [actor, target, location, existing] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+            include: { user: { select: { status: true } } },
+          }),
+          transaction.organizationMember.findFirst({
+            where: { id: memberId, organizationId, status: "ACTIVE" },
+            include: { user: { select: { status: true, displayName: true } } },
+          }),
+          transaction.location.findFirst({
+            where: { id: locationId, organizationId, status: "ACTIVE" },
+            select: { id: true, name: true },
+          }),
+          transaction.staffLocationAssignment.findUnique({
+            where: {
+              organizationMemberId_locationId: {
+                organizationMemberId: memberId,
+                locationId,
+              },
+            },
+          }),
+        ]);
+        if (
+          actor?.status !== "ACTIVE" ||
+          actor.user.status !== "ACTIVE" ||
+          !hasPermission(actor.role, "devices.pair")
+        ) {
+          throw new AppError(
+            "PERMISSION_DENIED",
+            "Your role does not allow Staff assignment changes.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (
+          target?.user.status !== "ACTIVE" ||
+          (actor.role === "MANAGER" && target.role !== "STAFF")
+        ) {
+          throw new AppError(
+            "STAFF_MEMBER_NOT_ASSIGNABLE",
+            "The selected active Staff member cannot be assigned.",
+            HttpStatus.UNPROCESSABLE_ENTITY,
+          );
+        }
+        if (!location) {
+          throw new AppError(
+            "STAFF_LOCATION_INVALID",
+            "Select an active Location from this organization.",
+            HttpStatus.UNPROCESSABLE_ENTITY,
+          );
+        }
+        const changed =
+          !existing?.active ||
+          existing.earningAllowed !== input.earningAllowed ||
+          existing.redemptionAllowed !== input.redemptionAllowed;
+        const assignment = changed
+          ? await transaction.staffLocationAssignment.upsert({
+              where: {
+                organizationMemberId_locationId: {
+                  organizationMemberId: memberId,
+                  locationId,
+                },
+              },
+              create: {
+                organizationId,
+                organizationMemberId: memberId,
+                locationId,
+                earningAllowed: input.earningAllowed,
+                redemptionAllowed: input.redemptionAllowed,
+                assignedByUserId: userId,
+              },
+              update: {
+                organizationId,
+                earningAllowed: input.earningAllowed,
+                redemptionAllowed: input.redemptionAllowed,
+                active: true,
+                assignedByUserId: userId,
+                revokedAt: null,
+              },
+            })
+          : existing;
+        if (changed && (!input.earningAllowed || !input.redemptionAllowed)) {
+          const devices = await transaction.staffDevice.findMany({
+            where: { organizationMemberId: memberId },
+            select: { id: true },
+          });
+          await transaction.staffDeviceLocation.updateMany({
+            where: {
+              staffDeviceId: { in: devices.map((device) => device.id) },
+              locationId,
+              active: true,
+            },
+            data: {
+              ...(!input.earningAllowed ? { earningAllowed: false } : {}),
+              ...(!input.redemptionAllowed ? { redemptionAllowed: false } : {}),
+            },
+          });
+        }
+        if (changed) {
+          await transaction.devicePairingSession.updateMany({
+            where: { intendedStaffMemberId: memberId, status: { in: ["PENDING", "CLAIMED"] } },
+            data: { status: "CANCELED" },
+          });
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId,
+              actorUserId: userId,
+              action: existing?.active
+                ? "staff.location_assignment_updated"
+                : "staff.location_assignment_provisioned",
+              targetType: "staff_location_assignment",
+              targetId: `${memberId}:${locationId}`,
+              locationId,
+              metadata: {
+                staffMemberId: memberId,
+                earningAllowed: input.earningAllowed,
+                redemptionAllowed: input.redemptionAllowed,
+              },
+            },
+            request,
+          );
+        }
+        return { assignment, changed, staffDisplayName: target.user.displayName, location };
+      },
+    );
+    return {
+      organizationId,
+      staffMemberId: memberId,
+      staffDisplayName: outcome.staffDisplayName,
+      locationId,
+      locationName: outcome.location.name,
+      earningAllowed: outcome.assignment.earningAllowed,
+      redemptionAllowed: outcome.assignment.redemptionAllowed,
+      active: outcome.assignment.active,
+      createdAt: outcome.assignment.createdAt,
+      revokedAt: outcome.assignment.revokedAt,
+      changed: outcome.changed,
+    };
+  }
+
+  async revokeLocationAssignment(
+    userId: string,
+    organizationId: string,
+    memberId: string,
+    locationId: string,
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "devices.pair");
+    return withOrderedInvariantLocks(
+      this.prisma.client,
+      [`organization:${organizationId}`, `staff-assignment:${memberId}:${locationId}`],
+      async (transaction) => {
+        const [actor, target, assignment] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { organizationId_userId: { organizationId, userId } },
+            include: { user: { select: { status: true } } },
+          }),
+          transaction.organizationMember.findFirst({
+            where: { id: memberId, organizationId },
+          }),
+          transaction.staffLocationAssignment.findUnique({
+            where: {
+              organizationMemberId_locationId: {
+                organizationMemberId: memberId,
+                locationId,
+              },
+            },
+          }),
+        ]);
+        if (
+          actor?.status !== "ACTIVE" ||
+          actor.user.status !== "ACTIVE" ||
+          !hasPermission(actor.role, "devices.pair")
+        ) {
+          throw new AppError(
+            "PERMISSION_DENIED",
+            "Your role does not allow Staff assignment changes.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (!target) {
+          throw new AppError("STAFF_MEMBER_NOT_FOUND", "Staff member not found.", 404);
+        }
+        if (actor.role === "MANAGER" && target.role !== "STAFF") {
+          throw new AppError(
+            "PERMISSION_DENIED",
+            "Managers can revoke Staff assignments only.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        if (!assignment || assignment.organizationId !== organizationId) {
+          throw new AppError(
+            "STAFF_LOCATION_ASSIGNMENT_NOT_FOUND",
+            "Staff Location assignment not found.",
+            HttpStatus.NOT_FOUND,
+          );
+        }
+        if (!assignment.active) {
+          return {
+            organizationId,
+            staffMemberId: memberId,
+            locationId,
+            status: "REVOKED" as const,
+            revokedAt: assignment.revokedAt,
+            changed: false,
+          };
+        }
+        const now = new Date();
+        const updated = await transaction.staffLocationAssignment.update({
+          where: {
+            organizationMemberId_locationId: {
+              organizationMemberId: memberId,
+              locationId,
+            },
+          },
+          data: { active: false, revokedAt: now },
+        });
+        const lifecycle = await revokeStaffAccessForLocation(
+          transaction,
+          memberId,
+          locationId,
+          now,
+        );
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "staff.location_assignment_revoked",
+            targetType: "staff_location_assignment",
+            targetId: `${memberId}:${locationId}`,
+            locationId,
+            metadata: { staffMemberId: memberId, ...lifecycle },
+          },
+          request,
+        );
+        return {
+          organizationId,
+          staffMemberId: memberId,
+          locationId,
+          status: "REVOKED" as const,
+          revokedAt: updated.revokedAt,
+          changed: true,
+        };
+      },
+    );
+  }
+
   async createPairing(
     userId: string,
     organizationId: string,
@@ -142,9 +450,12 @@ export class StaffDeviceService {
     const actor = await this.tenant.requireMembership(userId, organizationId, "devices.pair");
     const intended = await this.prisma.client.organizationMember.findFirst({
       where: { id: input.staffMemberId, organizationId, status: "ACTIVE" },
-      include: { user: { select: { displayName: true } } },
+      include: { user: { select: { displayName: true, status: true } } },
     });
-    if (!intended || (actor.role === "MANAGER" && intended.role !== "STAFF")) {
+    if (
+      intended?.user.status !== "ACTIVE" ||
+      (actor.role === "MANAGER" && intended.role !== "STAFF")
+    ) {
       throw new AppError(
         "DEVICE_PAIRING_INVALID",
         "The selected Staff member cannot be paired.",
@@ -167,6 +478,9 @@ export class StaffDeviceService {
         active: true,
       },
     });
+    const activeLocationCount = await this.prisma.client.location.count({
+      where: { id: { in: uniqueLocationIds }, organizationId, status: "ACTIVE" },
+    });
     const requestedAllowed = input.locations.every((location) => {
       const assignment = assignments.find(
         (candidate) => candidate.locationId === location.locationId,
@@ -177,7 +491,7 @@ export class StaffDeviceService {
           (!location.redemptionAllowed || assignment.redemptionAllowed),
       );
     });
-    if (!requestedAllowed) {
+    if (!requestedAllowed || activeLocationCount !== uniqueLocationIds.length) {
       throw new AppError(
         "LOCATION_NOT_AUTHORIZED",
         "Pairing Locations must be active Staff assignments.",
@@ -187,35 +501,79 @@ export class StaffDeviceService {
     const publicId = randomUUID();
     const pairing = createPairingToken({
       publicId,
-      environmentId: this.environment.values.NODE_ENV,
+      environmentId: this.environment.values.DEPLOYMENT_ENVIRONMENT,
     });
+    const manualPairing = createManualPairingCode(this.environment.values.DEVICE_SESSION_SECRET);
     const expiresInMinutes = Math.min(
       input.expiresInMinutes,
       this.environment.values.DEVICE_PAIRING_TTL_MINUTES,
     );
-    const created = await this.prisma.client.$transaction(
+    const created = await withOrderedInvariantLocks(
+      this.prisma.client,
+      [`organization:${organizationId}`, `pairing-member:${intended.id}`],
       async (transaction: Prisma.TransactionClient) => {
-        const active = await transaction.devicePairingSession.findFirst({
-          where: {
-            intendedStaffMemberId: intended.id,
-            status: { in: ["PENDING", "CLAIMED"] },
-            expiresAt: { gt: new Date() },
-          },
+        const [currentActor, currentIntended, currentAssignments, currentLocationCount] =
+          await Promise.all([
+            transaction.organizationMember.findUnique({
+              where: { organizationId_userId: { organizationId, userId } },
+              include: { user: { select: { status: true } } },
+            }),
+            transaction.organizationMember.findUnique({
+              where: { id: intended.id },
+              include: { user: { select: { status: true } } },
+            }),
+            transaction.staffLocationAssignment.findMany({
+              where: {
+                organizationId,
+                organizationMemberId: intended.id,
+                locationId: { in: uniqueLocationIds },
+                active: true,
+              },
+            }),
+            transaction.location.count({
+              where: { id: { in: uniqueLocationIds }, organizationId, status: "ACTIVE" },
+            }),
+          ]);
+        if (
+          currentActor?.status !== "ACTIVE" ||
+          currentActor.user.status !== "ACTIVE" ||
+          !hasPermission(currentActor.role, "devices.pair")
+        ) {
+          throw new AppError("PERMISSION_DENIED", "Pairing permission is no longer active.", 403);
+        }
+        const stillAllowed = input.locations.every((location) => {
+          const assignment = currentAssignments.find(
+            (candidate) => candidate.locationId === location.locationId,
+          );
+          return Boolean(
+            assignment &&
+              (!location.earningAllowed || assignment.earningAllowed) &&
+              (!location.redemptionAllowed || assignment.redemptionAllowed),
+          );
         });
-        if (active) {
+        if (
+          currentIntended?.organizationId !== organizationId ||
+          currentIntended.status !== "ACTIVE" ||
+          (currentActor.role === "MANAGER" && currentIntended.role !== "STAFF") ||
+          currentIntended.user.status !== "ACTIVE" ||
+          !stillAllowed ||
+          currentLocationCount !== uniqueLocationIds.length
+        ) {
           throw new AppError(
-            "DEVICE_PAIRING_ALREADY_ACTIVE",
-            "This Staff member already has an active pairing session.",
-            HttpStatus.CONFLICT,
+            "STAFF_ASSIGNMENT_REQUIRED",
+            "Pairing requires an active Staff identity and active Location assignments.",
+            HttpStatus.FORBIDDEN,
           );
         }
-        await transaction.devicePairingSession.updateMany({
-          where: {
-            intendedStaffMemberId: intended.id,
-            status: { in: ["PENDING", "CLAIMED"] },
-            expiresAt: { lte: new Date() },
+        const now = new Date();
+        const revokedAccess = await revokeStaffAccessForMembership(transaction, intended.id, now);
+        const revokedDevices = await transaction.staffDevice.updateMany({
+          where: { organizationMemberId: intended.id, status: { in: ["PENDING", "ACTIVE"] } },
+          data: {
+            status: "REVOKED",
+            revokedAt: now,
+            revocationReason: "A new Staff sign-in QR was generated.",
           },
-          data: { status: "EXPIRED" },
         });
         const session = await transaction.devicePairingSession.create({
           data: {
@@ -223,6 +581,7 @@ export class StaffDeviceService {
             organizationId,
             intendedStaffMemberId: intended.id,
             pairingTokenHash: pairing.tokenHash,
+            pairingManualCodeHash: manualPairing.codeHash,
             requestedLocationAssignments: input.locations,
             deviceLabelSuggestion:
               input.deviceLabelSuggestion ?? `${intended.user.displayName}'s device`,
@@ -242,6 +601,9 @@ export class StaffDeviceService {
               intendedStaffMemberId: intended.id,
               locationCount: input.locations.length,
               expiresInMinutes,
+              priorPairingsCanceled: revokedAccess.pairingsCanceled,
+              priorSessionsRevoked: revokedAccess.sessionsRevoked,
+              priorDevicesRevoked: revokedDevices.count,
             },
           },
           request,
@@ -254,6 +616,7 @@ export class StaffDeviceService {
       status: created.status,
       expiresAt: created.expiresAt,
       staffDisplayName: intended.user.displayName,
+      manualPairingCode: manualPairing.code,
       pairingQrSvg: await createQrSvg(pairing.token, {
         width: 360,
         margin: 3,
@@ -323,20 +686,62 @@ export class StaffDeviceService {
   }
 
   async claim(input: DevicePairingClaimInput) {
-    let parsed: ReturnType<typeof parsePairingToken>;
-    try {
-      parsed = parsePairingToken(input.pairingToken);
-    } catch {
+    let publicId: string;
+    let credentialFilter: { pairingTokenHash: string } | { pairingManualCodeHash: string };
+    let claimMethod: "QR" | "MANUAL";
+    if (input.pairingToken) {
+      let parsed: ReturnType<typeof parsePairingToken>;
+      try {
+        parsed = parsePairingToken(input.pairingToken);
+      } catch {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      if (parsed.environmentId !== this.environment.values.DEPLOYMENT_ENVIRONMENT) {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      publicId = parsed.publicId;
+      credentialFilter = { pairingTokenHash: hashPairingToken(input.pairingToken) };
+      claimMethod = "QR";
+    } else if (input.manualCode) {
+      let pairingManualCodeHash: string;
+      try {
+        pairingManualCodeHash = hashManualPairingCode(
+          input.manualCode,
+          this.environment.values.DEVICE_SESSION_SECRET,
+        );
+      } catch {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      const pairing = await this.prisma.client.devicePairingSession.findUnique({
+        where: { pairingManualCodeHash },
+        select: { publicId: true },
+      });
+      if (!pairing) {
+        throw new AppError(
+          "DEVICE_PAIRING_INVALID",
+          "Pairing code is invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+      publicId = pairing.publicId;
+      credentialFilter = { pairingManualCodeHash };
+      claimMethod = "MANUAL";
+    } else {
       throw new AppError(
         "DEVICE_PAIRING_INVALID",
-        "Pairing token is invalid.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    if (parsed.environmentId !== this.environment.values.NODE_ENV) {
-      throw new AppError(
-        "DEVICE_PAIRING_INVALID",
-        "Pairing token is for another environment.",
+        "Pairing code is invalid.",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
@@ -367,14 +772,19 @@ export class StaffDeviceService {
       );
     }
     const publicKey = normalizeEd25519PublicKey(input.publicKey);
+    const pairing = await this.prisma.client.devicePairingSession.findUnique({
+      where: { publicId },
+      select: { organizationId: true },
+    });
+    if (pairing) await this.accountAccess.requireOperationalAccess(pairing.organizationId);
     return withOrderedInvariantLocks(
       this.prisma.client,
-      [`pairing:${parsed.publicId}`],
+      [`pairing:${publicId}`],
       async (transaction) => {
         const session = await transaction.devicePairingSession.findFirst({
           where: {
-            publicId: parsed.publicId,
-            pairingTokenHash: hashPairingToken(input.pairingToken),
+            publicId,
+            ...credentialFilter,
           },
         });
         if (!session) {
@@ -396,6 +806,53 @@ export class StaffDeviceService {
             "DEVICE_PAIRING_EXPIRED",
             "Pairing token has expired.",
             HttpStatus.GONE,
+          );
+        }
+        const requestedLocations = safePairingLocations(session.requestedLocationAssignments);
+        const requestedLocationIds = requestedLocations.map((location) => location.locationId);
+        const [intendedMember, activeLocations, liveAssignments] = await Promise.all([
+          transaction.organizationMember.findUnique({
+            where: { id: session.intendedStaffMemberId },
+            include: { user: { select: { status: true } } },
+          }),
+          transaction.location.count({
+            where: {
+              id: { in: requestedLocationIds },
+              organizationId: session.organizationId,
+              status: "ACTIVE",
+            },
+          }),
+          transaction.staffLocationAssignment.findMany({
+            where: {
+              organizationId: session.organizationId,
+              organizationMemberId: session.intendedStaffMemberId,
+              locationId: { in: requestedLocationIds },
+              active: true,
+            },
+          }),
+        ]);
+        const assignmentAllowed = requestedLocations.every((requested) => {
+          const assignment = liveAssignments.find(
+            (candidate) => candidate.locationId === requested.locationId,
+          );
+          return Boolean(
+            assignment &&
+              (!requested.earningAllowed || assignment.earningAllowed) &&
+              (!requested.redemptionAllowed || assignment.redemptionAllowed),
+          );
+        });
+        if (
+          requestedLocations.length === 0 ||
+          activeLocations !== requestedLocations.length ||
+          intendedMember?.organizationId !== session.organizationId ||
+          intendedMember.status !== "ACTIVE" ||
+          intendedMember.user.status !== "ACTIVE" ||
+          !assignmentAllowed
+        ) {
+          throw new AppError(
+            "STAFF_ASSIGNMENT_REQUIRED",
+            "Pairing requires an active Staff identity and active Location assignments.",
+            HttpStatus.FORBIDDEN,
           );
         }
         const duplicate = await transaction.staffDevice.findFirst({
@@ -443,7 +900,7 @@ export class StaffDeviceService {
           action: "device.pairing_claimed",
           targetType: "device_pairing_session",
           targetId: session.id,
-          metadata: { platform: input.platform, appVersion: input.appVersion },
+          metadata: { platform: input.platform, appVersion: input.appVersion, claimMethod },
         });
         return {
           pairingPublicId: session.publicId,
@@ -460,6 +917,7 @@ export class StaffDeviceService {
     const session = await this.prisma.client.devicePairingSession.findUnique({
       where: { publicId },
     });
+    if (session) await this.accountAccess.requireOperationalAccess(session.organizationId);
     if (
       session?.status !== "CLAIMED" ||
       !session.claimedInstallationId ||
@@ -494,11 +952,23 @@ export class StaffDeviceService {
   }
 
   async complete(input: DevicePairingCompleteInput) {
+    const preflight = await this.prisma.client.devicePairingSession.findUnique({
+      where: { publicId: input.pairingPublicId },
+      select: { intendedStaffMemberId: true, organizationId: true },
+    });
+    if (!preflight) {
+      throw new AppError(
+        "DEVICE_PAIRING_EXPIRED",
+        "Pairing challenge has expired.",
+        HttpStatus.GONE,
+      );
+    }
+    await this.accountAccess.requireOperationalAccess(preflight.organizationId);
     const token = createOpaqueDeviceSessionToken(this.environment.values.DEVICE_SESSION_SECRET);
     const refreshToken = randomBytes(48).toString("base64url");
     return withOrderedInvariantLocks(
       this.prisma.client,
-      [`pairing:${input.pairingPublicId}`],
+      [`pairing-member:${preflight.intendedStaffMemberId}`, `pairing:${input.pairingPublicId}`],
       async (transaction) => {
         const session = await transaction.devicePairingSession.findUnique({
           where: { publicId: input.pairingPublicId },
@@ -519,11 +989,13 @@ export class StaffDeviceService {
         }
         const intendedStaffMember = await transaction.organizationMember.findUnique({
           where: { id: session.intendedStaffMemberId },
+          include: { user: { select: { status: true } } },
         });
         if (
           !intendedStaffMember ||
           intendedStaffMember.organizationId !== session.organizationId ||
-          intendedStaffMember.status !== "ACTIVE"
+          intendedStaffMember.status !== "ACTIVE" ||
+          intendedStaffMember.user.status !== "ACTIVE"
         ) {
           throw new AppError(
             "STAFF_ASSIGNMENT_REQUIRED",
@@ -566,27 +1038,89 @@ export class StaffDeviceService {
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        const device = await transaction.staffDevice.create({
-          data: {
-            organizationId: session.organizationId,
-            organizationMemberId: session.intendedStaffMemberId,
-            displayName: input.displayName ?? session.deviceLabelSuggestion ?? "Waflo Staff device",
-            platform:
-              metadata.platform === "IOS" ||
-              metadata.platform === "ANDROID" ||
-              metadata.platform === "TEST_CLIENT"
-                ? metadata.platform
-                : "ANDROID",
-            installationId: session.claimedInstallationId,
-            publicKey: session.claimedPublicKey,
-            status: "ACTIVE",
-            appVersion: typeof metadata.appVersion === "string" ? metadata.appVersion : "unknown",
-            osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
-            model: typeof metadata.model === "string" ? metadata.model : null,
-            pairedAt: new Date(),
-            lastSeenAt: new Date(),
-          },
+        const locationIds = locations.map((location) => location.locationId);
+        const [activeLocationCount, assignments] = await Promise.all([
+          transaction.location.count({
+            where: {
+              id: { in: locationIds },
+              organizationId: session.organizationId,
+              status: "ACTIVE",
+            },
+          }),
+          transaction.staffLocationAssignment.findMany({
+            where: {
+              organizationId: session.organizationId,
+              organizationMemberId: session.intendedStaffMemberId,
+              locationId: { in: locationIds },
+              active: true,
+            },
+          }),
+        ]);
+        const assignmentAllowed = locations.every((requested) => {
+          const assignment = assignments.find(
+            (candidate) => candidate.locationId === requested.locationId,
+          );
+          return Boolean(
+            assignment &&
+              (!requested.earningAllowed || assignment.earningAllowed) &&
+              (!requested.redemptionAllowed || assignment.redemptionAllowed),
+          );
         });
+        if (activeLocationCount !== locations.length || !assignmentAllowed) {
+          throw new AppError(
+            "STAFF_ASSIGNMENT_REQUIRED",
+            "Pairing requires active Location assignments.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        const existingDevice = await transaction.staffDevice.findUnique({
+          where: { installationId: session.claimedInstallationId },
+        });
+        if (
+          existingDevice &&
+          (existingDevice.organizationId !== session.organizationId ||
+            existingDevice.organizationMemberId !== session.intendedStaffMemberId)
+        ) {
+          throw new AppError(
+            "DEVICE_PAIRING_INVALID",
+            "This installation is already bound to another Staff identity.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const deviceData = {
+          organizationId: session.organizationId,
+          organizationMemberId: session.intendedStaffMemberId,
+          displayName: input.displayName ?? session.deviceLabelSuggestion ?? "Waflo Staff device",
+          platform:
+            metadata.platform === "IOS" ||
+            metadata.platform === "ANDROID" ||
+            metadata.platform === "TEST_CLIENT"
+              ? metadata.platform
+              : ("ANDROID" as const),
+          publicKey: session.claimedPublicKey,
+          status: "ACTIVE" as const,
+          appVersion: typeof metadata.appVersion === "string" ? metadata.appVersion : "unknown",
+          osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
+          model: typeof metadata.model === "string" ? metadata.model : null,
+          pairedAt: new Date(),
+          lastSeenAt: new Date(),
+          revokedAt: null,
+          revocationReason: null,
+        } satisfies Prisma.StaffDeviceUncheckedUpdateInput;
+        const device = existingDevice
+          ? await transaction.staffDevice.update({
+              where: { id: existingDevice.id },
+              data: deviceData,
+            })
+          : await transaction.staffDevice.create({
+              data: {
+                ...deviceData,
+                installationId: session.claimedInstallationId,
+              },
+            });
+        if (existingDevice) {
+          await transaction.staffDeviceLocation.deleteMany({ where: { staffDeviceId: device.id } });
+        }
         await transaction.staffDeviceLocation.createMany({
           data: locations.map((location) => ({
             staffDeviceId: device.id,
@@ -691,6 +1225,13 @@ export class StaffDeviceService {
           where: { staffDeviceId: device.id, revokedAt: null },
           data: { revokedAt: new Date() },
         });
+        await transaction.managerApprovalChallenge.updateMany({
+          where: {
+            staffDeviceId: device.id,
+            status: { in: ["PENDING", "APPROVED"] },
+          },
+          data: { status: "EXPIRED" },
+        });
         await this.audit.recordInTransaction(
           transaction,
           {
@@ -721,16 +1262,74 @@ export class StaffDeviceService {
       async (transaction) => {
         const session = await transaction.staffDeviceSession.findUnique({
           where: { id: sessionId },
-          include: { staffDevice: true, organizationMember: true },
+          include: {
+            staffDevice: true,
+            organizationMember: { include: { user: { select: { status: true } } } },
+          },
         });
-        if (
-          !session ||
-          session.refreshTokenHash !== expectedHash ||
-          session.revokedAt ||
-          session.expiresAt <= new Date() ||
-          session.staffDevice.status !== "ACTIVE" ||
-          session.organizationMember.status !== "ACTIVE"
-        ) {
+        if (!session || session.refreshTokenHash !== expectedHash) {
+          throw new AppError(
+            "STAFF_DEVICE_NOT_ACTIVE",
+            "Staff device session cannot be refreshed.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        const [location, staffAssignment, deviceAssignment] = await Promise.all([
+          transaction.location.findFirst({
+            where: {
+              id: session.locationId,
+              organizationId: session.organizationId,
+              status: "ACTIVE",
+            },
+            select: { id: true },
+          }),
+          transaction.staffLocationAssignment.findFirst({
+            where: {
+              organizationId: session.organizationId,
+              organizationMemberId: session.organizationMemberId,
+              locationId: session.locationId,
+              active: true,
+            },
+            select: { locationId: true },
+          }),
+          transaction.staffDeviceLocation.findFirst({
+            where: {
+              staffDeviceId: session.staffDeviceId,
+              locationId: session.locationId,
+              active: true,
+            },
+            select: { locationId: true },
+          }),
+        ]);
+        if (session.organizationMember.user.status !== "ACTIVE") {
+          throw new AppError(
+            "STAFF_USER_DEACTIVATED",
+            "The Staff identity is deactivated.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        if (session.organizationMember.status !== "ACTIVE") {
+          throw new AppError(
+            "STAFF_MEMBERSHIP_INACTIVE",
+            "The Staff organization membership is inactive.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        if (session.staffDevice.status !== "ACTIVE") {
+          throw new AppError(
+            "STAFF_DEVICE_REVOKED",
+            "The Staff device has been revoked.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        if (!location || !staffAssignment || !deviceAssignment) {
+          throw new AppError(
+            "STAFF_LOCATION_ASSIGNMENT_INVALID",
+            "The Staff Location assignment is no longer active.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        if (session.revokedAt || session.expiresAt <= new Date()) {
           throw new AppError(
             "STAFF_DEVICE_NOT_ACTIVE",
             "Staff device session cannot be refreshed.",

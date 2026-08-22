@@ -3,13 +3,16 @@ import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 const envelopeVersion = "waflo-device-request-v1";
 const baseUrl = (process.env.W4_TEST_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
 const pairingToken = process.env.W4_TEST_PAIRING_TOKEN;
+const manualCode = process.env.W4_TEST_MANUAL_PAIRING_CODE;
 const action = process.env.W4_TEST_ACTION ?? "context";
 
 if (process.env.NODE_ENV === "production") {
   throw new Error("The W4 Staff Test Client is disabled in production.");
 }
-if (!pairingToken) {
-  throw new Error("W4_TEST_PAIRING_TOKEN is required and is never printed.");
+if (Boolean(pairingToken) === Boolean(manualCode)) {
+  throw new Error(
+    "Exactly one W4_TEST_PAIRING_TOKEN or W4_TEST_MANUAL_PAIRING_CODE is required and is never printed.",
+  );
 }
 
 const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -30,7 +33,7 @@ const claim = await api("/v1/staff/devices/pairing/claim", {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
-    pairingToken,
+    ...(pairingToken ? { pairingToken } : { manualCode }),
     installationId,
     publicKey: publicKeyPem,
     platform: "TEST_CLIENT",

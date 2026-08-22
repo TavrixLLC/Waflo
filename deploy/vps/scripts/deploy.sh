@@ -7,13 +7,28 @@ source "${script_directory}/common.sh"
 environment="${1:-}"
 release_sha="${2:-}"
 configure_release "${environment}" "${release_sha}"
+assert_legal_release_state
+prepare_cloudflare_tunnel_token "${environment}"
 assert_secret_permissions
 
 exec 9>"${PLATFORM_ROOT}/deploy-${environment}.lock"
 flock -n 9 || { printf 'Another %s deployment is active.\n' "${environment}" >&2; exit 3; }
 
+prepare_postgres_bind "${environment}"
+
+deployment_failed() {
+  local status=$?
+  trap - ERR
+  capture_deployment_logs "${environment}" "${release_sha}"
+  exit "${status}"
+}
+trap deployment_failed ERR
+
 compose config --quiet
+pull_release_images
 compose up -d --no-build postgres redis minio
+printf 'Refreshing the release-bound MinIO provisioning container.\n'
+compose rm --force --stop minio-init
 compose up --no-build minio-init
 
 printf 'Executing exactly one forward migration job.\n'
@@ -25,6 +40,10 @@ compose up -d --no-build --wait --wait-timeout 240 \
 compose exec -T api node -e \
   "fetch('http://127.0.0.1:4000/ready').then(async r=>{if(!r.ok)throw new Error(await r.text())}).catch(()=>process.exit(1))"
 
+printf 'Checking the complete merchant-journey release gate.\n'
+compose exec -T api node dist/readiness.js
+
+assert_public_health
 ln -sfn "${RELEASE_DIRECTORY}" "${PLATFORM_ROOT}/current/${environment}"
 compose ps
 printf 'Application release %s is current for %s. Database schemas were not made rollback-aware.\n' \

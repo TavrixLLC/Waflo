@@ -1,7 +1,16 @@
 import { z } from "zod";
 
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
+const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
+const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+
+export type PublicMapboxTokenStatus = "SET" | "UNSET" | "INVALID_FORMAT";
+
+export function classifyPublicMapboxToken(value: string | undefined): PublicMapboxTokenStatus {
+  if (!value?.trim()) return "UNSET";
+  return publicMapboxTokenPattern.test(value.trim()) ? "SET" : "INVALID_FORMAT";
+}
 
 export const environmentSchema = z
   .object({
@@ -135,12 +144,18 @@ export const environmentSchema = z
     GOOGLE_SIGNIN_CLIENT_ID: z.string().optional(),
     GOOGLE_SIGNIN_CLIENT_SECRET: z.string().optional(),
     GOOGLE_SIGNIN_REDIRECT_URI: optionalUrl,
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: z
+      .union([z.literal(""), z.string().regex(publicMapboxTokenPattern)])
+      .optional(),
     APPLE_SIGNIN_CLIENT_ID: z.string().optional(),
     APPLE_SIGNIN_TEAM_ID: z.string().optional(),
     APPLE_SIGNIN_KEY_ID: z.string().optional(),
     APPLE_SIGNIN_PRIVATE_KEY: z.string().optional(),
     APPLE_SIGNIN_PRIVATE_KEY_BASE64: z.string().optional(),
     APPLE_SIGNIN_REDIRECT_URI: optionalUrl,
+    EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1: optionalSecret,
+    EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION: z.coerce.number().int().min(1).default(1),
+    EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON: z.string().optional(),
     MERCHANT_BASE_DOMAIN: z.string().min(3).default("waflo.app"),
     SCALE_LOCATION_LIMIT: z.coerce.number().int().positive().optional(),
     SCALE_TEAM_LIMIT: z.coerce.number().int().positive().optional(),
@@ -150,6 +165,12 @@ export const environmentSchema = z
     STRIPE_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
     STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
     STRIPE_SCALE_MONTHLY_PRICE_ID: z.string().optional(),
+    STRIPE_STARTER_QUARTERLY_PRICE_ID: z.string().optional(),
+    STRIPE_GROWTH_QUARTERLY_PRICE_ID: z.string().optional(),
+    STRIPE_SCALE_QUARTERLY_PRICE_ID: z.string().optional(),
+    STRIPE_STARTER_YEARLY_PRICE_ID: z.string().optional(),
+    STRIPE_GROWTH_YEARLY_PRICE_ID: z.string().optional(),
+    STRIPE_SCALE_YEARLY_PRICE_ID: z.string().optional(),
     STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID: z.string().optional(),
     STRIPE_RECONCILIATION_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
     STRIPE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
@@ -188,6 +209,16 @@ export const environmentSchema = z
     GOOGLE_WALLET_PUBLISHING_MODE: z.enum(["DEMO", "PUBLISHING"]).default("DEMO"),
   })
   .superRefine((value, context) => {
+    if (
+      !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value.MERCHANT_BASE_DOMAIN)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["MERCHANT_BASE_DOMAIN"],
+        message:
+          "Merchant base domain must be a lowercase ASCII DNS name without a scheme or port.",
+      });
+    }
     const deployed = value.DEPLOYMENT_ENVIRONMENT !== "development";
     if (deployed && value.NODE_ENV !== "production") {
       context.addIssue({
@@ -195,6 +226,49 @@ export const environmentSchema = z
         path: ["NODE_ENV"],
         message: "Staging and production must run optimized production builds.",
       });
+    }
+    const quarterlyPrices = [
+      value.STRIPE_STARTER_QUARTERLY_PRICE_ID,
+      value.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
+      value.STRIPE_SCALE_QUARTERLY_PRICE_ID,
+    ];
+    const yearlyPrices = [
+      value.STRIPE_STARTER_YEARLY_PRICE_ID,
+      value.STRIPE_GROWTH_YEARLY_PRICE_ID,
+      value.STRIPE_SCALE_YEARLY_PRICE_ID,
+    ];
+    if (quarterlyPrices.some(Boolean) && !quarterlyPrices.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_STARTER_QUARTERLY_PRICE_ID"],
+        message: "All three quarterly Stripe Price IDs must be complete or absent.",
+      });
+    }
+    if (yearlyPrices.some(Boolean) && !yearlyPrices.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_STARTER_YEARLY_PRICE_ID"],
+        message: "All three yearly Stripe Price IDs must be complete or absent.",
+      });
+    }
+    for (const key of [
+      "STRIPE_STARTER_MONTHLY_PRICE_ID",
+      "STRIPE_GROWTH_MONTHLY_PRICE_ID",
+      "STRIPE_SCALE_MONTHLY_PRICE_ID",
+      "STRIPE_STARTER_QUARTERLY_PRICE_ID",
+      "STRIPE_GROWTH_QUARTERLY_PRICE_ID",
+      "STRIPE_SCALE_QUARTERLY_PRICE_ID",
+      "STRIPE_STARTER_YEARLY_PRICE_ID",
+      "STRIPE_GROWTH_YEARLY_PRICE_ID",
+      "STRIPE_SCALE_YEARLY_PRICE_ID",
+    ] as const) {
+      if (value[key] && !/^price_[A-Za-z0-9][A-Za-z0-9_]*$/.test(value[key])) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Stripe billing plans require Price IDs in price_ format.",
+        });
+      }
     }
     if (!deployed) return;
     if (value.COOKIE_SAME_SITE === "NONE" && !value.COOKIE_SECURE) {
@@ -267,6 +341,34 @@ export const environmentSchema = z
         path: ["APPLE_SIGNIN_CLIENT_ID"],
         message: "Apple Sign-In configuration must be complete or absent.",
       });
+    }
+    if (appleSignInParts.every(Boolean)) {
+      try {
+        const tokenKeys = parseVersionedSecretEntries(
+          value.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON,
+          value.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1 ?? "",
+        );
+        if (!tokenKeys[value.EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION]) {
+          throw new Error("active version missing");
+        }
+        for (const secret of Object.values(tokenKeys)) {
+          const trimmed = secret.trim();
+          const decoded = /^[0-9a-f]{64}$/i.test(trimmed)
+            ? Buffer.from(trimmed, "hex")
+            : Buffer.from(
+                trimmed,
+                trimmed.includes("-") || trimmed.includes("_") ? "base64url" : "base64",
+              );
+          if (decoded.length !== 32) throw new Error("invalid key length");
+        }
+      } catch {
+        context.addIssue({
+          code: "custom",
+          path: ["EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION"],
+          message:
+            "Apple Sign-In requires a valid versioned 32-byte external-auth token encryption keyring.",
+        });
+      }
     }
     if (!value.COOKIE_SECURE) {
       context.addIssue({
@@ -349,6 +451,13 @@ export const environmentSchema = z
           "Real Google Wallet mode requires issuer, service-account, and public asset configuration.",
       });
     }
+    if (value.APPLE_WALLET_MODE === "REAL" && value.APPLE_APNS_ENVIRONMENT !== "production") {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_APNS_ENVIRONMENT"],
+        message: "Real Apple Wallet pass updates require the production APNs endpoint.",
+      });
+    }
     if (value.DEPLOYMENT_ENVIRONMENT === "production") {
       if (
         value.GOOGLE_WALLET_MODE === "REAL" &&
@@ -358,13 +467,6 @@ export const environmentSchema = z
           code: "custom",
           path: ["GOOGLE_WALLET_PUBLISHING_MODE"],
           message: "Production Google Wallet requires publishing mode.",
-        });
-      }
-      if (value.APPLE_WALLET_MODE === "REAL" && value.APPLE_APNS_ENVIRONMENT !== "production") {
-        context.addIssue({
-          code: "custom",
-          path: ["APPLE_APNS_ENVIRONMENT"],
-          message: "Production Apple Wallet requires production APNs.",
         });
       }
     }
@@ -446,6 +548,70 @@ export const environmentSchema = z
         });
       }
     }
+    const publicAuthority =
+      value.DEPLOYMENT_ENVIRONMENT === "staging"
+        ? {
+            MARKETING_WEB_URL: "https://staging.waflo.app",
+            MERCHANT_DASHBOARD_URL: "https://app-staging.waflo.app",
+            CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+            API_PUBLIC_URL: "https://api-staging.waflo.app",
+            WALLET_PUBLIC_BASE_URL: "https://api-staging.waflo.app/v1/public/wallet-assets",
+          }
+        : {
+            MARKETING_WEB_URL: "https://waflo.app",
+            MERCHANT_DASHBOARD_URL: "https://app.waflo.app",
+            CUSTOMER_WEB_URL: "https://card.waflo.app",
+            API_PUBLIC_URL: "https://api.waflo.app",
+            WALLET_PUBLIC_BASE_URL: "https://api.waflo.app/v1/public/wallet-assets",
+          };
+    for (const [key, expected] of Object.entries(publicAuthority) as Array<
+      [keyof typeof publicAuthority, string]
+    >) {
+      if (value[key].replace(/\/+$/u, "") !== expected) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `${value.DEPLOYMENT_ENVIRONMENT} requires the authoritative ${expected} URL.`,
+        });
+      }
+    }
+    const expectedWalletOrigin = new URL(publicAuthority.API_PUBLIC_URL).origin;
+    if (
+      value.APPLE_PASS_WEB_SERVICE_URL &&
+      value.APPLE_PASS_WEB_SERVICE_URL.replace(/\/+$/u, "") !==
+        `${expectedWalletOrigin}/v1/apple-wallet`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_PASS_WEB_SERVICE_URL"],
+        message: "Apple Wallet webServiceURL must use the authoritative API origin.",
+      });
+    }
+    if (
+      value.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL &&
+      value.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL.replace(/\/+$/u, "") !==
+        `${expectedWalletOrigin}/v1/public/wallet-assets`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL"],
+        message: "Google Wallet public assets must use the authoritative API origin.",
+      });
+    }
+    const googleWalletOrigins = value.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",").map((origin) =>
+      origin.trim(),
+    );
+    if (
+      googleWalletOrigins.length !== 1 ||
+      googleWalletOrigins[0] !== new URL(publicAuthority.CUSTOMER_WEB_URL).origin
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GOOGLE_WALLET_ALLOWED_ORIGINS"],
+        message:
+          "Google Wallet Save origins must contain only the authoritative Customer Web origin.",
+      });
+    }
     if (
       value.APPLE_PASS_WEB_SERVICE_URL &&
       !value.APPLE_PASS_WEB_SERVICE_URL.startsWith("https://")
@@ -524,9 +690,32 @@ export const environmentSchema = z
     }
     const stripeKey = value.STRIPE_SECRET_KEY ?? "";
     const stripePublishable = value.STRIPE_PUBLISHABLE_KEY ?? "";
+    const stripeCore = [
+      value.STRIPE_SECRET_KEY,
+      value.STRIPE_PUBLISHABLE_KEY,
+      value.STRIPE_WEBHOOK_SECRET,
+      value.STRIPE_STARTER_MONTHLY_PRICE_ID,
+      value.STRIPE_GROWTH_MONTHLY_PRICE_ID,
+      value.STRIPE_SCALE_MONTHLY_PRICE_ID,
+      value.STRIPE_STARTER_QUARTERLY_PRICE_ID,
+      value.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
+      value.STRIPE_SCALE_QUARTERLY_PRICE_ID,
+      value.STRIPE_STARTER_YEARLY_PRICE_ID,
+      value.STRIPE_GROWTH_YEARLY_PRICE_ID,
+      value.STRIPE_SCALE_YEARLY_PRICE_ID,
+    ];
+    if (stripeCore.some(Boolean) && !stripeCore.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_SECRET_KEY"],
+        message:
+          "Stripe secret and publishable keys, webhook secret, and all nine Price IDs must be complete or absent.",
+      });
+    }
     if (
       value.DEPLOYMENT_ENVIRONMENT === "staging" &&
-      (stripeKey.startsWith("sk_live_") || stripePublishable.startsWith("pk_live_"))
+      ((stripeKey && !stripeKey.startsWith("sk_test_")) ||
+        (stripePublishable && !stripePublishable.startsWith("pk_test_")))
     ) {
       context.addIssue({
         code: "custom",
@@ -543,6 +732,23 @@ export const environmentSchema = z
         code: "custom",
         path: ["STRIPE_SECRET_KEY"],
         message: "Production accepts Stripe live-mode keys only.",
+      });
+    }
+    if (value.STRIPE_WEBHOOK_SECRET && !value.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_WEBHOOK_SECRET"],
+        message: "Stripe webhook secrets must use the whsec_ endpoint-secret format.",
+      });
+    }
+    if (
+      value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID &&
+      !value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID.startsWith("bpc_")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID"],
+        message: "Stripe customer portal configuration IDs must use bpc_ format.",
       });
     }
   });
@@ -597,5 +803,12 @@ export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
 export const platformDomains = {
   marketing: "waflo.app",
   dashboard: "app.waflo.app",
+  customer: "card.waflo.app",
   api: "api.waflo.app",
+  staging: {
+    marketing: "staging.waflo.app",
+    dashboard: "app-staging.waflo.app",
+    customer: "card-staging.waflo.app",
+    api: "api-staging.waflo.app",
+  },
 } as const;

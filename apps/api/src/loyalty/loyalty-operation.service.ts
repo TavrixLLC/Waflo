@@ -41,6 +41,7 @@ import {
   evaluateRiskRules,
   riskDeduplicationKey,
 } from "@waflo/operational-analytics";
+import { hasPermission } from "@waflo/permissions";
 import {
   type LoyaltyOperationType,
   type Prisma,
@@ -718,13 +719,257 @@ export class LoyaltyOperationService {
         HttpStatus.NOT_FOUND,
       );
     }
-    const fingerprint = operationFingerprint({
-      type: "REDEEM_REWARD",
-      qr: safeQrFingerprint(input.qrPayload),
-      entitlement: input.rewardEntitlementPublicId,
-      approval: input.managerApprovalPublicId ?? null,
-      note: input.note ?? null,
-    });
+    const prepared = await withOrderedInvariantLocks(
+      this.prisma.client,
+      [
+        `organization:${context.organizationId}`,
+        `program-lifecycle:${credential.membership.programId}`,
+        `membership:${credential.membershipId}`,
+        `operation:${context.organizationId}:${commandId}`,
+        `device:${context.deviceId}`,
+      ],
+      async (transaction) => {
+        const membership = await this.operationalMembership(
+          transaction,
+          credential.membershipId,
+          context,
+          "REDEEM",
+        );
+        if (membership.activeCredential?.id !== credential.id) {
+          throw new AppError(
+            "MEMBERSHIP_CREDENTIAL_INVALID",
+            "Membership credential is no longer active.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const entitlement = await transaction.rewardEntitlement.findFirst({
+          where: {
+            publicId: input.rewardEntitlementPublicId,
+            organizationId: context.organizationId,
+            membershipId: membership.id,
+          },
+        });
+        if (!entitlement) {
+          throw new AppError("REWARD_NOT_AVAILABLE", "Reward is not available.", 404);
+        }
+        const reward = membership.enrollmentProgramVersion.rewards.find(
+          (candidate) => candidate.id === entitlement.rewardDefinitionId,
+        );
+        if (!reward) {
+          throw new AppError("PROGRAM_VERSION_MISMATCH", "Reward version mismatch.", 409);
+        }
+        const fingerprint = operationFingerprint({
+          version: "redeem-approval-v1",
+          operationType: "REDEEM",
+          commandId,
+          organizationId: context.organizationId,
+          customerId: membership.customerId,
+          membershipId: membership.id,
+          credential: safeQrFingerprint(input.qrPayload),
+          programId: membership.programId,
+          programVersionId: membership.enrollmentProgramVersionId,
+          rewardEntitlementId: entitlement.id,
+          rewardEntitlementPublicId: entitlement.publicId,
+          rewardDefinitionId: reward.id,
+          rewardPolicy: {
+            threshold: entitlement.threshold,
+            cycleNumber: entitlement.cycleNumber,
+            maximumRedemptionCount: entitlement.maximumRedemptionCount,
+            requiresManagerApproval: reward.requiresManagerApproval,
+          },
+          staffMemberId: context.organizationMemberId,
+          staffDeviceId: context.deviceId,
+          locationId: context.locationId,
+          note: input.note ?? null,
+        });
+        let command = await transaction.loyaltyOperationCommand.findUnique({
+          where: {
+            organizationId_idempotencyKey: {
+              organizationId: context.organizationId,
+              idempotencyKey: commandId,
+            },
+          },
+        });
+        if (command) {
+          if (
+            command.requestFingerprint !== fingerprint ||
+            command.membershipId !== membership.id ||
+            command.operationType !== "REDEEM_REWARD"
+          ) {
+            throw new AppError(
+              "OPERATION_IDEMPOTENCY_CONFLICT",
+              "This command ID was already used for another request.",
+              HttpStatus.CONFLICT,
+            );
+          }
+          if (command.status === "COMPLETED" && command.resultPayload !== null) {
+            return {
+              kind: "replayed" as const,
+              result: {
+                ...(command.resultPayload as Record<string, Prisma.JsonValue>),
+                replayed: true,
+              },
+            };
+          }
+          if (command.status === "FAILED") {
+            throw new AppError(
+              command.safeFailureCode ?? "OPERATION_FAILED",
+              "The original operation failed.",
+              this.failureHttpStatus(command.safeFailureCode),
+            );
+          }
+        }
+        if (!reward.requiresManagerApproval) {
+          if (input.managerApprovalPublicId) {
+            throw new AppError(
+              "MANAGER_APPROVAL_NOT_APPLICABLE",
+              "This reward does not require manager approval.",
+              HttpStatus.UNPROCESSABLE_ENTITY,
+            );
+          }
+          return { kind: "proceed" as const, fingerprint };
+        }
+        let approval = command
+          ? await transaction.managerApprovalChallenge.findFirst({
+              where: { pendingOperationId: command.id },
+            })
+          : null;
+        if (!command) {
+          command = await transaction.loyaltyOperationCommand.create({
+            data: {
+              organizationId: context.organizationId,
+              membershipId: membership.id,
+              operationType: "REDEEM_REWARD",
+              idempotencyKey: commandId,
+              requestFingerprint: fingerprint,
+              actorMemberId: context.organizationMemberId,
+              actorDeviceId: context.deviceId,
+              locationId: context.locationId,
+            },
+          });
+          approval = await transaction.managerApprovalChallenge.create({
+            data: {
+              organizationId: context.organizationId,
+              membershipId: membership.id,
+              rewardEntitlementId: entitlement.id,
+              pendingOperationId: command.id,
+              staffDeviceId: context.deviceId,
+              locationId: context.locationId,
+              requestFingerprint: fingerprint,
+              operationType: "REDEEM",
+              requestedByMemberId: context.organizationMemberId,
+              expiresAt: new Date(Date.now() + 5 * 60_000),
+            },
+          });
+          await this.audit.recordInTransaction(
+            transaction,
+            {
+              organizationId: context.organizationId,
+              action: "operation.manager_approval_requested",
+              targetType: "manager_approval",
+              targetId: approval.id,
+              locationId: context.locationId,
+              metadata: {
+                operationType: "REDEEM",
+                commandPublicId: command.publicId,
+                requestedByMemberId: context.organizationMemberId,
+              },
+            },
+            request,
+          );
+        }
+        if (approval?.operationType !== "REDEEM") {
+          throw new AppError(
+            "MANAGER_APPROVAL_INVALID",
+            "The server-owned approval intent is unavailable.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const bindingsMatch =
+          approval.organizationId === context.organizationId &&
+          approval.membershipId === membership.id &&
+          approval.rewardEntitlementId === entitlement.id &&
+          approval.pendingOperationId === command.id &&
+          approval.staffDeviceId === context.deviceId &&
+          approval.locationId === context.locationId &&
+          approval.requestedByMemberId === context.organizationMemberId &&
+          approval.requestFingerprint === fingerprint;
+        if (!bindingsMatch) {
+          throw new AppError(
+            "MANAGER_APPROVAL_MISMATCH",
+            "Manager approval does not match this redeem intent.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (approval.expiresAt <= new Date() && approval.status !== "CONSUMED") {
+          const now = new Date();
+          await transaction.managerApprovalChallenge.updateMany({
+            where: { id: approval.id, status: { in: ["PENDING", "APPROVED"] } },
+            data: { status: "EXPIRED" },
+          });
+          await transaction.loyaltyOperationCommand.updateMany({
+            where: { id: command.id, status: "PROCESSING", leaseOwner: null },
+            data: {
+              status: "FAILED",
+              safeFailureCode: "MANAGER_APPROVAL_EXPIRED",
+              completedAt: now,
+            },
+          });
+          return {
+            kind: "approval_error" as const,
+            code: "MANAGER_APPROVAL_EXPIRED",
+            approval,
+          };
+        }
+        if (!input.managerApprovalPublicId) {
+          return {
+            kind: "approval_error" as const,
+            code: "MANAGER_APPROVAL_REQUIRED",
+            approval,
+          };
+        }
+        if (input.managerApprovalPublicId !== approval.publicId) {
+          return {
+            kind: "approval_error" as const,
+            code: "MANAGER_APPROVAL_MISMATCH",
+            approval,
+          };
+        }
+        const code =
+          approval.status === "PENDING"
+            ? "MANAGER_APPROVAL_PENDING"
+            : approval.status === "REJECTED"
+              ? "MANAGER_APPROVAL_REJECTED"
+              : approval.status === "EXPIRED"
+                ? "MANAGER_APPROVAL_EXPIRED"
+                : approval.status === "CONSUMED"
+                  ? "MANAGER_APPROVAL_CONSUMED"
+                  : null;
+        return code
+          ? { kind: "approval_error" as const, code, approval }
+          : { kind: "proceed" as const, fingerprint };
+      },
+    );
+    if (prepared.kind === "replayed") return prepared.result;
+    if (prepared.kind === "approval_error") {
+      const status =
+        prepared.code === "MANAGER_APPROVAL_EXPIRED" ? "EXPIRED" : prepared.approval.status;
+      throw new AppError(
+        prepared.code,
+        this.managerApprovalErrorMessage(prepared.code),
+        prepared.code === "MANAGER_APPROVAL_EXPIRED" ? HttpStatus.GONE : HttpStatus.CONFLICT,
+        {
+          approvalRequest: {
+            publicId: prepared.approval.publicId,
+            status,
+            expiresAt: prepared.approval.expiresAt.toISOString(),
+          },
+          operationType: "REDEEM",
+          retryWithSameIdempotencyKey: true,
+        },
+      );
+    }
+    const fingerprint = prepared.fingerprint;
     const claim = await this.claimDurableCommand({
       organizationId: context.organizationId,
       programId: credential.membership.programId,
@@ -783,16 +1028,17 @@ export class LoyaltyOperationService {
           if (!reward) {
             throw new AppError("PROGRAM_VERSION_MISMATCH", "Reward version mismatch.", 409);
           }
-          const approvalValid = reward.requiresManagerApproval
-            ? await this.managerOverrideValid(
-                transaction,
-                context,
-                input.managerApprovalPublicId ?? "",
-                membership.id,
-                entitlement.id,
-                fingerprint,
-              )
-            : true;
+          if (reward.requiresManagerApproval) {
+            await this.consumeManagerApproval(
+              transaction,
+              context,
+              input.managerApprovalPublicId ?? "",
+              commandState.command.id,
+              membership.id,
+              entitlement.id,
+              fingerprint,
+            );
+          }
           await this.evaluateAndPersistOperationalRisk(
             transaction,
             membership,
@@ -808,7 +1054,7 @@ export class LoyaltyOperationService {
                 maximumRedemptionCount: entitlement.maximumRedemptionCount,
                 expiresAt: entitlement.expiresAt,
                 requiresManagerApproval: reward.requiresManagerApproval,
-                managerApprovalValid: approvalValid,
+                managerApprovalValid: true,
               },
               new Date(),
             );
@@ -883,16 +1129,6 @@ export class LoyaltyOperationService {
                 nextRedemptionCount >= entitlement.maximumRedemptionCount ? now : null,
             },
           });
-          if (reward.requiresManagerApproval && input.managerApprovalPublicId) {
-            await transaction.managerApprovalChallenge.updateMany({
-              where: {
-                publicId: input.managerApprovalPublicId,
-                status: "APPROVED",
-                consumedAt: null,
-              },
-              data: { status: "CONSUMED", consumedAt: now },
-            });
-          }
           await this.persistProjection(transaction, membership.id, projection);
           await this.queueWalletUpdates(
             transaction,
@@ -2453,6 +2689,25 @@ export class LoyaltyOperationService {
               this.failureHttpStatus(existing.safeFailureCode),
             );
           }
+          if (!existing.leaseOwner && !existing.leaseExpiresAt) {
+            const activated = await transaction.loyaltyOperationCommand.updateMany({
+              where: {
+                id: existing.id,
+                status: "PROCESSING",
+                leaseOwner: null,
+                leaseExpiresAt: null,
+              },
+              data: {
+                leaseOwner,
+                leaseExpiresAt: new Date(Date.now() + 90_000),
+                attemptCount: { increment: 1 },
+              },
+            });
+            if (activated.count !== 1) {
+              return { waitForTerminal: true as const };
+            }
+            return { replayed: false as const, leaseOwner };
+          }
           if (!existing.leaseExpiresAt || existing.leaseExpiresAt > new Date()) {
             return { waitForTerminal: true as const };
           }
@@ -2564,6 +2819,7 @@ export class LoyaltyOperationService {
   }
 
   private failureHttpStatus(code: string | null | undefined): number {
+    if (code === "MANAGER_APPROVAL_EXPIRED") return HttpStatus.GONE;
     if (["LOCATION_NOT_AUTHORIZED", "STAFF_ASSIGNMENT_REQUIRED"].includes(code ?? "")) return 403;
     if (["MEMBERSHIP_CREDENTIAL_INVALID", "REWARD_NOT_AVAILABLE"].includes(code ?? "")) return 404;
     if (
@@ -2853,45 +3109,202 @@ export class LoyaltyOperationService {
     }
   }
 
-  private async managerOverrideValid(
+  private managerApprovalErrorMessage(code: string): string {
+    switch (code) {
+      case "MANAGER_APPROVAL_REQUIRED":
+        return "Manager approval is required for this exact redeem intent.";
+      case "MANAGER_APPROVAL_PENDING":
+        return "Manager approval is still pending.";
+      case "MANAGER_APPROVAL_REJECTED":
+        return "Manager approval was rejected.";
+      case "MANAGER_APPROVAL_EXPIRED":
+        return "Manager approval has expired.";
+      case "MANAGER_APPROVAL_CONSUMED":
+        return "Manager approval has already been consumed.";
+      case "MANAGER_APPROVAL_MISMATCH":
+        return "Manager approval does not match this redeem intent.";
+      case "MANAGER_APPROVAL_APPROVER_INACTIVE":
+        return "The approving Manager no longer has approval permission.";
+      default:
+        return "Manager approval is invalid.";
+    }
+  }
+
+  private async consumeManagerApproval(
     transaction: Prisma.TransactionClient,
     context: StaffOperationContext,
     approvalPublicId: string,
+    operationCommandId: string,
     membershipId: string,
-    entitlementId?: string,
-    requestFingerprint?: string,
-  ): Promise<boolean> {
-    if (!approvalPublicId) return false;
+    entitlementId: string,
+    requestFingerprint: string,
+  ): Promise<void> {
+    if (!approvalPublicId) {
+      throw new AppError(
+        "MANAGER_APPROVAL_REQUIRED",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_REQUIRED"),
+        HttpStatus.CONFLICT,
+      );
+    }
+    const approval = await transaction.managerApprovalChallenge.findUnique({
+      where: { publicId: approvalPublicId },
+    });
+    if (!approval) {
+      throw new AppError(
+        "MANAGER_APPROVAL_INVALID",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_INVALID"),
+        HttpStatus.CONFLICT,
+      );
+    }
+    const bindingsMatch =
+      approval.organizationId === context.organizationId &&
+      approval.membershipId === membershipId &&
+      approval.rewardEntitlementId === entitlementId &&
+      approval.pendingOperationId === operationCommandId &&
+      approval.staffDeviceId === context.deviceId &&
+      approval.locationId === context.locationId &&
+      approval.requestedByMemberId === context.organizationMemberId &&
+      approval.requestFingerprint === requestFingerprint &&
+      approval.operationType === "REDEEM";
+    if (!bindingsMatch) {
+      throw new AppError(
+        "MANAGER_APPROVAL_MISMATCH",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_MISMATCH"),
+        HttpStatus.CONFLICT,
+      );
+    }
+    const statusCode =
+      approval.expiresAt <= new Date()
+        ? "MANAGER_APPROVAL_EXPIRED"
+        : approval.status === "PENDING"
+          ? "MANAGER_APPROVAL_PENDING"
+          : approval.status === "REJECTED"
+            ? "MANAGER_APPROVAL_REJECTED"
+            : approval.status === "EXPIRED"
+              ? "MANAGER_APPROVAL_EXPIRED"
+              : approval.status === "CONSUMED"
+                ? "MANAGER_APPROVAL_CONSUMED"
+                : null;
+    if (statusCode) {
+      throw new AppError(
+        statusCode,
+        this.managerApprovalErrorMessage(statusCode),
+        statusCode === "MANAGER_APPROVAL_EXPIRED" ? HttpStatus.GONE : HttpStatus.CONFLICT,
+      );
+    }
+    if (!approval.approvedByUserId) {
+      throw new AppError(
+        "MANAGER_APPROVAL_INVALID",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_INVALID"),
+        HttpStatus.CONFLICT,
+      );
+    }
+    const [approver, requester, device, location, staffAssignment, deviceAssignment] =
+      await Promise.all([
+        transaction.organizationMember.findUnique({
+          where: {
+            organizationId_userId: {
+              organizationId: context.organizationId,
+              userId: approval.approvedByUserId,
+            },
+          },
+          include: { user: { select: { status: true } } },
+        }),
+        transaction.organizationMember.findUnique({
+          where: { id: context.organizationMemberId },
+          include: { user: { select: { status: true } } },
+        }),
+        transaction.staffDevice.findUnique({ where: { id: context.deviceId } }),
+        transaction.location.findFirst({
+          where: {
+            id: context.locationId,
+            organizationId: context.organizationId,
+            status: "ACTIVE",
+          },
+        }),
+        transaction.staffLocationAssignment.findFirst({
+          where: {
+            organizationId: context.organizationId,
+            organizationMemberId: context.organizationMemberId,
+            locationId: context.locationId,
+            active: true,
+            redemptionAllowed: true,
+          },
+        }),
+        transaction.staffDeviceLocation.findFirst({
+          where: {
+            staffDeviceId: context.deviceId,
+            locationId: context.locationId,
+            active: true,
+            redemptionAllowed: true,
+          },
+        }),
+      ]);
+    if (
+      approver?.status !== "ACTIVE" ||
+      approver.user.status !== "ACTIVE" ||
+      !hasPermission(approver.role, "operations.manager_approve")
+    ) {
+      throw new AppError(
+        "MANAGER_APPROVAL_APPROVER_INACTIVE",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_APPROVER_INACTIVE"),
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (
+      requester?.organizationId !== context.organizationId ||
+      requester.status !== "ACTIVE" ||
+      requester.user.status !== "ACTIVE" ||
+      device?.organizationId !== context.organizationId ||
+      device.organizationMemberId !== context.organizationMemberId ||
+      device.status !== "ACTIVE" ||
+      !location ||
+      !staffAssignment ||
+      !deviceAssignment
+    ) {
+      throw new AppError(
+        "MANAGER_APPROVAL_MISMATCH",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_MISMATCH"),
+        HttpStatus.CONFLICT,
+      );
+    }
     const consumedAt = new Date();
-    const approval = await transaction.managerApprovalChallenge.updateMany({
+    const consumed = await transaction.managerApprovalChallenge.updateMany({
       where: {
-        publicId: approvalPublicId,
+        id: approval.id,
         organizationId: context.organizationId,
         membershipId,
-        ...(context.deviceId ? { staffDeviceId: context.deviceId } : {}),
+        rewardEntitlementId: entitlementId,
+        pendingOperationId: operationCommandId,
+        staffDeviceId: context.deviceId,
         locationId: context.locationId,
+        requestedByMemberId: context.organizationMemberId,
+        requestFingerprint,
+        operationType: "REDEEM",
         status: "APPROVED",
         consumedAt: null,
-        expiresAt: { gt: new Date() },
-        ...(entitlementId ? { rewardEntitlementId: entitlementId } : {}),
-        ...(requestFingerprint ? { requestFingerprint } : {}),
-        operationType: "REDEEM",
+        expiresAt: { gt: consumedAt },
       },
       data: { status: "CONSUMED", consumedAt },
     });
-    if (approval.count !== 1) return false;
+    if (consumed.count !== 1) {
+      throw new AppError(
+        "MANAGER_APPROVAL_CONSUMED",
+        this.managerApprovalErrorMessage("MANAGER_APPROVAL_CONSUMED"),
+        HttpStatus.CONFLICT,
+      );
+    }
     await transaction.auditLog.create({
       data: {
         organizationId: context.organizationId,
         action: "operation.manager_approval_consumed",
         targetType: "manager_approval",
-        targetId: approvalPublicId,
+        targetId: approval.id,
         locationId: context.locationId,
         requestId: context.requestId,
-        metadata: { membershipId, entitlementId: entitlementId ?? null },
+        metadata: { membershipId, entitlementId, operationCommandId },
       },
     });
-    return true;
   }
 
   private async persistRiskDecisions(

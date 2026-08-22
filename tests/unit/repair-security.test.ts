@@ -105,6 +105,68 @@ describe("repair-round security boundaries", () => {
     ).toContain("https://app.waflo.app/");
   });
 
+  it("renders production-quality localized email verification content", () => {
+    const localOrigin = "http://localhost:3001";
+    const english = renderNotificationHtml(
+      {
+        to: "owner@example.com",
+        locale: "en",
+        kind: "email_verification",
+        actionUrl: `${localOrigin}/en/verify-email#token=test-only-verification-token`,
+        expiresAt: new Date("2026-08-14T12:00:00.000Z"),
+      },
+      [localOrigin],
+    );
+    expect(english).toContain('<html lang="en" dir="ltr">');
+    expect(english).toContain("Verify your Waflo email");
+    expect(english).toContain("Confirm your email address");
+    expect(english).toContain(">Verify email</a>");
+    expect(english).toContain(`${localOrigin}/en/verify-email#token=`);
+
+    const arabic = renderNotificationHtml(
+      {
+        to: "owner@example.com",
+        locale: "ar",
+        kind: "email_verification",
+        actionUrl: `${localOrigin}/ar/verify-email#token=test-only-verification-token`,
+        expiresAt: new Date("2026-08-14T12:00:00.000Z"),
+      },
+      [localOrigin],
+    );
+    expect(arabic).toContain('<html lang="ar" dir="rtl">');
+    expect(arabic).toContain("تأكيد بريدك الإلكتروني في Waflo");
+    expect(arabic).toContain("أكّد عنوان بريدك الإلكتروني");
+    expect(arabic).toContain(">تأكيد البريد الإلكتروني</a>");
+    expect(arabic).toContain(`${localOrigin}/ar/verify-email#token=`);
+    expect(arabic).not.toMatch(/[٠-٩۰-۹]/u);
+
+    for (const html of [english, arabic]) {
+      expect(html).toContain("Waflo is owned and operated by Tavrix LLC.");
+      expect(html).not.toContain("Mailpit");
+      expect(html).not.toContain("localhost:8025");
+      expect(html).not.toContain("SMTP");
+    }
+  });
+
+  it("uses account-creation wording when a Google-only user creates a Waflo password", () => {
+    const localOrigin = "http://localhost:3001";
+    const english = renderNotificationHtml(
+      {
+        to: "owner@example.com",
+        locale: "en",
+        kind: "password_setup",
+        actionUrl: `${localOrigin}/en/reset-password#token=one-time-token`,
+        expiresAt: new Date("2026-08-22T12:00:00.000Z"),
+      },
+      [localOrigin],
+    );
+
+    expect(english).toContain("Create your Waflo password");
+    expect(english).toContain(">Create password</a>");
+    expect(english).toContain("Do not use your Google password here");
+    expect(english).not.toContain("Reset your Waflo password");
+  });
+
   it("adds CSP everywhere and HSTS only in production without unsafe-eval", async () => {
     process.env.NODE_ENV = "production";
     for (const config of [marketingConfig, dashboardConfig, customerConfig]) {
@@ -137,10 +199,12 @@ describe("repair-round security boundaries", () => {
     const app = await createApiApplication({ logger: false });
     try {
       expect(app.getHttpAdapter().getInstance().printRoutes()).toContain("docs");
+      const response = await app.inject({ method: "GET", url: "/route-that-does-not-exist" });
+      expect(response.headers["x-robots-tag"]).toBe("noindex, nofollow, noarchive");
     } finally {
       await app.close();
     }
-  });
+  }, 30000);
 
   it("fails closed when production Redis is unavailable", async () => {
     const fakeEnvironment = {
