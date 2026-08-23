@@ -51,16 +51,25 @@ export async function prepareGoogleWalletProgramLogo(source: Buffer): Promise<Bu
     .toBuffer();
 }
 
-export const GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP = Object.freeze({
-  programVersionId: null,
-  membershipId: null,
-  revokedAt: null,
-});
+export function googleProgressSharedAssetOwnership(programVersionId: string) {
+  return Object.freeze({
+    programVersionId,
+    membershipId: null,
+    revokedAt: null,
+  });
+}
 
-export function googleProgressAssetNeedsOwnershipRepair(asset: {
-  readonly programVersionId: string | null;
-  readonly membershipId: string | null;
-  readonly revokedAt: Date | null;
-}): boolean {
-  return Boolean(asset.programVersionId || asset.membershipId || asset.revokedAt);
+export function googleProgressAssetNeedsOwnershipRepair(
+  asset: {
+    readonly programVersionId: string | null;
+    readonly membershipId: string | null;
+    readonly revokedAt: Date | null;
+  },
+  expectedProgramVersionId: string,
+): boolean {
+  return (
+    asset.programVersionId !== expectedProgramVersionId ||
+    asset.membershipId !== null ||
+    asset.revokedAt !== null
+  );
 }

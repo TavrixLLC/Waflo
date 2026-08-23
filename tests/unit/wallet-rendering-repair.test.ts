@@ -5,12 +5,12 @@ import type { ObjectStorage } from "../../apps/api/src/programs/object-storage.j
 import type { PreviewAsset } from "../../apps/api/src/programs/preview-assets.js";
 import { resolveApplePassImagesWithFallback } from "../../apps/api/src/wallet/wallet.service.js";
 import {
-  GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
   GOOGLE_WALLET_HERO_HEIGHT,
   GOOGLE_WALLET_HERO_WIDTH,
   GOOGLE_WALLET_LOGO_SAFE_INSET,
   GOOGLE_WALLET_LOGO_SIZE,
   googleProgressAssetNeedsOwnershipRepair,
+  googleProgressSharedAssetOwnership,
   prepareGoogleWalletProgramLogo,
   prepareGoogleWalletProgressHero,
 } from "../../apps/wallet-worker/src/google-wallet-assets.js";
@@ -73,26 +73,30 @@ describe("Wallet rendering repair completion", () => {
     expect(trimmed.info.height).toBe(GOOGLE_WALLET_LOGO_SIZE - GOOGLE_WALLET_LOGO_SAFE_INSET * 2);
   });
 
-  it("detaches deduplicated Google progress art so erasing one membership cannot revoke it", () => {
+  it("owns deduplicated Google progress art by program version so membership erasure cannot revoke it", () => {
     const legacyAsset = {
       organizationId: "organization-a",
       programVersionId: "program-version-a",
       membershipId: "membership-a",
       revokedAt: new Date("2026-08-23T00:00:00.000Z"),
     };
-    expect(googleProgressAssetNeedsOwnershipRepair(legacyAsset)).toBe(true);
-    const repairedAsset = { ...legacyAsset, ...GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP };
+    expect(googleProgressAssetNeedsOwnershipRepair(legacyAsset, "program-version-a")).toBe(true);
+    const repairedAsset = {
+      ...legacyAsset,
+      ...googleProgressSharedAssetOwnership("program-version-a"),
+    };
     const erasedMembershipIds = new Set(["membership-a"]);
     const erasureWouldRevoke =
       repairedAsset.membershipId !== null && erasedMembershipIds.has(repairedAsset.membershipId);
     expect(repairedAsset).toMatchObject({
       organizationId: "organization-a",
-      programVersionId: null,
+      programVersionId: "program-version-a",
       membershipId: null,
       revokedAt: null,
     });
     expect(erasureWouldRevoke).toBe(false);
-    expect(googleProgressAssetNeedsOwnershipRepair(repairedAsset)).toBe(false);
+    expect(googleProgressAssetNeedsOwnershipRepair(repairedAsset, "program-version-a")).toBe(false);
+    expect(googleProgressAssetNeedsOwnershipRepair(repairedAsset, "program-version-b")).toBe(true);
   });
 
   it("falls back to a usable organization logo when the Apple program logo is unusable", async () => {

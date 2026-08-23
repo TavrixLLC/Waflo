@@ -56,11 +56,11 @@ import { Redis } from "ioredis";
 import sharp from "sharp";
 import { classifyApplePushResponse } from "./apple-push.js";
 import {
-  GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
   GOOGLE_WALLET_HERO_HEIGHT,
   GOOGLE_WALLET_HERO_WIDTH,
   GOOGLE_WALLET_LOGO_SIZE,
   googleProgressAssetNeedsOwnershipRepair,
+  googleProgressSharedAssetOwnership,
   prepareGoogleWalletProgramLogo,
   prepareGoogleWalletProgressHero,
 } from "./google-wallet-assets.js";
@@ -1748,7 +1748,12 @@ export class WalletWorker {
     stampRenderInput: PublishedMembershipStampRenderInput,
   ): Promise<string> {
     const visualDigest = publishedMembershipStampVisualDigest(stampRenderInput);
-    const assetType = `GOOGLE_PROGRESS_${visualDigest}`;
+    const programVersionId = pass.membership.enrollmentProgramVersionId;
+    const versionedVisualDigest = createHash("sha256")
+      .update(`${programVersionId}:${visualDigest}`)
+      .digest("hex");
+    const assetType = `GOOGLE_PROGRESS_${versionedVisualDigest}`;
+    const sharedAssetOwnership = googleProgressSharedAssetOwnership(programVersionId);
     const cached = await this.prisma.publicWalletAsset.findFirst({
       where: { organizationId: pass.organizationId, assetType, revokedAt: null },
     });
@@ -1756,10 +1761,10 @@ export class WalletWorker {
       this.environment.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL ||
       this.environment.WALLET_PUBLIC_BASE_URL;
     if (cached) {
-      const sharedAsset = googleProgressAssetNeedsOwnershipRepair(cached)
+      const sharedAsset = googleProgressAssetNeedsOwnershipRepair(cached, programVersionId)
         ? await this.prisma.publicWalletAsset.update({
             where: { id: cached.id },
-            data: GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+            data: sharedAssetOwnership,
           })
         : cached;
       return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
@@ -1807,7 +1812,7 @@ export class WalletWorker {
         },
         create: {
           organizationId: pass.organizationId,
-          ...GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+          ...sharedAssetOwnership,
           assetType,
           contentDigest,
           objectKey,
@@ -1817,7 +1822,7 @@ export class WalletWorker {
           height,
         },
         update: {
-          ...GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+          ...sharedAssetOwnership,
           objectKey,
           publicToken,
           mimeType: "image/png",
@@ -1837,10 +1842,10 @@ export class WalletWorker {
       });
       if (!asset) throw error;
     }
-    if (googleProgressAssetNeedsOwnershipRepair(asset)) {
+    if (googleProgressAssetNeedsOwnershipRepair(asset, programVersionId)) {
       asset = await this.prisma.publicWalletAsset.update({
         where: { id: asset.id },
-        data: GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+        data: sharedAssetOwnership,
       });
     }
     return `${base.replace(/\/+$/, "")}/${asset.publicToken}`;

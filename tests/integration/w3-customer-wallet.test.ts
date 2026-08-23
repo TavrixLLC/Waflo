@@ -134,11 +134,12 @@ describe.sequential("W3 Customer and Wallet integration", () => {
     expect(new Set(passes.map((pass) => pass.providerIdentity)).size).toBe(2);
     const googleAssets = await prisma.client.publicWalletAsset.findMany({
       where: {
-        membershipId: firstMembershipId,
+        programVersionId: fixture.versionId,
         assetType: { startsWith: "GOOGLE_PROGRESS_" },
       },
     });
     expect(googleAssets).toHaveLength(1);
+    expect(googleAssets[0]?.membershipId).toBeNull();
     expect(googleAssets[0]?.objectKey).not.toContain(firstMembershipId);
   }, 120_000);
 
