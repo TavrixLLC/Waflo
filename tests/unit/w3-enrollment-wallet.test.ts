@@ -3,6 +3,15 @@ import { readFileSync } from "node:fs";
 import { unzipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import {
+  renderNotificationHtml,
+  safeNotificationActionUrl,
+} from "../../apps/api/src/notifications/notification.service.js";
+import {
+  enrollmentBillingDecision,
+  walletIncludedForPlan,
+} from "../../packages/billing/src/index.js";
+import { parseEnvironment } from "../../packages/config/src/index.js";
+import {
   createCustomerDataKeyring,
   decryptCustomerValue,
   deriveMembershipCredentialSecret,
@@ -16,10 +25,17 @@ import {
   canonicalJoinUrl,
   createQrPng,
   decodeQrImage,
-  formatMembershipQrPayload,
-  parseMembershipQrPayload,
+  formatMembershipCredentialPayload,
+  parseMembershipCredentialPayload,
 } from "../../packages/qr-core/src/index.js";
 import { AppleWalletProvider, TestApplePassSigner } from "../../packages/wallet-apple/src/index.js";
+import { WalletProviderError } from "../../packages/wallet-core/dist/index.js";
+import {
+  normalizeWalletProviderError,
+  resolveWalletLoyaltyPresentation,
+  type WalletMembershipInput,
+  walletCommandIdempotencyKey,
+} from "../../packages/wallet-core/src/index.js";
 import {
   createGoogleSaveJwt,
   GoogleWalletProvider,
@@ -28,21 +44,6 @@ import {
   mapGoogleLoyaltyClass,
   mapGoogleLoyaltyObject,
 } from "../../packages/wallet-google/src/index.js";
-import {
-  normalizeWalletProviderError,
-  walletCommandIdempotencyKey,
-  type WalletMembershipInput,
-} from "../../packages/wallet-core/src/index.js";
-import { WalletProviderError } from "../../packages/wallet-core/dist/index.js";
-import { parseEnvironment } from "../../packages/config/src/index.js";
-import {
-  enrollmentBillingDecision,
-  walletIncludedForPlan,
-} from "../../packages/billing/src/index.js";
-import {
-  renderNotificationHtml,
-  safeNotificationActionUrl,
-} from "../../apps/api/src/notifications/notification.service.js";
 
 const walletInput: WalletMembershipInput = {
   organizationId: "00000000-0000-4000-8000-000000000001",
@@ -165,13 +166,13 @@ describe("W3 customer security, QR, and Wallet domain", () => {
   it("round-trips opaque membership credentials through rendered QR images", async () => {
     const versioned = { version: 1, secret: Buffer.alloc(32, 8) };
     const publicCredentialId = "cred_m8PNYl1aSr9bT0V4w89d3H2g";
-    const payload = formatMembershipQrPayload({
+    const payload = formatMembershipCredentialPayload({
       publicCredentialId,
       secretVersion: 1,
       secret: deriveMembershipCredentialSecret(publicCredentialId, 1, versioned),
     });
     assertQrContainsNoPii(payload, ["Amina", "customer@example.com", "3/8"]);
-    expect(parseMembershipQrPayload(payload)).toMatchObject({
+    expect(parseMembershipCredentialPayload(payload)).toMatchObject({
       publicCredentialId,
       secretVersion: 1,
     });
@@ -220,7 +221,13 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       ]),
     );
     const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8"));
+    expect(pass.barcodes).toHaveLength(2);
+    expect(pass.barcodes.map((barcode: { format: string }) => barcode.format)).toEqual([
+      "PKBarcodeFormatCode128",
+      "PKBarcodeFormatQR",
+    ]);
     expect(pass.barcodes[0].message).toBe(walletInput.credentialPayload);
+    expect(pass.barcodes[1].message).toBe(walletInput.credentialPayload);
     expect(pass.voided).toBe(false);
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
     expect(Buffer.from(files["manifest.json"] ?? []).toString("utf8")).not.toContain("signature");
@@ -251,7 +258,7 @@ describe("W3 customer security, QR, and Wallet domain", () => {
     });
   });
 
-  it("maps Google Loyalty identity, opaque QR, public progress art, and transfer invalidation", () => {
+  it("maps Google Loyalty identity, opaque linear barcode, public progress art, and transfer invalidation", () => {
     const classId = googleLoyaltyClassId("issuer-1", walletInput.programVersionId);
     const objectId = googleLoyaltyObjectId("issuer-1", walletInput.walletPassInstanceId);
     const active = mapGoogleLoyaltyObject(
@@ -263,9 +270,12 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: objectId,
       classId,
       state: "ACTIVE",
-      barcode: { value: walletInput.credentialPayload },
-      imageModulesData: [{ id: "waflo-progress" }],
+      barcode: { type: "CODE_128", value: walletInput.credentialPayload },
+      heroImage: {
+        sourceUri: { uri: "https://assets.example.test/wpa_opaque" },
+      },
     });
+    expect(active).not.toHaveProperty("imageModulesData");
     expect(
       mapGoogleLoyaltyObject({ ...walletInput, transferred: true }, objectId, classId).state,
     ).toBe("INACTIVE");
@@ -347,13 +357,45 @@ describe("W3 customer security, QR, and Wallet domain", () => {
           id: walletInput.providerIdentity,
           state: "INACTIVE",
           barcode: {
-            type: "QR_CODE",
+            type: "CODE_128",
             value: walletInput.credentialPayload,
             alternateText: "No longer valid",
           },
         }),
       }),
     );
+  });
+
+  it("derives Apple and Google from one localized, PII-safe loyalty presentation", () => {
+    const presentation = resolveWalletLoyaltyPresentation({
+      ...walletInput,
+      locale: "ar",
+      displayName: "محمود سعد",
+      rewardReady: true,
+      currentStampCount: 8,
+    });
+    expect(presentation).toMatchObject({
+      merchantName: walletInput.organizationName,
+      programName: walletInput.programName,
+      memberName: "محمود سعد",
+      progress: "8/8",
+      status: "المكافأة جاهزة",
+      labels: {
+        stamps: "الأختام",
+        member: "العضو",
+        status: "الحالة",
+        reward: "المكافأة",
+      },
+      barcode: {
+        payload: walletInput.credentialPayload,
+        appleFormats: ["PKBarcodeFormatCode128", "PKBarcodeFormatQR"],
+        googleFormat: "CODE_128",
+      },
+    });
+    assertQrContainsNoPii(presentation.barcode.payload, [
+      presentation.memberName,
+      "customer@example.com",
+    ]);
   });
 
   it("classifies provider failures and makes command identity deterministic", () => {

@@ -59,6 +59,10 @@ export function parseMembershipQrPayload(value: string): MembershipQrPayloadV1 {
   return { version: "wfl1", publicCredentialId, secretVersion, secret };
 }
 
+/** Symbology-neutral aliases used by Wallet linear barcodes and legacy QR surfaces alike. */
+export const formatMembershipCredentialPayload = formatMembershipQrPayload;
+export const parseMembershipCredentialPayload = parseMembershipQrPayload;
+
 export function validateProgramPublicSlug(value: string): string {
   const normalized = value.trim().toLocaleLowerCase("en-US");
   if (!PROGRAM_SLUG_PATTERN.test(normalized)) {

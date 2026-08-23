@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
+  resolveWalletLoyaltyPresentation,
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
@@ -53,7 +54,7 @@ export interface AppleStoreCardPass {
   }>;
   readonly maxDistance?: number;
   readonly barcodes: ReadonlyArray<{
-    readonly format: "PKBarcodeFormatQR";
+    readonly format: "PKBarcodeFormatCode128" | "PKBarcodeFormatQR";
     readonly message: string;
     readonly messageEncoding: "iso-8859-1";
     readonly altText: string;
@@ -80,12 +81,7 @@ export function mapAppleStoreCard(
   configuration: ApplePassConfiguration,
   authenticationToken: string,
 ): AppleStoreCardPass {
-  const progress = `${input.currentStampCount}/${input.requiredStampCount}`;
-  const inactive =
-    input.transferred ||
-    input.membershipStatus !== "ACTIVE" ||
-    input.programStatus === "ARCHIVED" ||
-    input.programStatus === "SUSPENDED";
+  const presentation = resolveWalletLoyaltyPresentation(input);
   const nearby = input.nearbyRelevance;
   if (nearby?.enabled && nearby.locations.length > 10) {
     throw new Error("Apple Wallet supports at most 10 nearby locations per pass.");
@@ -103,7 +99,7 @@ export function mapAppleStoreCard(
     labelColor: appleRgb(input.foregroundColor),
     webServiceURL: configuration.webServiceUrl.replace(/\/+$/, ""),
     authenticationToken,
-    voided: inactive,
+    voided: presentation.inactive,
     ...(nearby?.enabled && nearby.locations.length
       ? {
           locations: nearby.locations.map((location) => ({
@@ -116,41 +112,54 @@ export function mapAppleStoreCard(
       : {}),
     barcodes: [
       {
-        format: "PKBarcodeFormatQR",
-        message: input.credentialPayload,
+        format: presentation.barcode.appleFormats[0],
+        message: presentation.barcode.payload,
         messageEncoding: "iso-8859-1",
-        altText: inactive ? "No longer valid" : input.publicMembershipId.slice(-12),
+        altText: presentation.barcode.alternateText,
+      },
+      {
+        // Apple Watch cannot display Code 128, so Wallet can select this safe fallback.
+        format: presentation.barcode.appleFormats[1],
+        message: presentation.barcode.payload,
+        messageEncoding: "iso-8859-1",
+        altText: presentation.barcode.alternateText,
       },
     ],
     storeCard: {
-      headerFields: [{ key: "progress", label: "STAMPS", value: progress }],
-      primaryFields: [{ key: "program", value: input.programName.slice(0, 80) }],
-      secondaryFields: [{ key: "member", label: "MEMBER", value: input.displayName.slice(0, 80) }],
+      headerFields: [
+        { key: "progress", label: presentation.labels.stamps, value: presentation.progress },
+      ],
+      primaryFields: [{ key: "program", value: presentation.programName.slice(0, 80) }],
+      secondaryFields: [
+        {
+          key: "member",
+          label: presentation.labels.member,
+          value: presentation.memberName.slice(0, 80),
+        },
+      ],
       auxiliaryFields: [
         {
           key: "status",
-          label: "STATUS",
-          value: input.transferred
-            ? "Transferred"
-            : input.programStatus === "PAUSED"
-              ? "Temporarily paused"
-              : input.rewardReady
-                ? "Reward ready"
-                : "Active",
+          label: presentation.labels.status,
+          value: presentation.status,
           changeMessage: "%@",
         },
       ],
       backFields: [
-        { key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) },
+        {
+          key: "reward",
+          label: presentation.labels.reward,
+          value: presentation.rewardSummary.slice(0, 500),
+        },
         {
           key: "security",
-          label: "SECURITY",
+          label: presentation.labels.security,
           value:
-            "This QR is an opaque, revocable Waflo membership credential. Do not share screenshots.",
+            "This barcode is an opaque, revocable Waflo membership credential. Do not share screenshots.",
         },
         {
           key: "operator",
-          label: "WAFLO",
+          label: presentation.labels.operator,
           value: "Waflo is owned and operated by Tavrix LLC.",
         },
       ],

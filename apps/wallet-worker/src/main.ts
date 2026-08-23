@@ -28,7 +28,7 @@ import {
   queueWalletPassStateChange,
   type WalletCommand,
 } from "@waflo/database";
-import { formatMembershipQrPayload } from "@waflo/qr-core";
+import { formatMembershipCredentialPayload } from "@waflo/qr-core";
 import {
   type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
@@ -55,6 +55,15 @@ import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-g
 import { Redis } from "ioredis";
 import sharp from "sharp";
 import { classifyApplePushResponse } from "./apple-push.js";
+import {
+  GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+  GOOGLE_WALLET_HERO_HEIGHT,
+  GOOGLE_WALLET_HERO_WIDTH,
+  GOOGLE_WALLET_LOGO_SIZE,
+  googleProgressAssetNeedsOwnershipRepair,
+  prepareGoogleWalletProgramLogo,
+  prepareGoogleWalletProgressHero,
+} from "./google-wallet-assets.js";
 
 const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
 const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
@@ -116,6 +125,7 @@ const passInclude = {
           locations: { select: { locationId: true } },
           visualTheme: {
             include: {
+              logoAsset: { include: { variants: true } },
               filledStampAsset: { include: { variants: true } },
               emptyStampAsset: { include: { variants: true } },
             },
@@ -254,7 +264,7 @@ function credentialPayload(pass: PassRecord, environment: Environment): string {
     version: pass.membershipCredential.secretVersion,
     secret: decodeSecret(secret),
   };
-  return formatMembershipQrPayload({
+  return formatMembershipCredentialPayload({
     publicCredentialId: pass.membershipCredential.publicCredentialId,
     secretVersion: pass.membershipCredential.secretVersion,
     secret: deriveMembershipCredentialSecret(
@@ -364,7 +374,9 @@ function mapProgram(
         include: {
           translations: true;
           cardLocales: true;
-          visualTheme: true;
+          visualTheme: {
+            include: { logoAsset: { include: { variants: true } } };
+          };
           locations: { select: { locationId: true } };
         };
       };
@@ -1174,7 +1186,9 @@ export class WalletWorker {
                   include: {
                     translations: true,
                     cardLocales: true,
-                    visualTheme: true,
+                    visualTheme: {
+                      include: { logoAsset: { include: { variants: true } } },
+                    },
                     locations: { select: { locationId: true } },
                   },
                 },
@@ -1742,18 +1756,21 @@ export class WalletWorker {
       this.environment.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL ||
       this.environment.WALLET_PUBLIC_BASE_URL;
     if (cached) {
-      return `${base.replace(/\/+$/, "")}/${cached.publicToken}`;
+      const sharedAsset = googleProgressAssetNeedsOwnershipRepair(cached)
+        ? await this.prisma.publicWalletAsset.update({
+            where: { id: cached.id },
+            data: GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+          })
+        : cached;
+      return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
     const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
-    const width = 1_032;
-    const height = 336;
-    const bytes = await sharp(Buffer.from(rendered.svg, "utf8"))
-      .resize(width, height, {
-        fit: "contain",
-        background: stampRenderInput.visualTheme.backgroundColor,
-      })
-      .png()
-      .toBuffer();
+    const width = GOOGLE_WALLET_HERO_WIDTH;
+    const height = GOOGLE_WALLET_HERO_HEIGHT;
+    const bytes = await prepareGoogleWalletProgressHero(
+      rendered.svg,
+      stampRenderInput.visualTheme.backgroundColor ?? "#F7F4EE",
+    );
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
     const objectKey = `wallet-public/${pass.organizationId}/${contentDigest}.png`;
     const publicToken = `wpa_${createHmac(
@@ -1790,8 +1807,7 @@ export class WalletWorker {
         },
         create: {
           organizationId: pass.organizationId,
-          programVersionId: pass.membership.enrollmentProgramVersionId,
-          membershipId: pass.membershipId,
+          ...GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
           assetType,
           contentDigest,
           objectKey,
@@ -1800,7 +1816,14 @@ export class WalletWorker {
           width,
           height,
         },
-        update: {},
+        update: {
+          ...GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+          objectKey,
+          publicToken,
+          mimeType: "image/png",
+          width,
+          height,
+        },
       });
     } catch (error) {
       asset = await this.prisma.publicWalletAsset.findUnique({
@@ -1813,6 +1836,12 @@ export class WalletWorker {
         },
       });
       if (!asset) throw error;
+    }
+    if (googleProgressAssetNeedsOwnershipRepair(asset)) {
+      asset = await this.prisma.publicWalletAsset.update({
+        where: { id: asset.id },
+        data: GOOGLE_PROGRESS_SHARED_ASSET_OWNERSHIP,
+      });
     }
     return `${base.replace(/\/+$/, "")}/${asset.publicToken}`;
   }
@@ -1835,26 +1864,23 @@ export class WalletWorker {
           include: {
             translations: true;
             cardLocales: true;
-            visualTheme: true;
+            visualTheme: {
+              include: { logoAsset: { include: { variants: true } } };
+            };
             locations: { select: { locationId: true } };
           };
         };
       };
     }>,
   ): Promise<string> {
-    const width = 660;
-    const height = 660;
+    const width = GOOGLE_WALLET_LOGO_SIZE;
+    const height = GOOGLE_WALLET_LOGO_SIZE;
+    const programLogo = binding.programVersion.visualTheme?.logoAsset;
     const brandLogo = binding.organization.brandLogoAsset;
-    const source = brandLogo ? await this.readBrandLogoBytes(brandLogo) : null;
+    const source =
+      (await this.readBrandLogoBytes(programLogo)) ?? (await this.readBrandLogoBytes(brandLogo));
     const bytes = source
-      ? await sharp(source)
-          .resize(width, height, {
-            fit: "contain",
-            background: { r: 255, g: 255, b: 255, alpha: 0 },
-            withoutEnlargement: false,
-          })
-          .png()
-          .toBuffer()
+      ? await prepareGoogleWalletProgramLogo(source)
       : await this.defaultGoogleProgramLogo(
           binding.programVersion.visualTheme?.accentColor,
           binding.programVersion.visualTheme?.backgroundColor,
@@ -1937,7 +1963,10 @@ export class WalletWorker {
   private async merchantApplePassImages(
     pass: PassRecord,
   ): Promise<Readonly<Record<string, Uint8Array>> | undefined> {
-    const bytes = await this.readBrandLogoBytes(pass.membership.organization.brandLogoAsset);
+    const bytes =
+      (await this.readBrandLogoBytes(
+        pass.membership.enrollmentProgramVersion.visualTheme?.logoAsset,
+      )) ?? (await this.readBrandLogoBytes(pass.membership.organization.brandLogoAsset));
     if (!bytes) return undefined;
     const [logo, logo2x] = await Promise.all([
       sharp(bytes)
@@ -1966,6 +1995,7 @@ export class WalletWorker {
           source: string;
           processingStatus: string;
           archivedAt: Date | null;
+          safeMetadata: unknown;
           variants: Array<{
             variantCode: string;
             objectKey: string;
@@ -1976,12 +2006,17 @@ export class WalletWorker {
       | null
       | undefined,
   ): Promise<Buffer | null> {
-    if (
-      asset?.source !== "MERCHANT_UPLOAD" ||
-      asset.processingStatus !== "READY" ||
-      asset.archivedAt
-    ) {
+    if (asset?.processingStatus !== "READY" || asset.archivedAt) {
       return null;
+    }
+    const metadata = asset.safeMetadata;
+    if (
+      metadata &&
+      typeof metadata === "object" &&
+      "inlineSvg" in metadata &&
+      typeof metadata.inlineSvg === "string"
+    ) {
+      return Buffer.from(metadata.inlineSvg, "utf8");
     }
     const variant =
       asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE") ??

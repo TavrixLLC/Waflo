@@ -19,7 +19,10 @@ import {
   normalizeEmail,
   type VersionedSecret,
 } from "@waflo/customer-security";
-import { formatMembershipQrPayload, parseMembershipQrPayload } from "@waflo/qr-core";
+import {
+  formatMembershipCredentialPayload,
+  parseMembershipCredentialPayload,
+} from "@waflo/qr-core";
 import { parseVersionedSecretEntries } from "@waflo/config";
 import type { Prisma } from "@waflo/database";
 import { EnvironmentService } from "../config/environment.service.js";
@@ -150,7 +153,7 @@ export class CustomerSecurityService {
         credentialVersion,
         this.activeCredentialSecret,
       ),
-      payload: formatMembershipQrPayload({
+      payload: formatMembershipCredentialPayload({
         publicCredentialId,
         secretVersion: this.activeCredentialSecret.version,
         secret,
@@ -164,7 +167,7 @@ export class CustomerSecurityService {
     secretVersion: number;
   }): string {
     const secretVersion = this.secretForCredentialVersion(credential.secretVersion);
-    return formatMembershipQrPayload({
+    return formatMembershipCredentialPayload({
       publicCredentialId: credential.publicCredentialId,
       secretVersion: credential.secretVersion,
       secret: deriveMembershipCredentialSecret(
@@ -179,9 +182,9 @@ export class CustomerSecurityService {
     rawPayload: string,
     transaction: Prisma.TransactionClient | null = null,
   ) {
-    let parsed: ReturnType<typeof parseMembershipQrPayload>;
+    let parsed: ReturnType<typeof parseMembershipCredentialPayload>;
     try {
-      parsed = parseMembershipQrPayload(rawPayload);
+      parsed = parseMembershipCredentialPayload(rawPayload);
     } catch {
       return null;
     }

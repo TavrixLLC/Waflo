@@ -3,16 +3,16 @@ import { unzipSync } from "fflate";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
+  type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
-  type PublishedMembershipStampRenderInput,
 } from "../../packages/stamp-engine/src/index.js";
 import { AppleWalletProvider, TestApplePassSigner } from "../../packages/wallet-apple/src/index.js";
+import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
 import {
   mapGoogleLoyaltyClass,
   mapGoogleLoyaltyObject,
 } from "../../packages/wallet-google/src/index.js";
-import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
 
 const pinnedRenderInput: PublishedMembershipStampRenderInput = {
   organizationId: "00000000-0000-4000-8000-000000000001",
@@ -181,7 +181,22 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       .filter(([name]) => name.endsWith(".json") || name.endsWith(".strings"))
       .map(([, value]) => Buffer.from(value).toString("utf8"))
       .join("\n");
-    expect(packageText.match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
+    // Apple Wallet may select the first supported format. Code 128 is primary on iPhone,
+    // while QR carries the identical opaque credential as the Apple Watch fallback.
+    expect(packageText.match(/wfl1\.opaque\.credential/g)).toHaveLength(2);
+    const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8")) as {
+      barcodes: Array<{ format: string; message: string }>;
+    };
+    expect(pass.barcodes).toEqual([
+      expect.objectContaining({
+        format: "PKBarcodeFormatCode128",
+        message: "wfl1.opaque.credential",
+      }),
+      expect.objectContaining({
+        format: "PKBarcodeFormatQR",
+        message: "wfl1.opaque.credential",
+      }),
+    ]);
     expect(packageText).not.toContain("customer@example.com");
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
   });
@@ -281,9 +296,10 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     });
     expect(JSON.stringify(classValue)).not.toContain(walletInput.credentialPayload);
     expect(objectValue).toMatchObject({
-      imageModulesData: [{ mainImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } } }],
+      heroImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } },
       barcode: { value: walletInput.credentialPayload },
     });
+    expect(objectValue).not.toHaveProperty("imageModulesData");
     expect(JSON.stringify(objectValue).match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
   });
 });

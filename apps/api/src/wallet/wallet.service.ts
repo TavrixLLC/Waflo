@@ -1,16 +1,17 @@
 import { createHash } from "node:crypto";
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { resolveCardLocale } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import type {
   WalletMembershipInput,
   WalletProgramInput,
   WalletProviderCode,
 } from "@waflo/wallet-core";
-import { resolveCardLocale } from "@waflo/contracts";
 import {
   APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   resolveWalletNearbyText,
 } from "@waflo/wallet-core";
+import sharp from "sharp";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
@@ -19,12 +20,64 @@ import { CustomerCardService } from "../customer/customer-card.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
+import { type PreviewAsset, resolvePreviewAssetContent } from "../programs/preview-assets.js";
 import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 import { WalletProviderRegistry } from "./wallet-provider.registry.js";
+
+export async function resolveApplePassImagesWithFallback(
+  objectStorage: ObjectStorage,
+  assets: ReadonlyArray<PreviewAsset | null | undefined>,
+): Promise<Readonly<Record<string, Uint8Array>> | undefined> {
+  const visited = new Set<string>();
+  for (const asset of assets) {
+    if (!asset || visited.has(asset.id)) continue;
+    visited.add(asset.id);
+    let content: Awaited<ReturnType<typeof resolvePreviewAssetContent>>;
+    try {
+      content = await resolvePreviewAssetContent(
+        objectStorage,
+        asset,
+        "ORIGINAL_SAFE",
+        "Wallet program logo",
+      );
+    } catch (error) {
+      if (error instanceof AppError && error.code === "PROGRAM_ASSET_CONTENT_UNAVAILABLE") {
+        continue;
+      }
+      throw error;
+    }
+    if (!content) continue;
+    const source = Buffer.from(content.dataUri.split(",")[1] ?? "", "base64");
+    if (!source.length) continue;
+    try {
+      const [logo, logo2x] = await Promise.all([
+        sharp(source)
+          .resize(160, 50, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+          })
+          .png()
+          .toBuffer(),
+        sharp(source)
+          .resize(320, 100, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+          })
+          .png()
+          .toBuffer(),
+      ]);
+      return { "logo.png": logo, "logo@2x.png": logo2x };
+    } catch {
+      // Branding is optional. A decoded but non-renderable program asset must not prevent
+      // organization/default Apple branding from being used.
+    }
+  }
+  return undefined;
+}
 
 const walletPassInclude = {
   walletProgramBinding: true,
@@ -33,6 +86,7 @@ const walletPassInclude = {
     include: {
       organization: {
         include: {
+          brandLogoAsset: { include: { variants: true } },
           walletNearbyConfiguration: {
             include: {
               locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
@@ -397,6 +451,13 @@ export class WalletService {
             : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
       }),
     };
+    const applePassImages =
+      pass.provider === "APPLE"
+        ? await resolveApplePassImagesWithFallback(this.objectStorage, [
+            version.visualTheme.logoAsset,
+            membership.organization.brandLogoAsset,
+          ])
+        : undefined;
     return {
       ...programInput,
       walletPassInstanceId: pass.id,
@@ -411,6 +472,7 @@ export class WalletService {
       programStatus: membership.program.status,
       transferred: pass.membershipCredential.status === "TRANSFERRED",
       stampRenderInput: stampRender.renderInput,
+      ...(applePassImages ? { applePassImages } : {}),
     };
   }
 }

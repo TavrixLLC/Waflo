@@ -322,6 +322,174 @@ export interface WalletMembershipInput extends WalletProgramInput {
   readonly applePassImages?: Readonly<Record<string, Uint8Array>>;
 }
 
+export const walletProviderPresentationCapabilities = {
+  CUSTOMER_WEB: {
+    layout: "WAFLO_CUSTOM",
+    barcode: "QR",
+    stampArtwork: "FULL_CUSTOM",
+  },
+  APPLE_WALLET: {
+    layout: "APPLE_STORE_CARD",
+    barcode: "CODE_128_WITH_QR_FALLBACK",
+    stampArtwork: "STRIP_IMAGE",
+  },
+  GOOGLE_WALLET: {
+    layout: "GOOGLE_LOYALTY_OBJECT",
+    barcode: "CODE_128",
+    stampArtwork: "HERO_IMAGE",
+  },
+} as const;
+
+export interface WalletLoyaltyPresentation {
+  readonly merchantName: string;
+  readonly programName: string;
+  readonly memberName: string;
+  readonly progress: string;
+  readonly rewardSummary: string;
+  readonly status: string;
+  readonly inactive: boolean;
+  readonly labels: {
+    readonly stamps: string;
+    readonly member: string;
+    readonly status: string;
+    readonly reward: string;
+    readonly security: string;
+    readonly operator: string;
+  };
+  readonly barcode: {
+    /** Opaque, revocable credential. It contains no customer or merchant PII. */
+    readonly payload: string;
+    readonly alternateText: string;
+    readonly appleFormats: readonly ["PKBarcodeFormatCode128", "PKBarcodeFormatQR"];
+    readonly googleFormat: "CODE_128";
+  };
+}
+
+type WalletCopyLocale = "en" | "ar" | "ku-badini" | "ku-sorani";
+
+const walletPresentationCopy: Readonly<
+  Record<
+    WalletCopyLocale,
+    {
+      stamps: string;
+      member: string;
+      status: string;
+      reward: string;
+      security: string;
+      operator: string;
+      active: string;
+      rewardReady: string;
+      transferred: string;
+      paused: string;
+      invalid: string;
+    }
+  >
+> = {
+  en: {
+    stamps: "STAMPS",
+    member: "MEMBER",
+    status: "STATUS",
+    reward: "REWARD",
+    security: "SECURITY",
+    operator: "WAFLO",
+    active: "Active",
+    rewardReady: "Reward ready",
+    transferred: "Transferred",
+    paused: "Temporarily paused",
+    invalid: "No longer valid",
+  },
+  ar: {
+    stamps: "الأختام",
+    member: "العضو",
+    status: "الحالة",
+    reward: "المكافأة",
+    security: "الأمان",
+    operator: "WAFLO",
+    active: "نشطة",
+    rewardReady: "المكافأة جاهزة",
+    transferred: "تم النقل",
+    paused: "متوقفة مؤقتًا",
+    invalid: "لم تعد صالحة",
+  },
+  "ku-badini": {
+    stamps: "مۆر",
+    member: "ئەندام",
+    status: "بارودۆخ",
+    reward: "خەلات",
+    security: "پاراستن",
+    operator: "WAFLO",
+    active: "چالاک",
+    rewardReady: "خەلات ئامادەیە",
+    transferred: "هاتە ڤەگوهاستن",
+    paused: "بۆ کاتەکی وەستیا",
+    invalid: "ئیدی نە دروستە",
+  },
+  "ku-sorani": {
+    stamps: "مۆر",
+    member: "ئەندام",
+    status: "دۆخ",
+    reward: "خەڵات",
+    security: "پاراستن",
+    operator: "WAFLO",
+    active: "چالاک",
+    rewardReady: "خەڵات ئامادەیە",
+    transferred: "گوازراوەتەوە",
+    paused: "کاتیی وەستێنراوە",
+    invalid: "چیتر دروست نییە",
+  },
+};
+
+function walletCopyLocale(locale: string): WalletCopyLocale {
+  const normalized = locale.toLocaleLowerCase("en-US");
+  if (normalized === "ar" || normalized.startsWith("ar-")) return "ar";
+  if (normalized === "ckb" || normalized.startsWith("ckb-")) return "ku-sorani";
+  if (normalized === "ku-arab-iq" || normalized.includes("badini")) return "ku-badini";
+  return "en";
+}
+
+export function resolveWalletLoyaltyPresentation(
+  input: WalletMembershipInput,
+): WalletLoyaltyPresentation {
+  const copy = walletPresentationCopy[walletCopyLocale(input.locale)];
+  const inactive =
+    input.transferred ||
+    input.membershipStatus !== "ACTIVE" ||
+    input.programStatus === "ARCHIVED" ||
+    input.programStatus === "SUSPENDED";
+  const status = input.transferred
+    ? copy.transferred
+    : input.programStatus === "PAUSED"
+      ? copy.paused
+      : inactive
+        ? copy.invalid
+        : input.rewardReady
+          ? copy.rewardReady
+          : copy.active;
+  return {
+    merchantName: input.organizationName,
+    programName: input.programName,
+    memberName: input.displayName,
+    progress: `${input.currentStampCount}/${input.requiredStampCount}`,
+    rewardSummary: input.rewardSummary,
+    status,
+    inactive,
+    labels: {
+      stamps: copy.stamps,
+      member: copy.member,
+      status: copy.status,
+      reward: copy.reward,
+      security: copy.security,
+      operator: copy.operator,
+    },
+    barcode: {
+      payload: input.credentialPayload,
+      alternateText: inactive ? copy.invalid : input.publicMembershipId.slice(-12),
+      appleFormats: ["PKBarcodeFormatCode128", "PKBarcodeFormatQR"],
+      googleFormat: "CODE_128",
+    },
+  };
+}
+
 export interface WalletProgramTemplateResult {
   readonly providerTemplateId: string;
   readonly state: string;

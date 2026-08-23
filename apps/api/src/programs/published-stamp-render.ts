@@ -12,6 +12,7 @@ import {
 
 export const publishedVisualThemeInclude = {
   include: {
+    logoAsset: { include: { variants: true } },
     filledStampAsset: { include: { variants: true } },
     emptyStampAsset: { include: { variants: true } },
   },

@@ -24,6 +24,10 @@ function preview(
   profile: "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET",
   progress: number,
   locale = "en",
+  branding?: {
+    logoDataUri?: string;
+    merchantBrandLogoDataUri?: string;
+  },
 ) {
   const template = required(findProgramTemplate("COFFEE"), "Classic Roast template");
   const filled = required(artworkFor(template.artwork.filled), "filled coffee artwork");
@@ -66,6 +70,7 @@ function preview(
     foregroundColor: template.colors.foreground,
     accentColor: template.colors.accent,
     secondaryColor: template.colors.secondary,
+    ...branding,
     identityDataUri: `data:image/svg+xml;base64,${Buffer.from(filled.content).toString("base64")}`,
     customerWebVariant: template.customerWeb.variant,
     ...(template.presentation ? { presentation: template.presentation } : {}),
@@ -168,14 +173,60 @@ describe("P3 Builder preview fidelity", () => {
     }
   });
 
-  it("uses the Google provider background color for the complete main card surface", () => {
+  it("uses only Google-supported background control and provider-managed chrome", () => {
     const composition = preview("GOOGLE_WALLET", 4);
     expect(composition.svg).toContain('data-card-surface-color="#FFF8EE"');
+    expect(composition.svg).toContain('data-provider-managed-layout="true"');
+    expect(composition.svg).toContain('data-provider-managed-text-color="true"');
+    expect(composition.svg).toContain('data-google-hero-aspect="1032:812"');
     expect(composition.svg).toContain(
-      'data-google-card-surface="true" x="24" y="40" width="412" height="626"',
+      'data-google-card-surface="true" x="24" y="40" width="412" height="716"',
     );
-    expect(composition.svg).toContain('height="626" rx="28" fill="#FFF8EE"');
+    expect(composition.svg).toContain(
+      'data-google-hero-region="true" x="48" y="238" width="364" height="286"',
+    );
+    const providerChrome = composition.svg.replace(
+      /data:image\/svg\+xml;base64,[^"']+/gu,
+      "embedded-stamp-artwork",
+    );
+    expect(providerChrome).not.toContain('fill="#2A1710"');
+    expect(providerChrome).not.toContain('fill="#C74424"');
   });
+
+  it.each(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const)(
+    "uses the program logo ahead of the organization fallback in the %s preview",
+    (profile) => {
+      const programLogo = `data:image/svg+xml;base64,${Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg"><title>program-logo</title></svg>',
+      ).toString("base64")}`;
+      const organizationLogo = `data:image/svg+xml;base64,${Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg"><title>organization-logo</title></svg>',
+      ).toString("base64")}`;
+      const programComposition = preview(profile, 4, "en", {
+        logoDataUri: programLogo,
+        merchantBrandLogoDataUri: organizationLogo,
+      });
+      const fallbackComposition = preview(profile, 4, "en", {
+        merchantBrandLogoDataUri: organizationLogo,
+      });
+
+      expect(programComposition.svg).toContain('data-issuer-brand="program"');
+      expect(programComposition.svg).toContain(programLogo);
+      expect(programComposition.svg).not.toContain(organizationLogo);
+      expect(fallbackComposition.svg).toContain('data-issuer-brand="organization"');
+      expect(fallbackComposition.svg).toContain(organizationLogo);
+    },
+  );
+
+  it.each(["APPLE_WALLET", "GOOGLE_WALLET"] as const)(
+    "keeps the Arabic %s preview RTL with provider barcode metadata",
+    (profile) => {
+      const composition = preview(profile, 8, "ar");
+      expect(composition.svg).toContain('direction="rtl"');
+      expect(composition.svg).toContain('data-barcode-format="CODE_128"');
+      expect(composition.svg).toContain("المكافأة جاهزة");
+    },
+  );
 
   it("retains the selected template composition and keeps readiness outside the grid", () => {
     const customer = preview("CUSTOMER_WEB", 8);
@@ -216,6 +267,8 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).toContain(String(status.label));
       expect(composition.svg).toContain(String(status.value));
       expect(composition.svg).toContain(String(reward.value));
+      expect(composition.svg).toContain('data-barcode-format="CODE_128"');
+      expect(composition.svg).toContain('data-barcode-fallback="QR"');
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );
@@ -228,7 +281,7 @@ describe("P3 Builder preview fidelity", () => {
       const loyaltyObject = mapGoogleLoyaltyObject(input, "issuer.object", "issuer.class");
       const composition = preview("GOOGLE_WALLET", progress);
       const reward = required(loyaltyClass.textModulesData[0], "Google reward module");
-      const status = required(loyaltyObject.textModulesData[0], "Google status module");
+      const status = required(loyaltyObject.textModulesData[1], "Google status module");
 
       expect(composition.svg).toContain(loyaltyClass.issuerName);
       expect(composition.svg).toContain(loyaltyClass.programName);
@@ -239,6 +292,7 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).toContain(reward.body);
       expect(composition.svg).toContain(status.header);
       expect(composition.svg).toContain(status.body);
+      expect(composition.svg).toContain('data-barcode-format="CODE_128"');
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );

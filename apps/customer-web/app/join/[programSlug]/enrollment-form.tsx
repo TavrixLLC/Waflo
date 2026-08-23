@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
 import { customerApi, CustomerApiError, customerCommandId } from "../../client-api";
 import type { PublicMerchant, PublicProgram } from "../../server-api";
+import { type WalletPlatform, walletPlatform } from "../../wallet-platform";
 
 function walletReadiness(status: string, ar: boolean): string {
   if (status === "READY") return ar ? "جاهزة" : "Ready";
@@ -51,6 +52,8 @@ export function EnrollmentForm({
   const [website, setWebsite] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [platform, setPlatform] = useState<WalletPlatform>("desktop");
   const [completed, setCompleted] = useState<{
     membership: {
       publicMembershipId: string;
@@ -103,6 +106,10 @@ export function EnrollmentForm({
   );
 
   useEffect(() => {
+    setPlatform(walletPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints));
+  }, []);
+
+  useEffect(() => {
     const storageKey = `waflo:card-locale:${program.slug}`;
     const saved = window.localStorage.getItem(storageKey);
     if (saved && program.enabledLocales.includes(saved)) setCardLocale(saved);
@@ -115,6 +122,29 @@ export function EnrollmentForm({
     const url = new URL(window.location.href);
     url.searchParams.set("lang", nextLocale);
     window.history.replaceState(null, "", url);
+  }
+
+  async function addCompletedCardToGoogleWallet() {
+    setWalletBusy(true);
+    setError("");
+    try {
+      const query = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
+      const action = await customerApi<{ url: string }>(
+        `/v1/customer/wallet/google/add-action${query}`,
+        { method: "POST" },
+      );
+      window.location.assign(action.url);
+    } catch (caught) {
+      setError(
+        caught instanceof CustomerApiError
+          ? caught.message
+          : ar
+            ? "تعذر فتح Google Wallet. افتح بطاقتك وحاول مرة أخرى."
+            : "Google Wallet could not be opened. Open your card and try again.",
+      );
+    } finally {
+      setWalletBusy(false);
+    }
   }
 
   async function submit(event: React.FormEvent) {
@@ -155,6 +185,9 @@ export function EnrollmentForm({
   }
 
   if (completed) {
+    const cardHref = `/card/${completed.membership.publicMembershipId}${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`;
+    const appleReady = completed.providerStates.apple.status === "READY";
+    const googleReady = completed.providerStates.google.status === "READY";
     return (
       <section className="enrollment-success" aria-live="polite">
         <span className="success-icon">
@@ -164,14 +197,38 @@ export function EnrollmentForm({
         <h1>{ar ? `أهلًا بك في ${copy?.programName}` : `Welcome to ${copy?.programName}`}</h1>
         <p>
           {ar
-            ? "حُفظت بطاقتك على هذا الجهاز. يمكنك فتحها الآن ومتابعة تجهيز المحفظة."
-            : "Your card is saved on this device. Open it now while Wallet prepares in the background."}
+            ? "حُفظت بطاقة الولاء على هذا الجهاز. أضفها إلى محفظة هاتفك عندما تكون جاهزة."
+            : "Your loyalty card is saved on this device. Add it to your phone's wallet when ready."}
         </p>
-        <a
-          href={`/card/${completed.membership.publicMembershipId}${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`}
-        >
-          <Button>{ar ? "فتح بطاقتي" : "Open my card"}</Button>
-        </a>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        {platform === "ios" && appleReady ? (
+          <a
+            className="wallet-button wallet-button--apple"
+            href={`/api/waflo/v1/customer/wallet/apple/pass${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`}
+          >
+            Add to Apple Wallet
+          </a>
+        ) : platform === "android" && googleReady ? (
+          <Button
+            className="wallet-button wallet-button--google"
+            onClick={() => void addCompletedCardToGoogleWallet()}
+            loading={walletBusy}
+          >
+            Add to Google Wallet
+          </Button>
+        ) : (
+          <a href={cardHref}>
+            <Button>
+              {platform === "desktop"
+                ? ar
+                  ? "فتح بطاقتي"
+                  : "Open my card"
+                : ar
+                  ? "عرض البطاقة أثناء تجهيز المحفظة"
+                  : "View card while Wallet prepares"}
+            </Button>
+          </a>
+        )}
         <div className="wallet-readiness">
           <span>Apple Wallet · {walletReadiness(completed.providerStates.apple.status, ar)}</span>
           <span>Google Wallet · {walletReadiness(completed.providerStates.google.status, ar)}</span>
@@ -339,8 +396,8 @@ export function EnrollmentForm({
             </Button>
             <p className="privacy-note">
               {ar
-                ? "تدير Tavrix LLC منصة Waflo، ويدير التاجر برنامج الولاء. لن نضع اسمك أو بريدك في رمز QR."
-                : "Tavrix LLC operates Waflo; the merchant operates this loyalty program. Your QR never contains your name or email."}
+                ? "تدير Tavrix LLC منصة Waflo، ويدير التاجر برنامج الولاء. لن تتضمن بيانات العضوية القابلة للمسح اسمك أو بريدك الإلكتروني."
+                : "Tavrix LLC operates Waflo; the merchant operates this loyalty program. Your scannable membership credential never contains your name or email."}
             </p>
           </form>
         )}

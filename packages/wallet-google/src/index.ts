@@ -1,6 +1,7 @@
 import { createHash, createSign } from "node:crypto";
 import {
   normalizeWalletProviderError,
+  resolveWalletLoyaltyPresentation,
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
@@ -134,50 +135,42 @@ export function mapGoogleLoyaltyObject(
   objectId: string,
   classId: string,
 ) {
-  const inactive =
-    input.transferred ||
-    input.membershipStatus !== "ACTIVE" ||
-    input.programStatus === "ARCHIVED" ||
-    input.programStatus === "SUSPENDED";
+  const presentation = resolveWalletLoyaltyPresentation(input);
   return {
     id: objectId,
     classId,
-    state: inactive ? "INACTIVE" : "ACTIVE",
-    accountName: input.displayName.slice(0, 20),
+    state: presentation.inactive ? "INACTIVE" : "ACTIVE",
+    accountName: presentation.memberName.slice(0, 20),
     accountId: input.publicMembershipId.slice(-20),
     loyaltyPoints: {
-      label: "Stamps",
-      balance: { string: `${input.currentStampCount}/${input.requiredStampCount}` },
+      label: presentation.labels.stamps,
+      balance: { string: presentation.progress },
     },
     barcode: {
-      type: "QR_CODE",
-      value: input.credentialPayload,
-      alternateText: inactive ? "No longer valid" : input.publicMembershipId.slice(-12),
+      type: presentation.barcode.googleFormat,
+      value: presentation.barcode.payload,
+      alternateText: presentation.barcode.alternateText,
     },
     ...(input.publicAssetBaseUrl
       ? {
-          imageModulesData: [
-            {
-              id: "waflo-progress",
-              mainImage: {
-                sourceUri: { uri: input.publicAssetBaseUrl },
-                contentDescription: translated("Stamp progress", input.locale),
-              },
-            },
-          ],
+          // Loyalty heroImage is the single provider-native progress-artwork region. Duplicating
+          // this image in imageModulesData causes two copies on layouts that render both regions.
+          heroImage: {
+            sourceUri: { uri: input.publicAssetBaseUrl },
+            contentDescription: translated(presentation.progress, input.locale),
+          },
         }
       : {}),
     textModulesData: [
       {
+        id: "reward",
+        header: presentation.labels.reward,
+        body: presentation.rewardSummary.slice(0, 500),
+      },
+      {
         id: "status",
-        header: "Status",
-        body: input.transferred
-          ? "Transferred — no longer valid"
-          : input.programStatus === "PAUSED"
-            ? "Program temporarily paused"
-            : input.rewardReady
-              ? "Reward ready"
-              : "Active",
+        header: presentation.labels.status,
+        body: presentation.status,
       },
     ],
   };
