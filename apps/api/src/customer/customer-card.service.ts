@@ -4,7 +4,10 @@ import { AppError } from "../common/app-error.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { HostResolutionService } from "../public/host-resolution.service.js";
+import {
+  HostResolutionService,
+  normalizeRequestHostname,
+} from "../public/host-resolution.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
 import {
@@ -485,8 +488,21 @@ export class CustomerCardService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    const resolved = await this.hosts.resolveOrganization(request.hostname, developmentOverride);
-    if (resolved.status !== "active" || resolved.organization.id !== session.organizationId) {
+    const normalizedHost = normalizeRequestHostname(request.hostname);
+    const sharedStagingHost =
+      this.environment.values.DEPLOYMENT_ENVIRONMENT === "staging"
+        ? new URL(this.environment.values.CUSTOMER_WEB_URL).hostname
+        : null;
+    const sharedStagingSessionMatches =
+      sharedStagingHost !== null &&
+      normalizedHost === sharedStagingHost &&
+      developmentOverride === session.membership.organization.merchantSlug;
+    const resolved = sharedStagingSessionMatches
+      ? null
+      : await this.hosts.resolveOrganization(request.hostname, developmentOverride);
+    const canonicalSessionMatches =
+      resolved?.status === "active" && resolved.organization.id === session.organizationId;
+    if (!sharedStagingSessionMatches && !canonicalSessionMatches) {
       await this.audit.security(
         {
           organizationId: session.organizationId,

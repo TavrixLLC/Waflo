@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { PublicEnrollmentService } from "../../apps/api/src/enrollment/public-enrollment.service.js";
+import { CustomerCardService } from "../../apps/api/src/customer/customer-card.service.js";
 import { normalizeWalletCampaignDestination } from "../../apps/api/src/wallet-engagement/wallet-engagement.service.js";
 import { parseEnvironment, platformDomains } from "../../packages/config/src/index.js";
 import { createNextContentSecurityPolicy } from "../../packages/security/src/index.js";
@@ -55,6 +56,56 @@ function stagingEnvironment(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 describe("staging public hostname cutover", () => {
+  it("keeps a customer session on the shared staging host when its tenant matches", async () => {
+    const organizationId = "00000000-0000-4000-8000-000000000001";
+    const session = {
+      id: "00000000-0000-4000-8000-000000000002",
+      organizationId,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      membershipCredential: { status: "ACTIVE" },
+      membership: {
+        organization: { merchantSlug: "cedar" },
+      },
+    };
+    const findUnique = vi.fn(async () => session);
+    const resolveOrganization = vi.fn();
+    const auditSecurity = vi.fn();
+    const service = new CustomerCardService(
+      { client: { membershipAccessSession: { findUnique } } } as never,
+      { values: stagingEnvironment() } as never,
+      { hashSessionToken: vi.fn(() => "a".repeat(64)) } as never,
+      { resolveOrganization } as never,
+      { security: auditSecurity } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.requireSession(
+        {
+          hostname: "card-staging.waflo.app",
+          cookies: { "__Host-waflo_customer": "session" },
+        } as never,
+        "cedar",
+      ),
+    ).resolves.toEqual({ session });
+    expect(resolveOrganization).not.toHaveBeenCalled();
+    expect(auditSecurity).not.toHaveBeenCalled();
+
+    resolveOrganization.mockResolvedValueOnce({ status: "malformed" });
+    await expect(
+      service.requireSession(
+        {
+          hostname: "card-staging.waflo.app",
+          cookies: { "__Host-waflo_customer": "session" },
+        } as never,
+        "another-merchant",
+      ),
+    ).rejects.toMatchObject({ code: "CUSTOMER_SESSION_HOST_MISMATCH" });
+    expect(auditSecurity).toHaveBeenCalledTimes(1);
+  });
+
   it("recovers an old shared-host QR only for one unambiguous staging merchant", async () => {
     const organization = {
       id: "00000000-0000-4000-8000-000000000001",
