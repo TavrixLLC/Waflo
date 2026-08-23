@@ -89,6 +89,29 @@ function truncate(value: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, Math.max(1, limit - 1))}…` : value;
 }
 
+function previewTextLines(value: string, lineLimit: number, maximumLines = 2): string[] {
+  const words = value.trim().split(/\s+/u).filter(Boolean);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let current = "";
+  for (const rawWord of words) {
+    const word = truncate(rawWord, lineLimit);
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= lineLimit || current.length === 0) {
+      current = candidate;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+  }
+  if (current) lines.push(current);
+  if (lines.length <= maximumLines) return lines;
+  return [
+    ...lines.slice(0, maximumLines - 1),
+    truncate(lines.slice(maximumLines - 1).join(" "), lineLimit),
+  ];
+}
+
 function walletPreviewCopy(locale: string) {
   const canonical = canonicalizeCardLocale(locale) ?? "en";
   if (canonical === "ar")
@@ -503,7 +526,20 @@ function composeApple(
     });
   const markX = rtl ? 386 : 48;
   const organizationX = rtl ? 376 : 84;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization"><rect width="100%" height="100%" fill="#F1F3F6"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="580" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/>${issuerBrandMark(input.merchantBrandLogoDataUri, markX, 66, 26, 26, 7)}<text x="${organizationX}" y="85" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="72" text-anchor="${headerAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="96" text-anchor="${headerAnchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text><text x="${contentX}" y="154" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="29" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text x="${contentX}" y="188" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${memberLabel}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${memberValue}</text><text x="${rtl ? 48 : 412}" y="188" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text>${stampImage(input.stampSvg, 42, 232, 376, 170)}<rect x="48" y="424" width="364" height="130" rx="18" fill="#FFFFFF" opacity=".82"/>${barcode(104, 446, 252, 58)}<text x="230" y="532" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text><text x="230" y="650" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="230" y="673" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 48))}</text></svg>`;
+  const oppositeX = rtl ? 48 : 412;
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization">`,
+    '<rect width="100%" height="100%" fill="#F1F3F6"/>',
+    `<rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/>`,
+    `<text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text>`,
+    `<rect data-apple-front-surface="true" x="24" y="40" width="412" height="474" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/>`,
+    `<g data-apple-identity-progress="true">${issuerBrandMark(input.merchantBrandLogoDataUri, markX, 64, 28, 28, 8)}<text x="${organizationX}" y="84" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="70" text-anchor="${headerAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="94" text-anchor="${headerAnchor}" direction="ltr" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g>`,
+    `<g data-apple-progress-strip="true"><rect data-apple-strip-safe-area="true" x="40" y="104" width="380" height="170" rx="12" fill="${input.backgroundColor}"/>${stampImage(input.stampSvg, 46, 112, 368, 154)}</g>`,
+    `<g data-apple-loyalty-row="true"><text data-apple-field-role="secondary" x="${contentX}" y="304" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text data-apple-field-role="auxiliary" x="${oppositeX}" y="282" text-anchor="end" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${oppositeX}" y="304" text-anchor="end" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text></g>`,
+    `<g data-apple-barcode-region="provider-managed"><rect x="62" y="326" width="336" height="158" rx="18" fill="#FFFFFF" opacity=".94"/>${barcode(112, 352, 236, 52)}<text x="230" y="460" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="9.5" fill="#374151">${barcodeLabel}</text></g>`,
+    `<g data-apple-back-fields="true"><rect x="24" y="538" width="412" height="136" rx="24" fill="#FFFFFF" stroke="#D8DDE5"/><text x="${contentX}" y="568" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="${contentX}" y="594" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 42))}</text><text x="${contentX}" y="642" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#6B7280">${memberLabel}: ${memberValue}</text></g>`,
+    "</svg>",
+  ].join("");
   return { svg, width, height, warnings };
 }
 
@@ -564,15 +600,35 @@ function composeGoogle(
       platform: "GOOGLE_WALLET",
       message: programPlatformCapabilities.GOOGLE_WALLET.heroArtwork.explanation,
     });
-  const logo = issuerBrandMark(input.merchantBrandLogoDataUri, logoX, 72, 62, 62, 15);
-  const issuerX = rtl ? 338 : 120;
+  const logo = issuerBrandMark(input.merchantBrandLogoDataUri, logoX, 70, 60, 60, 30);
+  const issuerX = rtl ? 340 : 118;
   const counterCenterX = rtl ? 92 : 368;
   const oppositeX = rtl ? 48 : 412;
   // The field on the physical opposite edge must flow back into the card.
   // SVG's `end` anchor does that at the right edge in LTR and the left edge in RTL.
   const oppositeAnchor = "end";
   const providerTextColor = googleProviderTextColor(input.backgroundColor);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812"><rect width="100%" height="100%" fill="#EEF3FA"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect data-google-card-surface="true" x="24" y="40" width="412" height="716" rx="28" fill="${input.backgroundColor}" stroke="#D2DAE5" stroke-width="2"/>${logo}<text x="${issuerX}" y="92" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="${providerTextColor}" opacity=".75">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="126" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="24" font-weight="800" fill="${providerTextColor}">${escapeXml(truncate(input.programName, 36))}</text><text x="${contentX}" y="190" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${accountLabel}</text><text x="${contentX}" y="214" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${providerTextColor}">${accountValue}</text><text x="${oppositeX}" y="190" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${pointsLabel}</text><text data-stamp-counter="true" data-card-left="24" data-card-right="436" x="${counterCenterX}" y="214" text-anchor="middle" direction="ltr" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${providerTextColor}">${input.progress}/${input.goal}</text><rect data-google-hero-region="true" x="48" y="238" width="364" height="286" rx="16" fill="${input.backgroundColor}" stroke="${providerTextColor}" stroke-width="1" opacity=".98"/>${stampImage(input.stampSvg, 64, 254, 332, 254)}<text x="${contentX}" y="558" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${rewardLabel}</text><text x="${contentX}" y="580" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${providerTextColor}">${escapeXml(truncate(input.rewardSummary, 38))}</text><text x="${oppositeX}" y="558" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${statusLabel}</text><text x="${oppositeX}" y="580" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${providerTextColor}">${statusValue}</text><rect x="62" y="604" width="336" height="118" rx="18" fill="#FFFFFF" opacity=".94"/>${barcode(112, 622, 236, 52)}<text x="230" y="704" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text></svg>`;
+  const titleLines = previewTextLines(input.programName, rtl ? 18 : 27);
+  const titleMarkup = titleLines
+    .map(
+      (line, index) =>
+        `<tspan x="${issuerX}" dy="${index === 0 ? 0 : 22}">${escapeXml(line)}</tspan>`,
+    )
+    .join("");
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812">`,
+    '<rect width="100%" height="100%" fill="#EEF3FA"/>',
+    `<rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/>`,
+    `<text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text>`,
+    `<rect data-google-card-surface="true" x="24" y="40" width="412" height="716" rx="28" fill="${input.backgroundColor}" stroke="#D2DAE5" stroke-width="2"/>`,
+    `<g data-google-native-title="true">${logo}<text x="${issuerX}" y="89" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="${providerTextColor}" opacity=".72">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="116" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${providerTextColor}">${titleMarkup}</text></g>`,
+    `<g data-google-core-field="points"><text x="${counterCenterX}" y="166" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${pointsLabel}</text><text data-stamp-counter="true" data-card-left="24" data-card-right="436" x="${counterCenterX}" y="191" text-anchor="middle" direction="ltr" font-family="Cairo,Arial,sans-serif" font-size="20" font-weight="800" fill="${providerTextColor}">${input.progress}/${input.goal}</text></g>`,
+    `<g data-google-template-row="identity-status"><text x="${contentX}" y="214" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${accountLabel}</text><text x="${contentX}" y="236" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${providerTextColor}">${accountValue}</text><text x="${oppositeX}" y="214" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${statusLabel}</text><text x="${oppositeX}" y="236" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${providerTextColor}">${statusValue}</text></g>`,
+    `<g data-google-hero-region="true" data-google-hero-artwork-composition="provider-adapted">${stampImage(input.stampSvg, 44, 252, 372, 293)}</g>`,
+    `<g data-google-template-row="reward"><text x="${contentX}" y="570" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${rewardLabel}</text><text x="${contentX}" y="594" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${providerTextColor}">${escapeXml(truncate(input.rewardSummary, 42))}</text></g>`,
+    `<g data-google-barcode-region="provider-managed"><rect x="80" y="618" width="300" height="114" rx="16" fill="#FFFFFF" opacity=".94"/>${barcode(126, 640, 208, 44)}<text x="230" y="714" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text></g>`,
+    "</svg>",
+  ].join("");
   return { svg, width, height, warnings };
 }
 

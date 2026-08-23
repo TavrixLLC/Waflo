@@ -51,7 +51,12 @@ import {
   type WalletProviderCode,
   type WalletUpdateReason,
 } from "@waflo/wallet-core";
-import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
+import {
+  GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION,
+  type GoogleServiceAccount,
+  GoogleWalletProvider,
+  resolveGoogleProgressArtworkComposition,
+} from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
 import { classifyApplePushResponse } from "./apple-push.js";
@@ -1750,7 +1755,7 @@ export class WalletWorker {
     const visualDigest = publishedMembershipStampVisualDigest(stampRenderInput);
     const programVersionId = pass.membership.enrollmentProgramVersionId;
     const versionedVisualDigest = createHash("sha256")
-      .update(`${programVersionId}:${visualDigest}`)
+      .update(`${GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION}:${programVersionId}:${visualDigest}`)
       .digest("hex");
     const assetType = `GOOGLE_PROGRESS_${versionedVisualDigest}`;
     const sharedAssetOwnership = googleProgressSharedAssetOwnership(programVersionId);
@@ -1769,7 +1774,25 @@ export class WalletWorker {
         : cached;
       return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
-    const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
+    const canonicalRendered = renderPublishedMembershipStampSvg(stampRenderInput);
+    const googleComposition = resolveGoogleProgressArtworkComposition({
+      goal: stampRenderInput.requiredStampCount,
+      renderedWidth: canonicalRendered.width,
+      renderedHeight: canonicalRendered.height,
+      layout: stampRenderInput.layoutType,
+      ...(stampRenderInput.layoutConfiguration
+        ? { layoutConfiguration: stampRenderInput.layoutConfiguration }
+        : {}),
+    });
+    const rendered = googleComposition.adapted
+      ? renderPublishedMembershipStampSvg({
+          ...stampRenderInput,
+          layoutType: googleComposition.layout,
+          ...(googleComposition.layoutConfiguration
+            ? { layoutConfiguration: googleComposition.layoutConfiguration }
+            : {}),
+        })
+      : canonicalRendered;
     const width = GOOGLE_WALLET_HERO_WIDTH;
     const height = GOOGLE_WALLET_HERO_HEIGHT;
     const bytes = await prepareGoogleWalletProgressHero(

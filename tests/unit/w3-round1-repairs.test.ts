@@ -177,6 +177,22 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       expect(raw.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
       expect(raw.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
     }
+    const stripBuffer = Buffer.from(files["strip.png"] ?? []);
+    const strip = sharp(stripBuffer).ensureAlpha();
+    await expect(strip.metadata()).resolves.toMatchObject({ width: 750, height: 246 });
+    for (const left of [0, 710]) {
+      const edge = await sharp(stripBuffer)
+        .ensureAlpha()
+        .extract({ left, top: 0, width: 40, height: 246 })
+        .raw()
+        .toBuffer();
+      const firstPixel = edge.subarray(0, 4);
+      expect(
+        Array.from({ length: edge.length / 4 }, (_, index) =>
+          edge.subarray(index * 4, index * 4 + 4).equals(firstPixel),
+        ).every(Boolean),
+      ).toBe(true);
+    }
     const packageText = Object.entries(files)
       .filter(([name]) => name.endsWith(".json") || name.endsWith(".strings"))
       .map(([, value]) => Buffer.from(value).toString("utf8"))

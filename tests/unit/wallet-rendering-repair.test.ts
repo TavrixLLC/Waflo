@@ -4,6 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { ObjectStorage } from "../../apps/api/src/programs/object-storage.js";
 import type { PreviewAsset } from "../../apps/api/src/programs/preview-assets.js";
 import { resolveApplePassImagesWithFallback } from "../../apps/api/src/wallet/wallet.service.js";
+import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
+import {
+  GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION,
+  resolveGoogleProgressArtworkComposition,
+} from "../../packages/wallet-google/src/index.js";
 import {
   GOOGLE_WALLET_HERO_HEIGHT,
   GOOGLE_WALLET_HERO_WIDTH,
@@ -42,6 +47,48 @@ function previewAsset(input: {
 }
 
 describe("Wallet rendering repair completion", () => {
+  it("adapts underutilized stamp grids into a truthful Google hero composition", () => {
+    const renderInput = {
+      goal: 6,
+      progress: 2,
+      rewardReady: false,
+      layout: "GRID" as const,
+      layoutConfiguration: { columns: 4 },
+      filledColor: "#E4572E",
+      emptyColor: "#F3A712",
+      accentColor: "#E4572E",
+      backgroundColor: "#F7F4EE",
+      foregroundColor: "#241916",
+      stampSize: 48,
+      spacing: 8,
+      outputProfile: "GOOGLE_WALLET" as const,
+    };
+    const canonical = renderStampSvg(renderInput);
+    const composition = resolveGoogleProgressArtworkComposition({
+      goal: renderInput.goal,
+      layout: renderInput.layout,
+      renderedWidth: canonical.width,
+      renderedHeight: canonical.height,
+    });
+    const adapted = renderStampSvg({
+      ...renderInput,
+      layout: composition.layout,
+      ...(composition.layoutConfiguration
+        ? { layoutConfiguration: composition.layoutConfiguration }
+        : {}),
+    });
+
+    expect(GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION).toBe("google-progress-v3");
+    expect(composition).toEqual({
+      layout: "GRID",
+      layoutConfiguration: { columns: 3 },
+      adapted: true,
+    });
+    expect(adapted.width / adapted.height).toBeLessThanOrEqual(2.15);
+    expect(adapted.svg.match(/data-visual-state="FILLED"/gu)).toHaveLength(2);
+    expect(adapted.svg.match(/data-visual-state="EMPTY"/gu)).toHaveLength(4);
+  });
+
   it("renders the single Google progress region at provider hero geometry", async () => {
     const source =
       '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="240"><rect width="800" height="240" fill="#E4572E"/></svg>';

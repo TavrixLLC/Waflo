@@ -594,8 +594,10 @@ a {
 
 .numeric-fraction {
   display: inline-block;
+  direction: ltr;
   font-variant-numeric: tabular-nums;
   unicode-bidi: isolate;
+  white-space: nowrap;
 }
 
 .progress-copy span {
@@ -1161,20 +1163,19 @@ body {
   box-shadow: var(--waflo-shadow-pass);
 }
 
-.program-story .wf-badge {
-  color: white;
-  border-color: rgb(255 255 255 / 16%);
-  background: rgb(255 255 255 / 8%);
-}
-
 .program-story h1 {
   max-width: 30rem;
-  margin: 0.8rem 0 0;
+  margin: 0.45rem 0 0;
   color: white;
   font-size: clamp(1.8rem, 8vw, 2.4rem);
   font-weight: 800;
   line-height: 1.08;
   letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+[dir="rtl"] .program-story h1 {
+  letter-spacing: 0;
 }
 
 .program-story .customer-lead {
@@ -1195,6 +1196,7 @@ body {
 }
 
 .reward-card {
+  align-items: center;
   margin-top: 1rem;
   padding: 0.85rem;
   color: white;
@@ -1209,6 +1211,15 @@ body {
   height: 3.5rem;
   border-radius: 14px;
   font-size: 1.25rem;
+}
+
+.program-story .reward-card > div {
+  min-width: 0;
+}
+
+.reward-card strong {
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .reward-card p,
@@ -1372,6 +1383,15 @@ body {
 
   .enrollment-card {
     margin-inline: 0;
+  }
+
+  .enrollment-card__heading {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .enrollment-card__heading .wf-search-select {
+    width: 100%;
   }
 
   .digital-card {

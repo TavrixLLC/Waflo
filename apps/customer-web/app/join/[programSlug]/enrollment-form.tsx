@@ -251,7 +251,6 @@ export function EnrollmentForm({
           logoDataUri={merchant.brandLogoDataUri}
           name={merchant.name}
         />
-        <Badge tone="brand">{merchant.name}</Badge>
         <h1>{copy?.programName}</h1>
         <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>
         <Image
@@ -264,9 +263,9 @@ export function EnrollmentForm({
           priority
         />
         <p className="stamp-preview-count">
-          <strong dir="ltr" className="numeric-fraction">
+          <bdi dir="ltr" className="numeric-fraction">
             0 / {program.goal}
-          </strong>{" "}
+          </bdi>{" "}
           {ar ? "أختام عند الانضمام" : "stamps when you join"}
         </p>
         <Card className="reward-card">

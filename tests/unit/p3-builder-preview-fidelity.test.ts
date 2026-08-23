@@ -183,14 +183,32 @@ describe("P3 Builder preview fidelity", () => {
       'data-google-card-surface="true" x="24" y="40" width="412" height="716"',
     );
     expect(composition.svg).toContain(
-      'data-google-hero-region="true" x="48" y="238" width="364" height="286"',
+      'data-google-hero-region="true" data-google-hero-artwork-composition="provider-adapted"',
     );
+    expect(composition.svg).toContain('x="44" y="252" width="372" height="293"');
+    const identityRow = composition.svg.indexOf('data-google-template-row="identity-status"');
+    const hero = composition.svg.indexOf('data-google-hero-region="true"');
+    const rewardRow = composition.svg.indexOf('data-google-template-row="reward"');
+    const barcodeRegion = composition.svg.indexOf('data-google-barcode-region="provider-managed"');
+    expect(identityRow).toBeGreaterThan(-1);
+    expect(identityRow).toBeLessThan(hero);
+    expect(hero).toBeLessThan(rewardRow);
+    expect(rewardRow).toBeLessThan(barcodeRegion);
     const providerChrome = composition.svg.replace(
       /data:image\/svg\+xml;base64,[^"']+/gu,
       "embedded-stamp-artwork",
     );
     expect(providerChrome).not.toContain('fill="#2A1710"');
     expect(providerChrome).not.toContain('fill="#C74424"');
+  });
+
+  it("keeps Apple front fields minimal and identifies its provider-managed back fields", () => {
+    const composition = preview("APPLE_WALLET", 4);
+    expect(composition.svg).toContain('data-apple-front-surface="true"');
+    expect(composition.svg).toContain('data-apple-back-fields="true"');
+    expect(composition.svg.indexOf('data-apple-front-surface="true"')).toBeLessThan(
+      composition.svg.indexOf('data-apple-back-fields="true"'),
+    );
   });
 
   it.each(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const)(
@@ -254,14 +272,21 @@ describe("P3 Builder preview fidelity", () => {
       );
       const composition = preview("APPLE_WALLET", progress);
       const header = required(pass.storeCard.headerFields[0], "Apple progress field");
-      const primary = required(pass.storeCard.primaryFields[0], "Apple program field");
-      const member = required(pass.storeCard.secondaryFields[0], "Apple member field");
+      const program = required(pass.storeCard.secondaryFields[0], "Apple program field");
+      const member = required(
+        pass.storeCard.backFields.find((field) => field.key === "member"),
+        "Apple member back field",
+      );
       const status = required(pass.storeCard.auxiliaryFields[0], "Apple status field");
-      const reward = required(pass.storeCard.backFields[0], "Apple reward back field");
+      const reward = required(
+        pass.storeCard.backFields.find((field) => field.key === "reward"),
+        "Apple reward back field",
+      );
 
+      expect(pass.storeCard.primaryFields).toEqual([]);
       expect(composition.svg).toContain(String(header.label));
       expect(composition.svg).toContain(String(header.value));
-      expect(composition.svg).toContain(String(primary.value));
+      expect(composition.svg).toContain(String(program.value));
       expect(composition.svg).toContain(String(member.label));
       expect(composition.svg).toContain(String(member.value));
       expect(composition.svg).toContain(String(status.label));
@@ -269,6 +294,8 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).toContain(String(reward.value));
       expect(composition.svg).toContain('data-barcode-format="CODE_128"');
       expect(composition.svg).toContain('data-barcode-fallback="QR"');
+      expect(composition.svg).toContain('data-apple-strip-safe-area="true"');
+      expect(composition.svg).toContain('data-apple-field-role="secondary"');
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );
@@ -293,6 +320,29 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).toContain(status.header);
       expect(composition.svg).toContain(status.body);
       expect(composition.svg).toContain('data-barcode-format="CODE_128"');
+      expect(loyaltyClass.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos).toEqual([
+        {
+          twoItems: {
+            startItem: {
+              firstValue: { fields: [{ fieldPath: "object.accountName" }] },
+            },
+            endItem: {
+              firstValue: {
+                fields: [{ fieldPath: "object.textModulesData['status']" }],
+              },
+            },
+          },
+        },
+        {
+          oneItem: {
+            item: {
+              firstValue: {
+                fields: [{ fieldPath: "object.textModulesData['reward']" }],
+              },
+            },
+          },
+        },
+      ]);
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );

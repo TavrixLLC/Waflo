@@ -128,6 +128,18 @@ const walletInput: WalletMembershipInput = {
 };
 
 describe("W3 customer security, QR, and Wallet domain", () => {
+  it("isolates the visible stamp fraction from Arabic bidi reordering", () => {
+    const enrollmentSource = readFileSync(
+      "apps/customer-web/app/join/[programSlug]/enrollment-form.tsx",
+      "utf8",
+    );
+    const globalStyles = readFileSync("apps/customer-web/app/globals.css", "utf8");
+    expect(enrollmentSource).toContain('<bdi dir="ltr" className="numeric-fraction">');
+    expect(globalStyles).toMatch(
+      /\.numeric-fraction\s*\{[^}]*direction:\s*ltr;[^}]*unicode-bidi:\s*isolate;[^}]*white-space:\s*nowrap;/su,
+    );
+  });
+
   it("encrypts customer email with tenant/record AAD and never stores plaintext", () => {
     const keyring = createCustomerDataKeyring(1, { 1: "10".repeat(32) });
     const encrypted = encryptCustomerValue("customer@example.com", {
@@ -255,6 +267,19 @@ describe("W3 customer security, QR, and Wallet domain", () => {
     expect(mapped.textModulesData[0]).toMatchObject({
       id: "reward",
       body: "A complimentary drink after eight stamps.",
+    });
+    expect(mapped.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos).toHaveLength(2);
+    expect(mapped.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos[0]).toEqual({
+      twoItems: {
+        startItem: {
+          firstValue: { fields: [{ fieldPath: "object.accountName" }] },
+        },
+        endItem: {
+          firstValue: {
+            fields: [{ fieldPath: "object.textModulesData['status']" }],
+          },
+        },
+      },
     });
   });
 

@@ -1,5 +1,10 @@
 import type { ProgramTemplateDefinition } from "@waflo/contracts";
-import { renderStampSvg, type StampOutputProfile } from "@waflo/stamp-engine";
+import {
+  renderStampSvg,
+  type StampOutputProfile,
+  type StampRenderInput,
+} from "@waflo/stamp-engine";
+import { resolveGoogleProgressArtworkComposition } from "@waflo/wallet-google";
 import { artworkFor } from "./library-artwork.js";
 import { composeProgramPreview, type ProgramPreviewComposition } from "./preview-composer.js";
 
@@ -102,7 +107,7 @@ export function renderTemplateGalleryPreview(
           barcodeLabel: "رمز للمعاينة",
         }
       : template.google;
-  const rendered = renderStampSvg({
+  const stampRenderInput = {
     goal,
     progress,
     layout: blank ? "GRID" : template.layout.type,
@@ -130,7 +135,24 @@ export function renderTemplateGalleryPreview(
     rewardReady: false,
     progressLabelVisible: profile === "CUSTOMER_WEB",
     rewardLabelVisible: profile === "CUSTOMER_WEB",
-  });
+  } satisfies StampRenderInput;
+  let rendered = renderStampSvg(stampRenderInput);
+  if (profile === "GOOGLE_WALLET") {
+    const googleComposition = resolveGoogleProgressArtworkComposition({
+      goal,
+      renderedWidth: rendered.width,
+      renderedHeight: rendered.height,
+      layout: stampRenderInput.layout,
+      layoutConfiguration: stampRenderInput.layoutConfiguration,
+    });
+    if (googleComposition.adapted) {
+      rendered = renderStampSvg({
+        ...stampRenderInput,
+        layout: googleComposition.layout,
+        layoutConfiguration: googleComposition.layoutConfiguration,
+      });
+    }
+  }
   const composed = composeProgramPreview({
     profile,
     locale,

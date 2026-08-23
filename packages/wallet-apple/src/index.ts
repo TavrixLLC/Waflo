@@ -129,12 +129,14 @@ export function mapAppleStoreCard(
       headerFields: [
         { key: "progress", label: presentation.labels.stamps, value: presentation.progress },
       ],
-      primaryFields: [{ key: "program", value: presentation.programName.slice(0, 80) }],
+      // Store-card primary fields are rendered over the strip artwork at a very large size.
+      // Keep that region clear so the progress artwork remains legible and use the native
+      // secondary row for the program title instead.
+      primaryFields: [],
       secondaryFields: [
         {
-          key: "member",
-          label: presentation.labels.member,
-          value: presentation.memberName.slice(0, 80),
+          key: "program",
+          value: presentation.programName.slice(0, 80),
         },
       ],
       auxiliaryFields: [
@@ -146,6 +148,11 @@ export function mapAppleStoreCard(
         },
       ],
       backFields: [
+        {
+          key: "member",
+          label: presentation.labels.member,
+          value: presentation.memberName.slice(0, 80),
+        },
         {
           key: "reward",
           label: presentation.labels.reward,
@@ -336,11 +343,23 @@ async function progressStrip(input: WalletMembershipInput): Promise<Buffer> {
     ...input.stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
-  return sharp(Buffer.from(rendered.svg, "utf8"))
-    .resize(750, 246, {
+  const background = input.stampRenderInput.visualTheme.backgroundColor ?? input.backgroundColor;
+  const inset = await sharp(Buffer.from(rendered.svg, "utf8"))
+    .resize(690, 206, {
       fit: "contain",
-      background: input.stampRenderInput.visualTheme.backgroundColor,
+      background,
     })
+    .png()
+    .toBuffer();
+  return sharp({
+    create: {
+      width: 750,
+      height: 246,
+      channels: 4,
+      background,
+    },
+  })
+    .composite([{ input: inset, left: 30, top: 20 }])
     .png()
     .toBuffer();
 }
@@ -366,6 +385,17 @@ function utf16AppleStrings(value: string): Buffer {
   return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(value, "utf16le")]);
 }
 
+function passFieldValue(pass: AppleStoreCardPass, key: string): string {
+  const field = [
+    ...pass.storeCard.headerFields,
+    ...pass.storeCard.primaryFields,
+    ...pass.storeCard.secondaryFields,
+    ...pass.storeCard.auxiliaryFields,
+    ...pass.storeCard.backFields,
+  ].find((candidate) => candidate.key === key);
+  return field?.value.toString() ?? "";
+}
+
 export async function buildApplePassPackage(input: {
   pass: AppleStoreCardPass;
   signer: ApplePassSigner;
@@ -384,15 +414,15 @@ export async function buildApplePassPackage(input: {
     : [
         {
           locale: "en",
-          programName: input.pass.storeCard.primaryFields[0]?.value.toString() ?? "",
+          programName: passFieldValue(input.pass, "program"),
           description: input.pass.description,
-          rewardSummary: input.pass.storeCard.backFields[0]?.value.toString() ?? "",
+          rewardSummary: passFieldValue(input.pass, "reward"),
         },
         {
           locale: "ar",
-          programName: input.pass.storeCard.primaryFields[0]?.value.toString() ?? "",
+          programName: passFieldValue(input.pass, "program"),
           description: input.pass.description,
-          rewardSummary: input.pass.storeCard.backFields[0]?.value.toString() ?? "",
+          rewardSummary: passFieldValue(input.pass, "reward"),
         },
       ];
   const defaultLocale = input.defaultLocale ?? localizations[0]?.locale ?? "en";
