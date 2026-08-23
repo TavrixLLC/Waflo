@@ -50,11 +50,17 @@ interface GoogleProgressArtworkCompositionInput {
  */
 export function resolveGoogleProgressArtworkComposition(
   input: GoogleProgressArtworkCompositionInput,
-): Readonly<{
-  layout: GoogleProgressLayout;
-  layoutConfiguration: GoogleProgressArtworkCompositionInput["layoutConfiguration"];
-  adapted: boolean;
-}> {
+):
+  | Readonly<{
+      layout: GoogleProgressLayout;
+      layoutConfiguration: GoogleProgressArtworkCompositionInput["layoutConfiguration"];
+      adapted: false;
+    }>
+  | Readonly<{
+      layout: "GRID";
+      layoutConfiguration: Readonly<{ columns: number }>;
+      adapted: true;
+    }> {
   const safeHeight = Math.max(1, input.renderedHeight);
   const aspectRatio = input.renderedWidth / safeHeight;
   if (
