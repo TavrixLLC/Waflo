@@ -215,7 +215,7 @@ describe("renderer-backed template gallery previews", () => {
           expect(preview.presentation).toBe("TEMPLATE");
           expect(preview.width).toBeGreaterThan(0);
           expect(preview.height).toBeGreaterThan(0);
-          expect(preview.svg).toContain(localizedName);
+          expect(preview.svg.replace(/<\/tspan><tspan[^>]*>/g, " ")).toContain(localizedName);
           expect(preview.svg).not.toContain("undefined");
           if (locale === "AR") expect(preview.svg).toContain('direction="rtl"');
         }
