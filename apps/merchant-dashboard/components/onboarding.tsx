@@ -28,6 +28,11 @@ import {
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
 import {
+  confirmSetupWithRecovery,
+  isOperationTimeoutError,
+  withOperationTimeout,
+} from "../lib/stripe-setup-recovery";
+import {
   LocationAddressFields,
   LocationMapPicker,
   type LocationMapSelection,
@@ -372,12 +377,14 @@ function PlanStep({
 function SecurePaymentForm({
   locale,
   organizationId,
+  clientSecret,
   billingIdentity,
   billingCommand,
   onReady,
 }: {
   locale: InterfaceLocale;
   organizationId: string;
+  clientSecret: string;
   billingIdentity: BillingIdentityDraft;
   billingCommand: string;
   onReady: (preview: TrialPreview) => void;
@@ -391,13 +398,17 @@ function SecurePaymentForm({
 
   const loadPreview = useCallback(
     async (setupIntentId: string) => {
-      const preview = await apiFetch<TrialPreview>(
-        `/v1/organizations/${organizationId}/billing/trial/preview`,
-        {
+      const controller = new AbortController();
+      const preview = await withOperationTimeout(
+        apiFetch<TrialPreview>(`/v1/organizations/${organizationId}/billing/trial/preview`, {
           method: "POST",
           headers: { "x-idempotency-key": billingCommand },
           body: JSON.stringify({ setupIntentId }),
-        },
+          signal: controller.signal,
+        }),
+        15_000,
+        "Trial preview",
+        () => controller.abort(),
       );
       onReady(preview);
     },
@@ -425,41 +436,51 @@ function SecurePaymentForm({
     if (!stripe || !elements) return;
     setLoading(true);
     setError("");
-    const result = await stripe.confirmSetup({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}`,
-        payment_method_data: {
-          billing_details: {
-            name: billingIdentity.name,
-            email: billingIdentity.email,
-            address: {
-              country: billingIdentity.countryCode,
-              line1: billingIdentity.addressLine1,
-              line2: billingIdentity.addressLine2 || null,
-              city: billingIdentity.city,
-              state: billingIdentity.region || null,
-              postal_code: billingIdentity.postalCode || null,
-            },
-          },
-        },
-      },
-      redirect: "if_required",
-    });
-    if (result.error) {
-      setError(copy.payment.saveCardError);
-      setLoading(false);
-      return;
-    }
-    if (result.setupIntent?.status !== "succeeded") {
-      setError(copy.payment.completeVerification);
-      setLoading(false);
-      return;
-    }
     try {
-      await loadPreview(result.setupIntent.id);
+      const outcome = await confirmSetupWithRecovery({
+        confirm: () =>
+          stripe.confirmSetup({
+            elements,
+            confirmParams: {
+              return_url: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}`,
+              payment_method_data: {
+                billing_details: {
+                  name: billingIdentity.name,
+                  email: billingIdentity.email,
+                  address: {
+                    country: billingIdentity.countryCode,
+                    line1: billingIdentity.addressLine1,
+                    line2: billingIdentity.addressLine2 || null,
+                    city: billingIdentity.city,
+                    state: billingIdentity.region || null,
+                    postal_code: billingIdentity.postalCode || null,
+                  },
+                },
+              },
+            },
+            redirect: "if_required",
+          }),
+        retrieve: () => stripe.retrieveSetupIntent(clientSecret),
+      });
+
+      if (outcome.kind !== "succeeded") {
+        setError(
+          outcome.timedOut
+            ? copy.payment.networkError
+            : outcome.providerError
+              ? copy.payment.saveCardError
+              : copy.payment.completeVerification,
+        );
+        return;
+      }
+
+      await loadPreview(outcome.setupIntent.id);
     } catch (caught) {
-      setError(localizedError(caught, copy, copy.payment.reviewTrialError));
+      setError(
+        isOperationTimeoutError(caught)
+          ? copy.payment.networkError
+          : localizedError(caught, copy, copy.payment.reviewTrialError),
+      );
     } finally {
       setLoading(false);
     }
@@ -1098,6 +1119,7 @@ export function BusinessOnboarding({
             <SecurePaymentForm
               locale={locale}
               organizationId={organizationId}
+              clientSecret={clientSecret}
               billingIdentity={billingIdentity}
               billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
               onReady={(value) => {
