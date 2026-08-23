@@ -430,8 +430,11 @@ describe("production-v1 UX and billing repair", () => {
       },
     });
     expect(preview.svg).toContain('lang="ar" xml:lang="ar"');
-    expect(preview.svg).toContain('x="48" y="210" text-anchor="end"');
-    expect(preview.svg).toContain('x="48" y="440" text-anchor="end"');
+    expect(preview.svg).toContain('direction="rtl"');
+    expect(preview.svg).toContain('x="412" y="190" text-anchor="start"');
+    expect(preview.svg).toContain('x="48" y="190" text-anchor="end"');
+    expect(preview.svg).toContain('x="412" y="558" text-anchor="start"');
+    expect(preview.svg).toContain('x="48" y="558" text-anchor="end"');
     expect(preview.digest).toBe(createHash("sha256").update(preview.svg).digest("hex"));
   });
 
