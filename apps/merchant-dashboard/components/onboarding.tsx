@@ -437,6 +437,12 @@ function SecurePaymentForm({
     setLoading(true);
     setError("");
     try {
+      const { error: submissionError } = await elements.submit();
+      if (submissionError) {
+        setError(copy.payment.saveCardError);
+        return;
+      }
+
       const outcome = await confirmSetupWithRecovery({
         confirm: () =>
           stripe.confirmSetup({

@@ -117,6 +117,10 @@ describe("onboarding payment integration", () => {
 
     expect(source).toContain("confirmSetupWithRecovery({");
     expect(source).toContain("retrieve: () => stripe.retrieveSetupIntent(clientSecret)");
+    expect(source).toContain("await elements.submit()");
+    expect(source.indexOf("await elements.submit()")).toBeLessThan(
+      source.indexOf("confirmSetupWithRecovery({"),
+    );
     expect(source).toMatch(/finally\s*\{\s*setLoading\(false\);\s*\}/);
   });
 });
