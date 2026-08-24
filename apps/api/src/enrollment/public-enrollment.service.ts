@@ -5,11 +5,19 @@ import {
   enrollmentBillingDecision,
   walletIncludedForPlan,
 } from "@waflo/billing";
-import type { BillingStatus, EnrollmentInput } from "@waflo/contracts";
+import {
+  resolveProgramTemplatePresentation,
+  type BillingStatus,
+  type EnrollmentInput,
+} from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { canonicalCustomerUrl } from "@waflo/qr-core";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
-import { walletCommandIdempotencyKey, type WalletProviderCode } from "@waflo/wallet-core";
+import {
+  WALLET_PRESENTATION_SCHEMA_VERSION,
+  walletCommandIdempotencyKey,
+  type WalletProviderCode,
+} from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
@@ -676,7 +684,7 @@ export class PublicEnrollmentService {
           providerState: { mode },
         },
       });
-      const ensureKey = `wallet:${provider.toLocaleLowerCase("en-US")}:ensure-template:${version.id}`;
+      const ensureKey = `wallet:${provider.toLocaleLowerCase("en-US")}:ensure-template:v${WALLET_PRESENTATION_SCHEMA_VERSION}:${version.id}`;
       await transaction.walletCommand.upsert({
         where: { idempotencyKey: ensureKey },
         create: {
@@ -719,6 +727,8 @@ export class PublicEnrollmentService {
       status: string;
       currentPublishedVersion: {
         id: string;
+        baseTemplateCode: string | null;
+        baseTemplateVersion: number | null;
         validationFingerprint: string | null;
         defaultCardLocale: string;
         translations: Array<{
@@ -865,6 +875,10 @@ export class PublicEnrollmentService {
       width: preview.width,
       height: preview.height,
     });
+    const identityArtworkDataUri = await this.publicAssetDataUri(
+      visualTheme.filledStampAsset,
+      "published stamp artwork",
+    );
     const billing = organization.billingProfile
       ? enrollmentBillingDecision(
           effectiveBillingStatus(
@@ -910,6 +924,15 @@ export class PublicEnrollmentService {
       stampPreviews: Object.fromEntries(
         cardLocales.map((item) => [item.locale, safePreview(defaultPreview)]),
       ),
+      template: {
+        code: version.baseTemplateCode,
+        version: version.baseTemplateVersion,
+        presentation: resolveProgramTemplatePresentation(
+          version.baseTemplateCode,
+          version.baseTemplateVersion,
+        ),
+        identityArtworkDataUri,
+      },
       earningDescription: version.stampRule?.earningDescription ?? "",
       rewards: version.rewards.map((reward) => ({
         thresholdStampCount: reward.thresholdStampCount,
@@ -955,13 +978,16 @@ export class PublicEnrollmentService {
     };
   }
 
-  private async publicBrandLogoDataUri(asset: PreviewAsset | null): Promise<string | null> {
+  private async publicAssetDataUri(
+    asset: PreviewAsset | null,
+    label: string,
+  ): Promise<string | null> {
     try {
       const resolved = await resolvePreviewAssetContent(
         this.objectStorage,
         asset,
         "THUMBNAIL_96",
-        "merchant brand logo",
+        label,
       );
       return resolved?.dataUri ?? null;
     } catch {
@@ -969,5 +995,9 @@ export class PublicEnrollmentService {
       // when a historical logo object is no longer readable.
       return null;
     }
+  }
+
+  private publicBrandLogoDataUri(asset: PreviewAsset | null): Promise<string | null> {
+    return this.publicAssetDataUri(asset, "merchant brand logo");
   }
 }

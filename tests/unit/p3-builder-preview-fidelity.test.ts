@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { artworkFor } from "../../apps/api/src/programs/library-artwork.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
-import { findProgramTemplate } from "../../packages/contracts/src/index.js";
+import {
+  findProgramTemplate,
+  latestProgramTemplates,
+  resolveProgramTemplatePresentation,
+} from "../../packages/contracts/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 import { mapAppleStoreCard } from "../../packages/wallet-apple/src/index.js";
 import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
@@ -120,6 +124,60 @@ function providerInput(progress: number): WalletMembershipInput {
 }
 
 describe("P3 Builder preview fidelity", () => {
+  it.each(latestProgramTemplates())(
+    "keeps $code customer rendering on its published composition and color contract",
+    (template) => {
+      const filled = required(artworkFor(template.artwork.filled), `${template.code} filled art`);
+      const empty = required(artworkFor(template.artwork.empty), `${template.code} empty art`);
+      const stamp = renderStampSvg({
+        goal: template.recommendedStampGoal,
+        progress: 0,
+        layout: template.layout.type,
+        layoutConfiguration: template.layout.configuration,
+        outputProfile: "CUSTOMER_WEB",
+        filledColor: template.colors.accent,
+        emptyColor: template.colors.background,
+        accentColor: template.colors.foreground,
+        backgroundColor: template.colors.background,
+        foregroundColor: template.colors.foreground,
+        stampSize: template.layout.stampSize,
+        spacing: template.layout.stampSpacing,
+        filledArtwork: { kind: "svg", content: filled.content, trusted: true },
+        emptyArtwork: { kind: "svg", content: empty.content, trusted: true },
+      });
+      const presentation = resolveProgramTemplatePresentation(template.code, template.version);
+      const composition = composeProgramPreview({
+        profile: "CUSTOMER_WEB",
+        locale: "en",
+        organizationName,
+        programName: template.copy.en.programName,
+        shortDescription: template.copy.en.shortDescription,
+        rewardSummary: template.copy.en.rewardSummary,
+        terms: template.copy.en.termsAndConditions,
+        progress: 0,
+        goal: template.recommendedStampGoal,
+        stampSvg: stamp.svg,
+        stampLayout: template.layout.type,
+        backgroundColor: template.colors.background,
+        foregroundColor: template.colors.foreground,
+        accentColor: template.colors.accent,
+        secondaryColor: template.colors.secondary,
+        identityDataUri: `data:image/svg+xml;base64,${Buffer.from(filled.content).toString("base64")}`,
+        customerWebVariant: template.customerWeb.variant,
+        presentation,
+        apple: template.apple,
+        google: template.google,
+      });
+
+      expect(composition.svg).toContain(`data-composition="${presentation.composition}"`);
+      expect(composition.svg).toContain(`data-density="${presentation.density}"`);
+      expect(composition.svg).toContain(`fill="${template.colors.background}"`);
+      expect(composition.svg).toContain(`fill="${template.colors.foreground}"`);
+      expect(composition.svg).toContain('data-preview-block="stamps"');
+      expect(composition.svg).toContain('data-preview-block="reward"');
+    },
+  );
+
   it.each([
     ["ar", true],
     ["ckb", true],

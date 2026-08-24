@@ -54,23 +54,23 @@ export async function resolveApplePassImagesWithFallback(
     const source = Buffer.from(content.dataUri.split(",")[1] ?? "", "base64");
     if (!source.length) continue;
     try {
-      const [logo, logo2x] = await Promise.all([
+      const appleLogo = (scale: 1 | 2 | 3) =>
         sharp(source)
-          .resize(160, 50, {
+          .resize(144 * scale, 36 * scale, {
             fit: "contain",
             background: { r: 255, g: 255, b: 255, alpha: 0 },
           })
-          .png()
-          .toBuffer(),
-        sharp(source)
-          .resize(320, 100, {
-            fit: "contain",
+          .extend({
+            top: 7 * scale,
+            bottom: 7 * scale,
+            left: 8 * scale,
+            right: 8 * scale,
             background: { r: 255, g: 255, b: 255, alpha: 0 },
           })
           .png()
-          .toBuffer(),
-      ]);
-      return { "logo.png": logo, "logo@2x.png": logo2x };
+          .toBuffer();
+      const [logo, logo2x, logo3x] = await Promise.all([appleLogo(1), appleLogo(2), appleLogo(3)]);
+      return { "logo.png": logo, "logo@2x.png": logo2x, "logo@3x.png": logo3x };
     } catch {
       // Branding is optional. A decoded but non-renderable program asset must not prevent
       // organization/default Apple branding from being used.

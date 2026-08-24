@@ -29,6 +29,16 @@ export interface ProgramTemplatePresentation {
   titleTreatment: "DISPLAY" | "EDITORIAL" | "COMPACT" | "QUIET";
 }
 
+export const defaultProgramTemplatePresentation: ProgramTemplatePresentation = {
+  visualRole: "MINIMAL",
+  composition: "STAMP_STAGE",
+  motifTreatment: "BADGE",
+  rewardTreatment: "FRAMED",
+  density: "BALANCED",
+  cornerTreatment: "SOFT",
+  titleTreatment: "COMPACT",
+};
+
 export interface ProgramTemplateArtworkReference {
   code: string;
   version: number;
@@ -1521,6 +1531,23 @@ export function findProgramTemplate(
   const matches = programTemplateCatalog.filter((template) => template.code === code);
   if (version !== undefined) return matches.find((template) => template.version === version);
   return matches.toSorted((left, right) => right.version - left.version)[0];
+}
+
+/**
+ * Published cards can outlive a catalog revision. Prefer the exact historical
+ * definition, then the latest art direction for the same template code, and
+ * finally a stable neutral composition for custom/legacy programs.
+ */
+export function resolveProgramTemplatePresentation(
+  code: string | null | undefined,
+  version?: number | null,
+): ProgramTemplatePresentation {
+  if (!code) return defaultProgramTemplatePresentation;
+  return (
+    findProgramTemplate(code, version ?? undefined)?.presentation ??
+    findProgramTemplate(code)?.presentation ??
+    defaultProgramTemplatePresentation
+  );
 }
 
 export function latestProgramTemplates(): ProgramTemplateDefinition[] {

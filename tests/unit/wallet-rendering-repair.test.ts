@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 import type { ObjectStorage } from "../../apps/api/src/programs/object-storage.js";
@@ -19,6 +20,7 @@ import {
   prepareGoogleWalletProgramLogo,
   prepareGoogleWalletProgressHero,
 } from "../../apps/wallet-worker/src/google-wallet-assets.js";
+import { WALLET_PRESENTATION_SCHEMA_VERSION } from "../../packages/wallet-core/src/index.js";
 
 const storage = {
   put: vi.fn(),
@@ -47,6 +49,19 @@ function previewAsset(input: {
 }
 
 describe("Wallet rendering repair completion", () => {
+  it("versions cached previews and reconciles existing provider presentation in place", () => {
+    const previewCache = readFileSync("apps/api/src/programs/preview-cache.ts", "utf8");
+    const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
+    const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
+    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(2);
+    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 6");
+    expect(enrollment).toContain("ensure-template:v");
+    expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
+    expect(worker).toContain("enqueuePresentationRepairs");
+    expect(worker).toContain("ensureGoogleTemplateCurrent");
+    expect(worker).toContain("PRESENTATION_SCHEMA_UPGRADE");
+  });
+
   it("adapts underutilized stamp grids into a truthful Google hero composition", () => {
     const renderInput = {
       goal: 6,
@@ -160,12 +175,15 @@ describe("Wallet rendering repair completion", () => {
       unusableProgramLogo,
       organizationLogo,
     ]);
-    expect(Object.keys(result ?? {})).toEqual(["logo.png", "logo@2x.png"]);
+    expect(Object.keys(result ?? {})).toEqual(["logo.png", "logo@2x.png", "logo@3x.png"]);
     await expect(sharp(Buffer.from(result?.["logo.png"] ?? [])).metadata()).resolves.toMatchObject({
       width: 160,
       height: 50,
       format: "png",
     });
+    await expect(
+      sharp(Buffer.from(result?.["logo@3x.png"] ?? [])).metadata(),
+    ).resolves.toMatchObject({ width: 480, height: 150, format: "png" });
     expect(storage.get).not.toHaveBeenCalled();
   });
 });

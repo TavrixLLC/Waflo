@@ -629,4 +629,7 @@ export function walletCommandIdempotencyKey(input: {
   ].join(":");
 }
 
+/** Bump when provider-side class/pass presentation must be reconciled in place. */
+export const WALLET_PRESENTATION_SCHEMA_VERSION = 2;
+
 import type { PublishedMembershipStampRenderInput } from "@waflo/stamp-engine";

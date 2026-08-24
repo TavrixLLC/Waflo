@@ -2,8 +2,10 @@
 
 import {
   cardLocaleMetadata,
+  defaultProgramTemplatePresentation,
   directionForCardLocale,
   fontStackForCardLocale,
+  type ProgramTemplatePresentation,
 } from "@waflo/contracts";
 import { Alert, Badge, Button, Card, SearchableSelect } from "@waflo/ui";
 import { ArrowRightLeft, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
@@ -30,6 +32,12 @@ interface CardView {
     description: string;
     rewardSummary: string;
     pausedMessage: string | null;
+    template?: {
+      code: string | null;
+      version: number | null;
+      presentation: ProgramTemplatePresentation;
+      identityArtworkDataUri: string | null;
+    };
   };
   membership: {
     status: string;
@@ -190,6 +198,8 @@ export function CustomerCard({
 
   const ar = card.customer.preferredLocale === "ar";
   const active = card.membership.state === "ACTIVE";
+  const presentation = card.program.template?.presentation ?? defaultProgramTemplatePresentation;
+  const identityArtworkDataUri = card.program.template?.identityArtworkDataUri ?? null;
   return (
     <main className="customer-page card-page" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
       <header className="customer-header card-header">
@@ -223,15 +233,28 @@ export function CustomerCard({
         className={`digital-card ${active ? "" : "digital-card--inactive"}`}
         lang={card.program.contentLocale}
         dir={directionForCardLocale(card.program.contentLocale)}
+        data-composition={presentation.composition}
+        data-corner-treatment={presentation.cornerTreatment}
+        data-density={presentation.density}
+        data-motif-treatment={presentation.motifTreatment}
+        data-reward-treatment={presentation.rewardTreatment}
+        data-title-treatment={presentation.titleTreatment}
+        data-visual-role={presentation.visualRole}
         style={
           {
             "--card-bg": card.theme.backgroundColor,
             "--card-ink": card.theme.foregroundColor,
             "--card-accent": card.theme.accentColor,
+            "--card-secondary": card.theme.secondaryColor,
             fontFamily: fontStackForCardLocale(card.program.contentLocale),
           } as React.CSSProperties
         }
       >
+        {identityArtworkDataUri ? (
+          <span className="digital-card__motif" aria-hidden="true">
+            <Image src={identityArtworkDataUri} alt="" width={96} height={96} unoptimized />
+          </span>
+        ) : null}
         <div className="digital-card__brand">
           <div className="digital-card__issuer">
             <CustomerMerchantIdentity

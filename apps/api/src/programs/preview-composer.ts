@@ -483,7 +483,7 @@ function composeApple(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 690;
+  const height = 530;
   const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
   const rtl = directionForCardLocale(canonicalLocale) === "rtl";
   const copy = walletPreviewCopy(canonicalLocale);
@@ -537,7 +537,7 @@ function composeApple(
     `<g data-apple-progress-strip="true"><rect data-apple-strip-safe-area="true" x="40" y="104" width="380" height="170" rx="12" fill="${input.backgroundColor}"/>${stampImage(input.stampSvg, 46, 112, 368, 154)}</g>`,
     `<g data-apple-loyalty-row="true"><text data-apple-field-role="secondary" x="${contentX}" y="304" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text data-apple-field-role="auxiliary" x="${oppositeX}" y="282" text-anchor="end" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${oppositeX}" y="304" text-anchor="end" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text></g>`,
     `<g data-apple-barcode-region="provider-managed"><rect x="62" y="326" width="336" height="158" rx="18" fill="#FFFFFF" opacity=".94"/>${barcode(112, 352, 236, 52)}<text x="230" y="460" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="9.5" fill="#374151">${barcodeLabel}</text></g>`,
-    `<g data-apple-back-fields="true"><rect x="24" y="538" width="412" height="136" rx="24" fill="#FFFFFF" stroke="#D8DDE5"/><text x="${contentX}" y="568" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="${contentX}" y="594" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 42))}</text><text x="${contentX}" y="642" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#6B7280">${memberLabel}: ${memberValue}</text></g>`,
+    `<metadata data-apple-back-fields="true" data-reward-label="${escapeXml(backRewardLabel)}" data-reward-value="${escapeXml(input.rewardSummary)}" data-member-label="${escapeXml(memberLabel)}" data-member-value="${escapeXml(memberValue)}">Apple Wallet presents these values on the pass back, not on the front surface.</metadata>`,
     "</svg>",
   ].join("");
   return { svg, width, height, warnings };

@@ -45,6 +45,7 @@ import {
   APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   normalizeWalletProviderError,
   resolveWalletNearbyText,
+  WALLET_PRESENTATION_SCHEMA_VERSION,
   type WalletMembershipInput,
   type WalletProgramInput,
   type WalletProvider,
@@ -74,6 +75,17 @@ const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
 const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
 const SIGNAL_TTL_SECONDS = 180;
 const LEASE_SECONDS = 90;
+
+function walletPresentationIsCurrent(state: unknown, configurationFingerprint: string): boolean {
+  return Boolean(
+    state &&
+      typeof state === "object" &&
+      "presentationSchemaVersion" in state &&
+      state.presentationSchemaVersion === WALLET_PRESENTATION_SCHEMA_VERSION &&
+      "configurationFingerprint" in state &&
+      state.configurationFingerprint === configurationFingerprint,
+  );
+}
 
 function workerLog(event: string, metadata: Record<string, unknown> = {}) {
   process.stdout.write(
@@ -608,6 +620,19 @@ export class WalletWorker {
         status: provider.status,
       })),
     });
+    try {
+      const queuedPresentationRepairs = await this.enqueuePresentationRepairs();
+      if (queuedPresentationRepairs > 0) {
+        workerLog("wallet_presentation_repairs_queued", {
+          count: queuedPresentationRepairs,
+          schemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+        });
+      }
+    } catch {
+      workerLog("wallet_presentation_repair_scan_failed", {
+        safeFailureCode: "PRESENTATION_REPAIR_SCAN_FAILED",
+      });
+    }
     const consumers = Array.from(
       { length: this.environment.WALLET_WORKER_CONCURRENCY },
       (_, index) => this.consume(index),
@@ -676,6 +701,60 @@ export class WalletWorker {
         oldestBacklogAt: oldest?.createdAt ?? null,
       },
     });
+  }
+
+  private async enqueuePresentationRepairs(): Promise<number> {
+    let cursor: string | undefined;
+    let queued = 0;
+    do {
+      const passes = await this.prisma.walletPassInstance.findMany({
+        where: {
+          status: { in: ["ISSUED", "ACTIVE"] },
+          walletProgramBindingId: { not: null },
+          membershipCredential: { status: "ACTIVE" },
+          membership: { status: "ACTIVE" },
+          walletCommands: {
+            none: {
+              safePayload: {
+                path: ["presentationSchemaVersion"],
+                equals: WALLET_PRESENTATION_SCHEMA_VERSION,
+              },
+            },
+          },
+        },
+        select: { id: true, organizationId: true, membershipId: true, provider: true },
+        orderBy: { id: "asc" },
+        take: 250,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      for (const pass of passes) {
+        const provider = this.providerMap.get(pass.provider);
+        if (!provider || provider.mode === "DISABLED") continue;
+        const idempotencyKey = `wallet:${pass.provider.toLocaleLowerCase("en-US")}:presentation-v${WALLET_PRESENTATION_SCHEMA_VERSION}:${pass.id}`;
+        await this.prisma.walletCommand.upsert({
+          where: { idempotencyKey },
+          create: {
+            organizationId: pass.organizationId,
+            membershipId: pass.membershipId,
+            walletPassInstanceId: pass.id,
+            provider: pass.provider,
+            commandType: "UPDATE",
+            idempotencyKey,
+            payloadFingerprint: createHash("sha256").update(idempotencyKey).digest("hex"),
+            safePayload: {
+              reason: "RECONCILIATION",
+              trigger: "PRESENTATION_SCHEMA_UPGRADE",
+              presentationSchemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+            },
+          },
+          update: {},
+        });
+        queued += 1;
+      }
+      cursor = passes.at(-1)?.id;
+      if (passes.length < 250) break;
+    } while (cursor);
+    return queued;
   }
 
   async processOneProgramSyncJob(jobId?: string): Promise<Record<string, unknown> | null> {
@@ -1210,7 +1289,12 @@ export class WalletWorker {
           data: {
             providerTemplateId: result.providerTemplateId,
             status: "READY",
-            providerState: { state: result.state, mode: provider.mode },
+            providerState: {
+              state: result.state,
+              mode: provider.mode,
+              presentationSchemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+              configurationFingerprint: binding.configurationFingerprint,
+            },
             lastSyncedAt: new Date(),
           },
         });
@@ -1226,6 +1310,19 @@ export class WalletWorker {
           include: passInclude,
         });
         if (!pass) throw new Error("Wallet pass instance is unavailable.");
+        if (pass.provider === "GOOGLE" && !pass.walletProgramBinding) {
+          throw new Error("Google Wallet pass has no program binding.");
+        }
+        if (
+          pass.provider === "GOOGLE" &&
+          pass.walletProgramBinding &&
+          !walletPresentationIsCurrent(
+            pass.walletProgramBinding.providerState,
+            pass.walletProgramBinding.configurationFingerprint,
+          )
+        ) {
+          await this.ensureGoogleTemplateCurrent(pass.walletProgramBinding.id, provider);
+        }
         const stampRenderInput = await this.stampRenderInput(
           pass,
           pass.provider === "GOOGLE" ? "GOOGLE_WALLET" : "APPLE_WALLET",
@@ -1981,6 +2078,66 @@ export class WalletWorker {
     return `${base.replace(/\/+$/, "")}/${asset.publicToken}`;
   }
 
+  private async ensureGoogleTemplateCurrent(
+    bindingId: string,
+    provider: WalletProvider,
+  ): Promise<void> {
+    const binding = await this.prisma.walletProgramBinding.findUnique({
+      where: { id: bindingId },
+      include: {
+        organization: {
+          include: {
+            brandLogoAsset: { include: { variants: true } },
+            walletNearbyConfiguration: {
+              include: {
+                locations: {
+                  include: { location: true },
+                  orderBy: { sortOrder: "asc" },
+                },
+              },
+            },
+          },
+        },
+        program: { include: { walletNearbyProgramCopy: true } },
+        programVersion: {
+          include: {
+            translations: true,
+            cardLocales: true,
+            visualTheme: {
+              include: { logoAsset: { include: { variants: true } } },
+            },
+            locations: { select: { locationId: true } },
+          },
+        },
+      },
+    });
+    if (binding?.provider !== "GOOGLE") {
+      throw new Error("Google Wallet program binding is unavailable.");
+    }
+    if (
+      walletPresentationIsCurrent(binding.providerState, binding.configurationFingerprint) &&
+      binding.status === "READY"
+    ) {
+      return;
+    }
+    const programLogoUrl = await this.ensureGoogleProgramLogo(binding);
+    const result = await provider.ensureProgramTemplate(mapProgram(binding, programLogoUrl));
+    await this.prisma.walletProgramBinding.update({
+      where: { id: binding.id },
+      data: {
+        providerTemplateId: result.providerTemplateId,
+        status: "READY",
+        providerState: {
+          state: result.state,
+          mode: provider.mode,
+          presentationSchemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+          configurationFingerprint: binding.configurationFingerprint,
+        },
+        lastSyncedAt: new Date(),
+      },
+    });
+  }
+
   private async defaultGoogleProgramLogo(accent?: string | null, background?: string | null) {
     const color = accent ?? "#E4572E";
     const foreground = background ?? "#F7F4EE";
@@ -1996,25 +2153,24 @@ export class WalletWorker {
         pass.membership.enrollmentProgramVersion.visualTheme?.logoAsset,
       )) ?? (await this.readBrandLogoBytes(pass.membership.organization.brandLogoAsset));
     if (!bytes) return undefined;
-    const [logo, logo2x] = await Promise.all([
+    const appleLogo = (scale: 1 | 2 | 3) =>
       sharp(bytes)
-        .resize(160, 50, {
+        .resize(144 * scale, 36 * scale, {
           fit: "contain",
           background: { r: 255, g: 255, b: 255, alpha: 0 },
           withoutEnlargement: false,
         })
-        .png()
-        .toBuffer(),
-      sharp(bytes)
-        .resize(320, 100, {
-          fit: "contain",
+        .extend({
+          top: 7 * scale,
+          bottom: 7 * scale,
+          left: 8 * scale,
+          right: 8 * scale,
           background: { r: 255, g: 255, b: 255, alpha: 0 },
-          withoutEnlargement: false,
         })
         .png()
-        .toBuffer(),
-    ]);
-    return { "logo.png": logo, "logo@2x.png": logo2x };
+        .toBuffer();
+    const [logo, logo2x, logo3x] = await Promise.all([appleLogo(1), appleLogo(2), appleLogo(3)]);
+    return { "logo.png": logo, "logo@2x.png": logo2x, "logo@3x.png": logo3x };
   }
 
   private async readBrandLogoBytes(

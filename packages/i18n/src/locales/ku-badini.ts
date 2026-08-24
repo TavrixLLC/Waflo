@@ -106,7 +106,7 @@ export const kuBadini: InterfaceMessages = {
         previewOnly: "تنێ بۆ پێشبینیێ",
         previewPending: "گۆهڕینێن خو پاشەکەفت بکە بۆ ئامادەکرنا ڤێ پێشبینیێ.",
         previewPreparing: "پێشبینی ئامادە دبیت…",
-        previewLoading: "پێشبینیا کارتا ڕاستەقینە نوو دبیتەوە…",
+        previewLoading: "پێشبینیا کارتا بەلاڤکری نوو دبیتەوە…",
         previewError: "پێشبینی نەشیا نوو بیتەوە.",
         walletPreviewNote:
           "تنێ پێشبینیا دیاری. بەردەستبوونا Wallet و ئامادەییا بەرهەم ل ستودیۆ ب جیاوازی دیار دبن.",

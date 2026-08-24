@@ -107,7 +107,7 @@ export const kuSorani: InterfaceMessages = {
         previewOnly: "تەنها پێشبینین",
         previewPending: "گۆڕانکارییەکانت پاشەکەوت بکە بۆ ئامادەکردنی ئەم پێشبینینە.",
         previewPreparing: "پێشبینین ئامادە دەکرێت…",
-        previewLoading: "پێشبینینی کارتی ڕاستەقینە نوێ دەکرێتەوە…",
+        previewLoading: "پێشبینینی کارتی بڵاوکراوە نوێ دەکرێتەوە…",
         previewError: "نەتوانرا پێشبینین نوێ بکرێتەوە.",
         walletPreviewNote:
           "تەنها پێشبینینی بینراوە. بەردەستبوونی Wallet و ئامادەیی بەرهەم بە جیاوازی لە ستودیۆ پیشان دەدرێن.",

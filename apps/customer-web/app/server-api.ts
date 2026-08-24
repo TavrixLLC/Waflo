@@ -1,4 +1,4 @@
-import { resolveCardLocale } from "@waflo/contracts";
+import { resolveCardLocale, type ProgramTemplatePresentation } from "@waflo/contracts";
 
 export interface PublicProgram {
   slug: string;
@@ -29,6 +29,12 @@ export interface PublicProgram {
     height: number;
   };
   stampPreviews: Record<string, PublicProgram["stampPreview"]>;
+  template?: {
+    code: string | null;
+    version: number | null;
+    presentation: ProgramTemplatePresentation;
+    identityArtworkDataUri: string | null;
+  };
   earningDescription: string;
   rewards: Array<{
     thresholdStampCount: number;

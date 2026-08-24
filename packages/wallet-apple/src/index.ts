@@ -322,12 +322,13 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${markSize}" height="${height}" rx="${Math.max(4, height * 0.18)}" fill="#E4572E"/><path d="M${markSize * 0.2} ${height * 0.28}l${markSize * 0.16} ${height * 0.46} ${markSize * 0.14}-${height * 0.27} ${markSize * 0.14} ${height * 0.27} ${markSize * 0.16}-${height * 0.46}" fill="none" stroke="#fff" stroke-width="${Math.max(2, markSize * 0.09)}" stroke-linecap="round" stroke-linejoin="round"/>${text}</svg>`;
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   };
-  const [icon, icon2x, icon3x, logo, logo2x] = await Promise.all([
+  const [icon, icon2x, icon3x, logo, logo2x, logo3x] = await Promise.all([
     image(29, 29),
     image(58, 58),
     image(87, 87),
     image(160, 50, true),
     image(320, 100, true),
+    image(480, 150, true),
   ]);
   return {
     "icon.png": icon,
@@ -335,17 +336,18 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
     "icon@3x.png": icon3x,
     "logo.png": logo,
     "logo@2x.png": logo2x,
+    "logo@3x.png": logo3x,
   };
 }
 
-async function progressStrip(input: WalletMembershipInput): Promise<Buffer> {
+async function progressStrip(input: WalletMembershipInput, scale: 1 | 2 | 3): Promise<Buffer> {
   const rendered = renderPublishedMembershipStampSvg({
     ...input.stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
   const background = input.stampRenderInput.visualTheme.backgroundColor ?? input.backgroundColor;
   const inset = await sharp(Buffer.from(rendered.svg, "utf8"))
-    .resize(690, 206, {
+    .resize(345 * scale, 103 * scale, {
       fit: "contain",
       background,
     })
@@ -353,13 +355,13 @@ async function progressStrip(input: WalletMembershipInput): Promise<Buffer> {
     .toBuffer();
   return sharp({
     create: {
-      width: 750,
-      height: 246,
+      width: 375 * scale,
+      height: 123 * scale,
       channels: 4,
       background,
     },
   })
-    .composite([{ input: inset, left: 30, top: 20 }])
+    .composite([{ input: inset, left: 15 * scale, top: 10 * scale }])
     .png()
     .toBuffer();
 }
@@ -647,13 +649,20 @@ export class AppleWalletProvider implements WalletProvider {
       configuration,
       this.options.authenticationToken(input),
     );
+    const [strip, strip2x, strip3x] = await Promise.all([
+      progressStrip(input, 1),
+      progressStrip(input, 2),
+      progressStrip(input, 3),
+    ]);
     const artifact = await buildApplePassPackage({
       pass,
       signer: this.options.signer as ApplePassSigner,
       defaultLocale,
       ...(input.localizedContent ? { localizations: input.localizedContent } : {}),
       images: {
-        "strip.png": await progressStrip(input),
+        "strip.png": strip,
+        "strip@2x.png": strip2x,
+        "strip@3x.png": strip3x,
         ...(input.applePassImages ?? {}),
       },
     });

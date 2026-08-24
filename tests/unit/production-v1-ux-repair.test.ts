@@ -27,6 +27,53 @@ import { composeProgramPreview } from "../../apps/api/src/programs/preview-compo
 import { walletPlatform } from "../../apps/customer-web/app/wallet-platform.js";
 
 describe("production-v1 UX and billing repair", () => {
+  it("projects every published template decision into the customer card renderer", () => {
+    const enrollment = readFileSync(
+      "apps/customer-web/app/join/[programSlug]/enrollment-form.tsx",
+      "utf8",
+    );
+    const customerCard = readFileSync(
+      "apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx",
+      "utf8",
+    );
+    const styles = readFileSync("apps/customer-web/app/globals.css", "utf8");
+    const publicEnrollment = readFileSync(
+      "apps/api/src/enrollment/public-enrollment.service.ts",
+      "utf8",
+    );
+    const publicCard = readFileSync("apps/api/src/customer/customer-card.service.ts", "utf8");
+    for (const attribute of [
+      "composition",
+      "corner-treatment",
+      "density",
+      "motif-treatment",
+      "reward-treatment",
+      "title-treatment",
+      "visual-role",
+    ]) {
+      expect(enrollment).toContain(`data-${attribute}`);
+      expect(customerCard).toContain(`data-${attribute}`);
+    }
+    for (const composition of [
+      "SPLIT_HERO",
+      "POSTER",
+      "STAMP_STAGE",
+      "EDITORIAL",
+      "LABEL_FRAME",
+      "SIDE_TOTEM",
+      "HEADER_BAND",
+      "DIAGONAL_FIELD",
+    ]) {
+      expect(styles).toContain(`[data-composition="${composition}"]`);
+    }
+    expect(styles).toContain("var(--program-bg)");
+    expect(styles).toContain("var(--program-ink)");
+    expect(publicEnrollment).toContain("resolveProgramTemplatePresentation");
+    expect(publicEnrollment).toContain("identityArtworkDataUri");
+    expect(publicCard).toContain("resolveProgramTemplatePresentation");
+    expect(publicCard).toContain("identityArtworkDataUri");
+  });
+
   it("keeps merchant branding additive, tenant-scoped, and asynchronously refreshed for Wallet", () => {
     const schema = readFileSync("packages/database/prisma/schema.prisma", "utf8");
     const migration = readFileSync(
@@ -74,6 +121,7 @@ describe("production-v1 UX and billing repair", () => {
     expect(worker).toContain("ensureGoogleProgramLogo");
     expect(worker).toContain("merchantApplePassImages");
     expect(worker).toContain('"logo@2x.png"');
+    expect(worker).toContain('"logo@3x.png"');
     expect(previews).toContain("merchantBrandLogoDataUri");
     expect(previews).toContain('data-issuer-brand="organization"');
     expect(publicEnrollment).toContain("brandLogoDataUri");

@@ -18,7 +18,7 @@ import { resolvePreviewAssetContent, type PreviewAsset } from "../programs/previ
 import { CustomerSecurityService } from "./customer-security.service.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import { WalletProviderRegistry } from "../wallet/wallet-provider.registry.js";
-import { resolveCardLocale } from "@waflo/contracts";
+import { resolveCardLocale, resolveProgramTemplatePresentation } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 
 const customerCardMembershipInclude = {
@@ -174,7 +174,13 @@ export class CustomerCardService {
       theme: membership.enrollmentProgramVersion.visualTheme,
       outputProfile: "CUSTOMER_WEB",
     });
-    const brandLogoDataUri = await this.brandLogoDataUri(membership.organization.brandLogoAsset);
+    const [brandLogoDataUri, identityArtworkDataUri] = await Promise.all([
+      this.publicAssetDataUri(membership.organization.brandLogoAsset, "merchant brand logo"),
+      this.publicAssetDataUri(
+        membership.enrollmentProgramVersion.visualTheme.filledStampAsset,
+        "published stamp artwork",
+      ),
+    ]);
     await this.touch(context.session.id, context.session.lastActiveAt);
     return {
       publicMembershipId: membership.publicMembershipId,
@@ -201,6 +207,15 @@ export class CustomerCardService {
         termsAndConditions: selected?.termsAndConditions ?? "",
         pausedMessage: selected?.pausedMessage ?? null,
         enrollmentVersionNumber: membership.enrollmentProgramVersion.versionNumber,
+        template: {
+          code: membership.enrollmentProgramVersion.baseTemplateCode,
+          version: membership.enrollmentProgramVersion.baseTemplateVersion,
+          presentation: resolveProgramTemplatePresentation(
+            membership.enrollmentProgramVersion.baseTemplateCode,
+            membership.enrollmentProgramVersion.baseTemplateVersion,
+          ),
+          identityArtworkDataUri,
+        },
       },
       membership: {
         status: membership.status,
@@ -286,13 +301,16 @@ export class CustomerCardService {
     return { wallet: card.wallet, credentialStatus: card.membership.credentialStatus };
   }
 
-  private async brandLogoDataUri(asset: PreviewAsset | null): Promise<string | null> {
+  private async publicAssetDataUri(
+    asset: PreviewAsset | null,
+    label: string,
+  ): Promise<string | null> {
     try {
       const resolved = await resolvePreviewAssetContent(
         this.objectStorage,
         asset,
         "THUMBNAIL_96",
-        "merchant brand logo",
+        label,
       );
       return resolved?.dataUri ?? null;
     } catch {

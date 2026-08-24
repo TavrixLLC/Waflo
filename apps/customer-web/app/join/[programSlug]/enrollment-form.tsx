@@ -13,6 +13,7 @@ import {
 } from "@waflo/ui";
 import {
   cardLocaleMetadata,
+  defaultProgramTemplatePresentation,
   directionForCardLocale,
   fontStackForCardLocale,
 } from "@waflo/contracts";
@@ -70,6 +71,8 @@ export function EnrollmentForm({
   const copy = program.translations[cardLocale] ?? program.translations[program.defaultLocale];
   const reward = program.rewards[program.rewards.length - 1]?.translations[cardLocale];
   const stampPreview = program.stampPreviews[cardLocale] ?? program.stampPreview;
+  const presentation = program.template?.presentation ?? defaultProgramTemplatePresentation;
+  const identityArtworkDataUri = program.template?.identityArtworkDataUri ?? null;
   const emailRequired = program.policy.emailCollectionMode === "REQUIRED";
   const enrollable = program.enrollmentStatus === "OPEN";
   const unavailableTitle =
@@ -243,31 +246,54 @@ export function EnrollmentForm({
         className="program-story"
         lang={cardLocale}
         dir={directionForCardLocale(cardLocale)}
+        data-composition={presentation.composition}
+        data-corner-treatment={presentation.cornerTreatment}
+        data-density={presentation.density}
+        data-motif-treatment={presentation.motifTreatment}
+        data-reward-treatment={presentation.rewardTreatment}
+        data-title-treatment={presentation.titleTreatment}
+        data-visual-role={presentation.visualRole}
         style={{ fontFamily: fontStackForCardLocale(cardLocale) }}
       >
-        <CustomerMerchantIdentity
-          className="program-story__merchant"
-          locale={interfaceLocale}
-          logoDataUri={merchant.brandLogoDataUri}
-          name={merchant.name}
-        />
-        <h1>{copy?.programName}</h1>
-        <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>
-        <Image
-          className="published-stamp-artwork published-stamp-artwork--preview"
-          src={stampPreview.dataUri}
-          alt={ar ? `0 من ${program.goal} أختام` : `0 of ${program.goal} stamps`}
-          width={stampPreview.width}
-          height={stampPreview.height}
-          unoptimized
-          priority
-        />
-        <p className="stamp-preview-count">
-          <bdi dir="ltr" className="numeric-fraction">
-            0 / {program.goal}
-          </bdi>{" "}
-          {ar ? "أختام عند الانضمام" : "stamps when you join"}
-        </p>
+        {identityArtworkDataUri ? (
+          <span className="program-story__motif" aria-hidden="true">
+            <Image
+              className="program-story__motif-art"
+              src={identityArtworkDataUri}
+              alt=""
+              width={96}
+              height={96}
+              unoptimized
+            />
+          </span>
+        ) : null}
+        <div className="program-story__header">
+          <CustomerMerchantIdentity
+            className="program-story__merchant"
+            locale={interfaceLocale}
+            logoDataUri={merchant.brandLogoDataUri}
+            name={merchant.name}
+          />
+          <h1>{copy?.programName}</h1>
+          <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>
+        </div>
+        <div className="program-story__progress">
+          <Image
+            className="published-stamp-artwork published-stamp-artwork--preview"
+            src={stampPreview.dataUri}
+            alt={ar ? `0 من ${program.goal} أختام` : `0 of ${program.goal} stamps`}
+            width={stampPreview.width}
+            height={stampPreview.height}
+            unoptimized
+            priority
+          />
+          <p className="stamp-preview-count">
+            <bdi dir="ltr" className="numeric-fraction">
+              0 / {program.goal}
+            </bdi>{" "}
+            {ar ? "أختام عند الانضمام" : "stamps when you join"}
+          </p>
+        </div>
         <Card className="reward-card">
           <span>{program.goal}</span>
           <div>

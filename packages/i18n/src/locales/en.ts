@@ -106,10 +106,10 @@ export const en = {
         previewOnly: "Preview only",
         previewPending: "Save your changes to prepare this preview.",
         previewPreparing: "Preparing your preview…",
-        previewLoading: "Updating the real card preview…",
+        previewLoading: "Updating the published card preview…",
         previewError: "The preview could not be refreshed.",
         walletPreviewNote:
-          "Visual preview only. Wallet availability and production readiness are shown separately in Studio.",
+          "Customer Web uses the published card renderer. Apple and Google are provider-faithful simulations; Wallet controls final spacing and type.",
         retry: "Retry",
         customer: "Customer",
         previewProgress: "Preview stamp progress",

@@ -143,6 +143,7 @@ export default async function JoinProgramPage({
           "--program-bg": result.program.theme.backgroundColor,
           "--program-ink": result.program.theme.foregroundColor,
           "--program-accent": result.program.theme.accentColor,
+          "--program-secondary": result.program.theme.secondaryColor,
         } as React.CSSProperties
       }
     >

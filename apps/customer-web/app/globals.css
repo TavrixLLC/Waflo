@@ -1147,26 +1147,157 @@ body {
 }
 
 .program-story {
+  --story-radius: 26px;
   position: relative;
-  padding: 1.25rem;
+  isolation: isolate;
+  display: grid;
+  grid-template-areas:
+    "header"
+    "progress"
+    "reward"
+    "details";
+  gap: 1rem;
+  padding: 1.35rem;
   overflow: hidden;
-  color: white;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 26px;
+  color: var(--program-ink);
+  border: 1px solid color-mix(in srgb, var(--program-ink) 14%, transparent);
+  border-radius: var(--story-radius);
   background:
     radial-gradient(
       65% 65% at 88% 4%,
-      color-mix(in srgb, var(--program-accent) 30%, transparent),
+      color-mix(in srgb, var(--program-accent) 24%, transparent),
       transparent 72%
     ),
-    var(--waflo-ink);
+    var(--program-bg);
   box-shadow: var(--waflo-shadow-pass);
+}
+
+.program-story::before,
+.digital-card::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.program-story[data-corner-treatment="ROUND"],
+.digital-card[data-corner-treatment="ROUND"] {
+  --story-radius: 34px;
+  border-radius: 34px;
+}
+
+.program-story[data-corner-treatment="CRISP"],
+.digital-card[data-corner-treatment="CRISP"] {
+  --story-radius: 16px;
+  border-radius: 16px;
+}
+
+.program-story[data-density="COMPACT"] {
+  gap: 0.72rem;
+  padding: 1.1rem;
+}
+
+.program-story[data-density="AIRY"] {
+  gap: 1.35rem;
+  padding: 1.65rem;
+}
+
+.program-story[data-density="EXPRESSIVE"] {
+  gap: 1.15rem;
+}
+
+.program-story__header {
+  position: relative;
+  z-index: 2;
+  grid-area: header;
+}
+
+.program-story__progress {
+  position: relative;
+  z-index: 2;
+  grid-area: progress;
+  min-width: 0;
+}
+
+.program-story > .reward-card {
+  position: relative;
+  z-index: 2;
+  grid-area: reward;
+}
+
+.program-story > .program-details {
+  position: relative;
+  z-index: 2;
+  grid-area: details;
+}
+
+.program-story__motif,
+.digital-card__motif {
+  position: absolute;
+  z-index: 0;
+  display: grid;
+  width: 7.5rem;
+  height: 7.5rem;
+  place-items: center;
+  opacity: 0.2;
+  pointer-events: none;
+  inset-block-start: 1rem;
+  inset-inline-end: 0.75rem;
+}
+
+.program-story__motif-art,
+.digital-card__motif img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.program-story[data-motif-treatment="WATERMARK"] .program-story__motif,
+.digital-card[data-motif-treatment="WATERMARK"] .digital-card__motif {
+  width: 12rem;
+  height: 12rem;
+  opacity: 0.09;
+}
+
+.program-story[data-motif-treatment="EDGE_CROP"] .program-story__motif,
+.digital-card[data-motif-treatment="EDGE_CROP"] .digital-card__motif {
+  width: 11rem;
+  height: 11rem;
+  opacity: 0.3;
+  transform: translate(32%, -24%);
+}
+
+[dir="rtl"].program-story[data-motif-treatment="EDGE_CROP"] .program-story__motif,
+[dir="rtl"].digital-card[data-motif-treatment="EDGE_CROP"] .digital-card__motif {
+  transform: translate(-32%, -24%);
+}
+
+.program-story[data-motif-treatment="HEADER_MARK"] .program-story__motif,
+.program-story[data-motif-treatment="CORNER_MARK"] .program-story__motif,
+.program-story[data-motif-treatment="BADGE"] .program-story__motif,
+.digital-card[data-motif-treatment="HEADER_MARK"] .digital-card__motif,
+.digital-card[data-motif-treatment="CORNER_MARK"] .digital-card__motif,
+.digital-card[data-motif-treatment="BADGE"] .digital-card__motif {
+  padding: 0.8rem;
+  border-radius: 1.5rem;
+  background: color-mix(in srgb, var(--program-secondary, var(--card-secondary)) 22%, transparent);
+  opacity: 0.72;
+}
+
+.program-story[data-motif-treatment="SIDE_MARK"] .program-story__motif,
+.digital-card[data-motif-treatment="SIDE_MARK"] .digital-card__motif {
+  inset-block-start: 9rem;
+  inset-inline-start: 0.75rem;
+  inset-inline-end: auto;
+  opacity: 0.3;
 }
 
 .program-story h1 {
   max-width: 30rem;
   margin: 0.45rem 0 0;
-  color: white;
+  color: var(--program-ink);
   font-size: clamp(1.8rem, 8vw, 2.4rem);
   font-weight: 800;
   line-height: 1.08;
@@ -1174,34 +1305,56 @@ body {
   text-wrap: balance;
 }
 
+.program-story[data-title-treatment="DISPLAY"] h1 {
+  font-size: clamp(2.2rem, 9vw, 3rem);
+  line-height: 0.98;
+}
+
+.program-story[data-title-treatment="EDITORIAL"] h1 {
+  max-width: 24rem;
+  font-size: clamp(2rem, 8vw, 2.7rem);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+}
+
+.program-story[data-title-treatment="COMPACT"] h1 {
+  font-size: clamp(1.55rem, 7vw, 2rem);
+}
+
+.program-story[data-title-treatment="QUIET"] h1 {
+  font-size: clamp(1.65rem, 7vw, 2.1rem);
+  font-weight: 700;
+}
+
 [dir="rtl"] .program-story h1 {
   letter-spacing: 0;
 }
 
 .program-story .customer-lead {
-  color: rgb(255 255 255 / 70%);
+  max-width: 34rem;
+  color: color-mix(in srgb, var(--program-ink) 70%, transparent);
 }
 
 .published-stamp-artwork--preview {
   max-width: 100%;
   max-height: 14rem;
-  margin: 1.25rem auto 0.5rem;
+  margin: 0 auto 0.5rem;
 }
 
 .stamp-preview-count {
   margin: 0 0 1rem;
-  color: rgb(255 255 255 / 72%);
+  color: color-mix(in srgb, var(--program-ink) 72%, transparent);
   font-size: 0.8rem;
   font-weight: 700;
 }
 
 .reward-card {
   align-items: center;
-  margin-top: 1rem;
+  margin-top: 0;
   padding: 0.85rem;
-  color: white;
-  border-color: rgb(255 255 255 / 12%);
-  background: rgb(255 255 255 / 7%);
+  color: var(--program-ink);
+  border-color: color-mix(in srgb, var(--program-ink) 14%, transparent);
+  background: color-mix(in srgb, var(--program-ink) 7%, transparent);
   box-shadow: none;
 }
 
@@ -1224,13 +1377,112 @@ body {
 
 .reward-card p,
 .program-details li {
-  color: rgb(255 255 255 / 68%);
+  color: color-mix(in srgb, var(--program-ink) 68%, transparent);
 }
 
 .program-details {
   gap: 0.75rem;
-  margin-top: 1.25rem;
+  margin-top: 0;
   font-size: 0.8rem;
+}
+
+.program-story[data-reward-treatment="FRAMED"] > .reward-card,
+.program-story[data-reward-treatment="SIDE_PANEL"] > .reward-card {
+  border: 2px solid color-mix(in srgb, var(--program-accent) 42%, transparent);
+  background: transparent;
+}
+
+.program-story[data-reward-treatment="FOOTER_BAND"] > .reward-card {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--program-secondary) 20%, transparent);
+}
+
+.program-story[data-reward-treatment="RULE"] > .reward-card {
+  border: 0;
+  border-block-start: 3px solid var(--program-accent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.program-story[data-reward-treatment="BADGE"] > .reward-card {
+  border-color: transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--program-accent) 14%, transparent);
+}
+
+.program-story[data-composition="STAMP_STAGE"] .program-story__progress {
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--program-ink) 10%, transparent);
+  border-radius: calc(var(--story-radius) - 8px);
+  background: color-mix(in srgb, var(--program-secondary) 11%, transparent);
+}
+
+.program-story[data-composition="LABEL_FRAME"]::before {
+  inset: 1rem;
+  border: 2px solid color-mix(in srgb, var(--program-ink) 15%, transparent);
+  border-radius: calc(var(--story-radius) - 7px);
+}
+
+.program-story[data-composition="LABEL_FRAME"] {
+  padding: 2rem;
+}
+
+.program-story[data-composition="HEADER_BAND"]::before {
+  height: 8.75rem;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--program-accent) 16%, transparent);
+}
+
+.program-story[data-composition="SIDE_TOTEM"]::before,
+.program-story[data-composition="SPLIT_HERO"]::before {
+  width: 29%;
+  inset-inline: auto 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--program-accent) 15%, transparent);
+}
+
+.program-story[data-composition="DIAGONAL_FIELD"]::before {
+  inset-inline-start: 48%;
+  background: linear-gradient(
+    152deg,
+    color-mix(in srgb, var(--program-accent) 20%, transparent) 0 46%,
+    color-mix(in srgb, var(--program-secondary) 16%, transparent) 46% 68%,
+    transparent 68%
+  );
+}
+
+.program-story[data-composition="POSTER"] .program-story__header,
+.program-story[data-composition="POSTER"] .stamp-preview-count {
+  text-align: center;
+}
+
+.program-story[data-composition="POSTER"] .program-story__merchant {
+  justify-content: center;
+}
+
+@media (min-width: 500px) {
+  .program-story[data-composition="EDITORIAL"],
+  .program-story[data-composition="LABEL_FRAME"] {
+    grid-template-areas:
+      "header header"
+      "progress reward"
+      "details details";
+    grid-template-columns: minmax(0, 1fr) minmax(9.5rem, 0.42fr);
+  }
+
+  .program-story[data-composition="SIDE_TOTEM"] {
+    grid-template-areas:
+      ". header"
+      ". progress"
+      "reward progress"
+      ". details";
+    grid-template-columns: minmax(8rem, 0.34fr) minmax(0, 1fr);
+  }
+
+  .program-story[data-composition="SPLIT_HERO"] > :not(.program-story__motif) {
+    width: 69%;
+    margin-inline-end: auto;
+  }
 }
 
 .enrollment-card {
@@ -1269,20 +1521,83 @@ body {
 .digital-card {
   margin-top: 1.5rem;
   padding: 1.25rem;
+  isolation: isolate;
   border-radius: 26px;
   box-shadow: var(--waflo-shadow-pass);
 }
 
 .digital-card::after {
-  top: -7rem;
-  right: -8rem;
-  width: 16rem;
-  height: 16rem;
+  display: none;
+}
+
+.digital-card[data-composition="HEADER_BAND"]::before {
+  height: 8.5rem;
+  background: color-mix(in srgb, var(--card-accent) 16%, transparent);
+}
+
+.digital-card[data-composition="SIDE_TOTEM"]::before,
+.digital-card[data-composition="SPLIT_HERO"]::before {
+  width: 28%;
+  inset-inline: auto 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--card-accent) 15%, transparent);
+}
+
+.digital-card[data-composition="DIAGONAL_FIELD"]::before {
+  inset-inline-start: 46%;
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--card-accent) 20%, transparent) 0 44%,
+    color-mix(in srgb, var(--card-secondary) 17%, transparent) 44% 66%,
+    transparent 66%
+  );
+}
+
+.digital-card[data-composition="LABEL_FRAME"]::before {
+  inset: 0.8rem;
+  border: 2px solid color-mix(in srgb, var(--card-ink) 14%, transparent);
+  border-radius: calc(var(--story-radius) - 7px);
+}
+
+.digital-card[data-composition="STAMP_STAGE"] > .published-stamp-artwork {
+  padding: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--card-ink) 10%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--card-secondary) 11%, transparent);
+}
+
+.digital-card[data-composition="POSTER"] .digital-card__brand,
+.digital-card[data-composition="POSTER"] .digital-card__member,
+.digital-card[data-composition="POSTER"] .progress-copy {
+  align-items: center;
+  text-align: center;
+}
+
+.digital-card[data-density="COMPACT"] {
+  padding: 1rem;
+}
+
+.digital-card[data-density="AIRY"] {
+  padding: 1.6rem;
 }
 
 .digital-card__brand h1 {
   font-size: clamp(1.45rem, 6vw, 2rem);
   font-weight: 800;
+}
+
+.digital-card[data-title-treatment="DISPLAY"] .digital-card__brand h1 {
+  font-size: clamp(1.8rem, 8vw, 2.5rem);
+  line-height: 1;
+}
+
+.digital-card[data-title-treatment="EDITORIAL"] .digital-card__brand h1 {
+  font-weight: 720;
+}
+
+.digital-card[data-title-treatment="QUIET"] .digital-card__brand h1 {
+  font-size: clamp(1.35rem, 6vw, 1.8rem);
+  font-weight: 700;
 }
 
 .digital-card__member {

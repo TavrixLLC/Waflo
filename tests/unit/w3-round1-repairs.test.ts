@@ -156,7 +156,10 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       "icon@3x.png",
       "logo.png",
       "logo@2x.png",
+      "logo@3x.png",
       "strip.png",
+      "strip@2x.png",
+      "strip@3x.png",
       "en.lproj/pass.strings",
       "ar.lproj/pass.strings",
     ];
@@ -177,7 +180,17 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       expect(raw.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
       expect(raw.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
     }
-    const stripBuffer = Buffer.from(files["strip.png"] ?? []);
+    await expect(sharp(Buffer.from(files["strip.png"] ?? [])).metadata()).resolves.toMatchObject({
+      width: 375,
+      height: 123,
+    });
+    await expect(sharp(Buffer.from(files["strip@3x.png"] ?? [])).metadata()).resolves.toMatchObject(
+      {
+        width: 1125,
+        height: 369,
+      },
+    );
+    const stripBuffer = Buffer.from(files["strip@2x.png"] ?? []);
     const strip = sharp(stripBuffer).ensureAlpha();
     await expect(strip.metadata()).resolves.toMatchObject({ width: 750, height: 246 });
     for (const left of [0, 710]) {
