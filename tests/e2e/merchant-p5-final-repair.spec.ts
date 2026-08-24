@@ -289,7 +289,7 @@ test("keeps Wallet preview tabs selectable without implying provider readiness",
   const preview = page.locator(".builder-preview-desktop");
   await expect(
     preview.getByText(
-      "Visual preview only. Wallet availability and production readiness are shown separately in Studio.",
+      "Customer Web uses the published card renderer. Apple and Google are provider-faithful simulations; Wallet controls final spacing and type.",
       { exact: true },
     ),
   ).toBeVisible();
