@@ -81,7 +81,7 @@ const walletInput: WalletMembershipInput = {
 };
 
 describe("W3 Repair Round 1 renderer and provider regressions", () => {
-  it("preserves stamp order and state while integrating reward copy only in Wallet artwork", () => {
+  it("preserves stamp order and state while keeping provider artwork text-free", () => {
     const profiles = ["JOIN_PREVIEW", "CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
     const results = profiles.map((outputProfile) =>
       renderPublishedMembershipStampSvg({ ...pinnedRenderInput, outputProfile }),
@@ -99,9 +99,10 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     }
     expect(results[0]?.svg).not.toContain('data-integrated-reward="true"');
     expect(results[1]?.svg).not.toContain('data-integrated-reward="true"');
-    expect(results[2]?.svg).toContain('data-integrated-reward="true"');
-    expect(results[2]?.svg).toContain("مكافأة مجانية");
-    expect(results[3]?.svg).toContain('data-integrated-reward="true"');
+    expect(results[2]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[2]?.svg).not.toContain("مكافأة مجانية");
+    expect(results[3]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[3]?.svg).not.toContain("مكافأة مجانية");
     expect(new Set(results.map((result) => result.configurationDigest)).size).toBe(4);
   });
 
@@ -189,21 +190,25 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     }
     await expect(sharp(Buffer.from(files["strip.png"] ?? [])).metadata()).resolves.toMatchObject({
       width: 375,
-      height: 123,
+      height: 144,
+    });
+    await expect(sharp(Buffer.from(files["icon.png"] ?? [])).metadata()).resolves.toMatchObject({
+      width: 38,
+      height: 38,
     });
     await expect(sharp(Buffer.from(files["strip@3x.png"] ?? [])).metadata()).resolves.toMatchObject(
       {
         width: 1125,
-        height: 369,
+        height: 432,
       },
     );
     const stripBuffer = Buffer.from(files["strip@2x.png"] ?? []);
     const strip = sharp(stripBuffer).ensureAlpha();
-    await expect(strip.metadata()).resolves.toMatchObject({ width: 750, height: 246 });
+    await expect(strip.metadata()).resolves.toMatchObject({ width: 750, height: 288 });
     for (const left of [0, 710]) {
       const edge = await sharp(stripBuffer)
         .ensureAlpha()
-        .extract({ left, top: 0, width: 40, height: 246 })
+        .extract({ left, top: 0, width: 40, height: 288 })
         .raw()
         .toBuffer();
       const firstPixel = edge.subarray(0, 4);

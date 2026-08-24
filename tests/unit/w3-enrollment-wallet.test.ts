@@ -267,7 +267,21 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: "reward",
       body: "A complimentary drink after eight stamps.",
     });
-    expect(mapped).not.toHaveProperty("classTemplateInfo");
+    expect(mapped.classTemplateInfo).toEqual({
+      cardTemplateOverride: {
+        cardRowTemplateInfos: [
+          {
+            oneItem: {
+              item: {
+                firstValue: {
+                  fields: [{ fieldPath: "object.textModulesData['reward']" }],
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
   });
 
   it("maps Google Loyalty identity, opaque QR, public progress art, and transfer invalidation", () => {

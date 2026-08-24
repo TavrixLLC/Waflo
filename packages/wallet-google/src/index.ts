@@ -19,13 +19,7 @@ import {
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
 
-export const GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION = "google-progress-v4";
-
-// Artwork substantially wider than the provider's 5:4 hero is technically valid,
-// but Google must letterbox it so heavily that the stamps stop reading as the hero.
-// Keep a little flexibility for merchant-authored paths while adapting wide rows
-// and four-column grids into a near-square provider-only composition.
-const GOOGLE_PROGRESS_MAX_SOURCE_ASPECT_RATIO = 1.72;
+export const GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION = "google-progress-v5";
 
 type GoogleProgressLayout = "ROW" | "GRID" | "PATH" | "RING";
 
@@ -43,43 +37,23 @@ interface GoogleProgressArtworkCompositionInput {
 }
 
 /**
- * Google requires loyalty hero artwork to use a near-square 1032x812 canvas.
- * Preserve a merchant's composition when it already fits that region; otherwise
- * adapt only the provider artwork to a compact grid while retaining the exact
- * stamp count, state order and artwork identity.
+ * Google renders loyalty hero artwork in a near-square 1032x812 region. The canvas may
+ * letterbox wide or tall artwork, but the provider adapter must not rewrite the merchant's
+ * authored ROW/GRID/RING/PATH topology to compensate for provider-owned geometry.
  */
 export function resolveGoogleProgressArtworkComposition(
   input: GoogleProgressArtworkCompositionInput,
-):
-  | Readonly<{
-      layout: GoogleProgressLayout;
-      layoutConfiguration: GoogleProgressArtworkCompositionInput["layoutConfiguration"];
-      adapted: false;
-    }>
-  | Readonly<{
-      layout: "GRID";
-      layoutConfiguration: Readonly<{ columns: number }>;
-      adapted: true;
-    }> {
-  const safeHeight = Math.max(1, input.renderedHeight);
-  const aspectRatio = input.renderedWidth / safeHeight;
-  if (
-    Number.isFinite(aspectRatio) &&
-    aspectRatio >= 1 / GOOGLE_PROGRESS_MAX_SOURCE_ASPECT_RATIO &&
-    aspectRatio <= GOOGLE_PROGRESS_MAX_SOURCE_ASPECT_RATIO
-  ) {
-    return {
-      layout: input.layout,
-      layoutConfiguration: input.layoutConfiguration,
-      adapted: false,
-    };
-  }
-
-  const columns = Math.max(2, Math.min(6, Math.ceil(Math.sqrt(input.goal))));
+): Readonly<{
+  layout: GoogleProgressLayout;
+  layoutConfiguration: GoogleProgressArtworkCompositionInput["layoutConfiguration"];
+  adapted: false;
+}> {
+  // Google owns the hero canvas aspect ratio, but Waflo owns the authored stamp topology.
+  // Preserve ROW/GRID/RING/PATH exactly and accept provider-native letterboxing when necessary.
   return {
-    layout: "GRID",
-    layoutConfiguration: { columns },
-    adapted: true,
+    layout: input.layout,
+    layoutConfiguration: input.layoutConfiguration,
+    adapted: false,
   };
 }
 
@@ -191,8 +165,21 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
         body: "Waflo is owned and operated by Tavrix LLC.",
       },
     ],
-    // Do not add a front-row override. Reward copy is composed into the shared hero
-    // artwork with the stamps; the native text module remains available in details.
+    classTemplateInfo: {
+      cardTemplateOverride: {
+        cardRowTemplateInfos: [
+          {
+            oneItem: {
+              item: {
+                firstValue: {
+                  fields: [{ fieldPath: "object.textModulesData['reward']" }],
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
   };
 }
 

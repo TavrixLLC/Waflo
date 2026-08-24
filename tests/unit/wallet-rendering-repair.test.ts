@@ -53,8 +53,8 @@ describe("Wallet rendering repair completion", () => {
     const previewCache = readFileSync("apps/api/src/programs/preview-cache.ts", "utf8");
     const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
-    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(4);
-    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 8");
+    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(5);
+    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 9");
     expect(enrollment).toContain("ensure-template:v");
     expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
     expect(worker).toContain("enqueuePresentationRepairs");
@@ -62,7 +62,7 @@ describe("Wallet rendering repair completion", () => {
     expect(worker).toContain("PRESENTATION_SCHEMA_UPGRADE");
   });
 
-  it("adapts underutilized stamp grids into a truthful Google hero composition", () => {
+  it("preserves authored stamp topology in the Google hero composition", () => {
     const renderInput = {
       goal: 6,
       progress: 2,
@@ -82,6 +82,7 @@ describe("Wallet rendering repair completion", () => {
     const composition = resolveGoogleProgressArtworkComposition({
       goal: renderInput.goal,
       layout: renderInput.layout,
+      layoutConfiguration: renderInput.layoutConfiguration,
       renderedWidth: canonical.width,
       renderedHeight: canonical.height,
     });
@@ -93,13 +94,14 @@ describe("Wallet rendering repair completion", () => {
         : {}),
     });
 
-    expect(GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION).toBe("google-progress-v4");
+    expect(GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION).toBe("google-progress-v5");
     expect(composition).toEqual({
       layout: "GRID",
-      layoutConfiguration: { columns: 3 },
-      adapted: true,
+      layoutConfiguration: { columns: 4 },
+      adapted: false,
     });
-    expect(adapted.width / adapted.height).toBeLessThanOrEqual(2.15);
+    expect(adapted.width).toBe(canonical.width);
+    expect(adapted.height).toBe(canonical.height);
     expect(adapted.svg.match(/data-visual-state="FILLED"/gu)).toHaveLength(2);
     expect(adapted.svg.match(/data-visual-state="EMPTY"/gu)).toHaveLength(4);
   });

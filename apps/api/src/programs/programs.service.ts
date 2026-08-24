@@ -34,7 +34,6 @@ import {
   type StampOutputProfile,
   type StampRenderInput,
 } from "@waflo/stamp-engine";
-import { resolveGoogleProgressArtworkComposition } from "@waflo/wallet-google";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import {
@@ -761,27 +760,9 @@ export class ProgramsService {
         rewardReady,
         progressLabelVisible: outputProfile === "CUSTOMER_WEB" && visualInput.progressLabelVisible,
         rewardLabelVisible:
-          outputProfile === "CUSTOMER_WEB"
-            ? visualInput.rewardLabelVisible
-            : outputProfile === "APPLE_WALLET" || outputProfile === "GOOGLE_WALLET",
+          outputProfile === "CUSTOMER_WEB" ? visualInput.rewardLabelVisible : false,
       } satisfies StampRenderInput;
-      let rendered = renderStampSvg(stampRenderInput);
-      if (outputProfile === "GOOGLE_WALLET") {
-        const googleComposition = resolveGoogleProgressArtworkComposition({
-          goal,
-          renderedWidth: rendered.width,
-          renderedHeight: rendered.height,
-          layout: stampRenderInput.layout,
-          layoutConfiguration: stampRenderInput.layoutConfiguration,
-        });
-        if (googleComposition.adapted) {
-          rendered = renderStampSvg({
-            ...stampRenderInput,
-            layout: googleComposition.layout,
-            layoutConfiguration: googleComposition.layoutConfiguration,
-          });
-        }
-      }
+      const rendered = renderStampSvg(stampRenderInput);
       const appleConfig = visualInput.applePreviewConfig as Partial<{
         headerLabel: string;
         headerValue: string;

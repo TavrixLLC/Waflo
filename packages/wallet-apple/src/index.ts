@@ -119,13 +119,16 @@ export function mapAppleStoreCard(
       },
     ],
     storeCard: {
-      // The stamp artwork already communicates progress more clearly than a small
-      // numeric counter. Keep the header clear and avoid repeating customer data.
+      // Keep identity in the provider-owned logo/logoText row. The strip remains graphics-only.
       headerFields: [],
-      // Store-card primary fields are rendered over the strip artwork at a very large size.
-      // Keep that region clear so the progress artwork remains legible and use the native
-      // secondary row for the program title instead.
-      primaryFields: [],
+      // Apple renders primary fields over strip.png. Put localized reward copy here and reserve
+      // the top of strip artwork so text never has to be rasterized into the PNG.
+      primaryFields: [
+        {
+          key: "rewardFront",
+          value: presentation.rewardSummary.slice(0, 80),
+        },
+      ],
       secondaryFields: [
         {
           key: "program",
@@ -310,9 +313,9 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   };
   const [icon, icon2x, icon3x, logo, logo2x, logo3x] = await Promise.all([
-    image(29, 29),
-    image(58, 58),
-    image(87, 87),
+    image(38, 38),
+    image(76, 76),
+    image(114, 114),
     image(160, 50, true),
     image(320, 100, true),
     image(480, 150, true),
@@ -327,14 +330,25 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
   };
 }
 
+const APPLE_STORE_CARD_STRIP_WIDTH = 375;
+const APPLE_STORE_CARD_STRIP_HEIGHT = 144;
+const APPLE_STORE_CARD_STRIP_HORIZONTAL_INSET = 24;
+const APPLE_STORE_CARD_STRIP_TOP_TEXT_RESERVE = 48;
+const APPLE_STORE_CARD_STRIP_BOTTOM_INSET = 12;
+
 async function progressStrip(input: WalletMembershipInput, scale: 1 | 2 | 3): Promise<Buffer> {
   const rendered = renderPublishedMembershipStampSvg({
     ...input.stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
   const background = input.stampRenderInput.visualTheme.backgroundColor ?? input.backgroundColor;
+  const artworkWidth = APPLE_STORE_CARD_STRIP_WIDTH - APPLE_STORE_CARD_STRIP_HORIZONTAL_INSET * 2;
+  const artworkHeight =
+    APPLE_STORE_CARD_STRIP_HEIGHT -
+    APPLE_STORE_CARD_STRIP_TOP_TEXT_RESERVE -
+    APPLE_STORE_CARD_STRIP_BOTTOM_INSET;
   const inset = await sharp(Buffer.from(rendered.svg, "utf8"))
-    .resize(345 * scale, 103 * scale, {
+    .resize(artworkWidth * scale, artworkHeight * scale, {
       fit: "contain",
       background,
     })
@@ -342,13 +356,19 @@ async function progressStrip(input: WalletMembershipInput, scale: 1 | 2 | 3): Pr
     .toBuffer();
   return sharp({
     create: {
-      width: 375 * scale,
-      height: 123 * scale,
+      width: APPLE_STORE_CARD_STRIP_WIDTH * scale,
+      height: APPLE_STORE_CARD_STRIP_HEIGHT * scale,
       channels: 4,
       background,
     },
   })
-    .composite([{ input: inset, left: 15 * scale, top: 10 * scale }])
+    .composite([
+      {
+        input: inset,
+        left: APPLE_STORE_CARD_STRIP_HORIZONTAL_INSET * scale,
+        top: APPLE_STORE_CARD_STRIP_TOP_TEXT_RESERVE * scale,
+      },
+    ])
     .png()
     .toBuffer();
 }

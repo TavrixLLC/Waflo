@@ -73,7 +73,7 @@ export interface PublishedMembershipStampRenderInput {
   readonly rendererSchemaVersion: "waflo-stamp-render-v2";
   /** Canonical card-content BCP-47 locale. */
   readonly locale: string;
-  /** Localized, non-customer reward copy rendered as part of the Wallet artwork. */
+  /** Localized reward copy used by native provider fields; provider artwork stays text-free. */
   readonly rewardLabel: string;
   readonly requiredStampCount: number;
   readonly currentStampCount: number;
@@ -234,53 +234,18 @@ export function renderStampSvg(input: StampRenderInput): {
   ).map((position) => ({ ...position, filled: position.index < progress }));
   const profile = input.outputProfile ?? "CUSTOMER_WEB";
   const walletArtwork = profile === "APPLE_WALLET" || profile === "GOOGLE_WALLET";
-  const normalizedRewardLabel = input.rewardLabel?.replace(/\s+/gu, " ").trim() ?? "";
-  const rewardWords = normalizedRewardLabel.split(" ").filter(Boolean);
-  const rewardLineLimit = /^ar(?:-|$)|^ckb(?:-|$)|^ku-Arab(?:-|$)/iu.test(input.locale ?? "")
-    ? 25
-    : 34;
-  const clampRewardLine = (value: string): string => {
-    const characters = Array.from(value);
-    return characters.length <= rewardLineLimit
-      ? value
-      : `${characters.slice(0, Math.max(1, rewardLineLimit - 1)).join("")}…`;
-  };
-  const rewardLines: string[] = [];
-  for (const word of rewardWords) {
-    const current = rewardLines.at(-1);
-    if (!current) {
-      rewardLines.push(word);
-      continue;
-    }
-    if (rewardLines.length <= 2 && `${current} ${word}`.length <= rewardLineLimit) {
-      rewardLines[rewardLines.length - 1] = `${current} ${word}`;
-      continue;
-    }
-    if (rewardLines.length < 2) rewardLines.push(word);
-    else {
-      const last = rewardLines[1] ?? "";
-      rewardLines[1] = `${last} ${word}`.trim();
-    }
-  }
-  for (let index = 0; index < rewardLines.length; index += 1) {
-    rewardLines[index] = clampRewardLine(rewardLines[index] ?? "");
-  }
+  // Wallet providers own localized text rendering. Keep provider artwork graphics-only so
+  // Sharp/libvips never has to rasterize merchant copy with host-dependent fonts/shaping.
   const labelLines = walletArtwork
-    ? input.rewardLabelVisible
-      ? rewardLines.slice(0, 2)
-      : []
+    ? []
     : [
         input.progressLabelVisible && input.label ? input.label : null,
         input.rewardLabelVisible && input.rewardLabel ? input.rewardLabel : null,
       ].filter((value): value is string => Boolean(value));
-  const labelHeight = labelLines.length
-    ? walletArtwork
-      ? 34 + labelLines.length * 19
-      : labelLines.length * 24 + 16
-    : 0;
+  const labelHeight = labelLines.length ? labelLines.length * 24 + 16 : 0;
   const maxX = Math.max(...positions.map((position) => position.x + size / 2));
   const maxY = Math.max(...positions.map((position) => position.y + size / 2));
-  const width = Math.ceil(walletArtwork && labelLines.length ? Math.max(maxX, 300) : maxX);
+  const width = Math.ceil(maxX);
   const height = Math.ceil(maxY + labelHeight);
   const artworkOffsetX = (width - maxX) / 2;
   const filledHref = artworkHref(
@@ -302,14 +267,7 @@ export function renderStampSvg(input: StampRenderInput): {
     ? "rtl"
     : "ltr";
   const labels = walletArtwork
-    ? labelLines.length
-      ? `<g data-integrated-reward="true" direction="${labelDirection}"><path d="M${Math.round(width * 0.2)} ${Math.ceil(maxY + 13)}H${Math.round(width * 0.8)}" stroke="${foreground}" stroke-width="1" opacity=".18"/><text x="${width / 2}" y="${Math.ceil(maxY + 35)}" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${foreground}">${labelLines
-          .map(
-            (label, index) =>
-              `<tspan x="${width / 2}" dy="${index === 0 ? 0 : 19}">${escapeXml(label)}</tspan>`,
-          )
-          .join("")}</text></g>`
-      : ""
+    ? ""
     : labelLines
         .map(
           (label, index) =>
@@ -361,7 +319,10 @@ export function publishedMembershipStampVisualDigest(
       stableJson({
         rendererSchemaVersion: input.rendererSchemaVersion,
         locale: input.locale,
-        rewardLabel: input.rewardLabel,
+        rewardLabel:
+          input.outputProfile === "APPLE_WALLET" || input.outputProfile === "GOOGLE_WALLET"
+            ? null
+            : input.rewardLabel,
         requiredStampCount: input.requiredStampCount,
         currentStampCount: input.currentStampCount,
         rewardReady: input.rewardReady,
@@ -409,8 +370,7 @@ export function renderPublishedMembershipStampSvg(
     emptyArtwork: input.emptyArtwork,
     outputProfile: input.outputProfile,
     progressLabelVisible: false,
-    rewardLabelVisible:
-      input.outputProfile === "APPLE_WALLET" || input.outputProfile === "GOOGLE_WALLET",
+    rewardLabelVisible: false,
   });
   const configurationDigest = createHash("sha256")
     .update(

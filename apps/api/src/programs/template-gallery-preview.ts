@@ -4,7 +4,6 @@ import {
   type StampOutputProfile,
   type StampRenderInput,
 } from "@waflo/stamp-engine";
-import { resolveGoogleProgressArtworkComposition } from "@waflo/wallet-google";
 import { artworkFor } from "./library-artwork.js";
 import { composeProgramPreview, type ProgramPreviewComposition } from "./preview-composer.js";
 
@@ -135,26 +134,9 @@ export function renderTemplateGalleryPreview(
     locale: locale === "AR" ? "ar" : "en",
     rewardReady: false,
     progressLabelVisible: profile === "CUSTOMER_WEB",
-    rewardLabelVisible:
-      profile === "CUSTOMER_WEB" || profile === "APPLE_WALLET" || profile === "GOOGLE_WALLET",
+    rewardLabelVisible: profile === "CUSTOMER_WEB",
   } satisfies StampRenderInput;
-  let rendered = renderStampSvg(stampRenderInput);
-  if (profile === "GOOGLE_WALLET") {
-    const googleComposition = resolveGoogleProgressArtworkComposition({
-      goal,
-      renderedWidth: rendered.width,
-      renderedHeight: rendered.height,
-      layout: stampRenderInput.layout,
-      layoutConfiguration: stampRenderInput.layoutConfiguration,
-    });
-    if (googleComposition.adapted) {
-      rendered = renderStampSvg({
-        ...stampRenderInput,
-        layout: googleComposition.layout,
-        layoutConfiguration: googleComposition.layoutConfiguration,
-      });
-    }
-  }
+  const rendered = renderStampSvg(stampRenderInput);
   const composed = composeProgramPreview({
     profile,
     locale,

@@ -96,7 +96,7 @@ export const programPlatformCapabilities: Record<
     heroArtwork: {
       support: "UNSUPPORTED",
       explanation:
-        "The current Google loyalty class/object payload does not generate a hero image.",
+        "Merchant-selected hero artwork is not mapped because Google Wallet's single hero region is reserved for generated stamp progress artwork.",
     },
     backgroundArtwork: {
       support: "UNSUPPORTED",

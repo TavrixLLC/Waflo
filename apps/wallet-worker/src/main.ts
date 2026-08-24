@@ -56,7 +56,6 @@ import {
   GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION,
   type GoogleServiceAccount,
   GoogleWalletProvider,
-  resolveGoogleProgressArtworkComposition,
 } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
@@ -1883,25 +1882,9 @@ export class WalletWorker {
         : cached;
       return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
-    const canonicalRendered = renderPublishedMembershipStampSvg(stampRenderInput);
-    const googleComposition = resolveGoogleProgressArtworkComposition({
-      goal: stampRenderInput.requiredStampCount,
-      renderedWidth: canonicalRendered.width,
-      renderedHeight: canonicalRendered.height,
-      layout: stampRenderInput.layoutType,
-      ...(stampRenderInput.layoutConfiguration
-        ? { layoutConfiguration: stampRenderInput.layoutConfiguration }
-        : {}),
-    });
-    const rendered = googleComposition.adapted
-      ? renderPublishedMembershipStampSvg({
-          ...stampRenderInput,
-          layoutType: googleComposition.layout,
-          ...(googleComposition.layoutConfiguration
-            ? { layoutConfiguration: googleComposition.layoutConfiguration }
-            : {}),
-        })
-      : canonicalRendered;
+    // Preserve the merchant-authored ROW/GRID/RING/PATH topology. Google owns the
+    // 1032x812 hero viewport; Waflo must not rewrite layout geometry to fill it.
+    const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
     const width = GOOGLE_WALLET_HERO_WIDTH;
     const height = GOOGLE_WALLET_HERO_HEIGHT;
     const bytes = await prepareGoogleWalletProgressHero(
