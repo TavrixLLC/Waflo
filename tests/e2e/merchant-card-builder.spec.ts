@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
+import { builderPreviewMedia, expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
 function allTemplates(page: Page) {
@@ -89,13 +90,7 @@ test("uses the organization brand as the unmirrored issuer mark in every Builder
     expect(preview.svg).toContain('data-issuer-brand="organization"');
     expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
   }
-  expect(
-    await page
-      .locator(".builder-preview-canvas img")
-      .evaluateAll((images) =>
-        images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
-      ),
-  ).toBe(true);
+  await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
 });
 
 test("builds one continuously saved card with combined languages and lazy truthful previews", async ({
@@ -335,20 +330,20 @@ test("uses an explicit Wallet loading state and preserves the last good preview"
   await enterBuilder(page);
   const preview = page.locator(".builder-preview-desktop");
   await expect(preview.locator(".builder-preview-empty")).toContainText("Preparing your preview");
-  await expect(preview.locator(".builder-preview-canvas img")).toHaveCount(0);
-  await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
+  await expect(builderPreviewMedia(preview)).toHaveCount(0);
+  await expectBuilderPreviewReady(preview);
 
   await page.getByRole("tab", { name: "Apple Wallet" }).click();
   await expect(preview.locator(".builder-preview-empty")).toContainText("Apple Wallet");
   await expect(preview.locator(".builder-preview-empty")).toContainText("Preparing your preview");
-  await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
+  await expectBuilderPreviewReady(preview);
 
   await page
     .getByRole("button", { name: /^Basics/u })
     .first()
     .click();
   await page.getByLabel("Card name in your dashboard").fill("Updated coffee card");
-  await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
+  await expectBuilderPreviewReady(preview);
   await expect(preview.locator(".builder-preview-status")).toBeVisible();
 });
 
@@ -953,7 +948,7 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }, value);
-    await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
+    await expectBuilderPreviewReady(preview);
     await expect(preview.locator(".builder-preview-status")).toHaveCount(0);
   };
 
@@ -978,14 +973,14 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
 
   await setProgress(4);
   await page.getByRole("tab", { name: "Apple Wallet" }).click();
-  await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
+  await expectBuilderPreviewReady(preview);
   await expect(preview.locator(".builder-preview-status")).toHaveCount(0);
   await preview.screenshot({
     path: `${evidenceDirectory}/05-apple-preview.png`,
     animations: "disabled",
   });
   await page.getByRole("tab", { name: "Google Wallet" }).click();
-  await expect(preview.locator(".builder-preview-canvas img")).toBeVisible();
+  await expectBuilderPreviewReady(preview);
   await expect(preview.locator(".builder-preview-status")).toHaveCount(0);
   await preview.screenshot({
     path: `${evidenceDirectory}/06-google-preview.png`,

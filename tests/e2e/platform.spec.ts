@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { expectBuilderPreviewReady } from "./preview-assertions";
 
 const screenshots = "test-results/evidence/handoff-w2-round-5/screenshots";
 const runId = randomUUID().slice(0, 8);
@@ -1364,7 +1365,7 @@ test.describe
 
         for (const surface of ["Customer", "Apple Wallet", "Google Wallet"]) {
           await page.getByRole("tab", { name: surface, exact: true }).click();
-          await expect(page.locator(".builder-preview-desktop img")).toBeVisible();
+          await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
         }
         await page.getByRole("button", { name: "Review card" }).click();
         await expect(

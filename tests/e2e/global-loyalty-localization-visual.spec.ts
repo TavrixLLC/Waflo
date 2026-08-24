@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { type BrowserContext, expect, type Page, type Route, test } from "@playwright/test";
+import { expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi, templateGalleryOrganizationId } from "./template-gallery-fixtures";
 
 const evidenceDirectory = path.resolve("artifacts", "global-loyalty-localization");
@@ -54,18 +55,7 @@ async function selectPreviewLocale(page: Page, locale: string): Promise<void> {
   await page.getByRole("option", { name: optionName }).click();
   await expect(preview.locator(".builder-preview-canvas")).toHaveAttribute("lang", locale);
   await expect(preview.locator(".builder-preview-canvas")).toHaveAttribute("aria-busy", "false");
-  const image = preview.locator(".builder-preview-canvas img");
-  await expect(image).toBeVisible();
-  await expect
-    .poll(() =>
-      image.evaluate((element: HTMLImageElement, expectedLocale) => {
-        if (!element.complete || element.naturalWidth <= 0) return false;
-        const encodedSvg = element.currentSrc.split(",", 2)[1];
-        if (!encodedSvg) return false;
-        return decodeURIComponent(encodedSvg).includes(`<svg lang="${expectedLocale}"`);
-      }, locale),
-    )
-    .toBe(true);
+  await expectBuilderPreviewReady(preview, locale);
   await expect(preview.locator(".builder-preview-status")).toHaveCount(0);
 }
 
@@ -73,13 +63,7 @@ async function selectPreviewProfile(page: Page, name: string): Promise<void> {
   const preview = page.locator(".builder-preview-desktop");
   await preview.getByRole("tab", { name }).click();
   await expect(preview.locator(".builder-preview-canvas")).toHaveAttribute("aria-busy", "false");
-  const image = preview.locator(".builder-preview-canvas img");
-  await expect(image).toBeVisible();
-  await expect
-    .poll(() =>
-      image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0),
-    )
-    .toBe(true);
+  await expectBuilderPreviewReady(preview);
 }
 
 async function fillCardLocale(

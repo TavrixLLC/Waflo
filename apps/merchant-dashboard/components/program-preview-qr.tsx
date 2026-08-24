@@ -51,6 +51,7 @@ export const WalletPreviewCanvas = memo(function WalletPreviewCanvas({
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    canvas.dataset.previewReady = "false";
     let cancelled = false;
     const previewImage = new Image();
     previewImage.decoding = "sync";
@@ -75,11 +76,16 @@ export const WalletPreviewCanvas = memo(function WalletPreviewCanvas({
         Math.round(width * percentage(overlay.width)),
         Math.round(height * percentage(overlay.height)),
       );
+      canvas.dataset.previewReady = "true";
+    };
+    previewImage.onerror = () => {
+      if (!cancelled) canvas.dataset.previewReady = "false";
     };
     previewImage.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
     return () => {
       cancelled = true;
       previewImage.onload = null;
+      previewImage.onerror = null;
     };
   }, [height, profile, svg, width]);
 
@@ -87,6 +93,7 @@ export const WalletPreviewCanvas = memo(function WalletPreviewCanvas({
     <canvas
       aria-label={ariaLabel}
       className="wallet-preview-image-stack__canvas"
+      data-preview-ready="false"
       height={height}
       ref={canvasRef}
       role="img"
