@@ -132,9 +132,11 @@ export function renderTemplateGalleryPreview(
     },
     label: `${progress}/${goal}`,
     rewardLabel: translation.rewardSummary,
+    locale: locale === "AR" ? "ar" : "en",
     rewardReady: false,
     progressLabelVisible: profile === "CUSTOMER_WEB",
-    rewardLabelVisible: profile === "CUSTOMER_WEB",
+    rewardLabelVisible:
+      profile === "CUSTOMER_WEB" || profile === "APPLE_WALLET" || profile === "GOOGLE_WALLET",
   } satisfies StampRenderInput;
   let rendered = renderStampSvg(stampRenderInput);
   if (profile === "GOOGLE_WALLET") {

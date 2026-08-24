@@ -862,6 +862,7 @@ export class PublicEnrollmentService {
       programVersionId: version.id,
       membershipId: `join-preview:${version.id}`,
       locale: defaultLocale,
+      rewardLabel: cardLocales.find((item) => item.locale === defaultLocale)?.rewardSummary ?? "",
       requiredStampCount: goal,
       currentStampCount: 0,
       rewardReady: false,

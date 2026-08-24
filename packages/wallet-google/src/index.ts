@@ -19,7 +19,7 @@ import {
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
 
-export const GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION = "google-progress-v3";
+export const GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION = "google-progress-v4";
 
 // Artwork substantially wider than the provider's 5:4 hero is technically valid,
 // but Google must letterbox it so heavily that the stamps stop reading as the hero.
@@ -191,36 +191,8 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
         body: "Waflo is owned and operated by Tavrix LLC.",
       },
     ],
-    classTemplateInfo: {
-      cardTemplateOverride: {
-        // Google controls the title, points and barcode chrome. These rows keep the
-        // customer identity and status together, place progress artwork immediately
-        // after that row, and leave the reward as the final supporting detail.
-        cardRowTemplateInfos: [
-          {
-            twoItems: {
-              startItem: {
-                firstValue: { fields: [{ fieldPath: "object.accountName" }] },
-              },
-              endItem: {
-                firstValue: {
-                  fields: [{ fieldPath: "object.textModulesData['status']" }],
-                },
-              },
-            },
-          },
-          {
-            oneItem: {
-              item: {
-                firstValue: {
-                  fields: [{ fieldPath: "object.textModulesData['reward']" }],
-                },
-              },
-            },
-          },
-        ],
-      },
-    },
+    // Do not add a front-row override. Reward copy is composed into the shared hero
+    // artwork with the stamps; the native text module remains available in details.
   };
 }
 
@@ -234,12 +206,6 @@ export function mapGoogleLoyaltyObject(
     id: objectId,
     classId,
     state: presentation.inactive ? "INACTIVE" : "ACTIVE",
-    accountName: presentation.memberName.slice(0, 20),
-    accountId: input.publicMembershipId.slice(-20),
-    loyaltyPoints: {
-      label: presentation.labels.stamps,
-      balance: { string: presentation.progress },
-    },
     barcode: {
       type: presentation.barcode.googleFormat,
       value: presentation.barcode.payload,
@@ -251,7 +217,7 @@ export function mapGoogleLoyaltyObject(
           // this image in imageModulesData causes two copies on layouts that render both regions.
           heroImage: {
             sourceUri: { uri: input.publicAssetBaseUrl },
-            contentDescription: translated(presentation.progress, input.locale),
+            contentDescription: translated(presentation.labels.stamps, input.locale),
           },
         }
       : {}),
@@ -367,7 +333,7 @@ export class GoogleWalletRestClient {
 
   async request<T>(
     path: string,
-    options: { method?: "GET" | "POST" | "PATCH"; body?: unknown } = {},
+    options: { method?: "GET" | "POST" | "PATCH" | "PUT"; body?: unknown } = {},
   ): Promise<{ value: T; requestId?: string }> {
     const response = await this.fetchImplementation(
       `https://walletobjects.googleapis.com/walletobjects/v1/${path.replace(/^\/+/, "")}`,
@@ -531,7 +497,9 @@ export class GoogleWalletProvider implements WalletProvider {
     if (!this.client) return;
     try {
       await this.client.request(resourcePath);
-      await this.client.request(resourcePath, { method: "PATCH", body: intended });
+      // Use full update semantics so removed template fields (for example a retired
+      // front row) are actually cleared instead of surviving a partial patch.
+      await this.client.request(resourcePath, { method: "PUT", body: intended });
     } catch (error) {
       if (!(error instanceof WalletProviderError) || error.category !== "NOT_FOUND") throw error;
       try {
@@ -543,7 +511,7 @@ export class GoogleWalletProvider implements WalletProvider {
         ) {
           throw createError;
         }
-        await this.client.request(resourcePath, { method: "PATCH", body: intended });
+        await this.client.request(resourcePath, { method: "PUT", body: intended });
       }
     }
   }

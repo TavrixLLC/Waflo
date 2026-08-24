@@ -94,7 +94,8 @@ const walletInput: WalletMembershipInput = {
     programId: "00000000-0000-4000-8000-000000000002",
     programVersionId: "00000000-0000-4000-8000-000000000003",
     membershipId: "00000000-0000-4000-8000-000000000005",
-    rendererSchemaVersion: "waflo-stamp-render-v1",
+    rendererSchemaVersion: "waflo-stamp-render-v2",
+    rewardLabel: "Free reward",
     locale: "en",
     requiredStampCount: 8,
     currentStampCount: 3,
@@ -233,13 +234,11 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       ]),
     );
     const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8"));
-    expect(pass.barcodes).toHaveLength(2);
+    expect(pass.barcodes).toHaveLength(1);
     expect(pass.barcodes.map((barcode: { format: string }) => barcode.format)).toEqual([
-      "PKBarcodeFormatCode128",
       "PKBarcodeFormatQR",
     ]);
     expect(pass.barcodes[0].message).toBe(walletInput.credentialPayload);
-    expect(pass.barcodes[1].message).toBe(walletInput.credentialPayload);
     expect(pass.voided).toBe(false);
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
     expect(Buffer.from(files["manifest.json"] ?? []).toString("utf8")).not.toContain("signature");
@@ -268,22 +267,10 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: "reward",
       body: "A complimentary drink after eight stamps.",
     });
-    expect(mapped.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos).toHaveLength(2);
-    expect(mapped.classTemplateInfo.cardTemplateOverride.cardRowTemplateInfos[0]).toEqual({
-      twoItems: {
-        startItem: {
-          firstValue: { fields: [{ fieldPath: "object.accountName" }] },
-        },
-        endItem: {
-          firstValue: {
-            fields: [{ fieldPath: "object.textModulesData['status']" }],
-          },
-        },
-      },
-    });
+    expect(mapped).not.toHaveProperty("classTemplateInfo");
   });
 
-  it("maps Google Loyalty identity, opaque linear barcode, public progress art, and transfer invalidation", () => {
+  it("maps Google Loyalty identity, opaque QR, public progress art, and transfer invalidation", () => {
     const classId = googleLoyaltyClassId("issuer-1", walletInput.programVersionId);
     const objectId = googleLoyaltyObjectId("issuer-1", walletInput.walletPassInstanceId);
     const active = mapGoogleLoyaltyObject(
@@ -295,12 +282,18 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: objectId,
       classId,
       state: "ACTIVE",
-      barcode: { type: "CODE_128", value: walletInput.credentialPayload },
+      barcode: { type: "QR_CODE", value: walletInput.credentialPayload },
       heroImage: {
         sourceUri: { uri: "https://assets.example.test/wpa_opaque" },
+        contentDescription: {
+          defaultValue: { language: "en", value: "STAMPS" },
+        },
       },
     });
     expect(active).not.toHaveProperty("imageModulesData");
+    expect(active).not.toHaveProperty("accountName");
+    expect(active).not.toHaveProperty("accountId");
+    expect(active).not.toHaveProperty("loyaltyPoints");
     expect(
       mapGoogleLoyaltyObject({ ...walletInput, transferred: true }, objectId, classId).state,
     ).toBe("INACTIVE");
@@ -353,7 +346,7 @@ describe("W3 customer security, QR, and Wallet domain", () => {
     expect(request).toHaveBeenNthCalledWith(
       3,
       `loyaltyObject/${encodeURIComponent(walletInput.providerIdentity)}`,
-      expect.objectContaining({ method: "PATCH" }),
+      expect.objectContaining({ method: "PUT" }),
     );
   });
 
@@ -382,7 +375,7 @@ describe("W3 customer security, QR, and Wallet domain", () => {
           id: walletInput.providerIdentity,
           state: "INACTIVE",
           barcode: {
-            type: "CODE_128",
+            type: "QR_CODE",
             value: walletInput.credentialPayload,
             alternateText: "No longer valid",
           },
@@ -413,8 +406,8 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       },
       barcode: {
         payload: walletInput.credentialPayload,
-        appleFormats: ["PKBarcodeFormatCode128", "PKBarcodeFormatQR"],
-        googleFormat: "CODE_128",
+        appleFormats: ["PKBarcodeFormatQR"],
+        googleFormat: "QR_CODE",
       },
     });
     assertQrContainsNoPii(presentation.barcode.payload, [

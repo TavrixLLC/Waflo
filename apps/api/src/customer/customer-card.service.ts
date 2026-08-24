@@ -168,6 +168,7 @@ export class CustomerCardService {
       programVersionId: membership.enrollmentProgramVersionId,
       membershipId: membership.id,
       locale: cardLocale,
+      rewardLabel: selected?.rewardSummary ?? "",
       requiredStampCount: goal,
       currentStampCount: progress,
       rewardReady: membership.progress?.rewardReady ?? false,

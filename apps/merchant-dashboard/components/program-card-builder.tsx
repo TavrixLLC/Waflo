@@ -51,6 +51,8 @@ import {
 } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import { ProgramAssetPicker } from "./program-asset-uploader";
+import { optimisticProgramPreviewSvg } from "./program-preview-optimistic";
+import { WalletPreviewCanvas } from "./program-preview-qr";
 import {
   BUILDER_AUTOSAVE_DELAY_MS,
   BUILDER_PREVIEW_DELAY_MS,
@@ -100,6 +102,7 @@ interface PreviewResult {
 interface PreviewState {
   key: string;
   result: PreviewResult;
+  sourceDraft: ProgramDraftInput;
 }
 
 interface ConflictState {
@@ -232,7 +235,7 @@ export function ProgramCardBuilder({
   const revisionRef = useRef(1);
   const initializedRef = useRef(false);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
-  const previewCacheRef = useRef(new Map<string, PreviewResult>());
+  const previewCacheRef = useRef(new Map<string, PreviewState>());
   const initialLoadKeyRef = useRef("");
   const sectionNavRef = useRef<HTMLElement | null>(null);
 
@@ -379,13 +382,14 @@ export function ProgramCardBuilder({
 
   const loadPreview = useCallback(
     async (nextProfile: PreviewProfile, force = false): Promise<PreviewResult | null> => {
-      if (!draftRef.current || JSON.stringify(apiDraft(draftRef.current)) !== persistedRef.current)
+      const persistedDraft = draftRef.current;
+      if (!persistedDraft || JSON.stringify(apiDraft(persistedDraft)) !== persistedRef.current)
         return null;
       const key = previewKey(nextProfile);
       const cached = previewCacheRef.current.get(key);
       if (cached && !force) {
-        setPreviews((current) => ({ ...current, [nextProfile]: { key, result: cached } }));
-        return cached;
+        setPreviews((current) => ({ ...current, [nextProfile]: cached }));
+        return cached.result;
       }
       setPreviewLoading(true);
       setPreviewError(false);
@@ -393,8 +397,10 @@ export function ProgramCardBuilder({
         const result = await apiFetch<PreviewResult>(
           `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${nextProfile}&locale=${encodeURIComponent(previewLocale)}`,
         );
-        previewCacheRef.current.set(key, result);
-        setPreviews((current) => ({ ...current, [nextProfile]: { key, result } }));
+        const sourceDraft = structuredClone(persistedDraft);
+        const nextPreview = { key, result, sourceDraft } satisfies PreviewState;
+        previewCacheRef.current.set(key, nextPreview);
+        setPreviews((current) => ({ ...current, [nextProfile]: nextPreview }));
         return result;
       } catch (caught) {
         setPreviewError(true);
@@ -745,10 +751,9 @@ export function ProgramCardBuilder({
             setProfile={setProfile}
             progress={progress}
             setProgress={setProgress}
-            preview={previews[profile]?.result}
+            preview={previews[profile]}
             previewLoading={previewLoading}
             previewError={previewError}
-            stale={saveState !== "saved" || previews[profile]?.key !== previewKey(profile)}
             onRetry={() => void loadPreview(profile, true)}
           />
         </aside>
@@ -808,10 +813,9 @@ export function ProgramCardBuilder({
           setProfile={setProfile}
           progress={progress}
           setProgress={setProgress}
-          preview={previews[profile]?.result}
+          preview={previews[profile]}
           previewLoading={previewLoading}
           previewError={previewError}
-          stale={saveState !== "saved" || previews[profile]?.key !== previewKey(profile)}
           onRetry={() => void loadPreview(profile, true)}
         />
       </Modal>
@@ -2095,7 +2099,6 @@ function PreviewPanel({
   preview,
   previewLoading,
   previewError,
-  stale,
   onRetry,
 }: {
   idPrefix: string;
@@ -2107,13 +2110,24 @@ function PreviewPanel({
   setProfile: Dispatch<SetStateAction<PreviewProfile>>;
   progress: number;
   setProgress: Dispatch<SetStateAction<number>>;
-  preview: PreviewResult | undefined;
+  preview: PreviewState | undefined;
   previewLoading: boolean;
   previewError: boolean;
-  stale: boolean;
   onRetry: () => void;
 }) {
   const text = builderText(interfaceLocale);
+  const displaySvg = useMemo(
+    () =>
+      preview
+        ? optimisticProgramPreviewSvg({
+            svg: preview.result.svg,
+            sourceDraft: preview.sourceDraft,
+            draft,
+            locale: previewLocale,
+          })
+        : "",
+    [draft, preview, previewLocale],
+  );
   return (
     <div className="builder-preview-panel">
       <div className="builder-preview-header">
@@ -2184,12 +2198,24 @@ function PreviewPanel({
         aria-busy={previewLoading}
         className={`builder-preview-canvas builder-preview-canvas--${profile.toLocaleLowerCase("en-US")} ${preview ? "builder-preview-canvas--ready" : "builder-preview-canvas--empty"}`}
       >
-        {preview ? (
+        {preview && profile !== "CUSTOMER_WEB" ? (
+          <span
+            className={`wallet-preview-image-stack wallet-preview-image-stack--${profile.toLocaleLowerCase("en-US")}`}
+          >
+            <WalletPreviewCanvas
+              ariaLabel={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
+              height={preview.result.height}
+              profile={profile}
+              svg={displaySvg}
+              width={preview.result.width}
+            />
+          </span>
+        ) : preview ? (
           <Image
-            src={previewSource(preview.svg)}
+            src={previewSource(displaySvg)}
             alt={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
-            width={preview.width}
-            height={preview.height}
+            width={preview.result.width}
+            height={preview.result.height}
             unoptimized
             priority
           />
@@ -2204,7 +2230,7 @@ function PreviewPanel({
             <span>{previewLoading ? text.previewPreparing : text.previewPending}</span>
           </div>
         )}
-        {preview && (previewLoading || stale) ? (
+        {preview && previewLoading ? (
           <div className="builder-preview-status" role="status">
             <RefreshCcw
               className={previewLoading ? "studio-spin" : ""}
@@ -2222,7 +2248,7 @@ function PreviewPanel({
           </Button>
         </Alert>
       ) : null}
-      {preview?.warnings.map((warning) => (
+      {preview?.result.warnings.map((warning) => (
         <Alert key={warning.code} tone="warning" title={warning.message} />
       ))}
       <FormField label={text.previewProgress}>

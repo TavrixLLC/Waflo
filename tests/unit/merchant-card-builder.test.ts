@@ -15,11 +15,17 @@ import {
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
 } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
+import {
+  optimisticProgramPreviewSvg,
+  walletPreviewQrOverlay,
+  walletPreviewQrRows,
+} from "../../apps/merchant-dashboard/components/program-preview-optimistic.js";
 import type {
   LocationItem,
   TemplateItem,
 } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { latestProgramTemplates } from "../../packages/contracts/src/index.js";
+import { createQrPreviewMarkup } from "../../packages/qr-core/src/index.js";
 
 function template(code: string): TemplateItem {
   const match = latestProgramTemplates().find((item) => item.code === code);
@@ -205,12 +211,79 @@ describe("merchant loyalty-card Builder state", () => {
 
   it("debounces autosave, requires explicit retry after failure, and keys previews by revision", () => {
     expect(BUILDER_AUTOSAVE_DELAY_MS).toBeGreaterThanOrEqual(800);
-    expect(BUILDER_PREVIEW_DELAY_MS).toBeGreaterThanOrEqual(250);
+    expect(BUILDER_PREVIEW_DELAY_MS).toBeLessThanOrEqual(150);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "saved")).toBe(true);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "saving")).toBe(false);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "failed")).toBe(false);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "conflict")).toBe(false);
     expect(shouldScheduleBuilderAutosave("same", "same", "saved")).toBe(false);
     expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4)).toBe("7:APPLE_WALLET:AR:4");
+  });
+
+  it("updates colors and localized copy immediately while retaining provider structure", () => {
+    const source = createBuilderDraft(template("COFFEE"), locations, { locale: "en" });
+    const next = updateBuilderRewardCopy(
+      {
+        ...source,
+        visualTheme: {
+          ...source.visualTheme,
+          backgroundColor: "#101820",
+          foregroundColor: "#F8F5EE",
+          accentColor: "#D99032",
+        },
+      },
+      "en",
+      "A free signature drink",
+    );
+    const nested = `<svg fill="${source.visualTheme.backgroundColor}"><text>${source.translations.en.rewardSummary}</text></svg>`;
+    const svg = `<svg data-provider-owned-layout="true" fill="${source.visualTheme.backgroundColor}"><text>${source.translations.en.programName}</text><image href="data:image/svg+xml;base64,${Buffer.from(nested).toString("base64")}"/></svg>`;
+
+    const optimistic = optimisticProgramPreviewSvg({
+      svg,
+      sourceDraft: source,
+      draft: next,
+      locale: "en",
+    });
+
+    expect(optimistic).toContain('data-provider-owned-layout="true"');
+    expect(optimistic).toContain(next.visualTheme.backgroundColor);
+    expect(optimistic).toContain(next.translations.en.programName);
+    const embedded = /data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)/u.exec(optimistic)?.[1];
+    expect(Buffer.from(embedded ?? "", "base64").toString("utf8")).toContain(
+      "A free signature drink",
+    );
+  });
+
+  it("keeps the fast Wallet canvas QR aligned with the authoritative preview QR", () => {
+    const preview = createQrPreviewMarkup("waflo-wallet-preview-only");
+    expect(preview.viewSize).toBe(37);
+    expect(walletPreviewQrRows).toHaveLength(29);
+    walletPreviewQrRows.forEach((hex, row) => {
+      const bits = BigInt(`0x${hex}`);
+      const runs: string[] = [];
+      let column = 0;
+      while (column < 29) {
+        if (((bits >> BigInt(28 - column)) & 1n) === 0n) {
+          column += 1;
+          continue;
+        }
+        const start = column;
+        while (column < 29 && ((bits >> BigInt(28 - column)) & 1n) === 1n) column += 1;
+        runs.push(`M${start + 4} ${row + 4}h${column - start}v1h-${column - start}z`);
+      }
+      expect(preview.markup).toContain(`<path d="${runs.join("")}"/>`);
+    });
+    expect(walletPreviewQrOverlay("APPLE_WALLET")).toEqual({
+      left: "33.2609%",
+      top: "56.0377%",
+      width: "33.4783%",
+      height: "29.0566%",
+    });
+    expect(walletPreviewQrOverlay("GOOGLE_WALLET")).toEqual({
+      left: "33.2609%",
+      top: "21.0256%",
+      width: "33.4783%",
+      height: "19.7436%",
+    });
   });
 });

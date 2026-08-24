@@ -6,6 +6,7 @@ import {
   type ProgramTemplatePresentation,
   programPlatformCapabilities,
 } from "@waflo/contracts";
+import { createQrPreviewMarkup } from "@waflo/qr-core";
 import type { StampOutputProfile } from "@waflo/stamp-engine";
 
 export interface ProgramPreviewCompositionInput {
@@ -126,7 +127,7 @@ function walletPreviewCopy(locale: string) {
       rewardReady: "المكافأة جاهزة",
       reward: "المكافأة",
       backReward: "خلف البطاقة · المكافأة",
-      barcode: "رمز عضوية خطي · يتوفر QR احتياطي على Apple Watch",
+      barcode: "رمز QR للعضوية",
     };
   if (canonical === "ckb")
     return {
@@ -140,7 +141,7 @@ function walletPreviewCopy(locale: string) {
       rewardReady: "خەڵات ئامادەیە",
       reward: "خەڵات",
       backReward: "پشتی کارت · خەڵات",
-      barcode: "بارکۆدی هێڵی ئەندامێتی · QRی جێگرەوە لە Apple Watch",
+      barcode: "کۆدی QRی ئەندامێتی",
     };
   if (canonical === "ku-Arab-IQ")
     return {
@@ -154,7 +155,7 @@ function walletPreviewCopy(locale: string) {
       rewardReady: "خەلات ئامادەیە",
       reward: "خەلات",
       backReward: "پشتا کارتێ · خەلات",
-      barcode: "بارکۆدا هێلی یا ئەندامێتیێ · QR یا جێگر ل Apple Watch",
+      barcode: "کۆدا QR یا ئەندامێتیێ",
     };
   return {
     preview: "PREVIEW ONLY",
@@ -167,7 +168,7 @@ function walletPreviewCopy(locale: string) {
     rewardReady: "Reward ready",
     reward: "Reward",
     backReward: "BACK OF PASS · REWARD",
-    barcode: "Linear membership barcode · QR fallback on Apple Watch",
+    barcode: "Membership QR code",
   };
 }
 
@@ -218,18 +219,18 @@ function issuerBrandMark(
     : wafloIssuerMark(x, y, width, height, radius);
 }
 
-function barcode(x: number, y: number, width: number, height: number): string {
-  const bars = Array.from({ length: 27 }, (_, index) => {
-    const barWidth = index % 4 === 0 ? 4 : index % 3 === 0 ? 3 : 2;
-    const offset = (index * width) / 28;
-    return `<rect x="${x + offset}" y="${y}" width="${barWidth}" height="${height}" fill="#111827"/>`;
-  }).join("");
-  return `<g aria-label="Barcode placeholder">${bars}</g>`;
+function qrCode(x: number, y: number, size: number): string {
+  const previewQr = createQrPreviewMarkup("waflo-wallet-preview-only", {
+    errorCorrectionLevel: "Q",
+  });
+  const scale = size / previewQr.viewSize;
+  return `<g aria-label="QR code preview" transform="translate(${x} ${y}) scale(${scale})" shape-rendering="crispEdges">${previewQr.markup}</g>`;
 }
 
 function stampImage(stampSvg: string, x: number, y: number, width: number, height: number): string {
   const href = `data:image/svg+xml;base64,${Buffer.from(stampSvg, "utf8").toString("base64")}`;
-  return `<image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/>`;
+  const clipId = `stamp-clip-${x}-${y}-${width}-${height}`;
+  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${clipId})"/>`;
 }
 
 function composeLegacyCustomer(
@@ -490,14 +491,9 @@ function composeApple(
   const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
   const contentX = rtl ? 412 : 48;
-  const headerX = rtl ? 48 : 412;
-  const headerAnchor = "end";
   const previewBadgeX = rtl ? 24 : 316;
   const previewBadgeCenter = previewBadgeX + 60;
   const previewOnly = copy.preview;
-  const stampsLabel = copy.stamps;
-  const memberLabel = copy.member;
-  const memberValue = copy.demoMember;
   const statusLabel = copy.status;
   const statusValue = input.progress >= input.goal ? copy.rewardReady : copy.active;
   const backRewardLabel = copy.backReward;
@@ -524,20 +520,19 @@ function composeApple(
       platform: "APPLE_WALLET",
       message: programPlatformCapabilities.APPLE_WALLET.heroArtwork.explanation,
     });
-  const markX = rtl ? 386 : 48;
-  const organizationX = rtl ? 376 : 84;
-  const oppositeX = rtl ? 48 : 412;
+  const markX = rtl ? 376 : 48;
+  const organizationX = rtl ? 364 : 94;
   const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-preview-fidelity="provider-contract" data-provider-owned-geometry="true" data-apple-strip-aspect="375:123">`,
     '<rect width="100%" height="100%" fill="#F1F3F6"/>',
     `<rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/>`,
     `<text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text>`,
     `<rect data-apple-front-surface="true" x="24" y="40" width="412" height="474" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/>`,
-    `<g data-apple-identity-progress="true">${issuerBrandMark(input.merchantBrandLogoDataUri, markX, 64, 28, 28, 8)}<text x="${organizationX}" y="84" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="70" text-anchor="${headerAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="94" text-anchor="${headerAnchor}" direction="ltr" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g>`,
-    `<g data-apple-progress-strip="true"><rect data-apple-strip-safe-area="true" x="40" y="104" width="380" height="170" rx="12" fill="${input.backgroundColor}"/>${stampImage(input.stampSvg, 46, 112, 368, 154)}</g>`,
-    `<g data-apple-loyalty-row="true"><text data-apple-field-role="secondary" x="${contentX}" y="304" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text data-apple-field-role="auxiliary" x="${oppositeX}" y="282" text-anchor="end" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${oppositeX}" y="304" text-anchor="end" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text></g>`,
-    `<g data-apple-barcode-region="provider-managed"><rect x="62" y="326" width="336" height="158" rx="18" fill="#FFFFFF" opacity=".94"/>${barcode(112, 352, 236, 52)}<text x="230" y="460" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="9.5" fill="#374151">${barcodeLabel}</text></g>`,
-    `<metadata data-apple-back-fields="true" data-reward-label="${escapeXml(backRewardLabel)}" data-reward-value="${escapeXml(input.rewardSummary)}" data-member-label="${escapeXml(memberLabel)}" data-member-value="${escapeXml(memberValue)}">Apple Wallet presents these values on the pass back, not on the front surface.</metadata>`,
+    `<g data-apple-identity="true">${issuerBrandMark(input.merchantBrandLogoDataUri, markX, 62, 36, 36, 9)}<text x="${organizationX}" y="85" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text></g>`,
+    `<g data-apple-barcode-region="provider-managed"><rect x="132" y="282" width="196" height="216" rx="18" fill="#FFFFFF" opacity=".98"/>${qrCode(153, 297, 154)}<text x="230" y="480" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="9.5" fill="#374151">${barcodeLabel}</text></g>`,
+    `<g data-apple-progress-strip="true" data-apple-progress-artwork="integrated-stamps-and-reward"><rect data-apple-strip-safe-area="true" x="40" y="108" width="380" height="125" fill="${input.backgroundColor}"/>${stampImage(input.stampSvg, 46, 114, 368, 113)}</g>`,
+    `<g data-apple-program-title="true"><text data-apple-field-role="secondary" x="${contentX}" y="263" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text></g>`,
+    `<metadata data-apple-back-fields="true" data-reward-label="${escapeXml(backRewardLabel)}" data-reward-value="${escapeXml(input.rewardSummary)}" data-status-label="${escapeXml(statusLabel)}" data-status-value="${escapeXml(statusValue)}">Apple Wallet presents reward details and status on the pass back, not on the front surface.</metadata>`,
     "</svg>",
   ].join("");
   return { svg, width, height, warnings };
@@ -566,14 +561,10 @@ function composeGoogle(
   const copy = walletPreviewCopy(canonicalLocale);
   const direction = rtl ? "rtl" : "ltr";
   const anchor = "start";
-  const contentX = rtl ? 412 : 48;
   const logoX = rtl ? 350 : 48;
   const previewBadgeX = rtl ? 24 : 316;
   const previewBadgeCenter = previewBadgeX + 60;
   const previewOnly = copy.preview;
-  const pointsLabel = copy.stamps;
-  const accountLabel = copy.account;
-  const accountValue = copy.demoMember;
   const statusLabel = copy.status;
   const statusValue = input.progress >= input.goal ? copy.rewardReady : copy.active;
   const rewardLabel = copy.reward;
@@ -602,11 +593,6 @@ function composeGoogle(
     });
   const logo = issuerBrandMark(input.merchantBrandLogoDataUri, logoX, 70, 60, 60, 30);
   const issuerX = rtl ? 340 : 118;
-  const counterCenterX = rtl ? 92 : 368;
-  const oppositeX = rtl ? 48 : 412;
-  // The field on the physical opposite edge must flow back into the card.
-  // SVG's `end` anchor does that at the right edge in LTR and the left edge in RTL.
-  const oppositeAnchor = "end";
   const providerTextColor = googleProviderTextColor(input.backgroundColor);
   const titleLines = previewTextLines(input.programName, rtl ? 18 : 27);
   const titleMarkup = titleLines
@@ -616,17 +602,15 @@ function composeGoogle(
     )
     .join("");
   const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812" data-preview-fidelity="provider-contract" data-provider-owned-geometry="true">`,
     '<rect width="100%" height="100%" fill="#EEF3FA"/>',
     `<rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/>`,
     `<text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text>`,
     `<rect data-google-card-surface="true" x="24" y="40" width="412" height="716" rx="28" fill="${input.backgroundColor}" stroke="#D2DAE5" stroke-width="2"/>`,
     `<g data-google-native-title="true">${logo}<text x="${issuerX}" y="89" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="${providerTextColor}" opacity=".72">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="116" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${providerTextColor}">${titleMarkup}</text></g>`,
-    `<g data-google-core-field="points"><text x="${counterCenterX}" y="166" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${pointsLabel}</text><text data-stamp-counter="true" data-card-left="24" data-card-right="436" x="${counterCenterX}" y="191" text-anchor="middle" direction="ltr" font-family="Cairo,Arial,sans-serif" font-size="20" font-weight="800" fill="${providerTextColor}">${input.progress}/${input.goal}</text></g>`,
-    `<g data-google-template-row="identity-status"><text x="${contentX}" y="214" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${accountLabel}</text><text x="${contentX}" y="236" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${providerTextColor}">${accountValue}</text><text x="${oppositeX}" y="214" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${statusLabel}</text><text x="${oppositeX}" y="236" text-anchor="${oppositeAnchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${providerTextColor}">${statusValue}</text></g>`,
-    `<g data-google-hero-region="true" data-google-hero-artwork-composition="provider-adapted">${stampImage(input.stampSvg, 44, 252, 372, 293)}</g>`,
-    `<g data-google-template-row="reward"><text x="${contentX}" y="570" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" fill="${providerTextColor}" opacity=".68">${rewardLabel}</text><text x="${contentX}" y="594" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="700" fill="${providerTextColor}">${escapeXml(truncate(input.rewardSummary, 42))}</text></g>`,
-    `<g data-google-barcode-region="provider-managed"><rect x="80" y="618" width="300" height="114" rx="16" fill="#FFFFFF" opacity=".94"/>${barcode(126, 640, 208, 44)}<text x="230" y="714" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text></g>`,
+    `<g data-google-barcode-region="provider-managed"><rect x="132" y="154" width="196" height="194" rx="18" fill="#FFFFFF" opacity=".98"/>${qrCode(153, 164, 154)}<text x="230" y="336" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text></g>`,
+    `<g data-google-hero-region="true" data-google-hero-artwork-composition="integrated-stamps-and-reward">${stampImage(input.stampSvg, 44, 366, 372, 293)}</g>`,
+    `<metadata data-google-below-fold-fields="true" data-status-label="${escapeXml(statusLabel)}" data-status-value="${escapeXml(statusValue)}" data-reward-label="${escapeXml(rewardLabel)}" data-reward-value="${escapeXml(input.rewardSummary)}">Google Wallet keeps status and the full reward record in pass details; the concise localized reward is integrated with the stamp hero artwork.</metadata>`,
     "</svg>",
   ].join("");
   return { svg, width, height, warnings };
@@ -650,7 +634,7 @@ export function composeProgramPreview(
     svg = svg
       .replace(
         'data-wallet-provider="APPLE"',
-        'data-wallet-provider="APPLE" data-barcode-format="CODE_128" data-barcode-fallback="QR"',
+        'data-wallet-provider="APPLE" data-barcode-format="QR"',
       )
       .replace(
         'data-issuer-brand="organization"',
@@ -664,7 +648,7 @@ export function composeProgramPreview(
     svg = svg
       .replace(
         'data-wallet-provider="GOOGLE"',
-        'data-wallet-provider="GOOGLE" data-barcode-format="CODE_128"',
+        'data-wallet-provider="GOOGLE" data-barcode-format="QR_CODE"',
       )
       .replace(
         'data-issuer-brand="organization"',

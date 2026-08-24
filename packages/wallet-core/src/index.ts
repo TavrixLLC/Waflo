@@ -330,12 +330,12 @@ export const walletProviderPresentationCapabilities = {
   },
   APPLE_WALLET: {
     layout: "APPLE_STORE_CARD",
-    barcode: "CODE_128_WITH_QR_FALLBACK",
+    barcode: "QR",
     stampArtwork: "STRIP_IMAGE",
   },
   GOOGLE_WALLET: {
     layout: "GOOGLE_LOYALTY_OBJECT",
-    barcode: "CODE_128",
+    barcode: "QR",
     stampArtwork: "HERO_IMAGE",
   },
 } as const;
@@ -360,8 +360,8 @@ export interface WalletLoyaltyPresentation {
     /** Opaque, revocable credential. It contains no customer or merchant PII. */
     readonly payload: string;
     readonly alternateText: string;
-    readonly appleFormats: readonly ["PKBarcodeFormatCode128", "PKBarcodeFormatQR"];
-    readonly googleFormat: "CODE_128";
+    readonly appleFormats: readonly ["PKBarcodeFormatQR"];
+    readonly googleFormat: "QR_CODE";
   };
 }
 
@@ -484,8 +484,8 @@ export function resolveWalletLoyaltyPresentation(
     barcode: {
       payload: input.credentialPayload,
       alternateText: inactive ? copy.invalid : input.publicMembershipId.slice(-12),
-      appleFormats: ["PKBarcodeFormatCode128", "PKBarcodeFormatQR"],
-      googleFormat: "CODE_128",
+      appleFormats: ["PKBarcodeFormatQR"],
+      googleFormat: "QR_CODE",
     },
   };
 }
@@ -630,6 +630,6 @@ export function walletCommandIdempotencyKey(input: {
 }
 
 /** Bump when provider-side class/pass presentation must be reconciled in place. */
-export const WALLET_PRESENTATION_SCHEMA_VERSION = 2;
+export const WALLET_PRESENTATION_SCHEMA_VERSION = 4;
 
 import type { PublishedMembershipStampRenderInput } from "@waflo/stamp-engine";

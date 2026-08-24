@@ -753,10 +753,17 @@ export class ProgramsService {
         ...(filledAsset ? { filledArtwork: filledAsset.artwork } : {}),
         ...(emptyAsset ? { emptyArtwork: emptyAsset.artwork } : {}),
         label: `${safeProgress}/${goal}`,
-        rewardLabel: rewardReady ? rewardReadyText : translation.rewardSummary,
+        rewardLabel:
+          outputProfile === "CUSTOMER_WEB" && rewardReady
+            ? rewardReadyText
+            : translation.rewardSummary,
+        locale: effectiveCardLocale,
         rewardReady,
         progressLabelVisible: outputProfile === "CUSTOMER_WEB" && visualInput.progressLabelVisible,
-        rewardLabelVisible: outputProfile === "CUSTOMER_WEB" && visualInput.rewardLabelVisible,
+        rewardLabelVisible:
+          outputProfile === "CUSTOMER_WEB"
+            ? visualInput.rewardLabelVisible
+            : outputProfile === "APPLE_WALLET" || outputProfile === "GOOGLE_WALLET",
       } satisfies StampRenderInput;
       let rendered = renderStampSvg(stampRenderInput);
       if (outputProfile === "GOOGLE_WALLET") {

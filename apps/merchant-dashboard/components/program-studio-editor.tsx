@@ -77,6 +77,8 @@ import {
 } from "./loyalty-card-presentation";
 import { MerchantBrandMark } from "./merchant-brand-mark";
 import { ProgramAssetPicker } from "./program-asset-uploader";
+import { optimisticProgramPreviewSvg } from "./program-preview-optimistic";
+import { WalletPreviewCanvas } from "./program-preview-qr";
 import {
   type EnrollmentSettings,
   ProgramEnrollmentSettings,
@@ -138,7 +140,10 @@ interface PreviewResult {
   height: number;
   warnings: Array<{ code: string; message: string }>;
   profile: PreviewProfile;
+  sourceDraft: ProgramDraftInput;
 }
+
+type PreviewResponse = Omit<PreviewResult, "sourceDraft">;
 
 interface CursorPage<T> {
   items: T[];
@@ -436,8 +441,7 @@ function ProgramStudioEditorContent({
     const serialized = JSON.stringify(apiDraft(draft));
     if (serialized === persistedRef.current) return;
     setSaveState("unsaved");
-    setPreviews({});
-    setPreviewLoadState("idle");
+    setPreviewLoadState((current) => (current === "available" ? current : "idle"));
     const timer = window.setTimeout(async () => {
       setSaveState("saving");
       try {
@@ -467,7 +471,7 @@ function ProgramStudioEditorContent({
           setError(studioOperationError("save", interfaceLocale));
         }
       }
-    }, 900);
+    }, 800);
     return () => window.clearTimeout(timer);
   }, [conflict, draft, interfaceLocale, organizationId, programId, revision]);
 
@@ -476,14 +480,15 @@ function ProgramStudioEditorContent({
     if (saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current) return;
     setPreviewLoadState("loading");
     try {
-      const results: PreviewResult[] = [];
-      for (const profile of ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const) {
-        results.push(
-          await apiFetch<PreviewResult>(
+      const sourceDraft = structuredClone(draft);
+      const results = await Promise.all(
+        (["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map(async (profile) => ({
+          ...(await apiFetch<PreviewResponse>(
             `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${profile}&locale=${encodeURIComponent(previewLocale)}`,
-          ),
-        );
-      }
+          )),
+          sourceDraft,
+        })),
+      );
       setPreviews(Object.fromEntries(results.map((item) => [item.profile, item])));
       setPreviewLoadState("available");
     } catch {
@@ -494,7 +499,7 @@ function ProgramStudioEditorContent({
   }, [draft, interfaceLocale, organizationId, previewLocale, programId, progress, saveState]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void generatePreviews(), 250);
+    const timer = window.setTimeout(() => void generatePreviews(), 120);
     return () => window.clearTimeout(timer);
   }, [generatePreviews]);
 
@@ -1732,6 +1737,18 @@ function StudioPreview({
   const activeSource = showingSavedChanges ? "draft" : source;
   const activeDraft = showingSavedChanges ? (savedDraft ?? draft) : draft;
   const showingPublishedVersion = activeSource === "published";
+  const optimisticPreviewSvg = useMemo(
+    () =>
+      preview
+        ? optimisticProgramPreviewSvg({
+            svg: preview.svg,
+            sourceDraft: preview.sourceDraft,
+            draft: activeDraft,
+            locale: previewLocale,
+          })
+        : "",
+    [activeDraft, preview, previewLocale],
+  );
   const profileLabel = showingPublishedVersion
     ? ui.publishedCardSummary
     : selectedProfile === "CUSTOMER_WEB"
@@ -1857,9 +1874,21 @@ function StudioPreview({
             draft={activeDraft}
             progress={progress}
           />
+        ) : activeSource === "draft" && preview && selectedProfile !== "CUSTOMER_WEB" ? (
+          <span
+            className={`wallet-preview-image-stack wallet-preview-image-stack--${selectedProfile.toLocaleLowerCase("en-US")}`}
+          >
+            <WalletPreviewCanvas
+              ariaLabel={interpolateStudioCopy(ui.previewAlt, profileLabel)}
+              height={preview.height}
+              profile={selectedProfile}
+              svg={optimisticPreviewSvg}
+              width={preview.width}
+            />
+          </span>
         ) : activeSource === "draft" && preview ? (
           <Image
-            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview.svg)}`}
+            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(optimisticPreviewSvg)}`}
             alt={interpolateStudioCopy(ui.previewAlt, profileLabel)}
             width={preview.width}
             height={preview.height}

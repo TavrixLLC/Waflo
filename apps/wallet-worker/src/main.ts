@@ -292,16 +292,10 @@ function credentialPayload(pass: PassRecord, environment: Environment): string {
   });
 }
 
-function mapPass(
-  pass: PassRecord,
-  environment: Environment,
-  stampRenderInput: PublishedMembershipStampRenderInput,
-  progressAssetUrl?: string,
-  applePassImages?: Readonly<Record<string, Uint8Array>>,
-): WalletMembershipInput {
+function resolvePassLocalizedContent(pass: PassRecord) {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
-  const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+  const preferredLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
   const localizedContent = version.cardLocales.length
     ? version.cardLocales.map((item) => ({
         locale: item.locale,
@@ -322,10 +316,28 @@ function mapPass(
   const locale = resolveCardLocale({
     enabledLocales,
     defaultLocale,
-    explicitLocale: nearbyLocale,
+    explicitLocale: preferredLocale,
   });
-  const translation =
-    localizedContent.find((item) => item.locale === locale) ?? localizedContent[0];
+  return {
+    localizedContent,
+    defaultLocale,
+    locale,
+    translation: localizedContent.find((item) => item.locale === locale) ?? localizedContent[0],
+  };
+}
+
+function mapPass(
+  pass: PassRecord,
+  environment: Environment,
+  stampRenderInput: PublishedMembershipStampRenderInput,
+  progressAssetUrl?: string,
+  applePassImages?: Readonly<Record<string, Uint8Array>>,
+): WalletMembershipInput {
+  const membership = pass.membership;
+  const version = membership.enrollmentProgramVersion;
+  const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+  const { localizedContent, defaultLocale, locale, translation } =
+    resolvePassLocalizedContent(pass);
   return {
     organizationId: membership.organizationId,
     organizationName: membership.organization.name,
@@ -2237,6 +2249,7 @@ export class WalletWorker {
       asset.sha256Digest;
     const requiredStampCount = version.stampRule?.requiredStampCount ?? 8;
     const currentStampCount = pass.membership.progress?.currentCycleStampCount ?? 0;
+    const { locale, translation } = resolvePassLocalizedContent(pass);
     const rawLayout =
       theme.layoutConfiguration &&
       typeof theme.layoutConfiguration === "object" &&
@@ -2262,8 +2275,9 @@ export class WalletWorker {
       programId: pass.membership.programId,
       programVersionId: version.id,
       membershipId: pass.membershipId,
-      rendererSchemaVersion: "waflo-stamp-render-v1",
-      locale: pass.membership.customer.preferredLocale === "AR" ? "ar" : "en",
+      rendererSchemaVersion: "waflo-stamp-render-v2",
+      locale,
+      rewardLabel: translation?.rewardSummary ?? "",
       requiredStampCount,
       currentStampCount,
       rewardReady: pass.membership.progress?.rewardReady ?? false,

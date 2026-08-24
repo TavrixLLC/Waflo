@@ -68,7 +68,8 @@ const membershipInput: WalletMembershipInput = {
     programId: "00000000-0000-4000-8000-000000000002",
     programVersionId: "00000000-0000-4000-8000-000000000003",
     membershipId: "00000000-0000-4000-8000-000000000005",
-    rendererSchemaVersion: "waflo-stamp-render-v1",
+    rendererSchemaVersion: "waflo-stamp-render-v2",
+    rewardLabel: "Free reward",
     locale: "en",
     requiredStampCount: 8,
     currentStampCount: 2,
@@ -179,7 +180,9 @@ describe("Wallet provider-native nearby relevance", () => {
       }),
     ]);
     expect(pass.maxDistance).toBe(2000);
-    expect(pass.storeCard.auxiliaryFields[0]?.changeMessage).toBe("%@");
+    expect(pass.storeCard.backFields.find((field) => field.key === "status")?.changeMessage).toBe(
+      "%@",
+    );
   });
 
   it("removes Apple relevance when disabled and enforces the 10-location provider limit", () => {

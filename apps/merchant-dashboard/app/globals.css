@@ -4207,6 +4207,43 @@ html:lang(ckb-Arab-IQ) body {
   object-fit: contain;
 }
 
+.wallet-preview-image-stack {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.wallet-preview-image-stack--apple_wallet {
+  aspect-ratio: 460 / 530;
+}
+
+.wallet-preview-image-stack--google_wallet {
+  aspect-ratio: 460 / 780;
+}
+
+.wallet-preview-image-stack__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+.builder-preview-canvas .wallet-preview-image-stack--apple_wallet {
+  max-width: 29.51rem;
+}
+
+.builder-preview-canvas .wallet-preview-image-stack--google_wallet {
+  max-width: 20.05rem;
+}
+
+.studio-device-frame .wallet-preview-image-stack--apple_wallet {
+  max-width: 33rem;
+}
+
+.studio-device-frame .wallet-preview-image-stack--google_wallet {
+  max-width: 22.4rem;
+}
+
 .studio-device-frame--apple_wallet {
   background: #111827;
 }

@@ -54,7 +54,7 @@ export interface AppleStoreCardPass {
   }>;
   readonly maxDistance?: number;
   readonly barcodes: ReadonlyArray<{
-    readonly format: "PKBarcodeFormatCode128" | "PKBarcodeFormatQR";
+    readonly format: "PKBarcodeFormatQR";
     readonly message: string;
     readonly messageEncoding: "iso-8859-1";
     readonly altText: string;
@@ -117,18 +117,11 @@ export function mapAppleStoreCard(
         messageEncoding: "iso-8859-1",
         altText: presentation.barcode.alternateText,
       },
-      {
-        // Apple Watch cannot display Code 128, so Wallet can select this safe fallback.
-        format: presentation.barcode.appleFormats[1],
-        message: presentation.barcode.payload,
-        messageEncoding: "iso-8859-1",
-        altText: presentation.barcode.alternateText,
-      },
     ],
     storeCard: {
-      headerFields: [
-        { key: "progress", label: presentation.labels.stamps, value: presentation.progress },
-      ],
+      // The stamp artwork already communicates progress more clearly than a small
+      // numeric counter. Keep the header clear and avoid repeating customer data.
+      headerFields: [],
       // Store-card primary fields are rendered over the strip artwork at a very large size.
       // Keep that region clear so the progress artwork remains legible and use the native
       // secondary row for the program title instead.
@@ -139,19 +132,13 @@ export function mapAppleStoreCard(
           value: presentation.programName.slice(0, 80),
         },
       ],
-      auxiliaryFields: [
+      auxiliaryFields: [],
+      backFields: [
         {
           key: "status",
           label: presentation.labels.status,
           value: presentation.status,
           changeMessage: "%@",
-        },
-      ],
-      backFields: [
-        {
-          key: "member",
-          label: presentation.labels.member,
-          value: presentation.memberName.slice(0, 80),
         },
         {
           key: "reward",
@@ -162,7 +149,7 @@ export function mapAppleStoreCard(
           key: "security",
           label: presentation.labels.security,
           value:
-            "This barcode is an opaque, revocable Waflo membership credential. Do not share screenshots.",
+            "This QR code is an opaque, revocable Waflo membership credential. Do not share screenshots.",
         },
         {
           key: "operator",

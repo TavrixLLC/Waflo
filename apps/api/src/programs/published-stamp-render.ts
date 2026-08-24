@@ -38,6 +38,7 @@ export async function renderPublishedStampArtwork(input: {
   programVersionId: string;
   membershipId: string;
   locale: string;
+  rewardLabel: string;
   requiredStampCount: number;
   currentStampCount: number;
   rewardReady: boolean;
@@ -88,8 +89,9 @@ export async function renderPublishedStampArtwork(input: {
     programId: input.programId,
     programVersionId: input.programVersionId,
     membershipId: input.membershipId,
-    rendererSchemaVersion: "waflo-stamp-render-v1",
+    rendererSchemaVersion: "waflo-stamp-render-v2",
     locale: input.locale,
+    rewardLabel: input.rewardLabel,
     requiredStampCount: input.requiredStampCount,
     currentStampCount: input.currentStampCount,
     rewardReady: input.rewardReady,

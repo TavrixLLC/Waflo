@@ -19,7 +19,8 @@ const pinnedRenderInput: PublishedMembershipStampRenderInput = {
   programId: "00000000-0000-4000-8000-000000000002",
   programVersionId: "00000000-0000-4000-8000-000000000003",
   membershipId: "00000000-0000-4000-8000-000000000004",
-  rendererSchemaVersion: "waflo-stamp-render-v1",
+  rendererSchemaVersion: "waflo-stamp-render-v2",
+  rewardLabel: "مكافأة مجانية",
   locale: "ar",
   requiredStampCount: 8,
   currentStampCount: 3,
@@ -80,18 +81,13 @@ const walletInput: WalletMembershipInput = {
 };
 
 describe("W3 Repair Round 1 renderer and provider regressions", () => {
-  it("preserves identical FILLED/EMPTY placement across every output profile", () => {
+  it("preserves stamp order and state while integrating reward copy only in Wallet artwork", () => {
     const profiles = ["JOIN_PREVIEW", "CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
     const results = profiles.map((outputProfile) =>
       renderPublishedMembershipStampSvg({ ...pinnedRenderInput, outputProfile }),
     );
     const semantics = results.map((result) =>
-      result.positions.map((position) => ({
-        index: position.index,
-        x: position.x,
-        y: position.y,
-        filled: position.filled,
-      })),
+      result.positions.map((position) => ({ index: position.index, filled: position.filled })),
     );
     expect(semantics.every((value) => JSON.stringify(value) === JSON.stringify(semantics[0]))).toBe(
       true,
@@ -99,8 +95,13 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     for (const result of results) {
       expect(result.svg.match(/data-visual-state="FILLED"/g)).toHaveLength(3);
       expect(result.svg.match(/data-visual-state="EMPTY"/g)).toHaveLength(5);
-      expect(result.svg).not.toMatch(/<text|check|star|gift|data-stamp-index="[^"]+">[0-9]/i);
+      expect(result.svg).not.toMatch(/check|star|gift|data-stamp-index="[^"]+">[0-9]/i);
     }
+    expect(results[0]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[1]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[2]?.svg).toContain('data-integrated-reward="true"');
+    expect(results[2]?.svg).toContain("مكافأة مجانية");
+    expect(results[3]?.svg).toContain('data-integrated-reward="true"');
     expect(new Set(results.map((result) => result.configurationDigest)).size).toBe(4);
   });
 
@@ -130,6 +131,12 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
         membershipId: "00000000-0000-4000-8000-000000000099",
       }),
     ).toBe(publishedMembershipStampVisualDigest(pinnedRenderInput));
+    expect(
+      publishedMembershipStampVisualDigest({
+        ...pinnedRenderInput,
+        rewardLabel: "مكافأة مختلفة",
+      }),
+    ).not.toBe(publishedMembershipStampVisualDigest(pinnedRenderInput));
   });
 
   it("packages nonblank Apple branding and selected-artwork progress without leaking secrets", async () => {
@@ -210,17 +217,12 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       .filter(([name]) => name.endsWith(".json") || name.endsWith(".strings"))
       .map(([, value]) => Buffer.from(value).toString("utf8"))
       .join("\n");
-    // Apple Wallet may select the first supported format. Code 128 is primary on iPhone,
-    // while QR carries the identical opaque credential as the Apple Watch fallback.
-    expect(packageText.match(/wfl1\.opaque\.credential/g)).toHaveLength(2);
+    // Apple Wallet renders one square QR containing the unchanged opaque credential.
+    expect(packageText.match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
     const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8")) as {
       barcodes: Array<{ format: string; message: string }>;
     };
     expect(pass.barcodes).toEqual([
-      expect.objectContaining({
-        format: "PKBarcodeFormatCode128",
-        message: "wfl1.opaque.credential",
-      }),
       expect.objectContaining({
         format: "PKBarcodeFormatQR",
         message: "wfl1.opaque.credential",

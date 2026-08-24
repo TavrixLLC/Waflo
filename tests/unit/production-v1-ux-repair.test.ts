@@ -479,13 +479,17 @@ describe("production-v1 UX and billing repair", () => {
     });
     expect(preview.svg).toContain('lang="ar" xml:lang="ar"');
     expect(preview.svg).toContain('direction="rtl"');
-    expect(preview.svg).toContain(
-      'data-google-template-row="identity-status"><text x="412" y="214" text-anchor="start"',
-    );
-    expect(preview.svg).toContain('x="48" y="214" text-anchor="end"');
-    expect(preview.svg).toContain(
-      'data-google-template-row="reward"><text x="412" y="570" text-anchor="start"',
-    );
+    expect(preview.svg).toContain('data-barcode-format="QR_CODE"');
+    expect(preview.svg).not.toContain('data-google-core-field="points"');
+    expect(preview.svg).not.toContain('data-stamp-counter="true"');
+    const qrRegion = preview.svg.indexOf('data-google-barcode-region="provider-managed"');
+    const heroRegion = preview.svg.indexOf('data-google-hero-region="true"');
+    const supportingFields = preview.svg.indexOf('data-google-below-fold-fields="true"');
+    expect(qrRegion).toBeGreaterThan(-1);
+    expect(qrRegion).toBeLessThan(heroRegion);
+    expect(heroRegion).toBeLessThan(supportingFields);
+    expect(preview.svg).not.toContain('data-account-label="الحساب"');
+    expect(preview.svg).toContain('data-reward-label="المكافأة"');
     expect(preview.digest).toBe(createHash("sha256").update(preview.svg).digest("hex"));
   });
 

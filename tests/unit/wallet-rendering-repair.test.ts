@@ -53,8 +53,8 @@ describe("Wallet rendering repair completion", () => {
     const previewCache = readFileSync("apps/api/src/programs/preview-cache.ts", "utf8");
     const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
-    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(2);
-    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 6");
+    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(4);
+    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 8");
     expect(enrollment).toContain("ensure-template:v");
     expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
     expect(worker).toContain("enqueuePresentationRepairs");
@@ -93,7 +93,7 @@ describe("Wallet rendering repair completion", () => {
         : {}),
     });
 
-    expect(GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION).toBe("google-progress-v3");
+    expect(GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION).toBe("google-progress-v4");
     expect(composition).toEqual({
       layout: "GRID",
       layoutConfiguration: { columns: 3 },

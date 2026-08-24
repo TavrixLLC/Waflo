@@ -414,6 +414,7 @@ export class WalletService {
       programVersionId: version.id,
       membershipId: membership.id,
       locale,
+      rewardLabel: translation?.rewardSummary ?? "",
       requiredStampCount: goal,
       currentStampCount: progress,
       rewardReady: membership.progress?.rewardReady ?? false,
