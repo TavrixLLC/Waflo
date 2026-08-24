@@ -224,6 +224,7 @@ export function ProgramCardBuilder({
   const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewState>>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(false);
+  const [assetGeneration, setAssetGeneration] = useState(0);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -376,8 +377,14 @@ export function ProgramCardBuilder({
 
   const previewKey = useCallback(
     (nextProfile: PreviewProfile) =>
-      builderPreviewCacheKey(revisionRef.current, nextProfile, previewLocale, progress),
-    [previewLocale, progress],
+      builderPreviewCacheKey(
+        revisionRef.current,
+        nextProfile,
+        previewLocale,
+        progress,
+        assetGeneration,
+      ),
+    [assetGeneration, previewLocale, progress],
   );
 
   const loadPreview = useCallback(
@@ -708,7 +715,10 @@ export function ProgramCardBuilder({
                 update={update}
                 organizationId={organizationId}
                 assets={assets}
-                onAssetUploaded={onAssetUploaded}
+                onAssetUploaded={(asset) => {
+                  onAssetUploaded(asset);
+                  setAssetGeneration((current) => current + 1);
+                }}
                 interfaceLocale={interfaceLocale}
               />
             ) : null}

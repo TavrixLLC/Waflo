@@ -209,7 +209,7 @@ describe("merchant loyalty-card Builder state", () => {
     });
   });
 
-  it("debounces autosave, requires explicit retry after failure, and keys previews by revision", () => {
+  it("debounces autosave, requires explicit retry after failure, and keys previews by state", () => {
     expect(BUILDER_AUTOSAVE_DELAY_MS).toBeGreaterThanOrEqual(800);
     expect(BUILDER_PREVIEW_DELAY_MS).toBeLessThanOrEqual(150);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "saved")).toBe(true);
@@ -217,7 +217,7 @@ describe("merchant loyalty-card Builder state", () => {
     expect(shouldScheduleBuilderAutosave("changed", "saved", "failed")).toBe(false);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "conflict")).toBe(false);
     expect(shouldScheduleBuilderAutosave("same", "same", "saved")).toBe(false);
-    expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4)).toBe("7:APPLE_WALLET:AR:4");
+    expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4, 2)).toBe("7:APPLE_WALLET:AR:4:2");
   });
 
   it("updates colors and localized copy immediately while retaining provider structure", () => {

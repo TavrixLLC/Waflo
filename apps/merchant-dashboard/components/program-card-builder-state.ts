@@ -31,8 +31,9 @@ export function builderPreviewCacheKey(
   profile: PreviewProfile,
   locale: string,
   progress: number,
+  assetGeneration: number,
 ): string {
-  return `${revision}:${profile}:${locale}:${progress}`;
+  return `${revision}:${profile}:${locale}:${progress}:${assetGeneration}`;
 }
 
 export const builderSections = [
