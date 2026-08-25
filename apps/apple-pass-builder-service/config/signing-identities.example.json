@@ -1,0 +1,13 @@
+{
+  "identities": [
+    {
+      "id": "waflo-default",
+      "merchantIds": ["*"],
+      "passTypeIdentifier": "pass.app.waflo",
+      "teamIdentifier": "YOUR_TEAM_ID",
+      "certificatePath": "/run/secrets/apple-pass-certificate",
+      "certificatePasswordFile": "/run/secrets/apple-pass-certificate-password",
+      "wwdrCertificatePath": "/run/secrets/apple-wwdr-certificate"
+    }
+  ]
+}

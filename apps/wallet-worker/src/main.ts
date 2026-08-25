@@ -33,8 +33,10 @@ import {
   type PublishedMembershipStampRenderInput,
 } from "@waflo/stamp-engine";
 import {
+  ApplePassBuilderGenerator,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
+  parseAppleSigningKeyMap,
   TestApplePassSigner,
   type ApplePassSigner,
 } from "@waflo/wallet-apple";
@@ -145,6 +147,7 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
     signer = new TestApplePassSigner();
   } else if (
     environment.APPLE_WALLET_MODE === "REAL" &&
+    environment.APPLE_WALLET_GENERATOR === "legacy" &&
     environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 &&
     environment.APPLE_PASS_CERTIFICATE_PASSWORD &&
     environment.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
@@ -159,14 +162,42 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
       signer = undefined;
     }
   }
+  let appleGenerator: ApplePassBuilderGenerator | undefined;
+  if (
+    environment.APPLE_WALLET_MODE === "REAL" &&
+    environment.APPLE_WALLET_GENERATOR === "passbuilder" &&
+    environment.APPLE_PASS_BUILDER_URL &&
+    environment.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE
+  ) {
+    try {
+      appleGenerator = new ApplePassBuilderGenerator({
+        serviceUrl: environment.APPLE_PASS_BUILDER_URL,
+        authToken: readFileSync(environment.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE, "utf8").trim(),
+        signingKeyId: environment.APPLE_PASS_BUILDER_SIGNING_KEY_ID,
+        ...(environment.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE
+          ? {
+              signingKeyIdsByMerchant: parseAppleSigningKeyMap(
+                JSON.parse(
+                  readFileSync(environment.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE, "utf8"),
+                ),
+              ),
+            }
+          : {}),
+        templateId: environment.APPLE_PASS_BUILDER_TEMPLATE_ID,
+        timeoutMs: environment.APPLE_PASS_BUILDER_TIMEOUT_MS,
+      });
+    } catch {
+      appleGenerator = undefined;
+    }
+  }
   const appleReady =
     environment.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
     (environment.APPLE_WALLET_MODE === "REAL" &&
       Boolean(
-        signer &&
-          environment.APPLE_PASS_TYPE_IDENTIFIER &&
+        environment.APPLE_PASS_TYPE_IDENTIFIER &&
           environment.APPLE_TEAM_IDENTIFIER &&
-          environment.APPLE_PASS_WEB_SERVICE_URL,
+          environment.APPLE_PASS_WEB_SERVICE_URL &&
+          (environment.APPLE_WALLET_GENERATOR === "passbuilder" ? appleGenerator : signer),
       ));
   const appleMode = appleReady ? environment.APPLE_WALLET_MODE : "DISABLED";
   const appleSecrets = parseVersionedSecretEntries(
@@ -195,7 +226,7 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
               `${environment.API_PUBLIC_URL.replace(/\/+$/, "")}/v1/apple-wallet`,
           },
         }),
-    ...(signer ? { signer } : {}),
+    ...(appleGenerator ? { generator: appleGenerator } : signer ? { signer } : {}),
     authenticationToken: (input) =>
       deriveAppleAuthenticationToken(
         input.walletPassInstanceId,
@@ -983,10 +1014,16 @@ export class WalletWorker {
       include: { walletPassInstance: true },
     });
     if (mode === "TEST_ADAPTER" || registrations.length === 0) return;
+    const apnsCertificateSource =
+      this.environment.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 ??
+      this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64;
+    const apnsCertificatePassword = this.environment.APPLE_APNS_CERTIFICATE_PASSWORD_FILE
+      ? readFileSync(this.environment.APPLE_APNS_CERTIFICATE_PASSWORD_FILE, "utf8").trim()
+      : this.environment.APPLE_PASS_CERTIFICATE_PASSWORD;
     if (
       mode !== "REAL" ||
-      !this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
-      !this.environment.APPLE_PASS_CERTIFICATE_PASSWORD ||
+      !apnsCertificateSource ||
+      !apnsCertificatePassword ||
       !this.environment.APPLE_PASS_TYPE_IDENTIFIER
     ) {
       throw new Error("APNs pass certificate configuration is unavailable.");
@@ -996,8 +1033,8 @@ export class WalletWorker {
         ? "https://api.push.apple.com"
         : "https://api.sandbox.push.apple.com";
     const client = connectHttp2(authority, {
-      pfx: bytesFromSource(this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
-      passphrase: this.environment.APPLE_PASS_CERTIFICATE_PASSWORD,
+      pfx: bytesFromSource(apnsCertificateSource),
+      passphrase: apnsCertificatePassword,
     });
     try {
       for (const registration of registrations) {

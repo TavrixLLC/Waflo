@@ -173,6 +173,7 @@ export const environmentSchema = z
     SECURITY_TOKEN_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
     WALLET_PUBLIC_BASE_URL: z.url().default("http://localhost:4000/v1/public/wallet-assets"),
     APPLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
+    APPLE_WALLET_GENERATOR: z.enum(["legacy", "passbuilder"]).default("legacy"),
     APPLE_PASS_TYPE_IDENTIFIER: z.string().optional(),
     APPLE_TEAM_IDENTIFIER: z.string().optional(),
     APPLE_ORGANIZATION_NAME: z.string().default("Waflo by Tavrix LLC"),
@@ -187,6 +188,14 @@ export const environmentSchema = z
     APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION: z.coerce.number().int().min(1).default(1),
     APPLE_PASS_AUTH_SECRETS_JSON: z.string().optional(),
     APPLE_APNS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+    APPLE_APNS_CERTIFICATE_PATH_OR_BASE64: z.string().optional(),
+    APPLE_APNS_CERTIFICATE_PASSWORD_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_URL: optionalUrl,
+    APPLE_PASS_BUILDER_AUTH_TOKEN_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_SIGNING_KEY_ID: z.string().min(1).max(128).default("waflo-default"),
+    APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_TEMPLATE_ID: z.string().min(1).max(128).default("waflo-loyalty-v1"),
+    APPLE_PASS_BUILDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
     GOOGLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
     GOOGLE_WALLET_ISSUER_ID: z.string().optional(),
     GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64: z.string().optional(),
@@ -344,16 +353,49 @@ export const environmentSchema = z
       value.APPLE_WALLET_MODE === "REAL" &&
       (!value.APPLE_PASS_TYPE_IDENTIFIER ||
         !value.APPLE_TEAM_IDENTIFIER ||
-        !value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
-        !value.APPLE_PASS_CERTIFICATE_PASSWORD ||
-        !value.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64 ||
         !value.APPLE_PASS_WEB_SERVICE_URL)
     ) {
       context.addIssue({
         code: "custom",
         path: ["APPLE_WALLET_MODE"],
-        message:
-          "Real Apple Wallet mode requires a complete signing and update-service configuration.",
+        message: "Real Apple Wallet mode requires complete pass identity and update configuration.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      value.APPLE_WALLET_GENERATOR === "legacy" &&
+      (!value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
+        !value.APPLE_PASS_CERTIFICATE_PASSWORD ||
+        !value.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_WALLET_GENERATOR"],
+        message: "The legacy generator requires its pass certificate, password, and WWDR chain.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      value.APPLE_WALLET_GENERATOR === "passbuilder" &&
+      (!value.APPLE_PASS_BUILDER_URL || !value.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_WALLET_GENERATOR"],
+        message: "The Pass Builder generator requires its private service URL and auth-token file.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      (!(
+        value.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 || value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64
+      ) ||
+        !(value.APPLE_APNS_CERTIFICATE_PASSWORD_FILE || value.APPLE_PASS_CERTIFICATE_PASSWORD))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_APNS_ENVIRONMENT"],
+        message: "Real Apple Wallet mode requires APNs certificate credentials for pass updates.",
       });
     }
     if (

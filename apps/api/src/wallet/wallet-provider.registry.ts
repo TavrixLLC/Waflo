@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Injectable } from "@nestjs/common";
 import {
+  ApplePassBuilderGenerator,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
+  parseAppleSigningKeyMap,
   TestApplePassSigner,
   type ApplePassSigner,
 } from "@waflo/wallet-apple";
@@ -50,6 +52,7 @@ export class WalletProviderRegistry {
       appleSigner = new TestApplePassSigner();
     } else if (
       values.APPLE_WALLET_MODE === "REAL" &&
+      values.APPLE_WALLET_GENERATOR === "legacy" &&
       values.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 &&
       values.APPLE_PASS_CERTIFICATE_PASSWORD &&
       values.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
@@ -64,14 +67,40 @@ export class WalletProviderRegistry {
         appleSigner = undefined;
       }
     }
+    let appleGenerator: ApplePassBuilderGenerator | undefined;
+    if (
+      values.APPLE_WALLET_MODE === "REAL" &&
+      values.APPLE_WALLET_GENERATOR === "passbuilder" &&
+      values.APPLE_PASS_BUILDER_URL &&
+      values.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE
+    ) {
+      try {
+        appleGenerator = new ApplePassBuilderGenerator({
+          serviceUrl: values.APPLE_PASS_BUILDER_URL,
+          authToken: readFileSync(values.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE, "utf8").trim(),
+          signingKeyId: values.APPLE_PASS_BUILDER_SIGNING_KEY_ID,
+          ...(values.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE
+            ? {
+                signingKeyIdsByMerchant: parseAppleSigningKeyMap(
+                  JSON.parse(readFileSync(values.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE, "utf8")),
+                ),
+              }
+            : {}),
+          templateId: values.APPLE_PASS_BUILDER_TEMPLATE_ID,
+          timeoutMs: values.APPLE_PASS_BUILDER_TIMEOUT_MS,
+        });
+      } catch {
+        appleGenerator = undefined;
+      }
+    }
     const appleReady =
       values.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
       (values.APPLE_WALLET_MODE === "REAL" &&
         Boolean(
-          appleSigner &&
-            values.APPLE_PASS_TYPE_IDENTIFIER &&
+          values.APPLE_PASS_TYPE_IDENTIFIER &&
             values.APPLE_TEAM_IDENTIFIER &&
-            values.APPLE_PASS_WEB_SERVICE_URL,
+            values.APPLE_PASS_WEB_SERVICE_URL &&
+            (values.APPLE_WALLET_GENERATOR === "passbuilder" ? appleGenerator : appleSigner),
         ));
     const effectiveAppleMode = appleReady ? values.APPLE_WALLET_MODE : "DISABLED";
     const appleConfiguration =
@@ -91,7 +120,11 @@ export class WalletProviderRegistry {
     const apple = new AppleWalletProvider({
       mode: effectiveAppleMode,
       ...(appleConfiguration ? { configuration: appleConfiguration } : {}),
-      ...(appleSigner ? { signer: appleSigner } : {}),
+      ...(appleGenerator
+        ? { generator: appleGenerator }
+        : appleSigner
+          ? { signer: appleSigner }
+          : {}),
       authenticationToken: (input) =>
         security.appleAuthenticationToken(input.walletPassInstanceId, input.providerIdentity),
       passDownloadUrl: `${values.API_PUBLIC_URL.replace(/\/+$/, "")}/v1/customer/wallet/apple/pass`,

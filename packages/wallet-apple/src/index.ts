@@ -21,6 +21,25 @@ import {
   type WalletUpdateReason,
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
+import {
+  mapAppleGenericPass,
+  type WalletPassGenerationInput,
+  type WalletPassGenerator,
+  type WalletPassGeneratorHealth,
+} from "./pass-builder.js";
+
+export {
+  type AppleGenericPassDocument,
+  ApplePassBuilderGenerator,
+  type ApplePassBuilderGeneratorOptions,
+  adoptedApplePassBuilderRevision,
+  mapAppleGenericPass,
+  parseAppleSigningKeyMap,
+  type WalletPassGenerationInput,
+  type WalletPassGenerator,
+  type WalletPassGeneratorHealth,
+  type WalletPassValidationResult,
+} from "./pass-builder.js";
 
 export interface ApplePassConfiguration {
   readonly passTypeIdentifier: string;
@@ -366,16 +385,50 @@ export interface AppleWalletProviderOptions {
   readonly mode: WalletProviderMode;
   readonly configuration?: ApplePassConfiguration;
   readonly signer?: ApplePassSigner;
+  readonly generator?: WalletPassGenerator;
   readonly authenticationToken: (input: WalletMembershipInput) => string;
   readonly passDownloadUrl: string;
+}
+
+export class LegacyApplePassGenerator implements WalletPassGenerator {
+  readonly kind = "legacy" as const;
+
+  constructor(private readonly signer: ApplePassSigner) {}
+
+  async generatePass(input: WalletPassGenerationInput): Promise<Buffer> {
+    const pass = mapAppleStoreCard(
+      input.membership,
+      input.configuration,
+      input.authenticationToken,
+    );
+    return buildApplePassPackage({
+      pass,
+      signer: this.signer,
+      images: await progressStripImages(input.membership),
+    });
+  }
+
+  async validatePass(input: WalletPassGenerationInput) {
+    const artifact = await this.generatePass(input);
+    return { valid: artifact.length > 0, warnings: [] };
+  }
+
+  async healthCheck(configuration: ApplePassConfiguration): Promise<WalletPassGeneratorHealth> {
+    if (this.signer.mode !== "REAL" || !this.signer.health) return { status: "READY" };
+    return this.signer.health(configuration.passTypeIdentifier, configuration.teamIdentifier);
+  }
 }
 
 export class AppleWalletProvider implements WalletProvider {
   readonly provider = "APPLE" as const;
   readonly mode: WalletProviderMode;
+  private readonly generator: WalletPassGenerator | undefined;
 
   constructor(private readonly options: AppleWalletProviderOptions) {
     this.mode = options.mode;
+    this.generator =
+      options.generator ??
+      (options.signer ? new LegacyApplePassGenerator(options.signer) : undefined);
   }
 
   async healthCheck(): Promise<WalletProviderHealth> {
@@ -390,7 +443,7 @@ export class AppleWalletProvider implements WalletProvider {
         demo: false,
       };
     }
-    if (!this.options.configuration || !this.options.signer) {
+    if (!this.options.configuration || !this.generator) {
       return {
         provider: this.provider,
         mode: this.mode,
@@ -418,12 +471,22 @@ export class AppleWalletProvider implements WalletProvider {
         externallyCertified: false,
       };
     }
-    if (this.options.signer.mode === "REAL" && this.options.signer.health) {
+    if (this.mode === "REAL") {
       try {
-        const certificate = this.options.signer.health(
-          this.options.configuration.passTypeIdentifier,
-          this.options.configuration.teamIdentifier,
-        );
+        const certificate = await this.generator.healthCheck(this.options.configuration);
+        if (certificate.status === "DEGRADED") {
+          return {
+            provider: this.provider,
+            mode: this.mode,
+            status: "PROVIDER_UNAVAILABLE",
+            checkedAt,
+            safeMessage: "Apple pass generation is unavailable.",
+            demo: false,
+            configured: true,
+            providerReachable: false,
+            externallyCertified: false,
+          };
+        }
         if (certificate.status === "EXPIRED") {
           return {
             provider: this.provider,
@@ -435,7 +498,7 @@ export class AppleWalletProvider implements WalletProvider {
             configured: true,
             providerReachable: false,
             externallyCertified: false,
-            certificateExpiresAt: certificate.expiresAt,
+            ...(certificate.expiresAt ? { certificateExpiresAt: certificate.expiresAt } : {}),
           };
         }
         if (certificate.status === "EXPIRING") {
@@ -449,7 +512,7 @@ export class AppleWalletProvider implements WalletProvider {
             configured: true,
             providerReachable: false,
             externallyCertified: false,
-            certificateExpiresAt: certificate.expiresAt,
+            ...(certificate.expiresAt ? { certificateExpiresAt: certificate.expiresAt } : {}),
           };
         }
         if (
@@ -469,7 +532,7 @@ export class AppleWalletProvider implements WalletProvider {
             configured: true,
             providerReachable: false,
             externallyCertified: false,
-            certificateExpiresAt: certificate.expiresAt,
+            ...(certificate.expiresAt ? { certificateExpiresAt: certificate.expiresAt } : {}),
           };
         }
       } catch {
@@ -524,18 +587,24 @@ export class AppleWalletProvider implements WalletProvider {
 
   async issueMembershipPass(input: WalletMembershipInput): Promise<WalletIssueResult> {
     const configuration = this.requireConfigured();
-    const pass = mapAppleStoreCard(input, configuration, this.options.authenticationToken(input));
-    const artifact = await buildApplePassPackage({
-      pass,
-      signer: this.options.signer as ApplePassSigner,
-      images: await progressStripImages(input),
+    const authenticationToken = this.options.authenticationToken(input);
+    const pass =
+      this.generator?.kind === "apple-pass-builder"
+        ? mapAppleGenericPass(input, configuration, authenticationToken)
+        : mapAppleStoreCard(input, configuration, authenticationToken);
+    const artifact = await this.generator?.generatePass({
+      membership: input,
+      configuration,
+      authenticationToken,
     });
+    if (!artifact) throw new Error("Apple Wallet pass generator is unavailable.");
     return {
       providerObjectId: input.providerIdentity,
       state: "ACTIVE",
       artifact,
       safeMetadata: {
         mode: this.mode,
+        generator: this.generator?.kind ?? "unavailable",
         packageDigest: createHash("sha256").update(artifact).digest("hex"),
         voided: pass.voided,
       },
@@ -573,7 +642,7 @@ export class AppleWalletProvider implements WalletProvider {
   }
 
   private requireConfigured(): ApplePassConfiguration {
-    if (this.mode === "DISABLED" || !this.options.configuration || !this.options.signer) {
+    if (this.mode === "DISABLED" || !this.options.configuration || !this.generator) {
       throw new Error("Apple Wallet is not configured.");
     }
     return this.options.configuration;
