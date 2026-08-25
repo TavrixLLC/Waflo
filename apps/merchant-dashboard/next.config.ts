@@ -2,8 +2,6 @@ import { join } from "node:path";
 import { createNextContentSecurityPolicy } from "@waflo/security";
 import type { NextConfig } from "next";
 
-const configuredApiUrl = process.env.WAFLO_E2E_API_URL ?? process.env.NEXT_PUBLIC_API_URL;
-
 const nextConfig: NextConfig = {
   ...(process.env.WAFLO_E2E_NEXT_START === "1" ? {} : { output: "standalone" }),
   outputFileTracingRoot: join(import.meta.dirname, "../.."),
@@ -20,6 +18,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {
+    const configuredApiUrl = process.env.WAFLO_E2E_API_URL ?? process.env.NEXT_PUBLIC_API_URL;
     return [
       {
         source: "/:path*",

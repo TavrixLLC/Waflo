@@ -503,19 +503,12 @@ export class StaffDeviceSignatureGuard implements CanActivate {
             code: "STAFF_USER_DEACTIVATED",
             message: "The Staff identity is deactivated.",
           }
-        : session.organizationMember.status !== "ACTIVE"
+        : !location || !staffAssignment || !deviceAssignment
           ? {
-              code: "STAFF_MEMBERSHIP_INACTIVE",
-              message: "The Staff organization membership is inactive.",
+              code: "STAFF_LOCATION_ASSIGNMENT_INVALID",
+              message: "The Staff Location assignment is no longer active.",
             }
-          : session.staffDevice.status !== "ACTIVE"
-            ? { code: "STAFF_DEVICE_REVOKED", message: "The Staff device has been revoked." }
-            : !location || !staffAssignment || !deviceAssignment
-              ? {
-                  code: "STAFF_LOCATION_ASSIGNMENT_INVALID",
-                  message: "The Staff Location assignment is no longer active.",
-                }
-              : null;
+          : null;
     if (principalFailure) {
       await this.audit.security(
         {
@@ -689,17 +682,9 @@ export class StaffDeviceSignatureGuard implements CanActivate {
 
     request.staffDeviceContext = {
       organizationId: session.organizationId,
-      organization: {
-        id: location.organization.id,
-        displayName: organizationDisplayName,
-      },
       organizationMemberId: session.organizationMemberId,
       role: session.organizationMember.role,
       locationId: session.locationId,
-      currentLocation: {
-        id: location.id,
-        displayName: currentLocationDisplayName,
-      },
       deviceId: session.staffDeviceId,
       devicePublicId: session.staffDevice.publicId,
       deviceSessionId: session.id,

@@ -95,16 +95,12 @@ export function balancedWalletStampDistribution(total: number): BalancedWalletSt
  * wallet renderer. Both pieces of artwork are mandatory so production call
  * sites can never silently fall back to generic circles, checks, or placeholders.
  */
-export interface PublishedMembershipStampRenderInput {
+interface PublishedMembershipStampRenderInputBase {
   readonly organizationId: string;
   readonly programId: string;
   readonly programVersionId: string;
   readonly membershipId: string;
-  readonly rendererSchemaVersion: "waflo-stamp-render-v2";
-  /** Canonical card-content BCP-47 locale. */
   readonly locale: string;
-  /** Localized reward copy used by native provider fields; provider artwork stays text-free. */
-  readonly rewardLabel: string;
   readonly requiredStampCount: number;
   readonly currentStampCount: number;
   readonly rewardReady: boolean;
@@ -128,6 +124,20 @@ export interface PublishedMembershipStampRenderInput {
   };
   readonly outputProfile: StampOutputProfile;
 }
+
+export type PublishedMembershipStampRenderInput =
+  | (PublishedMembershipStampRenderInputBase & {
+      readonly rendererSchemaVersion: "waflo-stamp-render-v1";
+      readonly locale: "en" | "ar";
+      readonly layoutPolicy?: "BALANCED_WALLET_ROWS_V1";
+    })
+  | (PublishedMembershipStampRenderInputBase & {
+      readonly rendererSchemaVersion: "waflo-stamp-render-v2";
+      /** Canonical card-content BCP-47 locale. */
+      readonly locale: string;
+      /** Localized reward copy used by native provider fields; provider artwork stays text-free. */
+      readonly rewardLabel: string;
+    });
 
 export interface PublishedMembershipStampRenderResult {
   readonly svg: string;
@@ -297,21 +307,145 @@ export function renderStampSvg(input: StampRenderInput): {
   const labels = labelLines
     .map(
       (label, index) =>
-        `<text x="16" y="${Math.ceil(maxY + 24 + index * 24)}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${index === 0 ? 16 : 14}" fill="${foreground}">${escapeXml(label)}</text>`,
+        `<text x="16" y="${Math.ceil(maxY + 24 + index * 24)}" font-family="Cairo,Arial,sans-serif" font-size="${index === 0 ? 16 : 14}" fill="${foreground}">${escapeXml(label)}</text>`,
     )
     .join("");
-  const profile = input.outputProfile ?? "CUSTOMER_WEB";
-  const walletProfile = profile === "APPLE_WALLET" || profile === "GOOGLE_WALLET";
   const ariaLabel = escapeXml(
     [...labelLines, `${progress} of ${input.goal} stamps`].filter(Boolean).join(". "),
   );
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}" data-output-profile="${profile}" data-reward-ready="${input.rewardReady === true}"><rect width="100%" height="100%" rx="18" fill="${walletProfile ? "none" : background}"/>${artwork}${labels}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}" data-output-profile="${profile}" data-reward-ready="${input.rewardReady === true}"><rect width="100%" height="100%" rx="18" fill="${walletArtwork ? "none" : background}"/>${artwork}${labels}</svg>`;
   return {
     svg,
     digest: createHash("sha256").update(svg).digest("hex"),
     width,
     height,
     positions: positions.map((position) => ({ ...position, x: position.x + artworkOffsetX })),
+  };
+}
+
+function legacyLayoutStampPositions(
+  goal: number,
+  layout: StampLayout,
+  size: number,
+  spacing: number,
+  configuration: StampLayoutConfiguration,
+): StampPosition[] {
+  if (!Number.isInteger(goal) || goal < 1 || goal > 30) {
+    throw new Error("Stamp goal must be between 1 and 30.");
+  }
+  const gap = size + spacing;
+  const gridColumns = clampInteger(
+    configuration.columns,
+    2,
+    6,
+    Math.min(5, Math.max(2, Math.ceil(Math.sqrt(goal)))),
+  );
+  const rowLength = clampInteger(configuration.maxPerRow, 2, 10, Math.min(10, goal));
+  const pathColumns = clampInteger(configuration.columns, 3, 6, Math.min(5, goal));
+  const startAngle = ((configuration.startAngle ?? -90) * Math.PI) / 180;
+  const positions: StampPosition[] = [];
+  for (let index = 0; index < goal; index += 1) {
+    let x = 0;
+    let y = 0;
+    if (layout === "ROW") {
+      x = (index % rowLength) * gap;
+      y = Math.floor(index / rowLength) * gap;
+    } else if (layout === "GRID") {
+      x = (index % gridColumns) * gap;
+      y = Math.floor(index / gridColumns) * gap;
+    } else if (layout === "PATH") {
+      const row = Math.floor(index / pathColumns);
+      const column = index % pathColumns;
+      const serpentineColumn =
+        configuration.serpentine === false || row % 2 === 0 ? column : pathColumns - 1 - column;
+      x = serpentineColumn * gap;
+      y = row * gap + Math.sin((column / Math.max(1, pathColumns - 1)) * Math.PI) * spacing;
+    } else {
+      const radius = Math.max(size * 1.6, (goal * gap) / (Math.PI * 2));
+      const angle = (Math.PI * 2 * index) / goal + startAngle;
+      x = radius + Math.cos(angle) * radius;
+      y = radius + Math.sin(angle) * radius;
+    }
+    positions.push({ index, x, y, filled: false });
+  }
+  const minX = Math.min(...positions.map((position) => position.x));
+  const minY = Math.min(...positions.map((position) => position.y));
+  return positions.map((position) => ({
+    ...position,
+    x: position.x - minX + size / 2,
+    y: position.y - minY + size / 2,
+  }));
+}
+
+function renderLegacyPublishedMembershipStampSvg(
+  input: Extract<
+    PublishedMembershipStampRenderInput,
+    { rendererSchemaVersion: "waflo-stamp-render-v1" }
+  >,
+): PublishedMembershipStampRenderResult {
+  const walletDistribution =
+    input.layoutPolicy === "BALANCED_WALLET_ROWS_V1"
+      ? balancedWalletStampDistribution(input.requiredStampCount)
+      : null;
+  const size = input.visualTheme.stampSize ?? 48;
+  const spacing = input.visualTheme.spacing ?? 8;
+  const positions = legacyLayoutStampPositions(
+    input.requiredStampCount,
+    walletDistribution?.layout ?? input.layoutType,
+    size,
+    spacing,
+    walletDistribution?.layoutConfiguration ?? input.layoutConfiguration ?? {},
+  ).map((position) => ({
+    ...position,
+    filled:
+      position.index <
+      Math.max(0, Math.min(input.requiredStampCount, Math.floor(input.currentStampCount))),
+  }));
+  const maxX = Math.max(...positions.map((position) => position.x + size / 2)) + size / 2;
+  const maxY = Math.max(...positions.map((position) => position.y + size / 2)) + size / 2;
+  const width = Math.ceil(maxX);
+  const height = Math.ceil(maxY);
+  const filledHref = artworkHref(input.filledArtwork);
+  const emptyHref = artworkHref(input.emptyArtwork);
+  const artwork = positions
+    .map((position) => {
+      const href = position.filled ? filledHref : emptyHref;
+      const visualState = position.filled ? "FILLED" : "EMPTY";
+      return `<g data-stamp-index="${position.index}" data-filled="${position.filled}" data-visual-state="${visualState}"><image href="${escapeXml(href ?? "")}" x="${position.x - size / 2}" y="${position.y - size / 2}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet"/></g>`;
+    })
+    .join("");
+  const background = validColor(input.visualTheme.backgroundColor ?? "#FFFFFF", "#FFFFFF");
+  const walletProfile =
+    input.outputProfile === "APPLE_WALLET" || input.outputProfile === "GOOGLE_WALLET";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${input.currentStampCount} of ${input.requiredStampCount} stamps" data-output-profile="${input.outputProfile}" data-reward-ready="${input.rewardReady === true}"><rect width="100%" height="100%" rx="18" fill="${walletProfile ? "none" : background}"/>${artwork}</svg>`;
+  const configurationDigest = createHash("sha256")
+    .update(
+      stableJson({
+        rendererSchemaVersion: input.rendererSchemaVersion,
+        organizationId: input.organizationId,
+        programId: input.programId,
+        programVersionId: input.programVersionId,
+        membershipId: input.membershipId,
+        locale: input.locale,
+        requiredStampCount: input.requiredStampCount,
+        currentStampCount: input.currentStampCount,
+        rewardReady: input.rewardReady,
+        layoutType: input.layoutType,
+        layoutConfiguration: input.layoutConfiguration ?? {},
+        ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
+        visualTheme: input.visualTheme,
+        assetDigests: input.assetDigests,
+        outputProfile: input.outputProfile,
+      }),
+    )
+    .digest("hex");
+  return {
+    svg,
+    contentDigest: createHash("sha256").update(svg).digest("hex"),
+    configurationDigest,
+    width,
+    height,
+    positions,
   };
 }
 
@@ -342,6 +476,24 @@ export function publishedMembershipStampVisualDigest(
 ): string {
   assertDigest(input.assetDigests.filled, "Filled artwork digest");
   assertDigest(input.assetDigests.empty, "Empty artwork digest");
+  if (input.rendererSchemaVersion === "waflo-stamp-render-v1") {
+    return createHash("sha256")
+      .update(
+        stableJson({
+          rendererSchemaVersion: input.rendererSchemaVersion,
+          requiredStampCount: input.requiredStampCount,
+          currentStampCount: input.currentStampCount,
+          rewardReady: input.rewardReady,
+          layoutType: input.layoutType,
+          layoutConfiguration: input.layoutConfiguration ?? {},
+          ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
+          visualTheme: input.visualTheme,
+          assetDigests: input.assetDigests,
+          outputProfile: input.outputProfile,
+        }),
+      )
+      .digest("hex");
+  }
   return createHash("sha256")
     .update(
       stableJson({
@@ -368,11 +520,11 @@ export function publishedMembershipStampVisualDigest(
 export function renderPublishedMembershipStampSvg(
   input: PublishedMembershipStampRenderInput,
 ): PublishedMembershipStampRenderResult {
-  if (input.rendererSchemaVersion !== "waflo-stamp-render-v2") {
-    throw new Error("Unsupported stamp renderer schema.");
-  }
   assertDigest(input.assetDigests.filled, "Filled artwork digest");
   assertDigest(input.assetDigests.empty, "Empty artwork digest");
+  if (input.rendererSchemaVersion === "waflo-stamp-render-v1") {
+    return renderLegacyPublishedMembershipStampSvg(input);
+  }
 
   const walletDistribution =
     input.layoutPolicy === "BALANCED_WALLET_ROWS_V1"

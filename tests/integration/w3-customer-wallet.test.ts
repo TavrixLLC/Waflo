@@ -135,7 +135,7 @@ describe.sequential("W3 Customer and Wallet integration", () => {
     expect(new Set(passes.map((pass) => pass.providerIdentity)).size).toBe(2);
     const googleAssets = await prisma.client.publicWalletAsset.findMany({
       where: {
-        membershipId: firstMembershipId,
+        programVersionId: fixture.versionId,
         assetType: { startsWith: "GOOGLE_HERO_V4_" },
       },
     });

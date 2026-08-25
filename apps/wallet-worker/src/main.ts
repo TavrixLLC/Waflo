@@ -33,9 +33,9 @@ import {
   type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
-  type PublishedMembershipStampRenderInput,
 } from "@waflo/stamp-engine";
 import {
+  type ApplePassSigner,
   ApplePassBuilderGenerator,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
@@ -54,17 +54,20 @@ import {
   type WalletProviderCode,
   type WalletUpdateReason,
 } from "@waflo/wallet-core";
-import {
-  GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION,
-  type GoogleServiceAccount,
-  GoogleWalletProvider,
-} from "@waflo/wallet-google";
+import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
 import {
   HistoricalWalletStampSourceError,
   loadHistoricalWalletStampSource,
 } from "./historical-wallet-stamp-source.js";
+import { classifyApplePushResponse } from "./apple-push.js";
+import {
+  GOOGLE_WALLET_LOGO_SIZE,
+  googleProgressAssetNeedsOwnershipRepair,
+  googleProgressSharedAssetOwnership,
+  prepareGoogleWalletProgramLogo,
+} from "./google-wallet-assets.js";
 
 const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
 const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
@@ -355,6 +358,7 @@ function mapPass(
   environment: Environment,
   stampRenderInput: PublishedMembershipStampRenderInput,
   walletArtworkUrl?: string,
+  applePassImages?: Readonly<Record<string, Uint8Array>>,
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
@@ -376,6 +380,21 @@ function mapPass(
       version.renderFingerprint ??
       createHash("sha256").update(version.id).digest("hex"),
     locale,
+    defaultLocale,
+    localizedContent,
+    nearbyRelevance: nearbyRelevance({
+      enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
+      locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
+      allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
+      templateCode: version.baseTemplateCode,
+      businessCategory: membership.organization.businessCategory,
+      merchantName: membership.organization.name,
+      locale: nearbyLocale,
+      customText:
+        nearbyLocale === "ar"
+          ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
+          : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
+    }),
     ...(walletArtworkUrl ? { walletArtworkUrl } : {}),
     walletPassInstanceId: pass.id,
     providerIdentity: pass.providerIdentity,
@@ -1352,7 +1371,15 @@ export class WalletWorker {
           pass.provider === "GOOGLE"
             ? await this.ensureGoogleHeroAsset(pass, baseInput)
             : undefined;
-        const input = walletArtworkUrl ? { ...baseInput, walletArtworkUrl } : baseInput;
+        const applePassImages =
+          pass.provider === "APPLE" ? await this.merchantApplePassImages(pass) : undefined;
+        const input = mapPass(
+          pass,
+          this.environment,
+          stampRenderInput,
+          walletArtworkUrl,
+          applePassImages,
+        );
         if (command.commandType === "ISSUE") {
           if (pass.membershipCredential.status !== "ACTIVE") {
             await this.deadLetter(command, "CREDENTIAL_NOT_ACTIVE");
@@ -1872,6 +1899,8 @@ export class WalletWorker {
     pass: PassRecord,
     input: WalletMembershipInput,
   ): Promise<string> {
+    const programVersionId = input.programVersionId;
+    const sharedAssetOwnership = googleProgressSharedAssetOwnership(programVersionId);
     const visualDigest = publishedMembershipStampVisualDigest(input.stampRenderInput);
     const credentialDigest = createHash("sha256").update(input.credentialPayload).digest("hex");
     const compositionDigest = createHash("sha256")
@@ -1904,11 +1933,13 @@ export class WalletWorker {
         : cached;
       return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
-    const rendered = renderPublishedMembershipStampSvg(input.stampRenderInput);
+    const walletLocale: "en" | "ar" = input.stampRenderInput.locale === "ar" ? "ar" : "en";
+    const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
+    const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
     const composed = await composeWalletArtwork(
       walletArtworkInputFromStampRender(
         {
-          stampRenderInput: input.stampRenderInput,
+          stampRenderInput,
           rewardLabel: input.rewardSummary,
           organizationName: input.organizationName,
           programName: input.programName,

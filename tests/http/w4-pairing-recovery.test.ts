@@ -9,6 +9,7 @@ const ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OWNER_ID = "11111111-1111-4111-8111-111111111111";
 const STAFF_USER_ID = "33333333-3333-4333-8333-333333333333";
 const LOCATION_ID = "a1111111-1111-4111-8111-111111111111";
+const DEPLOYMENT_ENVIRONMENT = process.env.DEPLOYMENT_ENVIRONMENT ?? "development";
 
 function data<T>(response: { json(): unknown }): T {
   return (response.json() as { data: T }).data;
@@ -49,7 +50,10 @@ describe.sequential("W4-to-M1 pairing challenge recovery HTTP contract", () => {
       data: { status: "CANCELED" },
     });
     pairingPublicId = randomUUID();
-    pairingToken = createPairingToken({ publicId: pairingPublicId, environmentId: "test" });
+    pairingToken = createPairingToken({
+      publicId: pairingPublicId,
+      environmentId: DEPLOYMENT_ENVIRONMENT,
+    });
     await prisma.client.devicePairingSession.create({
       data: {
         publicId: pairingPublicId,
@@ -197,7 +201,7 @@ describe.sequential("W4-to-M1 pairing challenge recovery HTTP contract", () => {
 
   it("expires a claimed challenge and never recovers it", async () => {
     const publicId = randomUUID();
-    const token = createPairingToken({ publicId, environmentId: "test" });
+    const token = createPairingToken({ publicId, environmentId: DEPLOYMENT_ENVIRONMENT });
     await prisma.client.devicePairingSession.create({
       data: {
         publicId,

@@ -9,20 +9,8 @@ export const operationStatusSchema = z.enum(["PROCESSING", "COMPLETED", "FAILED"
 export const staffDeviceContextResultSchema = mobileStaffDeviceContextSchema
   .extend({
     organizationId: z.uuid(),
-    organization: z
-      .object({
-        id: z.uuid(),
-        displayName: z.string().trim().min(1).max(120),
-      })
-      .strict(),
     role: z.enum(["OWNER", "MANAGER", "STAFF"]),
     locationId: z.uuid(),
-    currentLocation: z
-      .object({
-        id: z.uuid(),
-        displayName: z.string().trim().min(1).max(120),
-      })
-      .strict(),
     devicePublicId: z.uuid(),
     deviceSessionId: z.uuid(),
     platform: z.enum(["IOS", "ANDROID", "TEST_CLIENT"]),

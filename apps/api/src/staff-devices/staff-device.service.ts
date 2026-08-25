@@ -5,6 +5,7 @@ import type {
   DevicePairingClaimInput,
   DevicePairingCompleteInput,
   StaffDeviceContextResult,
+  StaffLocationAssignmentUpsertInput,
 } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { hasPermission } from "@waflo/permissions";
@@ -13,6 +14,7 @@ import {
   assertDeviceOperational,
   assertStaffMobileAppVersion,
   assertTestClientAllowed,
+  createManualPairingCode,
   createOpaqueDeviceSessionToken,
   createPairingToken,
   hashOpaqueDeviceToken,
@@ -32,6 +34,10 @@ import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 import { intersectLocationCapabilities } from "./mobile-device-context.js";
+import {
+  revokeStaffAccessForLocation,
+  revokeStaffAccessForMembership,
+} from "./staff-device-lifecycle.js";
 
 const PAIRING_CHALLENGE_VERSION = "waflo-pair-challenge-v1";
 
@@ -1278,29 +1284,6 @@ export class StaffDeviceService {
             "STAFF_ASSIGNMENT_REQUIRED",
             "Pairing has no active Location assignment.",
             HttpStatus.UNPROCESSABLE_ENTITY,
-          );
-        }
-        const device = await transaction.staffDevice.create({
-          data: {
-            organizationId: session.organizationId,
-            organizationMemberId: session.intendedStaffMemberId,
-            displayName: input.displayName ?? session.deviceLabelSuggestion ?? "Waflo Staff device",
-            platform,
-            installationId: session.claimedInstallationId,
-            publicKey: session.claimedPublicKey,
-            status: "ACTIVE",
-            appVersion,
-            osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
-            model: typeof metadata.model === "string" ? metadata.model : null,
-            pairedAt: new Date(),
-            lastSeenAt: new Date(),
-          },
-        });
-        if (activeLocationCount !== locations.length || !assignmentAllowed) {
-          throw new AppError(
-            "STAFF_ASSIGNMENT_REQUIRED",
-            "Pairing requires active Location assignments.",
-            HttpStatus.FORBIDDEN,
           );
         }
         const existingDevice = await transaction.staffDevice.findUnique({

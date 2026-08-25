@@ -1,4 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
+import { zipSync } from "fflate";
+import forge from "node-forge";
+import sharp from "sharp";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
   composeAppleLegacyStripArtwork,
@@ -14,6 +17,7 @@ import {
   type WalletProvider,
   type WalletProviderHealth,
   type WalletProviderMode,
+  resolveWalletLoyaltyPresentation,
   type WalletReconcileResult,
   type WalletUpdateReason,
   type WalletUpdateResult,
@@ -350,14 +354,16 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
 async function progressStripImages(
   input: WalletMembershipInput,
 ): Promise<Readonly<Record<string, Buffer>>> {
+  const walletLocale: "en" | "ar" = input.stampRenderInput.locale === "ar" ? "ar" : "en";
+  const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
   const rendered = renderPublishedMembershipStampSvg({
-    ...input.stampRenderInput,
+    ...stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
   const composed = await composeAppleLegacyStripArtwork(
     walletArtworkInputFromStampRender(
       {
-        stampRenderInput: input.stampRenderInput,
+        stampRenderInput,
         rewardLabel: input.rewardSummary,
         organizationName: input.organizationName,
         programName: input.programName,
@@ -500,7 +506,14 @@ export class LegacyApplePassGenerator implements WalletPassGenerator {
     return buildApplePassPackage({
       pass,
       signer: this.signer,
-      images: await progressStripImages(input.membership),
+      images: {
+        ...(await progressStripImages(input.membership)),
+        ...(input.membership.applePassImages ?? {}),
+      },
+      ...(input.membership.defaultLocale ? { defaultLocale: input.membership.defaultLocale } : {}),
+      ...(input.membership.localizedContent
+        ? { localizations: input.membership.localizedContent }
+        : {}),
     });
   }
 

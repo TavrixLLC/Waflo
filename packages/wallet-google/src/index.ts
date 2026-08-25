@@ -188,39 +188,24 @@ export function mapGoogleLoyaltyObject(
   objectId: string,
   classId: string,
 ) {
-  const inactive =
-    input.transferred ||
-    input.membershipStatus !== "ACTIVE" ||
-    input.programStatus === "ARCHIVED" ||
-    input.programStatus === "SUSPENDED";
+  const presentation = resolveWalletLoyaltyPresentation(input);
   const heroImageUrl = input.walletArtworkUrl ?? input.publicAssetBaseUrl;
-  const heroDescription =
-    input.locale === "ar"
-      ? `${input.programName} للعضو ${input.displayName}. تقدم الأختام ${input.currentStampCount} من ${input.requiredStampCount}. المكافأة: ${input.rewardSummary}`
-      : `${input.programName} for ${input.displayName}. Stamp progress ${input.currentStampCount} of ${input.requiredStampCount}. Reward: ${input.rewardSummary}`;
+  void (input.locale === "ar"
+    ? `${input.programName} للعضو ${input.displayName}. تقدم الأختام ${input.currentStampCount} من ${input.requiredStampCount}. المكافأة: ${input.rewardSummary}`
+    : `${input.programName} for ${input.displayName}. Stamp progress ${input.currentStampCount} of ${input.requiredStampCount}. Reward: ${input.rewardSummary}`);
   return {
     id: objectId,
     classId,
-    state: inactive ? "INACTIVE" : "ACTIVE",
-    accountName: input.displayName.slice(0, 20),
-    accountId: input.publicMembershipId.slice(-20),
-    ...(!heroImageUrl
-      ? {
-          loyaltyPoints: {
-            label: "Stamps",
-            balance: { string: `${input.currentStampCount}/${input.requiredStampCount}` },
-          },
-        }
-      : {}),
+    state: presentation.inactive ? "INACTIVE" : "ACTIVE",
     barcode: {
-      type: "QR_CODE",
-      value: input.credentialPayload,
+      type: presentation.barcode.googleFormat,
+      value: presentation.barcode.payload,
     },
     ...(heroImageUrl
       ? {
           heroImage: {
             sourceUri: { uri: heroImageUrl },
-            contentDescription: translated(heroDescription.slice(0, 500), input.locale),
+            contentDescription: translated(presentation.labels.stamps, input.locale),
           },
         }
       : {}),
@@ -600,11 +585,15 @@ export class GoogleWalletProvider implements WalletProvider {
       input.providerIdentity,
       classId,
     );
+    const invalidated = {
+      ...inactive,
+      barcode: { ...inactive.barcode, alternateText: "No longer valid" },
+    };
     if (this.mode === "REAL" && this.client) {
       await this.upsertProviderResource(
         `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
         "loyaltyObject",
-        inactive,
+        invalidated,
       );
     }
     return { state: "INACTIVE" };

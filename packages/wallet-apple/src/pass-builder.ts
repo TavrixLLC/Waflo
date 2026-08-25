@@ -282,13 +282,15 @@ function defaultBrandImages() {
 async function personalizedVariants(
   input: WalletMembershipInput,
 ): Promise<Pick<PassBuilderServiceRequest["images"], "artwork" | "strip">> {
+  const walletLocale: "en" | "ar" = input.stampRenderInput.locale === "ar" ? "ar" : "en";
+  const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
   const rendered = renderPublishedMembershipStampSvg({
-    ...input.stampRenderInput,
+    ...stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
   const compositionInput = walletArtworkInputFromStampRender(
     {
-      stampRenderInput: input.stampRenderInput,
+      stampRenderInput,
       rewardLabel: input.rewardSummary,
       organizationName: input.organizationName,
       programName: input.programName,

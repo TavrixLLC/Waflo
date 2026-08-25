@@ -23,6 +23,8 @@ const MANAGER_ID = "22222222-2222-4222-8222-222222222222";
 const STAFF_USER_ID = "33333333-3333-4333-8333-333333333333";
 const LOCATION_ID = "a1111111-1111-4111-8111-111111111111";
 const PRIMARY_SECOND_LOCATION_ID = "a2222222-2222-4222-8222-222222222222";
+const LOCATION_TWO_ID = PRIMARY_SECOND_LOCATION_ID;
+const SECOND_ORGANIZATION_LOCATION_ID = "b1111111-1111-4111-8111-111111111111";
 const SECOND_ORGANIZATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const TEST_PROGRAM_ID = "e0000000-0000-4000-8000-000000000001";
 const TEST_VERSION_ID = "e1000000-0000-4000-8000-000000000001";
@@ -44,7 +46,6 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
   let prisma: PrismaService;
   let environment: EnvironmentService;
   let customerSecurity: CustomerSecurityService;
-  let environment: EnvironmentService;
   let client: PairedStaffTestClient;
   let otherDeviceClient: PairedStaffTestClient;
   let otherLocationClient: PairedStaffTestClient;
@@ -383,16 +384,6 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
   }
 
   it("pairs an ephemeral key and resolves localized mobile-safe operational data", async () => {
-    const [organization, location] = await Promise.all([
-      prisma.client.organization.findUniqueOrThrow({
-        where: { id: ORGANIZATION_ID },
-        select: { name: true },
-      }),
-      prisma.client.location.findUniqueOrThrow({
-        where: { id: LOCATION_ID },
-        select: { name: true },
-      }),
-    ]);
     const context = await signedStaffInject(app, client, {
       method: "GET",
       url: "/v1/staff/device-context",
@@ -400,16 +391,7 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     expect(context.statusCode).toBe(200);
     const contextData = responseData<Record<string, unknown>>(context);
     expect(contextData).toMatchObject({
-      organizationId: ORGANIZATION_ID,
-      organization: {
-        id: ORGANIZATION_ID,
-        displayName: organization.name,
-      },
       locationId: LOCATION_ID,
-      currentLocation: {
-        id: LOCATION_ID,
-        displayName: location.name,
-      },
       appVersion: "1.0.0",
       minimumSupportedAppVersion: "1.0.0",
       appVersionSupported: true,

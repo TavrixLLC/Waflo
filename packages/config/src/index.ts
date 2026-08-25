@@ -3,6 +3,15 @@ import { z } from "zod";
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
 const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
+const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+
+export type PublicMapboxTokenStatus = "SET" | "UNSET" | "INVALID_FORMAT";
+
+export function classifyPublicMapboxToken(value: string | undefined): PublicMapboxTokenStatus {
+  if (!value?.trim()) return "UNSET";
+  return publicMapboxTokenPattern.test(value.trim()) ? "SET" : "INVALID_FORMAT";
+}
+
 const strictSemanticVersionSchema = z
   .string()
   .min(5)

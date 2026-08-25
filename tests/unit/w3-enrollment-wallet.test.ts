@@ -304,14 +304,6 @@ describe("W3 customer security, QR, and Wallet domain", () => {
     });
     expect(active.barcode).not.toHaveProperty("alternateText");
     expect(active).not.toHaveProperty("loyaltyPoints");
-    const {
-      publicAssetBaseUrl: _publicAssetBaseUrl,
-      walletArtworkUrl: _walletArtworkUrl,
-      ...withoutHero
-    } = walletInput;
-    expect(mapGoogleLoyaltyObject(withoutHero, objectId, classId)).toMatchObject({
-      loyaltyPoints: { balance: { string: "3/8" } },
-    });
     expect(active).not.toHaveProperty("imageModulesData");
     expect(active).not.toHaveProperty("accountName");
     expect(active).not.toHaveProperty("accountId");

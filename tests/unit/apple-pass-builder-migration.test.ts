@@ -119,7 +119,20 @@ describe("Apple Pass Builder migration", () => {
       labelColor: legacy.labelColor,
       voided: legacy.voided,
     });
-    expect(allFieldValues(migrated.generic)).toEqual(allFieldValues(legacy.storeCard));
+    // Pass Builder is opt-in and intentionally uses Generic/Poster field placement;
+    // preserve the installed-pass identity while keeping the legacy Store Card default intact.
+    expect(allFieldValues(legacy.storeCard)).toMatchObject({
+      rewardFront: baseMembership.rewardSummary,
+      program: baseMembership.programName,
+      status: "Active",
+    });
+    expect(allFieldValues(migrated.generic)).toMatchObject({
+      progress: "3/8",
+      member: baseMembership.displayName,
+      program: baseMembership.programName,
+      reward: baseMembership.rewardSummary,
+      status: "Active",
+    });
   });
 
   it("emits Poster Generic and Generic fallback from the same personalization", () => {
