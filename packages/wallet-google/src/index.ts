@@ -153,33 +153,15 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
           longitude: location.longitude,
         }))
       : [],
+    // Reward content is personalized on the Object only for the native
+    // fallback. A class-level module would be rendered over every hero card.
     textModulesData: [
-      {
-        id: "reward",
-        header: "Reward",
-        body: (defaultContent?.rewardSummary ?? input.rewardSummary).slice(0, 500),
-      },
       {
         id: "waflo",
         header: "Operator",
         body: "Waflo is owned and operated by Tavrix LLC.",
       },
     ],
-    classTemplateInfo: {
-      cardTemplateOverride: {
-        cardRowTemplateInfos: [
-          {
-            oneItem: {
-              item: {
-                firstValue: {
-                  fields: [{ fieldPath: "object.textModulesData['reward']" }],
-                },
-              },
-            },
-          },
-        ],
-      },
-    },
   };
 }
 
@@ -197,10 +179,16 @@ export function mapGoogleLoyaltyObject(
     id: objectId,
     classId,
     state: presentation.inactive ? "INACTIVE" : "ACTIVE",
-    barcode: {
-      type: presentation.barcode.googleFormat,
-      value: presentation.barcode.payload,
-    },
+    // The hero carries its own readable QR. Keep the native barcode only for
+    // the no-hero fallback so the credential remains usable there.
+    ...(!heroImageUrl
+      ? {
+          barcode: {
+            type: presentation.barcode.googleFormat,
+            value: presentation.barcode.payload,
+          },
+        }
+      : {}),
     ...(heroImageUrl
       ? {
           heroImage: {
@@ -210,11 +198,15 @@ export function mapGoogleLoyaltyObject(
         }
       : {}),
     textModulesData: [
-      {
-        id: "reward",
-        header: presentation.labels.reward,
-        body: presentation.rewardSummary.slice(0, 500),
-      },
+      ...(!heroImageUrl
+        ? [
+            {
+              id: "reward",
+              header: presentation.labels.reward,
+              body: presentation.rewardSummary.slice(0, 500),
+            },
+          ]
+        : []),
       {
         id: "status",
         header: presentation.labels.status,
@@ -585,10 +577,9 @@ export class GoogleWalletProvider implements WalletProvider {
       input.providerIdentity,
       classId,
     );
-    const invalidated = {
-      ...inactive,
-      barcode: { ...inactive.barcode, alternateText: "No longer valid" },
-    };
+    const invalidated = inactive.barcode
+      ? { ...inactive, barcode: { ...inactive.barcode, alternateText: "No longer valid" } }
+      : inactive;
     if (this.mode === "REAL" && this.client) {
       await this.upsertProviderResource(
         `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,

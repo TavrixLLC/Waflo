@@ -376,8 +376,12 @@ describe("P3 Builder preview fidelity", () => {
       const input = providerInput(progress);
       const loyaltyClass = mapGoogleLoyaltyClass(input, "issuer.class");
       const loyaltyObject = mapGoogleLoyaltyObject(input, "issuer.object", "issuer.class");
+      const imageFirstObject = mapGoogleLoyaltyObject(
+        { ...input, walletArtworkUrl: "https://assets.example.test/google-hero.png" },
+        "issuer.object",
+        "issuer.class",
+      );
       const composition = preview("GOOGLE_WALLET", progress);
-      const reward = required(loyaltyClass.textModulesData[0], "Google reward module");
       const status = required(loyaltyObject.textModulesData[1], "Google status module");
 
       expect(composition.svg).toContain(loyaltyClass.issuerName);
@@ -387,25 +391,22 @@ describe("P3 Builder preview fidelity", () => {
       expect(loyaltyObject).not.toHaveProperty("loyaltyPoints");
       expect(composition.svg).not.toContain(input.displayName);
       expect(composition.svg).not.toContain(`${progress}/${goal}`);
-      expect(composition.svg).toContain(reward.header);
-      expect(composition.svg).toContain(reward.body);
       expect(composition.svg).toContain(status.header);
       expect(composition.svg).toContain(status.body);
       expect(composition.svg).toContain('data-barcode-format="QR_CODE"');
-      expect(loyaltyClass.classTemplateInfo).toEqual({
-        cardTemplateOverride: {
-          cardRowTemplateInfos: [
-            {
-              oneItem: {
-                item: {
-                  firstValue: {
-                    fields: [{ fieldPath: "object.textModulesData['reward']" }],
-                  },
-                },
-              },
-            },
-          ],
-        },
+      expect(loyaltyClass.textModulesData).not.toContainEqual(
+        expect.objectContaining({ id: "reward" }),
+      );
+      expect(loyaltyClass).not.toHaveProperty("classTemplateInfo");
+      expect(imageFirstObject).not.toHaveProperty("barcode");
+      expect(imageFirstObject.textModulesData).not.toContainEqual(
+        expect.objectContaining({ id: "reward" }),
+      );
+      expect(loyaltyObject).toMatchObject({
+        barcode: { value: input.credentialPayload },
+        textModulesData: expect.arrayContaining([
+          expect.objectContaining({ id: "reward", body: rewardSummary }),
+        ]),
       });
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },

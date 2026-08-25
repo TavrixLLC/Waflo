@@ -147,6 +147,8 @@ describe("Apple Pass Builder migration", () => {
     });
     expect(pass.posterGeneric.headerFields).toBeUndefined();
     expect(pass.posterGeneric.primaryFields).toBeUndefined();
+    expect(pass.posterGeneric.secondaryFields).toBeUndefined();
+    expect(pass.posterGeneric.auxiliaryFields).toBeUndefined();
     expect(pass.posterGeneric.footerFields).toBeUndefined();
     expect(pass.barcodes[0]).not.toHaveProperty("altText");
   });

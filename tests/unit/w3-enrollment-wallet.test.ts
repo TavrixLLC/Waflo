@@ -266,25 +266,8 @@ describe("W3 customer security, QR, and Wallet domain", () => {
         { language: "fr", value: "Cercle Cedar" },
       ],
     });
-    expect(mapped.textModulesData[0]).toMatchObject({
-      id: "reward",
-      body: "A complimentary drink after eight stamps.",
-    });
-    expect(mapped.classTemplateInfo).toEqual({
-      cardTemplateOverride: {
-        cardRowTemplateInfos: [
-          {
-            oneItem: {
-              item: {
-                firstValue: {
-                  fields: [{ fieldPath: "object.textModulesData['reward']" }],
-                },
-              },
-            },
-          },
-        ],
-      },
-    });
+    expect(mapped.textModulesData).not.toContainEqual(expect.objectContaining({ id: "reward" }));
+    expect(mapped).not.toHaveProperty("classTemplateInfo");
   });
 
   it("maps Google Loyalty identity, opaque QR, public progress art, and transfer invalidation", () => {
@@ -299,11 +282,21 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: objectId,
       classId,
       state: "ACTIVE",
-      barcode: { value: walletInput.credentialPayload },
       heroImage: { sourceUri: { uri: "https://assets.example.test/wpa_opaque" } },
     });
-    expect(active.barcode).not.toHaveProperty("alternateText");
+    expect(active).not.toHaveProperty("barcode");
     expect(active).not.toHaveProperty("loyaltyPoints");
+    const {
+      publicAssetBaseUrl: _publicAssetBaseUrl,
+      walletArtworkUrl: _walletArtworkUrl,
+      ...withoutHero
+    } = walletInput;
+    expect(mapGoogleLoyaltyObject(withoutHero, objectId, classId)).toMatchObject({
+      barcode: { value: walletInput.credentialPayload },
+      textModulesData: expect.arrayContaining([
+        expect.objectContaining({ id: "reward", body: walletInput.rewardSummary }),
+      ]),
+    });
     expect(active).not.toHaveProperty("imageModulesData");
     expect(active).not.toHaveProperty("accountName");
     expect(active).not.toHaveProperty("accountId");

@@ -292,12 +292,36 @@ function motif(
   return `<path d="M${width * 0.69} 0V${height * 0.16}M${width * 0.8} 0V${height * 0.2}M${width * 0.91} 0V${height * 0.15}M${width * 0.65} ${height * 0.07}H${width}M${width * 0.68} ${height * 0.15}H${width}" fill="none" stroke="${accent}" stroke-width="${Math.max(2, width * 0.005)}" opacity="0.11"/><rect x="${-width * 0.07}" y="${height * 0.79}" width="${width * 0.25}" height="${height * 0.25}" rx="${width * 0.03}" fill="${secondary}" opacity="0.11" transform="rotate(-9 ${width * 0.05} ${height * 0.9})"/>`;
 }
 
+function relativeLuminance(hex: string): number {
+  const channels = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)].map((part) => {
+    const value = Number.parseInt(part, 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * (channels[0] ?? 0) + 0.7152 * (channels[1] ?? 0) + 0.0722 * (channels[2] ?? 0);
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const first = relativeLuminance(foreground);
+  const second = relativeLuminance(background);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+/** Preserve approved colors when legible, with a deterministic safe fallback for pale themes. */
+function readableTextColor(preferred: string, background: string): string {
+  if (contrastRatio(preferred, background) >= 4.5) return preferred;
+  const candidates = ["#241916", "#FFFFFF"];
+  return candidates.reduce((best, candidate) =>
+    contrastRatio(candidate, background) > contrastRatio(best, background) ? candidate : best,
+  );
+}
+
 function counterBadgeSvg(
   input: WalletArtworkCompositionInput,
   region: WalletArtworkPlacement,
   typeface: string,
 ): string {
   const { accentColor, backgroundColor } = input.theme;
+  const textColor = readableTextColor(backgroundColor, accentColor);
   const label = input.locale === "ar" ? "الأختام" : "STAMPS";
   const isArabic = input.locale === "ar";
   const cx = region.left + region.width / 2;
@@ -305,7 +329,7 @@ function counterBadgeSvg(
   const radius = Math.min(region.width, region.height) / 2;
   const labelSize = region.width > 150 ? 18 : 10;
   const valueSize = region.width > 150 ? 36 : 22;
-  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${region.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (region.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${backgroundColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (region.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${backgroundColor}" direction="ltr" unicode-bidi="plaintext">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
+  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${region.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (region.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (region.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
 }
 
 function identitySvg(
@@ -321,6 +345,7 @@ function identitySvg(
   // for Arabic and the visual left edge for English.
   const textAnchor = "start";
   const direction = isArabic ? "rtl" : "ltr";
+  const textColor = readableTextColor(input.theme.foregroundColor, input.theme.backgroundColor);
   const organization = wrapLabel(input.organizationName, isGoogle ? 44 : 24, 1)[0] ?? "";
   const program = wrapLabel(input.programName, isGoogle ? 36 : 22, 1)[0] ?? "";
   const memberPrefix = isArabic ? "العضو" : "MEMBER";
@@ -329,7 +354,7 @@ function identitySvg(
   const programY = region.top + (isGoogle ? 61 : 40);
   const memberY = region.top + (isGoogle ? 98 : 69);
   const markerX = isArabic ? region.left + region.width - 4 : region.left;
-  return `<rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/><text x="${textX}" y="${organizationY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 15 : 8}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2 : 1.1}" fill="${input.theme.foregroundColor}" opacity="0.72" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(organization)}</text><text x="${textX}" y="${programY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 34 : 17}" font-weight="900" fill="${input.theme.foregroundColor}" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(program)}</text><text x="${textX}" y="${memberY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 21 : 10.5}" font-weight="700" fill="${input.theme.foregroundColor}" opacity="0.82" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(member)}</text>`;
+  return `<rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/><text x="${textX}" y="${organizationY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 15 : 8}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2 : 1.1}" fill="${textColor}" opacity="0.78" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(organization)}</text><text x="${textX}" y="${programY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 34 : 17}" font-weight="900" fill="${textColor}" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(program)}</text><text x="${textX}" y="${memberY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 21 : 10.5}" font-weight="700" fill="${textColor}" opacity="0.86" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(member)}</text>`;
 }
 
 function giftIconSvg(x: number, y: number, size: number, color: string): string {
@@ -357,7 +382,10 @@ function rewardPanelSvg(
   const lines = wrapLabel(input.rewardLabel || fallback, isGoogle ? 36 : appleCharacters, 2);
   const isArabic = input.locale === "ar";
   const fill = input.rewardReady ? accentColor : "#FFFFFF";
-  const textColor = input.rewardReady ? backgroundColor : foregroundColor;
+  const textColor = readableTextColor(
+    input.rewardReady ? backgroundColor : foregroundColor,
+    input.rewardReady ? accentColor : "#FFFFFF",
+  );
   const stroke = input.rewardReady ? backgroundColor : accentColor;
   const iconSize = isGoogle ? 62 : 34;
   const horizontalPadding = isGoogle ? 34 : 18;

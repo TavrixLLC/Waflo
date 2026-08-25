@@ -306,7 +306,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
   it("maps safe Class logo imagery and keeps member progress/barcode only on the Object", () => {
     const classValue = mapGoogleLoyaltyClass(walletInput, "issuer.class");
     const objectValue = mapGoogleLoyaltyObject(walletInput, "issuer.object", "issuer.class");
-    expect(objectValue.barcode).not.toHaveProperty("alternateText");
+    expect(objectValue).not.toHaveProperty("barcode");
     expect(classValue).toMatchObject({
       programLogo: {
         sourceUri: { uri: walletInput.programLogoUrl },
@@ -315,10 +315,9 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     expect(JSON.stringify(classValue)).not.toContain(walletInput.credentialPayload);
     expect(objectValue).toMatchObject({
       heroImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } },
-      barcode: { value: walletInput.credentialPayload },
     });
     expect(objectValue).not.toHaveProperty("loyaltyPoints");
     expect(objectValue).not.toHaveProperty("imageModulesData");
-    expect(JSON.stringify(objectValue).match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
+    expect(JSON.stringify(objectValue)).not.toContain(walletInput.credentialPayload);
   });
 });

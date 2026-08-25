@@ -157,6 +157,8 @@ export function mapAppleGenericPass(
       },
     ],
     generic: {
+      // Legacy Generic keeps its native front fields. Poster Generic below is
+      // the image-first iOS 27+ surface and intentionally has no front fields.
       headerFields: [{ key: "progress", label: "STAMPS", value: progress }],
       primaryFields: [program],
       secondaryFields: [member],

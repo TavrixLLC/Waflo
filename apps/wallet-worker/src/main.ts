@@ -35,8 +35,8 @@ import {
   renderPublishedMembershipStampSvg,
 } from "@waflo/stamp-engine";
 import {
-  type ApplePassSigner,
   ApplePassBuilderGenerator,
+  type ApplePassSigner,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
   parseAppleSigningKeyMap,
@@ -57,10 +57,6 @@ import {
 import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
-import {
-  HistoricalWalletStampSourceError,
-  loadHistoricalWalletStampSource,
-} from "./historical-wallet-stamp-source.js";
 import { classifyApplePushResponse } from "./apple-push.js";
 import {
   GOOGLE_WALLET_LOGO_SIZE,
@@ -68,6 +64,10 @@ import {
   googleProgressSharedAssetOwnership,
   prepareGoogleWalletProgramLogo,
 } from "./google-wallet-assets.js";
+import {
+  HistoricalWalletStampSourceError,
+  loadHistoricalWalletStampSource,
+} from "./historical-wallet-stamp-source.js";
 
 const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
 const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
@@ -1367,10 +1367,18 @@ export class WalletWorker {
           pass.provider === "GOOGLE" ? "GOOGLE_WALLET" : "APPLE_WALLET",
         );
         const baseInput = mapPass(pass, this.environment, stampRenderInput);
-        const walletArtworkUrl =
-          pass.provider === "GOOGLE"
-            ? await this.ensureGoogleHeroAsset(pass, baseInput)
-            : undefined;
+        let walletArtworkUrl: string | undefined;
+        if (pass.provider === "GOOGLE") {
+          try {
+            walletArtworkUrl = await this.ensureGoogleHeroAsset(pass, baseInput);
+          } catch (error) {
+            // Preserve a usable native Google Wallet fallback when hero
+            // composition or storage is temporarily unavailable.
+            workerLog("google_hero_artwork_fallback", {
+              reason: error instanceof Error ? error.name : "unknown",
+            });
+          }
+        }
         const applePassImages =
           pass.provider === "APPLE" ? await this.merchantApplePassImages(pass) : undefined;
         const input = mapPass(
