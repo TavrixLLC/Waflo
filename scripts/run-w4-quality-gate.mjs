@@ -7,6 +7,14 @@ const outputDirectory = resolve(root, "artifacts/handoff-w4-round-1/raw-test-out
 const pnpmEntry = Reflect.get(process.env, "npm_execpath");
 if (!pnpmEntry) throw new Error("Run this quality gate through pnpm.");
 
+// npm_execpath points at pnpm.exe on Windows.  That is a native executable,
+// so it must not be passed to Node as a script (which produces the `MZx`
+// syntax error).  Use the shell-supported command name on Windows and invoke
+// the script entrypoint directly on POSIX hosts.
+const packageManager = process.platform === "win32" ? "pnpm.cmd" : pnpmEntry;
+const packageManagerArguments =
+  process.platform === "win32" || /\.(?:c|m)?js$/i.test(pnpmEntry) ? [] : [pnpmEntry];
+
 const commands = [
   ["frozen-install", ["install", "--frozen-lockfile"]],
   ["format-check", ["format:check"]],
@@ -40,13 +48,14 @@ for (const [label, arguments_] of commands) {
   const startedAt = new Date();
   const output = [];
   const code = await new Promise((resolveCode, reject) => {
-    const child = spawn(process.execPath, [pnpmEntry, ...arguments_], {
+    const child = spawn(packageManager, [...packageManagerArguments, ...arguments_], {
       cwd: root,
       env: {
         ...process.env,
         RATE_LIMIT_NAMESPACE: `w4-quality-${label}-${startedAt.getTime()}`,
       },
       windowsHide: true,
+      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     for (const stream of [child.stdout, child.stderr]) {
