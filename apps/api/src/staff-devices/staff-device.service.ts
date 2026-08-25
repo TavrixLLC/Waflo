@@ -4,26 +4,31 @@ import type {
   CreateDevicePairingSessionInput,
   DevicePairingClaimInput,
   DevicePairingCompleteInput,
+  StaffDeviceContextResult,
 } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import { createQrSvg } from "@waflo/qr-core";
 import {
+  assertDeviceOperational,
   assertStaffMobileAppVersion,
+  assertTestClientAllowed,
   createOpaqueDeviceSessionToken,
   createPairingToken,
   hashOpaqueDeviceToken,
   hashPairingToken,
   normalizeEd25519PublicKey,
   parsePairingToken,
+  StaffDeviceSecurityError,
   verifyEd25519Message,
 } from "@waflo/staff-device-security";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withOrderedInvariantLocks } from "../common/organization-transaction.js";
-import type { WafloRequest } from "../common/request-context.js";
+import type { StaffDeviceRequestContext, WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { intersectLocationCapabilities } from "./mobile-device-context.js";
 
 const PAIRING_CHALLENGE_VERSION = "waflo-pair-challenge-v1";
 
@@ -41,6 +46,11 @@ function pairingChallenge(
 
 function pairingMessage(publicId: string, challenge: string, installationId: string): string {
   return `${PAIRING_CHALLENGE_VERSION}\n${publicId}\n${challenge}\n${installationId}`;
+}
+
+function safeDeviceStateError(error: unknown, message: string): AppError {
+  const code = error instanceof StaffDeviceSecurityError ? error.code : "STAFF_DEVICE_NOT_ACTIVE";
+  return new AppError(code, message, code === "STAFF_APP_VERSION_UNSUPPORTED" ? 426 : 401);
 }
 
 function safePairingLocations(value: Prisma.JsonValue): Array<{
@@ -77,6 +87,185 @@ export class StaffDeviceService {
     private readonly audit: AuditService,
     private readonly environment: EnvironmentService,
   ) {}
+
+  private minimumVersion(platform: "IOS" | "ANDROID" | "TEST_CLIENT"): string {
+    if (platform === "IOS") return this.environment.values.STAFF_MOBILE_MINIMUM_IOS_VERSION;
+    if (platform === "ANDROID") {
+      return this.environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION;
+    }
+    return this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION;
+  }
+
+  private assertPairingAppVersion(
+    platform: "IOS" | "ANDROID" | "TEST_CLIENT",
+    appVersion: string,
+  ): void {
+    try {
+      assertStaffMobileAppVersion({
+        platform,
+        appVersion,
+        minimumVersion: this.minimumVersion(platform),
+      });
+    } catch (error) {
+      throw new AppError(
+        error instanceof StaffDeviceSecurityError ? error.code : "STAFF_APP_VERSION_UNSUPPORTED",
+        "This Staff mobile app version is not supported.",
+        426,
+      );
+    }
+  }
+
+  async mobileContext(
+    guardContext: StaffDeviceRequestContext,
+    requestId: string,
+  ): Promise<StaffDeviceContextResult> {
+    return withOrderedInvariantLocks(
+      this.prisma.client,
+      [`device:${guardContext.deviceId}`],
+      async (transaction) => {
+        const session = await transaction.staffDeviceSession.findFirst({
+          where: {
+            id: guardContext.deviceSessionId,
+            organizationId: guardContext.organizationId,
+            staffDeviceId: guardContext.deviceId,
+            organizationMemberId: guardContext.organizationMemberId,
+          },
+          include: {
+            staffDevice: true,
+            organizationMember: { include: { user: { select: { displayName: true } } } },
+            location: true,
+          },
+        });
+        if (!session) {
+          throw new AppError(
+            "STAFF_DEVICE_NOT_ACTIVE",
+            "Staff device context is unavailable.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        try {
+          assertDeviceOperational({
+            deviceStatus: session.staffDevice.status,
+            sessionRevokedAt: session.revokedAt,
+            sessionExpiresAt: session.expiresAt,
+            memberStatus: session.organizationMember.status,
+            now: new Date(),
+          });
+          assertTestClientAllowed({
+            platform: session.staffDevice.platform,
+            nodeEnvironment: this.environment.values.NODE_ENV,
+            testClientEnabled: this.environment.values.TEST_STAFF_CLIENT_ENABLED,
+          });
+          assertStaffMobileAppVersion({
+            platform: session.staffDevice.platform,
+            appVersion: session.staffDevice.appVersion,
+            minimumVersion: this.minimumVersion(session.staffDevice.platform),
+          });
+        } catch (error) {
+          throw safeDeviceStateError(error, "Staff device context is unavailable.");
+        }
+        const [organization, staffAssignments, deviceAssignments] = await Promise.all([
+          transaction.organization.findFirst({
+            where: { id: session.organizationId, status: "ACTIVE" },
+            select: { merchantSlug: true, name: true },
+          }),
+          transaction.staffLocationAssignment.findMany({
+            where: {
+              organizationId: session.organizationId,
+              organizationMemberId: session.organizationMemberId,
+              active: true,
+              revokedAt: null,
+            },
+          }),
+          transaction.staffDeviceLocation.findMany({
+            where: { staffDeviceId: session.staffDeviceId, active: true },
+          }),
+        ]);
+        if (!organization || session.location.organizationId !== session.organizationId) {
+          throw new AppError(
+            "STAFF_DEVICE_NOT_ACTIVE",
+            "Staff device context is unavailable.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        const capabilities = intersectLocationCapabilities(staffAssignments, deviceAssignments);
+        const locations = await transaction.location.findMany({
+          where: {
+            organizationId: session.organizationId,
+            status: "ACTIVE",
+            id: { in: capabilities.map((capability) => capability.locationId) },
+          },
+          select: { id: true, publicId: true, name: true },
+        });
+        const locationById = new Map(locations.map((location) => [location.id, location]));
+        const assignedLocations = capabilities
+          .flatMap((capability) => {
+            const location = locationById.get(capability.locationId);
+            return location
+              ? [
+                  {
+                    publicId: location.publicId,
+                    displayName: location.name,
+                    earningAllowed: capability.earningAllowed,
+                    redemptionAllowed: capability.redemptionAllowed,
+                  },
+                ]
+              : [];
+          })
+          .sort((left, right) =>
+            left.displayName.localeCompare(right.displayName, "en", { sensitivity: "base" }),
+          );
+        const currentCapability = capabilities.find(
+          (capability) => capability.locationId === session.locationId,
+        );
+        const currentLocationRecord = locationById.get(session.locationId);
+        if (!currentCapability || !currentLocationRecord) {
+          throw new AppError(
+            "STAFF_DEVICE_NOT_ACTIVE",
+            "Staff device context is unavailable.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        const minimumSupportedAppVersion = this.minimumVersion(session.staffDevice.platform);
+        return {
+          organizationId: guardContext.organizationId,
+          role: session.organizationMember.role,
+          locationId: session.locationId,
+          devicePublicId: session.staffDevice.publicId,
+          deviceSessionId: session.id,
+          platform: session.staffDevice.platform,
+          appVersion: session.staffDevice.appVersion,
+          minimumSupportedAppVersion,
+          appVersionSupported: true,
+          organization: {
+            publicId: organization.merchantSlug,
+            displayName: organization.name,
+          },
+          staff: {
+            publicId: session.organizationMember.publicId,
+            displayName: session.organizationMember.user.displayName,
+            role: session.organizationMember.role,
+          },
+          device: {
+            publicId: session.staffDevice.publicId,
+            displayName: session.staffDevice.displayName,
+            status: session.staffDevice.status,
+            platform: session.staffDevice.platform,
+            appVersion: session.staffDevice.appVersion,
+          },
+          currentLocation: {
+            publicId: currentLocationRecord.publicId,
+            displayName: currentLocationRecord.name,
+            earningAllowed: currentCapability.earningAllowed,
+            redemptionAllowed: currentCapability.redemptionAllowed,
+          },
+          assignedLocations,
+          appPolicy: { minimumSupportedVersion: minimumSupportedAppVersion, updateRequired: false },
+          requestId,
+        };
+      },
+    );
+  }
 
   async list(userId: string, organizationId: string, cursor?: string, limit = 30) {
     await this.tenant.requireMembership(userId, organizationId, "devices.view");
@@ -165,6 +354,7 @@ export class StaffDeviceService {
         organizationMemberId: intended.id,
         locationId: { in: uniqueLocationIds },
         active: true,
+        revokedAt: null,
       },
     });
     const requestedAllowed = input.locations.every((location) => {
@@ -351,21 +541,7 @@ export class StaffDeviceService {
         HttpStatus.FORBIDDEN,
       );
     }
-    try {
-      assertStaffMobileAppVersion({
-        platform: input.platform,
-        appVersion: input.appVersion,
-        minimumVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
-      });
-    } catch (error) {
-      throw new AppError(
-        error && typeof error === "object" && "code" in error
-          ? String(error.code)
-          : "STAFF_APP_VERSION_UNSUPPORTED",
-        "This Staff mobile app version is not supported.",
-        426,
-      );
-    }
+    this.assertPairingAppVersion(input.platform, input.appVersion);
     const publicKey = normalizeEd25519PublicKey(input.publicKey);
     return withOrderedInvariantLocks(
       this.prisma.client,
@@ -456,41 +632,70 @@ export class StaffDeviceService {
     );
   }
 
-  async challenge(publicId: string) {
-    const session = await this.prisma.client.devicePairingSession.findUnique({
-      where: { publicId },
-    });
-    if (
-      session?.status !== "CLAIMED" ||
-      !session.claimedInstallationId ||
-      !session.claimedPublicKey ||
-      !session.challengeExpiresAt ||
-      session.challengeExpiresAt <= new Date()
-    ) {
+  async challenge(publicId: string, request: WafloRequest) {
+    const recovered = await withOrderedInvariantLocks(
+      this.prisma.client,
+      [`pairing:${publicId}`],
+      async (transaction) => {
+        const session = await transaction.devicePairingSession.findUnique({ where: { publicId } });
+        const now = new Date();
+        if (
+          session?.status !== "CLAIMED" ||
+          !session.claimedInstallationId ||
+          !session.claimedPublicKey ||
+          !session.challengeExpiresAt ||
+          session.challengeExpiresAt <= now ||
+          session.expiresAt <= now
+        ) {
+          if (
+            session?.status === "CLAIMED" &&
+            (session.challengeExpiresAt === null ||
+              session.challengeExpiresAt <= now ||
+              session.expiresAt <= now)
+          ) {
+            await transaction.devicePairingSession.updateMany({
+              where: { id: session.id, status: "CLAIMED" },
+              data: { status: "EXPIRED" },
+            });
+          }
+          return null;
+        }
+        const challenge = pairingChallenge(this.environment.values.DEVICE_SESSION_SECRET, {
+          publicId: session.publicId,
+          installationId: session.claimedInstallationId,
+          publicKey: session.claimedPublicKey,
+        });
+        if (createHash("sha256").update(challenge).digest("hex") !== session.challengeHash) {
+          return null;
+        }
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId: session.organizationId,
+            action: "device.pairing_challenge_recovered",
+            targetType: "device_pairing_session",
+            targetId: session.id,
+            metadata: { pairingPublicId: session.publicId },
+          },
+          request,
+        );
+        return {
+          pairingPublicId: session.publicId,
+          challenge,
+          challengeExpiresAt: session.challengeExpiresAt,
+          signatureAlgorithm: "Ed25519" as const,
+          message: pairingMessage(session.publicId, challenge, session.claimedInstallationId),
+        };
+      },
+    );
+    if (!recovered) {
       throw new AppError(
         "DEVICE_PAIRING_EXPIRED",
         "Pairing challenge is unavailable.",
         HttpStatus.GONE,
       );
     }
-    const challenge = pairingChallenge(this.environment.values.DEVICE_SESSION_SECRET, {
-      publicId: session.publicId,
-      installationId: session.claimedInstallationId,
-      publicKey: session.claimedPublicKey,
-    });
-    if (createHash("sha256").update(challenge).digest("hex") !== session.challengeHash) {
-      throw new AppError(
-        "DEVICE_PAIRING_INVALID",
-        "Pairing challenge is invalid.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    return {
-      pairingPublicId: session.publicId,
-      challenge,
-      challengeExpiresAt: session.challengeExpiresAt,
-      message: pairingMessage(session.publicId, challenge, session.claimedInstallationId),
-    };
+    return recovered;
   }
 
   async complete(input: DevicePairingCompleteInput) {
@@ -557,8 +762,52 @@ export class StaffDeviceService {
           !Array.isArray(session.claimedMetadata)
             ? session.claimedMetadata
             : {};
+        const platform =
+          metadata.platform === "IOS" ||
+          metadata.platform === "ANDROID" ||
+          metadata.platform === "TEST_CLIENT"
+            ? metadata.platform
+            : null;
+        const appVersion = typeof metadata.appVersion === "string" ? metadata.appVersion : null;
+        if (!platform || !appVersion) {
+          throw new AppError(
+            "DEVICE_PAIRING_INVALID",
+            "Pairing device metadata is invalid.",
+            HttpStatus.UNPROCESSABLE_ENTITY,
+          );
+        }
+        this.assertPairingAppVersion(platform, appVersion);
         const locations = safePairingLocations(session.requestedLocationAssignments);
-        const authoritativeLocation = locations[0];
+        const currentStaffAssignments = await transaction.staffLocationAssignment.findMany({
+          where: {
+            organizationId: session.organizationId,
+            organizationMemberId: session.intendedStaffMemberId,
+            locationId: { in: locations.map((location) => location.locationId) },
+            active: true,
+            revokedAt: null,
+          },
+        });
+        const activeLocations = await transaction.location.findMany({
+          where: {
+            organizationId: session.organizationId,
+            status: "ACTIVE",
+            id: { in: locations.map((location) => location.locationId) },
+          },
+          select: { id: true },
+        });
+        const activeLocationIds = new Set(activeLocations.map((location) => location.id));
+        const effectiveLocations = intersectLocationCapabilities(
+          currentStaffAssignments,
+          locations.map((location) => ({ ...location, active: true })),
+        ).filter((location) => activeLocationIds.has(location.locationId));
+        if (effectiveLocations.length !== locations.length) {
+          throw new AppError(
+            "STAFF_ASSIGNMENT_REQUIRED",
+            "Pairing Locations must remain active Staff assignments.",
+            HttpStatus.FORBIDDEN,
+          );
+        }
+        const authoritativeLocation = effectiveLocations[0];
         if (!authoritativeLocation) {
           throw new AppError(
             "STAFF_ASSIGNMENT_REQUIRED",
@@ -571,16 +820,11 @@ export class StaffDeviceService {
             organizationId: session.organizationId,
             organizationMemberId: session.intendedStaffMemberId,
             displayName: input.displayName ?? session.deviceLabelSuggestion ?? "Waflo Staff device",
-            platform:
-              metadata.platform === "IOS" ||
-              metadata.platform === "ANDROID" ||
-              metadata.platform === "TEST_CLIENT"
-                ? metadata.platform
-                : "ANDROID",
+            platform,
             installationId: session.claimedInstallationId,
             publicKey: session.claimedPublicKey,
             status: "ACTIVE",
-            appVersion: typeof metadata.appVersion === "string" ? metadata.appVersion : "unknown",
+            appVersion,
             osVersion: typeof metadata.osVersion === "string" ? metadata.osVersion : null,
             model: typeof metadata.model === "string" ? metadata.model : null,
             pairedAt: new Date(),
@@ -588,7 +832,7 @@ export class StaffDeviceService {
           },
         });
         await transaction.staffDeviceLocation.createMany({
-          data: locations.map((location) => ({
+          data: effectiveLocations.map((location) => ({
             staffDeviceId: device.id,
             locationId: location.locationId,
             earningAllowed: location.earningAllowed,
@@ -626,7 +870,7 @@ export class StaffDeviceService {
           metadata: {
             staffMemberId: session.intendedStaffMemberId,
             platform: device.platform,
-            locationCount: locations.length,
+            locationCount: effectiveLocations.length,
           },
         });
         return {
@@ -715,22 +959,54 @@ export class StaffDeviceService {
     );
     const access = createOpaqueDeviceSessionToken(this.environment.values.DEVICE_SESSION_SECRET);
     const refreshToken = randomBytes(48).toString("base64url");
+    const snapshot = await this.prisma.client.staffDeviceSession.findUnique({
+      where: { id: sessionId },
+      select: { staffDeviceId: true },
+    });
+    if (!snapshot) {
+      throw new AppError(
+        "STAFF_DEVICE_NOT_ACTIVE",
+        "Staff device session cannot be refreshed.",
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
     const rotated = await withOrderedInvariantLocks(
       this.prisma.client,
-      [`device-session:${sessionId}`],
+      [`device:${snapshot.staffDeviceId}`, `device-session:${sessionId}`],
       async (transaction) => {
         const session = await transaction.staffDeviceSession.findUnique({
           where: { id: sessionId },
           include: { staffDevice: true, organizationMember: true },
         });
-        if (
-          !session ||
-          session.refreshTokenHash !== expectedHash ||
-          session.revokedAt ||
-          session.expiresAt <= new Date() ||
-          session.staffDevice.status !== "ACTIVE" ||
-          session.organizationMember.status !== "ACTIVE"
-        ) {
+        if (!session) {
+          throw new AppError(
+            "STAFF_DEVICE_NOT_ACTIVE",
+            "Staff device session cannot be refreshed.",
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        try {
+          assertDeviceOperational({
+            deviceStatus: session.staffDevice.status,
+            sessionRevokedAt: session.revokedAt,
+            sessionExpiresAt: session.expiresAt,
+            memberStatus: session.organizationMember.status,
+            now: new Date(),
+          });
+          assertTestClientAllowed({
+            platform: session.staffDevice.platform,
+            nodeEnvironment: this.environment.values.NODE_ENV,
+            testClientEnabled: this.environment.values.TEST_STAFF_CLIENT_ENABLED,
+          });
+          assertStaffMobileAppVersion({
+            platform: session.staffDevice.platform,
+            appVersion: session.staffDevice.appVersion,
+            minimumVersion: this.minimumVersion(session.staffDevice.platform),
+          });
+        } catch (error) {
+          throw safeDeviceStateError(error, "Staff device session cannot be refreshed.");
+        }
+        if (session.refreshTokenHash !== expectedHash) {
           throw new AppError(
             "STAFF_DEVICE_NOT_ACTIVE",
             "Staff device session cannot be refreshed.",

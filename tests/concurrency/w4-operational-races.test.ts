@@ -1,14 +1,9 @@
-import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import {
-  createOpaqueDeviceSessionToken,
-  createPairingToken,
-  hashOpaqueDeviceToken,
-} from "../../packages/staff-device-security/src/index.js";
-import { parseEnvironment } from "../../packages/config/src/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app.js";
 import type { WafloRequest } from "../../apps/api/src/common/request-context.js";
+import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { CustomerSecurityService } from "../../apps/api/src/customer/customer-security.service.js";
 import { TransferService } from "../../apps/api/src/customer/transfer.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
@@ -17,7 +12,13 @@ import { MerchantOperationsService } from "../../apps/api/src/operations/merchan
 import { ProgramsService } from "../../apps/api/src/programs/programs.service.js";
 import { StaffDeviceService } from "../../apps/api/src/staff-devices/staff-device.service.js";
 import { OperationalWorker } from "../../apps/operational-worker/src/main.js";
+import { parseEnvironment } from "../../packages/config/src/index.js";
 import { canonicalJson } from "../../packages/loyalty-ledger/src/index.js";
+import {
+  createOpaqueDeviceSessionToken,
+  createPairingToken,
+  hashOpaqueDeviceToken,
+} from "../../packages/staff-device-security/src/index.js";
 
 const ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OWNER_ID = "11111111-1111-4111-8111-111111111111";
@@ -36,6 +37,7 @@ describe.sequential("W4 Repair Round 1 operational races", () => {
   let staffDevices: StaffDeviceService;
   let security: CustomerSecurityService;
   let transfers: TransferService;
+  let environment: EnvironmentService;
   let ownerMemberId: string;
   let staffMemberId: string;
   let context: Parameters<LoyaltyOperationService["issueStamps"]>[0];
@@ -59,6 +61,7 @@ describe.sequential("W4 Repair Round 1 operational races", () => {
     staffDevices = app.get(StaffDeviceService);
     security = app.get(CustomerSecurityService);
     transfers = app.get(TransferService);
+    environment = app.get(EnvironmentService);
     const [owner, device] = await Promise.all([
       prisma.client.organizationMember.findFirstOrThrow({
         where: { organizationId: ORGANIZATION_ID, userId: OWNER_ID },
@@ -708,6 +711,171 @@ describe.sequential("W4 Repair Round 1 operational races", () => {
     expect(
       await prisma.client.staffDeviceSession.findUniqueOrThrow({ where: { id: old.id } }),
     ).toMatchObject({ refreshTokenHash: null });
+  });
+
+  it("serializes device revocation against mobile context", async () => {
+    await prisma.client.$transaction([
+      prisma.client.staffDevice.update({
+        where: { id: DEVICE_ID },
+        data: { status: "ACTIVE", revokedAt: null, revocationReason: null },
+      }),
+      prisma.client.staffDeviceSession.update({
+        where: { id: DEVICE_SESSION_ID },
+        data: { revokedAt: null, expiresAt: new Date(Date.now() + 86_400_000) },
+      }),
+    ]);
+    const results = await Promise.allSettled([
+      staffDevices.revoke(
+        OWNER_ID,
+        ORGANIZATION_ID,
+        context.devicePublicId,
+        "Exercise revoke versus mobile context.",
+        false,
+        request,
+      ),
+      staffDevices.mobileContext(context, "revoke-versus-context"),
+    ]);
+    expect(results[0]?.status).toBe("fulfilled");
+    if (results[1]?.status === "rejected") {
+      expect(results[1].reason).toMatchObject({ code: "STAFF_DEVICE_REVOKED" });
+    }
+    await expect(staffDevices.mobileContext(context, "post-revoke-context")).rejects.toMatchObject({
+      code: "STAFF_DEVICE_REVOKED",
+    });
+    await prisma.client.$transaction([
+      prisma.client.staffDevice.update({
+        where: { id: DEVICE_ID },
+        data: { status: "ACTIVE", revokedAt: null, revocationReason: null },
+      }),
+      prisma.client.staffDeviceSession.update({
+        where: { id: DEVICE_SESSION_ID },
+        data: { revokedAt: null, expiresAt: new Date(Date.now() + 86_400_000) },
+      }),
+    ]);
+  });
+
+  it("serializes compromise against refresh and leaves no active successor", async () => {
+    const rawRefreshToken = `m1-refresh-${randomUUID()}-${randomUUID()}`;
+    const access = createOpaqueDeviceSessionToken(environment.values.DEVICE_SESSION_SECRET);
+    const old = await prisma.client.staffDeviceSession.create({
+      data: {
+        organizationId: ORGANIZATION_ID,
+        staffDeviceId: DEVICE_ID,
+        organizationMemberId: staffMemberId,
+        locationId: LOCATION_ID,
+        tokenHash: access.tokenHash,
+        refreshTokenHash: hashOpaqueDeviceToken(
+          `refresh:${rawRefreshToken}`,
+          environment.values.DEVICE_SESSION_SECRET,
+        ),
+        expiresAt: new Date(Date.now() + 86_400_000),
+        appVersion: "1.0.0",
+      },
+    });
+    const results = await Promise.allSettled([
+      staffDevices.revoke(
+        OWNER_ID,
+        ORGANIZATION_ID,
+        context.devicePublicId,
+        "Exercise compromise versus refresh.",
+        true,
+        request,
+      ),
+      staffDevices.refreshSession(old.id, rawRefreshToken),
+    ]);
+    expect(results[0]?.status).toBe("fulfilled");
+    expect(
+      await prisma.client.staffDeviceSession.count({
+        where: { staffDeviceId: DEVICE_ID, revokedAt: null },
+      }),
+    ).toBe(0);
+    if (results[1]?.status === "rejected") {
+      expect(results[1].reason).toMatchObject({ code: "STAFF_DEVICE_COMPROMISED" });
+    }
+    await prisma.client.staffDevice.update({
+      where: { id: DEVICE_ID },
+      data: { status: "ACTIVE", revokedAt: null, revocationReason: null },
+    });
+    await prisma.client.staffDeviceSession.update({
+      where: { id: DEVICE_SESSION_ID },
+      data: { revokedAt: null, expiresAt: new Date(Date.now() + 86_400_000) },
+    });
+    await prisma.client.staffDeviceSession.deleteMany({
+      where: { OR: [{ id: old.id }, { rotationSource: old.id }] },
+    });
+  });
+
+  it("evaluates an app-policy change atomically per mobile request", async () => {
+    await prisma.client.staffDevice.update({
+      where: { id: DEVICE_ID },
+      data: { platform: "ANDROID", appVersion: "1.0.0" },
+    });
+    environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION = "1.0.0";
+    const results = await Promise.allSettled([
+      staffDevices.mobileContext(context, "app-policy-race"),
+      Promise.resolve().then(() => {
+        environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION = "2.0.0";
+      }),
+    ]);
+    expect(results[1]?.status).toBe("fulfilled");
+    if (results[0]?.status === "rejected") {
+      expect(results[0].reason).toMatchObject({ code: "STAFF_APP_VERSION_UNSUPPORTED" });
+    }
+    await expect(staffDevices.mobileContext(context, "post-policy-change")).rejects.toMatchObject({
+      code: "STAFF_APP_VERSION_UNSUPPORTED",
+    });
+    environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION = "1.0.0";
+    await prisma.client.staffDevice.update({
+      where: { id: DEVICE_ID },
+      data: { platform: "TEST_CLIENT" },
+    });
+  });
+
+  it("serializes challenge recovery against single-use completion", async () => {
+    await prisma.client.devicePairingSession.updateMany({
+      where: { intendedStaffMemberId: staffMemberId, status: { in: ["PENDING", "CLAIMED"] } },
+      data: { status: "CANCELED" },
+    });
+    const publicId = randomUUID();
+    const pairing = createPairingToken({ publicId, environmentId: "test" });
+    await prisma.client.devicePairingSession.create({
+      data: {
+        publicId,
+        organizationId: ORGANIZATION_ID,
+        intendedStaffMemberId: staffMemberId,
+        pairingTokenHash: pairing.tokenHash,
+        requestedLocationAssignments: [
+          { locationId: LOCATION_ID, earningAllowed: true, redemptionAllowed: true },
+        ],
+        createdByUserId: OWNER_ID,
+        expiresAt: new Date(Date.now() + 10 * 60_000),
+      },
+    });
+    const keys = generateKeyPairSync("ed25519");
+    const installationId = `m1-concurrency-${randomUUID()}`;
+    const claimed = await staffDevices.claim({
+      pairingToken: pairing.token,
+      installationId,
+      publicKey: keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+      platform: "ANDROID",
+      appVersion: "1.0.0",
+    });
+    const results = await Promise.allSettled([
+      staffDevices.challenge(publicId, request),
+      staffDevices.complete({
+        pairingPublicId: publicId,
+        challenge: claimed.challenge,
+        signature: sign(null, Buffer.from(claimed.message), keys.privateKey).toString("base64url"),
+        displayName: "M1 concurrency device",
+      }),
+    ]);
+    expect(results[1]?.status).toBe("fulfilled");
+    if (results[0]?.status === "rejected") {
+      expect(results[0].reason).toMatchObject({ code: "DEVICE_PAIRING_EXPIRED" });
+    }
+    expect(await prisma.client.staffDevice.count({ where: { installationId } })).toBe(1);
+    await prisma.client.staffDevice.deleteMany({ where: { installationId } });
+    await prisma.client.devicePairingSession.delete({ where: { publicId } });
   });
 
   it("allows exactly one manager approval decision and one decision audit", async () => {

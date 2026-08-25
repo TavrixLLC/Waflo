@@ -2,20 +2,22 @@ import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app.js";
+import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { CustomerSecurityService } from "../../apps/api/src/customer/customer-security.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import { createPairingToken } from "../../packages/staff-device-security/src/index.js";
 import {
   createEphemeralStaffDeviceKeypair,
   type PairedStaffTestClient,
-  signPairingMessage,
   signedStaffInject,
+  signPairingMessage,
 } from "../helpers/w4-staff-test-client.js";
 
 const ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OWNER_ID = "11111111-1111-4111-8111-111111111111";
 const STAFF_USER_ID = "33333333-3333-4333-8333-333333333333";
 const LOCATION_ID = "a1111111-1111-4111-8111-111111111111";
+const PRIMARY_SECOND_LOCATION_ID = "a2222222-2222-4222-8222-222222222222";
 const SECOND_ORGANIZATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const SECOND_LOCATION_ID = "b1111111-1111-4111-8111-111111111111";
 const TEST_PROGRAM_ID = "e0000000-0000-4000-8000-000000000001";
@@ -37,6 +39,7 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
   let app: NestFastifyApplication;
   let prisma: PrismaService;
   let customerSecurity: CustomerSecurityService;
+  let environment: EnvironmentService;
   let client: PairedStaffTestClient;
   let otherDeviceClient: PairedStaffTestClient;
   let otherOrganizationClient: PairedStaffTestClient;
@@ -133,6 +136,7 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     customerSecurity = app.get(CustomerSecurityService);
+    environment = app.get(EnvironmentService);
     customerId = randomUUID();
     membershipId = randomUUID();
     membershipPublicId = `mem_${randomUUID().replaceAll("-", "")}`;
@@ -252,6 +256,23 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     expect(responseData<Record<string, unknown>>(context)).not.toHaveProperty(
       "organizationMemberId",
     );
+    const mobileContext = responseData<{
+      organization: { publicId: string; displayName: string };
+      staff: { publicId: string; displayName: string; role: string };
+      device: { publicId: string; appVersion: string };
+      currentLocation: { publicId: string; displayName: string };
+      assignedLocations: unknown[];
+      appPolicy: { minimumSupportedVersion: string; updateRequired: boolean };
+      requestId: string;
+    }>(context);
+    expect(mobileContext).toMatchObject({
+      organization: { publicId: "today" },
+      device: { publicId: client.devicePublicId, appVersion: "1.0.0" },
+      appPolicy: { minimumSupportedVersion: "1.0.0", updateRequired: false },
+    });
+    expect(mobileContext.staff.publicId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(mobileContext.currentLocation.publicId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(mobileContext.requestId).toBe((context.json() as { requestId: string }).requestId);
 
     for (const locale of ["EN", "AR"] as const) {
       await prisma.client.customer.update({
@@ -481,6 +502,164 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
     expect(responseCode(response)).toBe("STAFF_APP_VERSION_UNSUPPORTED");
   });
 
+  it("returns active Locations with intersected Staff and device capabilities", async () => {
+    const device = await prisma.client.staffDevice.findUniqueOrThrow({
+      where: { publicId: client.devicePublicId },
+    });
+    await prisma.client.staffDeviceLocation.upsert({
+      where: {
+        staffDeviceId_locationId: {
+          staffDeviceId: device.id,
+          locationId: PRIMARY_SECOND_LOCATION_ID,
+        },
+      },
+      update: { active: true, earningAllowed: true, redemptionAllowed: false },
+      create: {
+        staffDeviceId: device.id,
+        locationId: PRIMARY_SECOND_LOCATION_ID,
+        active: true,
+        earningAllowed: true,
+        redemptionAllowed: false,
+      },
+    });
+    await prisma.client.staffLocationAssignment.update({
+      where: {
+        organizationMemberId_locationId: {
+          organizationMemberId: device.organizationMemberId,
+          locationId: PRIMARY_SECOND_LOCATION_ID,
+        },
+      },
+      data: { active: true, revokedAt: null, earningAllowed: false, redemptionAllowed: true },
+    });
+    const response = await signedStaffInject(app, client, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(response.statusCode).toBe(200);
+    const data = responseData<{
+      organization: unknown;
+      staff: unknown;
+      device: unknown;
+      currentLocation: unknown;
+      assignedLocations: Array<{
+        publicId: string;
+        earningAllowed: boolean;
+        redemptionAllowed: boolean;
+      }>;
+      appPolicy: unknown;
+      requestId: string;
+    }>(response);
+    expect(data.assignedLocations).toHaveLength(2);
+    expect(data.assignedLocations).toContainEqual(
+      expect.objectContaining({ earningAllowed: false, redemptionAllowed: false }),
+    );
+    const publicProjection = {
+      organization: data.organization,
+      staff: data.staff,
+      device: data.device,
+      currentLocation: data.currentLocation,
+      assignedLocations: data.assignedLocations,
+      appPolicy: data.appPolicy,
+      requestId: data.requestId,
+    };
+    const serialized = JSON.stringify(publicProjection);
+    const member = await prisma.client.organizationMember.findUniqueOrThrow({
+      where: { id: device.organizationMemberId },
+    });
+    for (const internalId of [
+      ORGANIZATION_ID,
+      member.id,
+      device.id,
+      client.deviceSessionId,
+      LOCATION_ID,
+      PRIMARY_SECOND_LOCATION_ID,
+    ]) {
+      expect(serialized).not.toContain(internalId);
+    }
+    await prisma.client.staffLocationAssignment.update({
+      where: {
+        organizationMemberId_locationId: {
+          organizationMemberId: device.organizationMemberId,
+          locationId: PRIMARY_SECOND_LOCATION_ID,
+        },
+      },
+      data: { earningAllowed: true, redemptionAllowed: true },
+    });
+  });
+
+  it("returns mobile-safe errors for compromised devices, expired sessions, and inactive Staff", async () => {
+    const device = await prisma.client.staffDevice.findUniqueOrThrow({
+      where: { publicId: client.devicePublicId },
+    });
+    await prisma.client.staffDevice.update({
+      where: { id: device.id },
+      data: { status: "COMPROMISED", revokedAt: new Date(), revocationReason: "not mobile safe" },
+    });
+    const compromised = await signedStaffInject(app, client, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(compromised.statusCode).toBe(401);
+    expect(responseCode(compromised)).toBe("STAFF_DEVICE_COMPROMISED");
+    expect(JSON.stringify(compromised.json())).not.toContain("not mobile safe");
+
+    await prisma.client.staffDevice.update({
+      where: { id: device.id },
+      data: { status: "ACTIVE", revokedAt: null, revocationReason: null },
+    });
+    await prisma.client.staffDeviceSession.update({
+      where: { id: client.deviceSessionId },
+      data: { expiresAt: new Date(Date.now() - 1_000) },
+    });
+    const expired = await signedStaffInject(app, client, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(expired.statusCode).toBe(401);
+    expect(responseCode(expired)).toBe("STAFF_DEVICE_SESSION_EXPIRED");
+
+    await prisma.client.staffDeviceSession.update({
+      where: { id: client.deviceSessionId },
+      data: { expiresAt: new Date(Date.now() + 86_400_000) },
+    });
+    await prisma.client.organizationMember.update({
+      where: { id: device.organizationMemberId },
+      data: { status: "SUSPENDED" },
+    });
+    const inactive = await signedStaffInject(app, client, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(inactive.statusCode).toBe(401);
+    expect(responseCode(inactive)).toBe("STAFF_DEVICE_MEMBER_INACTIVE");
+    await prisma.client.organizationMember.update({
+      where: { id: device.organizationMemberId },
+      data: { status: "ACTIVE" },
+    });
+  });
+
+  it("uses the Android minimum while preserving the M2 app-version error", async () => {
+    const device = await prisma.client.staffDevice.findUniqueOrThrow({
+      where: { publicId: client.devicePublicId },
+    });
+    await prisma.client.staffDevice.update({
+      where: { id: device.id },
+      data: { platform: "ANDROID", appVersion: "1.0.0" },
+    });
+    environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION = "2.0.0";
+    const denied = await signedStaffInject(app, client, {
+      method: "GET",
+      url: "/v1/staff/device-context",
+    });
+    expect(denied.statusCode).toBe(426);
+    expect(responseCode(denied)).toBe("STAFF_APP_VERSION_UNSUPPORTED");
+    environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION = "1.0.0";
+    await prisma.client.staffDevice.update({
+      where: { id: device.id },
+      data: { platform: "TEST_CLIENT" },
+    });
+  });
+
   it("enforces immediate device revocation", async () => {
     await prisma.client.staffDevice.update({
       where: { publicId: client.devicePublicId },
@@ -491,6 +670,6 @@ describe.sequential("W4 signed Staff HTTP operations", () => {
       url: "/v1/staff/device-context",
     });
     expect(denied.statusCode).toBe(401);
-    expect(responseCode(denied)).toBe("STAFF_DEVICE_NOT_ACTIVE");
+    expect(responseCode(denied)).toBe("STAFF_DEVICE_REVOKED");
   });
 });

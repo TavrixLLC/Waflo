@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { programOperationalStatuses } from "./program-publication-state.js";
 
+export * from "./m2.js";
 export * from "./platform-capabilities.js";
 export * from "./program-publication-state.js";
 export * from "./program-template-catalog.js";
-export * from "./w4-policy-backlog.js";
+export * from "./semantic-version.js";
 export * from "./w3.js";
 export * from "./w4.js";
-export * from "./m2.js";
+export * from "./w4-policy-backlog.js";
 
 export const locales = ["en", "ar"] as const;
 export type Locale = (typeof locales)[number];

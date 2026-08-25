@@ -2,6 +2,14 @@ import { z } from "zod";
 
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
+const strictSemanticVersionSchema = z
+  .string()
+  .min(5)
+  .max(40)
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
+    "A strict semantic version is required.",
+  );
 
 export const environmentSchema = z
   .object({
@@ -108,10 +116,9 @@ export const environmentSchema = z
     DEVICE_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     DEVICE_REQUEST_MAX_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     DEVICE_NONCE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
-    STAFF_MOBILE_MINIMUM_APP_VERSION: z
-      .string()
-      .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
-      .default("1.0.0"),
+    STAFF_MOBILE_MINIMUM_APP_VERSION: strictSemanticVersionSchema.default("1.0.0"),
+    STAFF_MOBILE_MINIMUM_IOS_VERSION: strictSemanticVersionSchema,
+    STAFF_MOBILE_MINIMUM_ANDROID_VERSION: strictSemanticVersionSchema,
     STAFF_OWN_REVERSAL_WINDOW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     MANAGER_REVERSAL_WINDOW_MINUTES: z.coerce.number().int().min(1).max(10080).default(1440),
     MANAGER_APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(5),
@@ -319,6 +326,19 @@ export const environmentSchema = z
         path: ["TEST_STAFF_CLIENT_ENABLED"],
         message: "The Staff Test Client cannot run in staging or production.",
       });
+    }
+    for (const key of [
+      "STAFF_MOBILE_MINIMUM_APP_VERSION",
+      "STAFF_MOBILE_MINIMUM_IOS_VERSION",
+      "STAFF_MOBILE_MINIMUM_ANDROID_VERSION",
+    ] as const) {
+      if (/^0\.0\.0(?:[-+]|$)/.test(value[key])) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Deployed Staff mobile minimum versions must enforce a non-zero release.",
+        });
+      }
     }
     if (
       value.APPLE_WALLET_MODE === "REAL" &&
@@ -578,8 +598,14 @@ export function parseVersionedSecretEntries(
 }
 
 export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
+  const genericMinimumVersion = source.STAFF_MOBILE_MINIMUM_APP_VERSION ?? "1.0.0";
   const result = environmentSchema.safeParse({
     ...source,
+    STAFF_MOBILE_MINIMUM_APP_VERSION: genericMinimumVersion,
+    STAFF_MOBILE_MINIMUM_IOS_VERSION:
+      source.STAFF_MOBILE_MINIMUM_IOS_VERSION ?? genericMinimumVersion,
+    STAFF_MOBILE_MINIMUM_ANDROID_VERSION:
+      source.STAFF_MOBILE_MINIMUM_ANDROID_VERSION ?? genericMinimumVersion,
     SERVICE_INSTANCE_ID: source.SERVICE_INSTANCE_ID ?? source.HOSTNAME ?? "local",
     DEPLOYMENT_ENVIRONMENT:
       source.DEPLOYMENT_ENVIRONMENT ??

@@ -49,6 +49,7 @@
     "w4:no-flutter": "node scripts/no-flutter-scan.mjs",
     "w4:process-cleanup": "node scripts/record-w4-process-cleanup.mjs",
     "w4:quality-gate": "node scripts/run-w4-quality-gate.mjs",
+    "contracts:m1": "pnpm test:prepare && pnpm --filter @waflo/api build && node scripts/generate-m1-mobile-contracts.mjs",
     "m2:contracts": "pnpm --filter @waflo/contracts build && node scripts/generate-m2-mobile-contracts.mjs",
     "m2:contracts:verify": "node scripts/verify-m2-mobile-contracts.mjs",
     "handoff:archive": "node scripts/create-portable-archive.mjs",

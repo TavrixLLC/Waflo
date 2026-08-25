@@ -17,6 +17,7 @@ import {
   devicePairingCompleteSchema,
   staffDeviceSessionRefreshSchema,
 } from "@waflo/contracts";
+import { AppError } from "../common/app-error.js";
 import {
   CurrentUser,
   Public,
@@ -31,7 +32,6 @@ import {
   parseOptionalPaginationLimit,
   parseUuid,
 } from "../common/validation.js";
-import { AppError } from "../common/app-error.js";
 import { StaffDeviceService } from "./staff-device.service.js";
 
 @Controller("v1/organizations/:organizationId")
@@ -168,9 +168,9 @@ export class StaffDevicePairingController {
   @Post("devices/pairing/challenge")
   @RateLimit(20)
   @HttpCode(HttpStatus.OK)
-  challenge(@Body() body: unknown) {
+  challenge(@Body() body: unknown, @Req() request: WafloRequest) {
     const input = parseInput(devicePairingChallengeSchema, body);
-    return this.devices.challenge(input.pairingPublicId);
+    return this.devices.challenge(input.pairingPublicId, request);
   }
 
   @Post("devices/pairing/complete")
@@ -204,17 +204,6 @@ export class StaffDevicePairingController {
   context(@Req() request: WafloRequest, @Headers("x-waflo-device-id") _deviceId: string) {
     const context = request.staffDeviceContext;
     if (!context) throw new AppError("STAFF_DEVICE_NOT_ACTIVE", "Device context missing.", 401);
-    return {
-      organizationId: context.organizationId,
-      role: context.role,
-      locationId: context.locationId,
-      devicePublicId: context.devicePublicId,
-      deviceSessionId: context.deviceSessionId,
-      platform: context.platform,
-      appVersion: context.appVersion,
-      minimumSupportedAppVersion: context.minimumSupportedAppVersion,
-      appVersionSupported: context.appVersionSupported,
-      requestId: context.requestId,
-    };
+    return this.devices.mobileContext(context, request.requestId);
   }
 }
