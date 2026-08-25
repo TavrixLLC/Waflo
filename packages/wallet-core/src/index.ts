@@ -70,6 +70,9 @@ export interface WalletProgramInput {
   readonly backgroundColor: string;
   readonly foregroundColor: string;
   readonly programLogoUrl?: string;
+  /** Customer-specific, immutable Wallet artwork URL (for example a Google hero image). */
+  readonly walletArtworkUrl?: string;
+  /** @deprecated Use walletArtworkUrl for newly composed Wallet assets. */
   readonly publicAssetBaseUrl?: string;
   readonly configurationFingerprint: string;
   readonly locale: "en" | "ar";

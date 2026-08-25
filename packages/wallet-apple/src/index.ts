@@ -4,6 +4,10 @@ import forge from "node-forge";
 import sharp from "sharp";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
+  composeAppleLegacyStripArtwork,
+  walletArtworkInputFromStampRender,
+} from "@waflo/wallet-artwork";
+import {
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
@@ -50,7 +54,6 @@ export interface AppleStoreCardPass {
     readonly format: "PKBarcodeFormatQR";
     readonly message: string;
     readonly messageEncoding: "iso-8859-1";
-    readonly altText: string;
   }>;
   readonly storeCard: {
     readonly headerFields: readonly ApplePassField[];
@@ -99,7 +102,6 @@ export function mapAppleStoreCard(
         format: "PKBarcodeFormatQR",
         message: input.credentialPayload,
         messageEncoding: "iso-8859-1",
-        altText: inactive ? "No longer valid" : input.publicMembershipId.slice(-12),
       },
     ],
     storeCard: {
@@ -302,18 +304,31 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
   };
 }
 
-async function progressStrip(input: WalletMembershipInput): Promise<Buffer> {
+async function progressStripImages(
+  input: WalletMembershipInput,
+): Promise<Readonly<Record<string, Buffer>>> {
   const rendered = renderPublishedMembershipStampSvg({
     ...input.stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
-  return sharp(Buffer.from(rendered.svg, "utf8"))
-    .resize(750, 246, {
-      fit: "contain",
-      background: input.stampRenderInput.visualTheme.backgroundColor,
-    })
-    .png()
-    .toBuffer();
+  const composed = await composeAppleLegacyStripArtwork(
+    walletArtworkInputFromStampRender(
+      {
+        stampRenderInput: input.stampRenderInput,
+        rewardLabel: input.rewardSummary,
+        organizationName: input.organizationName,
+        programName: input.programName,
+        memberName: input.displayName,
+        credentialPayload: input.credentialPayload,
+      },
+      rendered,
+    ),
+  );
+  return {
+    "strip.png": composed.times1.bytes,
+    "strip@2x.png": composed.times2.bytes,
+    "strip@3x.png": composed.times3.bytes,
+  };
 }
 
 function localizedStrings(locale: "en" | "ar"): string {
@@ -513,9 +528,7 @@ export class AppleWalletProvider implements WalletProvider {
     const artifact = await buildApplePassPackage({
       pass,
       signer: this.options.signer as ApplePassSigner,
-      images: {
-        "strip.png": await progressStrip(input),
-      },
+      images: await progressStripImages(input),
     });
     return {
       providerObjectId: input.providerIdentity,

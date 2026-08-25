@@ -58,6 +58,36 @@ export interface StampPosition {
   filled: boolean;
 }
 
+export interface BalancedWalletStampDistribution {
+  readonly layout: "ROW" | "GRID";
+  readonly layoutConfiguration: StampLayoutConfiguration;
+  readonly rows: readonly number[];
+}
+
+/**
+ * Wallet-only placement policy. It changes positions, never the persisted
+ * filled/empty artwork bytes consumed by the authoritative renderer.
+ */
+export function balancedWalletStampDistribution(total: number): BalancedWalletStampDistribution {
+  if (!Number.isInteger(total) || total < 1 || total > 30) {
+    throw new Error("Wallet stamp total must be between 1 and 30.");
+  }
+  if (total <= 5) {
+    return {
+      layout: "ROW",
+      layoutConfiguration: { maxPerRow: total },
+      rows: [total],
+    };
+  }
+  const firstRow = Math.ceil(total / 2);
+  const secondRow = total - firstRow;
+  return {
+    layout: "GRID",
+    layoutConfiguration: { columns: firstRow },
+    rows: [firstRow, secondRow],
+  };
+}
+
 /**
  * The immutable, published membership projection consumed by every customer and
  * wallet renderer. Both pieces of artwork are mandatory so production call
@@ -75,6 +105,7 @@ export interface PublishedMembershipStampRenderInput {
   readonly rewardReady: boolean;
   readonly layoutType: StampLayout;
   readonly layoutConfiguration?: StampLayoutConfiguration;
+  readonly layoutPolicy?: "BALANCED_WALLET_ROWS_V1";
   readonly visualTheme: {
     readonly filledColor: string;
     readonly emptyColor: string;
@@ -153,8 +184,8 @@ export function layoutStampPositions(
   spacing = 8,
   configuration: StampLayoutConfiguration = {},
 ): StampPosition[] {
-  if (!Number.isInteger(goal) || goal < 2 || goal > 30)
-    throw new Error("Stamp goal must be between 2 and 30.");
+  if (!Number.isInteger(goal) || goal < 1 || goal > 30)
+    throw new Error("Stamp goal must be between 1 and 30.");
   if (!Number.isFinite(size) || size < 24 || size > 96) throw new Error("Invalid stamp size.");
   if (!Number.isFinite(spacing) || spacing < 0 || spacing > 32)
     throw new Error("Invalid stamp spacing.");
@@ -252,10 +283,11 @@ export function renderStampSvg(input: StampRenderInput): {
     )
     .join("");
   const profile = input.outputProfile ?? "CUSTOMER_WEB";
+  const walletProfile = profile === "APPLE_WALLET" || profile === "GOOGLE_WALLET";
   const ariaLabel = escapeXml(
     [...labelLines, `${progress} of ${input.goal} stamps`].filter(Boolean).join(". "),
   );
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}" data-output-profile="${profile}" data-reward-ready="${input.rewardReady === true}"><rect width="100%" height="100%" rx="18" fill="${background}"/>${artwork}${labels}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${ariaLabel}" data-output-profile="${profile}" data-reward-ready="${input.rewardReady === true}"><rect width="100%" height="100%" rx="18" fill="${walletProfile ? "none" : background}"/>${artwork}${labels}</svg>`;
   return {
     svg,
     digest: createHash("sha256").update(svg).digest("hex"),
@@ -301,6 +333,7 @@ export function publishedMembershipStampVisualDigest(
         rewardReady: input.rewardReady,
         layoutType: input.layoutType,
         layoutConfiguration: input.layoutConfiguration ?? {},
+        ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
         visualTheme: input.visualTheme,
         assetDigests: input.assetDigests,
         outputProfile: input.outputProfile,
@@ -318,11 +351,19 @@ export function renderPublishedMembershipStampSvg(
   assertDigest(input.assetDigests.filled, "Filled artwork digest");
   assertDigest(input.assetDigests.empty, "Empty artwork digest");
 
+  const walletDistribution =
+    input.layoutPolicy === "BALANCED_WALLET_ROWS_V1"
+      ? balancedWalletStampDistribution(input.requiredStampCount)
+      : null;
   const rendered = renderStampSvg({
     goal: input.requiredStampCount,
     progress: input.currentStampCount,
-    layout: input.layoutType,
-    ...(input.layoutConfiguration ? { layoutConfiguration: input.layoutConfiguration } : {}),
+    layout: walletDistribution?.layout ?? input.layoutType,
+    ...(walletDistribution
+      ? { layoutConfiguration: walletDistribution.layoutConfiguration }
+      : input.layoutConfiguration
+        ? { layoutConfiguration: input.layoutConfiguration }
+        : {}),
     filledColor: input.visualTheme.filledColor,
     emptyColor: input.visualTheme.emptyColor,
     accentColor: input.visualTheme.accentColor,
@@ -357,6 +398,7 @@ export function renderPublishedMembershipStampSvg(
         rewardReady: input.rewardReady,
         layoutType: input.layoutType,
         layoutConfiguration: input.layoutConfiguration ?? {},
+        ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
         visualTheme: input.visualTheme,
         assetDigests: input.assetDigests,
         outputProfile: input.outputProfile,

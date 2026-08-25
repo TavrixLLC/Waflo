@@ -17,6 +17,7 @@
     "@waflo/qr-core": "workspace:*",
     "@waflo/stamp-engine": "workspace:*",
     "@waflo/wallet-apple": "workspace:*",
+    "@waflo/wallet-artwork": "workspace:*",
     "@waflo/wallet-core": "workspace:*",
     "@waflo/wallet-google": "workspace:*",
     "ioredis": "5.11.1",

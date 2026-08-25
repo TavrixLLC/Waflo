@@ -31,7 +31,6 @@ import {
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
   type PublishedMembershipStampRenderInput,
-  type StampArtwork,
 } from "@waflo/stamp-engine";
 import {
   AppleWalletProvider,
@@ -39,6 +38,7 @@ import {
   TestApplePassSigner,
   type ApplePassSigner,
 } from "@waflo/wallet-apple";
+import { composeWalletArtwork, walletArtworkInputFromStampRender } from "@waflo/wallet-artwork";
 import {
   normalizeWalletProviderError,
   type WalletMembershipInput,
@@ -50,6 +50,7 @@ import {
 import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
+import { loadHistoricalWalletStampSource } from "./historical-wallet-stamp-source.js";
 
 const QUEUE_KEY = "waflo:wallet:commands";
 const SIGNAL_TTL_SECONDS = 180;
@@ -249,7 +250,7 @@ function mapPass(
   pass: PassRecord,
   environment: Environment,
   stampRenderInput: PublishedMembershipStampRenderInput,
-  progressAssetUrl?: string,
+  walletArtworkUrl?: string,
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
@@ -273,7 +274,7 @@ function mapPass(
       version.renderFingerprint ??
       createHash("sha256").update(version.id).digest("hex"),
     locale,
-    ...(progressAssetUrl ? { publicAssetBaseUrl: progressAssetUrl } : {}),
+    ...(walletArtworkUrl ? { walletArtworkUrl } : {}),
     walletPassInstanceId: pass.id,
     providerIdentity: pass.providerIdentity,
     publicMembershipId: membership.publicMembershipId,
@@ -735,11 +736,12 @@ export class WalletWorker {
           pass,
           pass.provider === "GOOGLE" ? "GOOGLE_WALLET" : "APPLE_WALLET",
         );
-        const progressAssetUrl =
+        const baseInput = mapPass(pass, this.environment, stampRenderInput);
+        const walletArtworkUrl =
           pass.provider === "GOOGLE"
-            ? await this.ensureGoogleProgressAsset(pass, stampRenderInput)
+            ? await this.ensureGoogleHeroAsset(pass, baseInput)
             : undefined;
-        const input = mapPass(pass, this.environment, stampRenderInput, progressAssetUrl);
+        const input = walletArtworkUrl ? { ...baseInput, walletArtworkUrl } : baseInput;
         if (command.commandType === "ISSUE") {
           if (pass.membershipCredential.status !== "ACTIVE") {
             await this.deadLetter(command, "CREDENTIAL_NOT_ACTIVE");
@@ -1033,12 +1035,27 @@ export class WalletWorker {
     }
   }
 
-  private async ensureGoogleProgressAsset(
+  private async ensureGoogleHeroAsset(
     pass: PassRecord,
-    stampRenderInput: PublishedMembershipStampRenderInput,
+    input: WalletMembershipInput,
   ): Promise<string> {
-    const visualDigest = publishedMembershipStampVisualDigest(stampRenderInput);
-    const assetType = `GOOGLE_PROGRESS_${visualDigest}`;
+    const visualDigest = publishedMembershipStampVisualDigest(input.stampRenderInput);
+    const credentialDigest = createHash("sha256").update(input.credentialPayload).digest("hex");
+    const compositionDigest = createHash("sha256")
+      .update(`waflo-wallet-artwork-v4:${visualDigest}:`)
+      .update(input.organizationName)
+      .update("\0")
+      .update(input.programName)
+      .update("\0")
+      .update(input.displayName)
+      .update("\0")
+      .update(input.rewardSummary)
+      .update("\0")
+      .update(input.locale)
+      .update("\0")
+      .update(credentialDigest)
+      .digest("hex");
+    const assetType = `GOOGLE_HERO_V4_${compositionDigest}`;
     const cached = await this.prisma.publicWalletAsset.findFirst({
       where: { organizationId: pass.organizationId, assetType, revokedAt: null },
     });
@@ -1048,16 +1065,22 @@ export class WalletWorker {
     if (cached) {
       return `${base.replace(/\/+$/, "")}/${cached.publicToken}`;
     }
-    const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
-    const width = 1_032;
-    const height = 336;
-    const bytes = await sharp(Buffer.from(rendered.svg, "utf8"))
-      .resize(width, height, {
-        fit: "contain",
-        background: stampRenderInput.visualTheme.backgroundColor,
-      })
-      .png()
-      .toBuffer();
+    const rendered = renderPublishedMembershipStampSvg(input.stampRenderInput);
+    const composed = await composeWalletArtwork(
+      walletArtworkInputFromStampRender(
+        {
+          stampRenderInput: input.stampRenderInput,
+          rewardLabel: input.rewardSummary,
+          organizationName: input.organizationName,
+          programName: input.programName,
+          memberName: input.displayName,
+          credentialPayload: input.credentialPayload,
+        },
+        rendered,
+      ),
+      "GOOGLE_HERO",
+    );
+    const { width, height, bytes } = composed;
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
     const objectKey = `wallet-public/${pass.organizationId}/${contentDigest}.png`;
     const publicToken = `wpa_${createHmac(
@@ -1209,14 +1232,10 @@ export class WalletWorker {
     const version = pass.membership.enrollmentProgramVersion;
     const theme = version.visualTheme;
     if (!theme) throw new Error("Published Wallet stamp artwork is unavailable.");
-    const [filledArtwork, emptyArtwork] = await Promise.all([
+    const [filledSource, emptySource] = await Promise.all([
       this.loadStampArtwork(theme.filledStampAsset),
       this.loadStampArtwork(theme.emptyStampAsset),
     ]);
-    const digest = (asset: typeof theme.filledStampAsset) =>
-      asset.variants.find((item) => item.variantCode === "STAMP_256")?.digest ??
-      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE")?.digest ??
-      asset.sha256Digest;
     const requiredStampCount = version.stampRule?.requiredStampCount ?? 8;
     const currentStampCount = pass.membership.progress?.currentCycleStampCount ?? 0;
     const rawLayout =
@@ -1250,6 +1269,7 @@ export class WalletWorker {
       currentStampCount,
       rewardReady: pass.membership.progress?.rewardReady ?? false,
       layoutType: theme.layoutType,
+      layoutPolicy: "BALANCED_WALLET_ROWS_V1",
       ...(Object.keys(layoutConfiguration).length > 0 ? { layoutConfiguration } : {}),
       visualTheme: {
         filledColor: theme.accentColor,
@@ -1260,11 +1280,11 @@ export class WalletWorker {
         stampSize: theme.stampSize,
         spacing: theme.stampSpacing,
       },
-      filledArtwork,
-      emptyArtwork,
+      filledArtwork: filledSource.artwork,
+      emptyArtwork: emptySource.artwork,
       assetDigests: {
-        filled: digest(theme.filledStampAsset),
-        empty: digest(theme.emptyStampAsset),
+        filled: filledSource.identity.renderDigest,
+        empty: emptySource.identity.renderDigest,
       },
       outputProfile,
     };
@@ -1276,46 +1296,17 @@ export class WalletWorker {
         ? Asset
         : never
       : never,
-  ): Promise<StampArtwork> {
-    const metadata = asset.safeMetadata;
-    if (
-      metadata &&
-      typeof metadata === "object" &&
-      !Array.isArray(metadata) &&
-      "inlineSvg" in metadata &&
-      typeof metadata.inlineSvg === "string"
-    ) {
-      return { kind: "svg", content: metadata.inlineSvg, trusted: true };
-    }
-    const variant =
-      asset.variants.find((item) => item.variantCode === "STAMP_256") ??
-      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE");
-    if (!variant?.mimeType.startsWith("image/")) {
-      throw new Error("Published Wallet stamp artwork has no processed variant.");
-    }
-    const result = await this.objectStorage.send(
-      new GetObjectCommand({
-        Bucket: this.environment.OBJECT_STORAGE_BUCKET,
-        Key: variant.objectKey,
-      }),
-    );
-    if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
-    const bytes = Buffer.from(await result.Body.transformToByteArray());
-    if (createHash("sha256").update(bytes).digest("hex") !== variant.digest) {
-      throw new Error("Published Wallet stamp artwork digest mismatch.");
-    }
-    const mimeType = variant.mimeType as StampArtwork extends {
-      kind: "data-uri";
-      mimeType: infer Mime;
-    }
-      ? Mime
-      : never;
-    return {
-      kind: "data-uri",
-      value: `data:${mimeType};base64,${bytes.toString("base64")}`,
-      mimeType,
-      trusted: true,
-    };
+  ) {
+    return loadHistoricalWalletStampSource(asset, async (objectKey) => {
+      const result = await this.objectStorage.send(
+        new GetObjectCommand({
+          Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+          Key: objectKey,
+        }),
+      );
+      if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
+      return Buffer.from(await result.Body.transformToByteArray());
+    });
   }
 
   private async objectStorageReady() {

@@ -191,12 +191,15 @@ describe("W3 customer security, QR, and Wallet domain", () => {
         "icon@3x.png",
         "logo.png",
         "strip.png",
+        "strip@2x.png",
+        "strip@3x.png",
         "en.lproj/pass.strings",
         "ar.lproj/pass.strings",
       ]),
     );
     const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8"));
     expect(pass.barcodes[0].message).toBe(walletInput.credentialPayload);
+    expect(pass.barcodes[0]).not.toHaveProperty("altText");
     expect(pass.voided).toBe(false);
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
     expect(Buffer.from(files["manifest.json"] ?? []).toString("utf8")).not.toContain("signature");
@@ -215,7 +218,17 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       classId,
       state: "ACTIVE",
       barcode: { value: walletInput.credentialPayload },
-      imageModulesData: [{ id: "waflo-progress" }],
+      heroImage: { sourceUri: { uri: "https://assets.example.test/wpa_opaque" } },
+    });
+    expect(active.barcode).not.toHaveProperty("alternateText");
+    expect(active).not.toHaveProperty("loyaltyPoints");
+    const {
+      publicAssetBaseUrl: _publicAssetBaseUrl,
+      walletArtworkUrl: _walletArtworkUrl,
+      ...withoutHero
+    } = walletInput;
+    expect(mapGoogleLoyaltyObject(withoutHero, objectId, classId)).toMatchObject({
+      loyaltyPoints: { balance: { string: "3/8" } },
     });
     expect(
       mapGoogleLoyaltyObject({ ...walletInput, transferred: true }, objectId, classId).state,

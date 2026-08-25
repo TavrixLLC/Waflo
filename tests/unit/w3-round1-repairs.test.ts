@@ -157,6 +157,8 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       "logo.png",
       "logo@2x.png",
       "strip.png",
+      "strip@2x.png",
+      "strip@3x.png",
       "en.lproj/pass.strings",
       "ar.lproj/pass.strings",
     ];
@@ -176,6 +178,17 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
         .toBuffer();
       expect(raw.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
       expect(raw.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
+    }
+    for (const [name, dimensions] of [
+      ["strip.png", [375, 123]],
+      ["strip@2x.png", [750, 246]],
+      ["strip@3x.png", [1_125, 369]],
+    ] as const) {
+      await expect(sharp(Buffer.from(files[name] ?? [])).metadata()).resolves.toMatchObject({
+        width: dimensions[0],
+        height: dimensions[1],
+        format: "png",
+      });
     }
     const packageText = Object.entries(files)
       .filter(([name]) => name.endsWith(".json") || name.endsWith(".strings"))
@@ -249,6 +262,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
   it("maps safe Class logo imagery and keeps member progress/barcode only on the Object", () => {
     const classValue = mapGoogleLoyaltyClass(walletInput, "issuer.class");
     const objectValue = mapGoogleLoyaltyObject(walletInput, "issuer.object", "issuer.class");
+    expect(objectValue.barcode).not.toHaveProperty("alternateText");
     expect(classValue).toMatchObject({
       programLogo: {
         sourceUri: { uri: walletInput.programLogoUrl },
@@ -256,9 +270,11 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     });
     expect(JSON.stringify(classValue)).not.toContain(walletInput.credentialPayload);
     expect(objectValue).toMatchObject({
-      imageModulesData: [{ mainImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } } }],
+      heroImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } },
       barcode: { value: walletInput.credentialPayload },
     });
+    expect(objectValue).not.toHaveProperty("loyaltyPoints");
+    expect(objectValue).not.toHaveProperty("imageModulesData");
     expect(JSON.stringify(objectValue).match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
   });
 });

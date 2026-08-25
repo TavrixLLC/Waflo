@@ -91,32 +91,35 @@ export function mapGoogleLoyaltyObject(
     input.membershipStatus !== "ACTIVE" ||
     input.programStatus === "ARCHIVED" ||
     input.programStatus === "SUSPENDED";
+  const heroImageUrl = input.walletArtworkUrl ?? input.publicAssetBaseUrl;
+  const heroDescription =
+    input.locale === "ar"
+      ? `${input.programName} للعضو ${input.displayName}. تقدم الأختام ${input.currentStampCount} من ${input.requiredStampCount}. المكافأة: ${input.rewardSummary}`
+      : `${input.programName} for ${input.displayName}. Stamp progress ${input.currentStampCount} of ${input.requiredStampCount}. Reward: ${input.rewardSummary}`;
   return {
     id: objectId,
     classId,
     state: inactive ? "INACTIVE" : "ACTIVE",
     accountName: input.displayName.slice(0, 20),
     accountId: input.publicMembershipId.slice(-20),
-    loyaltyPoints: {
-      label: "Stamps",
-      balance: { string: `${input.currentStampCount}/${input.requiredStampCount}` },
-    },
+    ...(!heroImageUrl
+      ? {
+          loyaltyPoints: {
+            label: "Stamps",
+            balance: { string: `${input.currentStampCount}/${input.requiredStampCount}` },
+          },
+        }
+      : {}),
     barcode: {
       type: "QR_CODE",
       value: input.credentialPayload,
-      alternateText: inactive ? "No longer valid" : input.publicMembershipId.slice(-12),
     },
-    ...(input.publicAssetBaseUrl
+    ...(heroImageUrl
       ? {
-          imageModulesData: [
-            {
-              id: "waflo-progress",
-              mainImage: {
-                sourceUri: { uri: input.publicAssetBaseUrl },
-                contentDescription: translated("Stamp progress", input.locale),
-              },
-            },
-          ],
+          heroImage: {
+            sourceUri: { uri: heroImageUrl },
+            contentDescription: translated(heroDescription.slice(0, 500), input.locale),
+          },
         }
       : {}),
     textModulesData: [
