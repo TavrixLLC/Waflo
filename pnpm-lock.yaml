@@ -43,6 +43,9 @@ importers:
       '@waflo/stamp-engine':
         specifier: workspace:*
         version: link:packages/stamp-engine
+      '@waflo/wallet-artwork':
+        specifier: workspace:*
+        version: link:packages/wallet-artwork
       dotenv:
         specifier: 17.4.2
         version: 17.4.2
@@ -209,6 +212,22 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.1))
+
+  apps/apple-pass-builder-service:
+    dependencies:
+      protobufjs:
+        specifier: 8.7.2
+        version: 8.7.2
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+      tsx:
+        specifier: 4.23.1
+        version: 4.23.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   apps/customer-web:
     dependencies:
@@ -462,6 +481,9 @@ importers:
       '@waflo/wallet-apple':
         specifier: workspace:*
         version: link:../../packages/wallet-apple
+      '@waflo/wallet-artwork':
+        specifier: workspace:*
+        version: link:../../packages/wallet-artwork
       '@waflo/wallet-core':
         specifier: workspace:*
         version: link:../../packages/wallet-core
@@ -741,6 +763,9 @@ importers:
       '@waflo/stamp-engine':
         specifier: workspace:*
         version: link:../stamp-engine
+      '@waflo/wallet-artwork':
+        specifier: workspace:*
+        version: link:../wallet-artwork
       '@waflo/wallet-core':
         specifier: workspace:*
         version: link:../wallet-core
@@ -760,6 +785,25 @@ importers:
       '@types/node-forge':
         specifier: 1.3.11
         version: 1.3.11
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/wallet-artwork:
+    dependencies:
+      '@waflo/qr-core':
+        specifier: workspace:*
+        version: link:../qr-core
+      '@waflo/stamp-engine':
+        specifier: workspace:*
+        version: link:../stamp-engine
+      sharp:
+        specifier: ^0.35.3
+        version: 0.35.3(@types/node@26.1.1)
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -3782,6 +3826,10 @@ packages:
 
   proper-lockfile@4.1.2:
     resolution: {integrity: sha512-TjNPblN4BwAWMXU8s9AEz4JmQxnD1NNL7bNOY/AKUzyamc379FWASUhc/K1pL2noVb+XmZKLL68cjzLsiOAMaA==}
+
+  protobufjs@8.7.2:
+    resolution: {integrity: sha512-oTVHV+oelUBtiu5iTuTNNZ0eLYsXSMxry4cgr30mayNkgIZL6qZ0IOQVPuSWGcyAaXKl/XgqwWHIC3a0khYVBA==}
+    engines: {node: '>=12.0.0'}
 
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
@@ -7307,6 +7355,10 @@ snapshots:
       graceful-fs: 4.2.11
       retry: 0.12.0
       signal-exit: 3.0.7
+
+  protobufjs@8.7.2:
+    dependencies:
+      long: 5.3.2
 
   punycode@2.3.1: {}
 

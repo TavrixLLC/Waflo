@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { strictSemanticVersionSchema } from "./semantic-version.js";
 
 export const operationCommandIdSchema = z.uuid();
 export const safeReasonSchema = z.string().trim().min(3).max(500);
@@ -78,6 +79,145 @@ export const staffDeviceSessionRefreshSchema = z
     refreshToken: z.string().min(40).max(512),
   })
   .strict();
+
+export const mobileLocationContextSchema = z
+  .object({
+    publicId: z.uuid(),
+    displayName: z.string().min(1).max(120),
+    earningAllowed: z.boolean(),
+    redemptionAllowed: z.boolean(),
+  })
+  .strict();
+
+export const mobileStaffDeviceContextSchema = z
+  .object({
+    organization: z
+      .object({
+        publicId: z.string().min(3).max(40),
+        displayName: z.string().min(1).max(120),
+      })
+      .strict(),
+    staff: z
+      .object({
+        publicId: z.uuid(),
+        displayName: z.string().min(1).max(100),
+        role: z.enum(["OWNER", "MANAGER", "STAFF"]),
+      })
+      .strict(),
+    device: z
+      .object({
+        publicId: z.uuid(),
+        displayName: z.string().min(1).max(120),
+        status: z.enum(["PENDING", "ACTIVE", "REVOKED", "COMPROMISED"]),
+        platform: z.enum(["IOS", "ANDROID", "TEST_CLIENT"]),
+        appVersion: z.string().min(1).max(40),
+      })
+      .strict(),
+    currentLocation: mobileLocationContextSchema,
+    assignedLocations: z.array(mobileLocationContextSchema).max(50),
+    appPolicy: z
+      .object({
+        minimumSupportedVersion: strictSemanticVersionSchema,
+        updateRequired: z.boolean(),
+      })
+      .strict(),
+    requestId: z.string().min(1).max(160),
+  })
+  .strict();
+
+export const devicePairingClaimResponseSchema = z
+  .object({
+    pairingPublicId: z.uuid(),
+    challenge: z.string().min(32).max(256),
+    challengeExpiresAt: z.iso.datetime(),
+    signatureAlgorithm: z.literal("Ed25519"),
+    message: z.string().min(1).max(1024),
+  })
+  .strict();
+
+export const devicePairingRecoveryResponseSchema = devicePairingClaimResponseSchema;
+
+export const devicePairingCompleteResponseSchema = z
+  .object({
+    device: z
+      .object({
+        publicId: z.uuid(),
+        displayName: z.string().min(1).max(120),
+        platform: z.enum(["IOS", "ANDROID", "TEST_CLIENT"]),
+        status: z.literal("ACTIVE"),
+      })
+      .strict(),
+    session: z
+      .object({
+        id: z.uuid(),
+        token: z.string().min(40).max(512),
+        refreshToken: z.string().min(40).max(512),
+        expiresAt: z.iso.datetime(),
+      })
+      .strict(),
+    context: z
+      .object({
+        organizationId: z.uuid(),
+        role: z.enum(["OWNER", "MANAGER", "STAFF"]),
+        locationId: z.uuid(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const staffDeviceSessionRefreshResponseSchema = z
+  .object({
+    session: z
+      .object({
+        id: z.uuid(),
+        token: z.string().min(40).max(512),
+        refreshToken: z.string().min(40).max(512),
+        expiresAt: z.iso.datetime(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const requestSigningFixtureSchema = z
+  .object({
+    envelopeVersion: z.literal("waflo-device-request-v1"),
+    algorithm: z.literal("Ed25519"),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    canonicalPath: z.string().startsWith("/"),
+    requestId: z.string().min(1).max(128),
+    timestamp: z.iso.datetime(),
+    nonce: z.string().min(1).max(128),
+    bodySha256: z.string().regex(/^[a-f0-9]{64}$/),
+    deviceSessionId: z.uuid(),
+    organizationId: z.uuid(),
+    separator: z.literal("\\n"),
+    containsCredential: z.literal(false),
+  })
+  .strict();
+
+export const M1_STABLE_ERROR_CODES = [
+  { code: "STAFF_DEVICE_COMPROMISED", httpStatus: 401, retryable: false },
+  { code: "STAFF_DEVICE_REVOKED", httpStatus: 401, retryable: false },
+  { code: "STAFF_DEVICE_MEMBER_INACTIVE", httpStatus: 401, retryable: false },
+  { code: "STAFF_DEVICE_SESSION_EXPIRED", httpStatus: 401, retryable: false },
+  { code: "STAFF_APP_VERSION_UNSUPPORTED", httpStatus: 426, retryable: false },
+  { code: "STAFF_DEVICE_NOT_ACTIVE", httpStatus: 401, retryable: false },
+  { code: "STAFF_DEVICE_SIGNATURE_INVALID", httpStatus: 401, retryable: false },
+  { code: "STAFF_DEVICE_CLOCK_SKEW", httpStatus: 401, retryable: true },
+  { code: "STAFF_DEVICE_NONCE_REPLAYED", httpStatus: 409, retryable: true },
+  { code: "STAFF_DEVICE_BODY_DIGEST_INVALID", httpStatus: 401, retryable: false },
+  { code: "DEVICE_PAIRING_INVALID", httpStatus: 422, retryable: false },
+  { code: "DEVICE_PAIRING_ALREADY_USED", httpStatus: 409, retryable: false },
+  { code: "DEVICE_PAIRING_EXPIRED", httpStatus: 410, retryable: false },
+  { code: "STAFF_ASSIGNMENT_REQUIRED", httpStatus: 403, retryable: false },
+  { code: "LOCATION_NOT_AUTHORIZED", httpStatus: 403, retryable: false },
+  { code: "RATE_LIMITED", httpStatus: 429, retryable: true },
+  { code: "VALIDATION_FAILED", httpStatus: 422, retryable: false },
+] as const;
+
+export type M1StableErrorCode = (typeof M1_STABLE_ERROR_CODES)[number]["code"];
+export type MobileStaffDeviceContext = z.infer<typeof mobileStaffDeviceContextSchema>;
+export type MobileLocationContext = z.infer<typeof mobileLocationContextSchema>;
 
 export const membershipResolveSchema = z
   .object({

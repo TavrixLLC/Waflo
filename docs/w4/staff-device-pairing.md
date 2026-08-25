@@ -8,24 +8,19 @@ The server issues a deterministic challenge bound to pairing ID, installation ID
 Completion verifies the Ed25519 signature, creates the device and opaque session, and consumes the
 pairing session atomically. Installation identity and public key cannot be reassigned.
 
+`POST /v1/staff/devices/pairing/challenge` is the official recovery path when claim succeeded but
+the claim response was lost or ambiguous. It is rate-limited and returns only the still-active,
+unexpired claimed challenge bound to the claimed installation and public key. Repeated recovery
+returns the same challenge and never returns the one-time pairing secret, QR payload,
+Organization, or Staff information. Unknown, expired, completed, and otherwise unavailable public
+IDs share the same safe unavailable response. Recovery and completion take the same pairing lock;
+completion remains single-use. Every successful recovery writes
+`device.pairing_challenge_recovered` with safe pairing metadata to the Organization audit log.
+
+iOS and Android claims must carry a strict semantic `appVersion`. Claims below the configured
+platform minimum return `STAFF_APP_VERSION_UNSUPPORTED`; completion rechecks the policy so a
+policy increase between claim and completion cannot activate an unsupported app. The development
+Test Client keeps the existing M2 exemption from semantic-version enforcement.
+
 Revocation marks the device and all sessions unusable immediately. The development Test Client is
 rejected in production.
-
-Pairing creation, claim, and proof completion each revalidate the Staff user's active state, the
-organization Membership, every active Location, and every Staff Location assignment. Provisioning
-is available only through the Merchant assignment endpoints documented in
-`location-authorization.md`; a Mobile device cannot create its own authority.
-
-Every authenticated or signed Device request performs a DB-backed current-state check at the
-shared authentication boundary. Operational access requires an active Staff user, active
-organization Membership, active device, unrevoked/unexpired session, active Location, active Staff
-Location assignment, and active device Location assignment. Refresh performs the same lifecycle
-checks. The distinguishable denial codes are `STAFF_USER_DEACTIVATED`,
-`STAFF_MEMBERSHIP_INACTIVE`, `STAFF_DEVICE_REVOKED`, and
-`STAFF_LOCATION_ASSIGNMENT_INVALID`.
-
-User deactivation, organization Membership suspension/removal, and Staff Location assignment
-revocation explicitly revoke affected device sessions, cancel unfinished pairings, and expire
-pending/approved manager approvals in the same lifecycle transaction. Device revocation also
-revokes its sessions and expires its approvals. History is retained; neither refresh nor pairing
-silently reactivates an identity.

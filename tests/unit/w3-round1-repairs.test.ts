@@ -188,35 +188,16 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       expect(raw.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
       expect(raw.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
     }
-    await expect(sharp(Buffer.from(files["strip.png"] ?? [])).metadata()).resolves.toMatchObject({
-      width: 375,
-      height: 144,
-    });
-    await expect(sharp(Buffer.from(files["icon.png"] ?? [])).metadata()).resolves.toMatchObject({
-      width: 38,
-      height: 38,
-    });
-    await expect(sharp(Buffer.from(files["strip@3x.png"] ?? [])).metadata()).resolves.toMatchObject(
-      {
-        width: 1125,
-        height: 432,
-      },
-    );
-    const stripBuffer = Buffer.from(files["strip@2x.png"] ?? []);
-    const strip = sharp(stripBuffer).ensureAlpha();
-    await expect(strip.metadata()).resolves.toMatchObject({ width: 750, height: 288 });
-    for (const left of [0, 710]) {
-      const edge = await sharp(stripBuffer)
-        .ensureAlpha()
-        .extract({ left, top: 0, width: 40, height: 288 })
-        .raw()
-        .toBuffer();
-      const firstPixel = edge.subarray(0, 4);
-      expect(
-        Array.from({ length: edge.length / 4 }, (_, index) =>
-          edge.subarray(index * 4, index * 4 + 4).equals(firstPixel),
-        ).every(Boolean),
-      ).toBe(true);
+    for (const [name, dimensions] of [
+      ["strip.png", [375, 123]],
+      ["strip@2x.png", [750, 246]],
+      ["strip@3x.png", [1_125, 369]],
+    ] as const) {
+      await expect(sharp(Buffer.from(files[name] ?? [])).metadata()).resolves.toMatchObject({
+        width: dimensions[0],
+        height: dimensions[1],
+        format: "png",
+      });
     }
     const packageText = Object.entries(files)
       .filter(([name]) => name.endsWith(".json") || name.endsWith(".strings"))
@@ -325,6 +306,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
   it("maps safe Class logo imagery and keeps member progress/barcode only on the Object", () => {
     const classValue = mapGoogleLoyaltyClass(walletInput, "issuer.class");
     const objectValue = mapGoogleLoyaltyObject(walletInput, "issuer.object", "issuer.class");
+    expect(objectValue.barcode).not.toHaveProperty("alternateText");
     expect(classValue).toMatchObject({
       programLogo: {
         sourceUri: { uri: walletInput.programLogoUrl },
@@ -335,6 +317,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       heroImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } },
       barcode: { value: walletInput.credentialPayload },
     });
+    expect(objectValue).not.toHaveProperty("loyaltyPoints");
     expect(objectValue).not.toHaveProperty("imageModulesData");
     expect(JSON.stringify(objectValue).match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
   });

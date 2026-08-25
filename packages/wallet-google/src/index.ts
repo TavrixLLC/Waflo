@@ -188,23 +188,39 @@ export function mapGoogleLoyaltyObject(
   objectId: string,
   classId: string,
 ) {
-  const presentation = resolveWalletLoyaltyPresentation(input);
+  const inactive =
+    input.transferred ||
+    input.membershipStatus !== "ACTIVE" ||
+    input.programStatus === "ARCHIVED" ||
+    input.programStatus === "SUSPENDED";
+  const heroImageUrl = input.walletArtworkUrl ?? input.publicAssetBaseUrl;
+  const heroDescription =
+    input.locale === "ar"
+      ? `${input.programName} للعضو ${input.displayName}. تقدم الأختام ${input.currentStampCount} من ${input.requiredStampCount}. المكافأة: ${input.rewardSummary}`
+      : `${input.programName} for ${input.displayName}. Stamp progress ${input.currentStampCount} of ${input.requiredStampCount}. Reward: ${input.rewardSummary}`;
   return {
     id: objectId,
     classId,
-    state: presentation.inactive ? "INACTIVE" : "ACTIVE",
-    barcode: {
-      type: presentation.barcode.googleFormat,
-      value: presentation.barcode.payload,
-      alternateText: presentation.barcode.alternateText,
-    },
-    ...(input.publicAssetBaseUrl
+    state: inactive ? "INACTIVE" : "ACTIVE",
+    accountName: input.displayName.slice(0, 20),
+    accountId: input.publicMembershipId.slice(-20),
+    ...(!heroImageUrl
       ? {
-          // Loyalty heroImage is the single provider-native progress-artwork region. Duplicating
-          // this image in imageModulesData causes two copies on layouts that render both regions.
+          loyaltyPoints: {
+            label: "Stamps",
+            balance: { string: `${input.currentStampCount}/${input.requiredStampCount}` },
+          },
+        }
+      : {}),
+    barcode: {
+      type: "QR_CODE",
+      value: input.credentialPayload,
+    },
+    ...(heroImageUrl
+      ? {
           heroImage: {
-            sourceUri: { uri: input.publicAssetBaseUrl },
-            contentDescription: translated(presentation.labels.stamps, input.locale),
+            sourceUri: { uri: heroImageUrl },
+            contentDescription: translated(heroDescription.slice(0, 500), input.locale),
           },
         }
       : {}),

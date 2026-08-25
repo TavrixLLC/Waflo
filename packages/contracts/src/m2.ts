@@ -1,12 +1,13 @@
 import { z } from "zod";
+import { mobileStaffDeviceContextSchema } from "./w4.js";
 
 export const m2ContractVersion = "waflo-m2-mobile-contract-v1" as const;
 
 export const publicMembershipIdSchema = z.string().trim().min(8).max(80);
 export const sha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const operationStatusSchema = z.enum(["PROCESSING", "COMPLETED", "FAILED"]);
-export const staffDeviceContextResultSchema = z
-  .object({
+export const staffDeviceContextResultSchema = mobileStaffDeviceContextSchema
+  .extend({
     organizationId: z.uuid(),
     organization: z
       .object({
@@ -204,6 +205,7 @@ export const operationPublicStatusResultSchema = z
   .strict();
 
 export type MembershipResolveResult = z.infer<typeof membershipResolveResultSchema>;
+export type StaffDeviceContextResult = z.infer<typeof staffDeviceContextResultSchema>;
 export type StampOperationResult = z.infer<typeof stampOperationResultSchema>;
 export type RedemptionOperationResult = z.infer<typeof redemptionOperationResultSchema>;
 export type OperationCommandStatusResult = z.infer<typeof operationCommandStatusResultSchema>;

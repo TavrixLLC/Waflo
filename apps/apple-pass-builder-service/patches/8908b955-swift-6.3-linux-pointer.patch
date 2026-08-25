@@ -1,0 +1,18 @@
+diff --git a/Sources/buildpass/ReadCredential.swift b/Sources/buildpass/ReadCredential.swift
+index 3126ca0..2562a53 100644
+--- a/Sources/buildpass/ReadCredential.swift
++++ b/Sources/buildpass/ReadCredential.swift
+@@ -47,10 +47,11 @@ func readCredential(prompt: String) throws -> String {
+     var buffer = [CChar](repeating: 0, count: 1024)
+     defer {
+         _ = buffer.withUnsafeMutableBytes { ptr in
++            guard let baseAddress = ptr.baseAddress else { return }
+             #if canImport(Darwin)
+-            memset_s(ptr.baseAddress, ptr.count, 0, ptr.count)
++            memset_s(baseAddress, ptr.count, 0, ptr.count)
+             #else
+-            explicit_bzero(ptr.baseAddress, ptr.count)
++            explicit_bzero(baseAddress, ptr.count)
+             #endif
+         }
+     }

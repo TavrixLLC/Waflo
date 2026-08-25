@@ -1,0 +1,142 @@
+[
+  {
+    "id": "COOKIES-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "68a6ff52a590e6ac6303d935b0ded577a8d076801f815e4553c3cfdd8e0c466d",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "COFFEE-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "6f38172d165743a03f7df40f3fd1d31f14029ab073c1308a545122c5edc15555",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "BAKERY-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "PIZZA-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "SMOOTHIE-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "SALON-v1",
+    "width": 206,
+    "height": 226,
+    "contentDigest": "58369c9047cc5fe1f7347c87f518ff84bdf60683fe94a0032ed3759b0a7a8312",
+    "positionsDigest": "65a992c809bcb735e4065b7ea153e2cc34a556d750c6e5f0d071810288e1389e"
+  },
+  {
+    "id": "FITNESS-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "RETAIL-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "281e3266046a5646c6fdd18ecdf6ea90661692eccc052dd994f6557ecec64cd5",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "FLOWERS-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "BOOKS-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "JUICE-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "PETCARE-v1",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "ed8df1883fcc90a42cc6a3ab63d5728c7d156bb7c535ec7aaff9b9a6b94f79f6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "COFFEE-v2",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "6853b3cf62b64587d728956fc67380208b54ee4c0ccffe30de43e55cfa76ffa6",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "COOKIES-v2",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "de3d7d1a65d956217de333dec65ca2f1228f017075b3a0e337c5fa26e17cbae9",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "CAR_WASH-v2",
+    "width": 296,
+    "height": 128,
+    "contentDigest": "2ebe7ea9ac9b179c4ed36b12a73dfbe3e6cfbad93993e6b5f9972b596f55962c",
+    "positionsDigest": "aa4db59ebc2354380d4658a07e6b6107b42603faea8445c60532f7fb2941b39d"
+  },
+  {
+    "id": "SALON-v2",
+    "width": 206,
+    "height": 226,
+    "contentDigest": "3cc50b8a04f0b4b57af3ead922ae847c93cb89565d5faf7600670d4e2094c227",
+    "positionsDigest": "65a992c809bcb735e4065b7ea153e2cc34a556d750c6e5f0d071810288e1389e"
+  },
+  {
+    "id": "BARBERSHOP-v2",
+    "width": 352,
+    "height": 72,
+    "contentDigest": "fb4d8235abc9880489fb1a0d2d8dbea2c5dcfb68e3ea2e0f60c1f137c2405b29",
+    "positionsDigest": "f7dc3942a5e940a8c973ecbd6d17f94bdbd27af640c229a9129cb1cdbe8def09"
+  },
+  {
+    "id": "RESTAURANT-v2",
+    "width": 296,
+    "height": 128,
+    "contentDigest": "2ee869be61ce99274f1d393e8ff534becb87379be02c226ca3cb076f59db671b",
+    "positionsDigest": "ce319dbe98fcdd02c7b45246db1ffec8b78405b1402b7c97cfadadf8cb0c0693"
+  },
+  {
+    "id": "RETAIL-v2",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "717ce9fcce81571ff5bcf4328bfcf0f914c8bf3bca9b106e88688886a0e654d8",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  },
+  {
+    "id": "GENERAL_VISITS-v2",
+    "width": 240,
+    "height": 128,
+    "contentDigest": "1f295fd0d4f863ea3d44fa51e7a23cc1bb0ad81ceac494d1eb1a1823ea94dfc7",
+    "positionsDigest": "f7398d244db129919a21e1d3e875d1351e663f47408b2ab45abf67858409ad6b"
+  }
+]

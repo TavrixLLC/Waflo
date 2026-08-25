@@ -873,6 +873,7 @@ model MerchantSlugHistory {
 
 model OrganizationMember {
   id             String       @id @default(uuid()) @db.Uuid
+  publicId       String       @unique @default(uuid()) @map("public_id") @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   userId         String       @map("user_id") @db.Uuid
   role           MemberRole
@@ -913,6 +914,7 @@ model OrganizationInvitation {
 
 model Location {
   id             String         @id @default(uuid()) @db.Uuid
+  publicId       String         @unique @default(uuid()) @map("public_id") @db.Uuid
   organizationId String         @map("organization_id") @db.Uuid
   name           String         @db.VarChar(120)
   addressLine1   String?        @map("address_line_1") @db.VarChar(160)

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@waflo/stamp-engine": "workspace:*",
+    "@waflo/wallet-artwork": "workspace:*",
     "@waflo/wallet-core": "workspace:*",
     "fflate": "0.8.2",
     "node-forge": "^1.4.0",

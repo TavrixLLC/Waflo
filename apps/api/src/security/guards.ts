@@ -8,26 +8,32 @@ import {
 import { Reflector } from "@nestjs/core";
 import { hashOpaqueToken, isSessionActive, safeTokenEquals } from "@waflo/auth";
 import { evaluateRiskRules, riskDeduplicationKey } from "@waflo/operational-analytics";
-import { AppError } from "../common/app-error.js";
-import { CUSTOMER_CSRF, IS_PUBLIC, RATE_LIMIT, SKIP_CSRF } from "../common/decorators.js";
-import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
-import type { WafloRequest } from "../common/request-context.js";
-import { EnvironmentService } from "../config/environment.service.js";
-import { PrismaService } from "../database/prisma.service.js";
-import { AuditService } from "../audit/audit.service.js";
-import { RateLimitService } from "./rate-limit.service.js";
-import { CustomerCardService } from "../customer/customer-card.service.js";
-import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import {
-  assertStaffMobileAppVersion,
   assertBodyDigest,
   assertDeviceOperational,
   assertDeviceRequestTimestamp,
+  assertStaffMobileAppVersion,
   assertTestClientAllowed,
   hashOpaqueDeviceToken,
+  type StaffDeviceSecurityCode,
   verifyDeviceRequestSignature,
 } from "@waflo/staff-device-security";
-import { STAFF_DEVICE_SIGNED } from "../common/decorators.js";
+import { AuditService } from "../audit/audit.service.js";
+import { AppError } from "../common/app-error.js";
+import {
+  CUSTOMER_CSRF,
+  IS_PUBLIC,
+  RATE_LIMIT,
+  SKIP_CSRF,
+  STAFF_DEVICE_SIGNED,
+} from "../common/decorators.js";
+import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
+import type { WafloRequest } from "../common/request-context.js";
+import { EnvironmentService } from "../config/environment.service.js";
+import { CustomerCardService } from "../customer/customer-card.service.js";
+import { CustomerSecurityService } from "../customer/customer-security.service.js";
+import { PrismaService } from "../database/prisma.service.js";
+import { RateLimitService } from "./rate-limit.service.js";
 
 @Injectable()
 export class SessionGuard implements CanActivate {
@@ -282,6 +288,77 @@ function singleHeader(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
+export interface StaffDeviceFailureDisposition {
+  readonly auditSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  readonly riskRuleCode: string;
+  readonly riskSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  readonly riskScore: number;
+  readonly httpStatus: number;
+}
+
+export function staffDeviceFailureDisposition(code: string): StaffDeviceFailureDisposition {
+  const stateMappings: Partial<Record<StaffDeviceSecurityCode, StaffDeviceFailureDisposition>> = {
+    STAFF_DEVICE_COMPROMISED: {
+      auditSeverity: "CRITICAL",
+      riskRuleCode: "DEVICE_COMPROMISED",
+      riskSeverity: "CRITICAL",
+      riskScore: 100,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_REVOKED: {
+      auditSeverity: "HIGH",
+      riskRuleCode: "DEVICE_REVOKED",
+      riskSeverity: "HIGH",
+      riskScore: 80,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_MEMBER_INACTIVE: {
+      auditSeverity: "HIGH",
+      riskRuleCode: "MEMBER_INACTIVE",
+      riskSeverity: "HIGH",
+      riskScore: 75,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_SESSION_EXPIRED: {
+      auditSeverity: "LOW",
+      riskRuleCode: "SESSION_EXPIRED",
+      riskSeverity: "LOW",
+      riskScore: 20,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_APP_VERSION_UNSUPPORTED: {
+      auditSeverity: "LOW",
+      riskRuleCode: "APP_UPDATE_REQUIRED",
+      riskSeverity: "LOW",
+      riskScore: 10,
+      httpStatus: 426,
+    },
+    STAFF_DEVICE_CLOCK_SKEW: {
+      auditSeverity: "MEDIUM",
+      riskRuleCode: "CLOCK_SKEW",
+      riskSeverity: "HIGH",
+      riskScore: 85,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_NOT_ACTIVE: {
+      auditSeverity: "HIGH",
+      riskRuleCode: "DEVICE_NOT_ACTIVE",
+      riskSeverity: "HIGH",
+      riskScore: 70,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+  };
+  return (
+    stateMappings[code as StaffDeviceSecurityCode] ?? {
+      auditSeverity: "HIGH",
+      riskRuleCode: "SIGNATURE_FAILURE",
+      riskSeverity: "CRITICAL",
+      riskScore: 100,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    }
+  );
+}
+
 @Injectable()
 export class StaffDeviceSignatureGuard implements CanActivate {
   constructor(
@@ -483,7 +560,12 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       assertStaffMobileAppVersion({
         platform: session.staffDevice.platform,
         appVersion: session.staffDevice.appVersion,
-        minimumVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+        minimumVersion:
+          session.staffDevice.platform === "IOS"
+            ? this.environment.values.STAFF_MOBILE_MINIMUM_IOS_VERSION
+            : session.staffDevice.platform === "ANDROID"
+              ? this.environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION
+              : this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
       });
       assertDeviceRequestTimestamp({
         timestamp,
@@ -510,40 +592,27 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         error && typeof error === "object" && "code" in error && typeof error.code === "string"
           ? error.code
           : "STAFF_DEVICE_SIGNATURE_INVALID";
+      const disposition = staffDeviceFailureDisposition(code);
       await this.audit.security(
         {
           organizationId: session.organizationId,
           eventType: `staff_device.${code.toLocaleLowerCase("en-US")}`,
-          severity:
-            code === "STAFF_APP_VERSION_UNSUPPORTED"
-              ? "LOW"
-              : code === "STAFF_DEVICE_CLOCK_SKEW"
-                ? "MEDIUM"
-                : "HIGH",
+          severity: disposition.auditSeverity,
           metadata: { devicePublicId, requestId },
         },
         request,
       );
-      if (code === "STAFF_APP_VERSION_UNSUPPORTED") {
-        throw new AppError(code, "This Staff mobile app version is no longer supported.", 426);
-      }
-      const ruleCode =
-        code === "STAFF_DEVICE_CLOCK_SKEW"
-          ? "CLOCK_SKEW"
-          : code === "STAFF_DEVICE_NOT_ACTIVE"
-            ? "DEVICE_NOT_ACTIVE"
-            : "SIGNATURE_FAILURE";
       await this.persistDeviceRisk(
         session,
-        ruleCode,
-        code === "STAFF_DEVICE_CLOCK_SKEW" ? "HIGH" : "CRITICAL",
-        code === "STAFF_DEVICE_CLOCK_SKEW" ? 85 : 100,
+        disposition.riskRuleCode,
+        disposition.riskSeverity,
+        disposition.riskScore,
         { failureCode: code },
       );
       throw new AppError(
         code,
         "Staff device request could not be verified.",
-        HttpStatus.UNAUTHORIZED,
+        disposition.httpStatus,
       );
     }
 
@@ -636,7 +705,12 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       deviceSessionId: session.id,
       platform: session.staffDevice.platform,
       appVersion: session.staffDevice.appVersion,
-      minimumSupportedAppVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+      minimumSupportedAppVersion:
+        session.staffDevice.platform === "IOS"
+          ? this.environment.values.STAFF_MOBILE_MINIMUM_IOS_VERSION
+          : session.staffDevice.platform === "ANDROID"
+            ? this.environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION
+            : this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
       appVersionSupported: true,
       requestId,
     };

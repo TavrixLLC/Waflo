@@ -228,6 +228,8 @@ describe("W3 customer security, QR, and Wallet domain", () => {
         "icon@3x.png",
         "logo.png",
         "strip.png",
+        "strip@2x.png",
+        "strip@3x.png",
         "en.lproj/pass.strings",
         "ar.lproj/pass.strings",
         "fr.lproj/pass.strings",
@@ -239,6 +241,7 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       "PKBarcodeFormatQR",
     ]);
     expect(pass.barcodes[0].message).toBe(walletInput.credentialPayload);
+    expect(pass.barcodes[0]).not.toHaveProperty("altText");
     expect(pass.voided).toBe(false);
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
     expect(Buffer.from(files["manifest.json"] ?? []).toString("utf8")).not.toContain("signature");
@@ -296,13 +299,18 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: objectId,
       classId,
       state: "ACTIVE",
-      barcode: { type: "QR_CODE", value: walletInput.credentialPayload },
-      heroImage: {
-        sourceUri: { uri: "https://assets.example.test/wpa_opaque" },
-        contentDescription: {
-          defaultValue: { language: "en", value: "STAMPS" },
-        },
-      },
+      barcode: { value: walletInput.credentialPayload },
+      heroImage: { sourceUri: { uri: "https://assets.example.test/wpa_opaque" } },
+    });
+    expect(active.barcode).not.toHaveProperty("alternateText");
+    expect(active).not.toHaveProperty("loyaltyPoints");
+    const {
+      publicAssetBaseUrl: _publicAssetBaseUrl,
+      walletArtworkUrl: _walletArtworkUrl,
+      ...withoutHero
+    } = walletInput;
+    expect(mapGoogleLoyaltyObject(withoutHero, objectId, classId)).toMatchObject({
+      loyaltyPoints: { balance: { string: "3/8" } },
     });
     expect(active).not.toHaveProperty("imageModulesData");
     expect(active).not.toHaveProperty("accountName");

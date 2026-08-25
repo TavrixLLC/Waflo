@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { layoutStampPositions, renderStampSvg } from "@waflo/stamp-engine";
+import {
+  balancedWalletStampDistribution,
+  layoutStampPositions,
+  renderStampSvg,
+} from "@waflo/stamp-engine";
 
 describe("W2 stamp visual engine", () => {
   it("renders deterministic progress with the expected fill count", () => {
@@ -26,10 +30,49 @@ describe("W2 stamp visual engine", () => {
     expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(8);
   });
 
+  it.each([
+    [1, [1]],
+    [2, [2]],
+    [3, [3]],
+    [4, [4]],
+    [5, [5]],
+    [6, [3, 3]],
+    [7, [4, 3]],
+    [8, [4, 4]],
+    [9, [5, 4]],
+    [10, [5, 5]],
+  ] as const)("balances %i Wallet stamps as %j", (total, expectedRows) => {
+    const distribution = balancedWalletStampDistribution(total);
+    expect(distribution.rows).toEqual(expectedRows);
+    expect(Math.max(...distribution.rows) - Math.min(...distribution.rows)).toBeLessThanOrEqual(1);
+    expect(distribution.layout).toBe(total <= 5 ? "ROW" : "GRID");
+  });
+
+  it("makes only Wallet renderer backgrounds transparent for a single clean panel", () => {
+    const common = {
+      goal: 5,
+      progress: 2,
+      layout: "ROW" as const,
+      filledColor: "#000000",
+      emptyColor: "#ffffff",
+      accentColor: "#000000",
+      backgroundColor: "#f7f4ee",
+    };
+    expect(renderStampSvg({ ...common, outputProfile: "APPLE_WALLET" }).svg).toContain(
+      '<rect width="100%" height="100%" rx="18" fill="none"/>',
+    );
+    expect(renderStampSvg({ ...common, outputProfile: "GOOGLE_WALLET" }).svg).toContain(
+      '<rect width="100%" height="100%" rx="18" fill="none"/>',
+    );
+    expect(renderStampSvg({ ...common, outputProfile: "CUSTOMER_WEB" }).svg).toContain(
+      '<rect width="100%" height="100%" rx="18" fill="#f7f4ee"/>',
+    );
+  });
+
   it("rejects unsafe or unsupported goals and escapes labels", () => {
     expect(() =>
       renderStampSvg({
-        goal: 1,
+        goal: 0,
         progress: 0,
         layout: "ROW",
         filledColor: "#000000",

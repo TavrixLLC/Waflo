@@ -3,14 +3,14 @@ import { z } from "zod";
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
 const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
-const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
-
-export type PublicMapboxTokenStatus = "SET" | "UNSET" | "INVALID_FORMAT";
-
-export function classifyPublicMapboxToken(value: string | undefined): PublicMapboxTokenStatus {
-  if (!value?.trim()) return "UNSET";
-  return publicMapboxTokenPattern.test(value.trim()) ? "SET" : "INVALID_FORMAT";
-}
+const strictSemanticVersionSchema = z
+  .string()
+  .min(5)
+  .max(40)
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
+    "A strict semantic version is required.",
+  );
 
 export const environmentSchema = z
   .object({
@@ -117,10 +117,9 @@ export const environmentSchema = z
     DEVICE_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     DEVICE_REQUEST_MAX_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     DEVICE_NONCE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
-    STAFF_MOBILE_MINIMUM_APP_VERSION: z
-      .string()
-      .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
-      .default("1.0.0"),
+    STAFF_MOBILE_MINIMUM_APP_VERSION: strictSemanticVersionSchema.default("1.0.0"),
+    STAFF_MOBILE_MINIMUM_IOS_VERSION: strictSemanticVersionSchema,
+    STAFF_MOBILE_MINIMUM_ANDROID_VERSION: strictSemanticVersionSchema,
     STAFF_OWN_REVERSAL_WINDOW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     MANAGER_REVERSAL_WINDOW_MINUTES: z.coerce.number().int().min(1).max(10080).default(1440),
     MANAGER_APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(5),
@@ -187,6 +186,7 @@ export const environmentSchema = z
     SECURITY_TOKEN_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
     WALLET_PUBLIC_BASE_URL: z.url().default("http://localhost:4000/v1/public/wallet-assets"),
     APPLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
+    APPLE_WALLET_GENERATOR: z.enum(["legacy", "passbuilder"]).default("legacy"),
     APPLE_PASS_TYPE_IDENTIFIER: z.string().optional(),
     APPLE_TEAM_IDENTIFIER: z.string().optional(),
     APPLE_ORGANIZATION_NAME: z.string().default("Waflo by Tavrix LLC"),
@@ -201,6 +201,14 @@ export const environmentSchema = z
     APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION: z.coerce.number().int().min(1).default(1),
     APPLE_PASS_AUTH_SECRETS_JSON: z.string().optional(),
     APPLE_APNS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+    APPLE_APNS_CERTIFICATE_PATH_OR_BASE64: z.string().optional(),
+    APPLE_APNS_CERTIFICATE_PASSWORD_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_URL: optionalUrl,
+    APPLE_PASS_BUILDER_AUTH_TOKEN_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_SIGNING_KEY_ID: z.string().min(1).max(128).default("waflo-default"),
+    APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_TEMPLATE_ID: z.string().min(1).max(128).default("waflo-loyalty-v1"),
+    APPLE_PASS_BUILDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
     GOOGLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
     GOOGLE_WALLET_ISSUER_ID: z.string().optional(),
     GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64: z.string().optional(),
@@ -422,20 +430,66 @@ export const environmentSchema = z
         message: "The Staff Test Client cannot run in staging or production.",
       });
     }
+    for (const key of [
+      "STAFF_MOBILE_MINIMUM_APP_VERSION",
+      "STAFF_MOBILE_MINIMUM_IOS_VERSION",
+      "STAFF_MOBILE_MINIMUM_ANDROID_VERSION",
+    ] as const) {
+      if (/^0\.0\.0(?:[-+]|$)/.test(value[key])) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Deployed Staff mobile minimum versions must enforce a non-zero release.",
+        });
+      }
+    }
     if (
       value.APPLE_WALLET_MODE === "REAL" &&
       (!value.APPLE_PASS_TYPE_IDENTIFIER ||
         !value.APPLE_TEAM_IDENTIFIER ||
-        !value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
-        !value.APPLE_PASS_CERTIFICATE_PASSWORD ||
-        !value.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64 ||
         !value.APPLE_PASS_WEB_SERVICE_URL)
     ) {
       context.addIssue({
         code: "custom",
         path: ["APPLE_WALLET_MODE"],
-        message:
-          "Real Apple Wallet mode requires a complete signing and update-service configuration.",
+        message: "Real Apple Wallet mode requires complete pass identity and update configuration.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      value.APPLE_WALLET_GENERATOR === "legacy" &&
+      (!value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
+        !value.APPLE_PASS_CERTIFICATE_PASSWORD ||
+        !value.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_WALLET_GENERATOR"],
+        message: "The legacy generator requires its pass certificate, password, and WWDR chain.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      value.APPLE_WALLET_GENERATOR === "passbuilder" &&
+      (!value.APPLE_PASS_BUILDER_URL || !value.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_WALLET_GENERATOR"],
+        message: "The Pass Builder generator requires its private service URL and auth-token file.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      (!(
+        value.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 || value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64
+      ) ||
+        !(value.APPLE_APNS_CERTIFICATE_PASSWORD_FILE || value.APPLE_PASS_CERTIFICATE_PASSWORD))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_APNS_ENVIRONMENT"],
+        message: "Real Apple Wallet mode requires APNs certificate credentials for pass updates.",
       });
     }
     if (
@@ -784,8 +838,14 @@ export function parseVersionedSecretEntries(
 }
 
 export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
+  const genericMinimumVersion = source.STAFF_MOBILE_MINIMUM_APP_VERSION ?? "1.0.0";
   const result = environmentSchema.safeParse({
     ...source,
+    STAFF_MOBILE_MINIMUM_APP_VERSION: genericMinimumVersion,
+    STAFF_MOBILE_MINIMUM_IOS_VERSION:
+      source.STAFF_MOBILE_MINIMUM_IOS_VERSION ?? genericMinimumVersion,
+    STAFF_MOBILE_MINIMUM_ANDROID_VERSION:
+      source.STAFF_MOBILE_MINIMUM_ANDROID_VERSION ?? genericMinimumVersion,
     SERVICE_INSTANCE_ID: source.SERVICE_INSTANCE_ID ?? source.HOSTNAME ?? "local",
     DEPLOYMENT_ENVIRONMENT:
       source.DEPLOYMENT_ENVIRONMENT ??

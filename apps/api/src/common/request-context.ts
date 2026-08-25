@@ -17,34 +17,28 @@ export interface AuthenticatedUser {
   emailVerifiedAt: Date | null;
 }
 
+export interface StaffDeviceRequestContext {
+  organizationId: string;
+  organizationMemberId: string;
+  role: "OWNER" | "MANAGER" | "STAFF";
+  locationId: string;
+  deviceId: string;
+  devicePublicId: string;
+  deviceSessionId: string;
+  platform: "IOS" | "ANDROID" | "TEST_CLIENT";
+  appVersion: string;
+  minimumSupportedAppVersion: string;
+  appVersionSupported: true;
+  requestId: string;
+}
+
 export interface WafloRequest extends FastifyRequest {
   requestId: string;
   rawBody?: Buffer;
   currentUser?: AuthenticatedUser;
   currentSessionId?: string;
   currentSessionToken?: string;
-  staffDeviceContext?: {
-    organizationId: string;
-    organization: {
-      id: string;
-      displayName: string;
-    };
-    organizationMemberId: string;
-    role: "OWNER" | "MANAGER" | "STAFF";
-    locationId: string;
-    currentLocation: {
-      id: string;
-      displayName: string;
-    };
-    deviceId: string;
-    devicePublicId: string;
-    deviceSessionId: string;
-    platform: "IOS" | "ANDROID" | "TEST_CLIENT";
-    appVersion: string;
-    minimumSupportedAppVersion: string;
-    appVersionSupported: true;
-    requestId: string;
-  };
+  staffDeviceContext?: StaffDeviceRequestContext;
 }
 
 @Injectable()

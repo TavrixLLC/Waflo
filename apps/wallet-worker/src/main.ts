@@ -33,14 +33,16 @@ import {
   type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
-  type StampArtwork,
+  type PublishedMembershipStampRenderInput,
 } from "@waflo/stamp-engine";
 import {
-  type ApplePassSigner,
+  ApplePassBuilderGenerator,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
+  parseAppleSigningKeyMap,
   TestApplePassSigner,
 } from "@waflo/wallet-apple";
+import { composeWalletArtwork, walletArtworkInputFromStampRender } from "@waflo/wallet-artwork";
 import {
   APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   normalizeWalletProviderError,
@@ -59,16 +61,10 @@ import {
 } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
-import { classifyApplePushResponse } from "./apple-push.js";
 import {
-  GOOGLE_WALLET_HERO_HEIGHT,
-  GOOGLE_WALLET_HERO_WIDTH,
-  GOOGLE_WALLET_LOGO_SIZE,
-  googleProgressAssetNeedsOwnershipRepair,
-  googleProgressSharedAssetOwnership,
-  prepareGoogleWalletProgramLogo,
-  prepareGoogleWalletProgressHero,
-} from "./google-wallet-assets.js";
+  HistoricalWalletStampSourceError,
+  loadHistoricalWalletStampSource,
+} from "./historical-wallet-stamp-source.js";
 
 const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
 const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
@@ -187,6 +183,7 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
     signer = new TestApplePassSigner();
   } else if (
     environment.APPLE_WALLET_MODE === "REAL" &&
+    environment.APPLE_WALLET_GENERATOR === "legacy" &&
     environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 &&
     environment.APPLE_PASS_CERTIFICATE_PASSWORD &&
     environment.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
@@ -201,14 +198,42 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
       signer = undefined;
     }
   }
+  let appleGenerator: ApplePassBuilderGenerator | undefined;
+  if (
+    environment.APPLE_WALLET_MODE === "REAL" &&
+    environment.APPLE_WALLET_GENERATOR === "passbuilder" &&
+    environment.APPLE_PASS_BUILDER_URL &&
+    environment.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE
+  ) {
+    try {
+      appleGenerator = new ApplePassBuilderGenerator({
+        serviceUrl: environment.APPLE_PASS_BUILDER_URL,
+        authToken: readFileSync(environment.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE, "utf8").trim(),
+        signingKeyId: environment.APPLE_PASS_BUILDER_SIGNING_KEY_ID,
+        ...(environment.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE
+          ? {
+              signingKeyIdsByMerchant: parseAppleSigningKeyMap(
+                JSON.parse(
+                  readFileSync(environment.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE, "utf8"),
+                ),
+              ),
+            }
+          : {}),
+        templateId: environment.APPLE_PASS_BUILDER_TEMPLATE_ID,
+        timeoutMs: environment.APPLE_PASS_BUILDER_TIMEOUT_MS,
+      });
+    } catch {
+      appleGenerator = undefined;
+    }
+  }
   const appleReady =
     environment.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
     (environment.APPLE_WALLET_MODE === "REAL" &&
       Boolean(
-        signer &&
-          environment.APPLE_PASS_TYPE_IDENTIFIER &&
+        environment.APPLE_PASS_TYPE_IDENTIFIER &&
           environment.APPLE_TEAM_IDENTIFIER &&
-          environment.APPLE_PASS_WEB_SERVICE_URL,
+          environment.APPLE_PASS_WEB_SERVICE_URL &&
+          (environment.APPLE_WALLET_GENERATOR === "passbuilder" ? appleGenerator : signer),
       ));
   const appleMode = appleReady ? environment.APPLE_WALLET_MODE : "DISABLED";
   const appleSecrets = parseVersionedSecretEntries(
@@ -237,7 +262,7 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
               `${environment.API_PUBLIC_URL.replace(/\/+$/, "")}/v1/apple-wallet`,
           },
         }),
-    ...(signer ? { signer } : {}),
+    ...(appleGenerator ? { generator: appleGenerator } : signer ? { signer } : {}),
     authenticationToken: (input) =>
       deriveAppleAuthenticationToken(
         input.walletPassInstanceId,
@@ -329,8 +354,7 @@ function mapPass(
   pass: PassRecord,
   environment: Environment,
   stampRenderInput: PublishedMembershipStampRenderInput,
-  progressAssetUrl?: string,
-  applePassImages?: Readonly<Record<string, Uint8Array>>,
+  walletArtworkUrl?: string,
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
@@ -352,22 +376,7 @@ function mapPass(
       version.renderFingerprint ??
       createHash("sha256").update(version.id).digest("hex"),
     locale,
-    defaultLocale,
-    localizedContent,
-    nearbyRelevance: nearbyRelevance({
-      enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
-      locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
-      allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
-      templateCode: version.baseTemplateCode,
-      businessCategory: membership.organization.businessCategory,
-      merchantName: membership.organization.name,
-      locale: nearbyLocale,
-      customText:
-        nearbyLocale === "ar"
-          ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
-          : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
-    }),
-    ...(progressAssetUrl ? { publicAssetBaseUrl: progressAssetUrl } : {}),
+    ...(walletArtworkUrl ? { walletArtworkUrl } : {}),
     walletPassInstanceId: pass.id,
     providerIdentity: pass.providerIdentity,
     publicMembershipId: membership.publicMembershipId,
@@ -1338,19 +1347,12 @@ export class WalletWorker {
           pass,
           pass.provider === "GOOGLE" ? "GOOGLE_WALLET" : "APPLE_WALLET",
         );
-        const progressAssetUrl =
+        const baseInput = mapPass(pass, this.environment, stampRenderInput);
+        const walletArtworkUrl =
           pass.provider === "GOOGLE"
-            ? await this.ensureGoogleProgressAsset(pass, stampRenderInput)
+            ? await this.ensureGoogleHeroAsset(pass, baseInput)
             : undefined;
-        const applePassImages =
-          pass.provider === "APPLE" ? await this.merchantApplePassImages(pass) : undefined;
-        const input = mapPass(
-          pass,
-          this.environment,
-          stampRenderInput,
-          progressAssetUrl,
-          applePassImages,
-        );
+        const input = walletArtworkUrl ? { ...baseInput, walletArtworkUrl } : baseInput;
         if (command.commandType === "ISSUE") {
           if (pass.membershipCredential.status !== "ACTIVE") {
             await this.deadLetter(command, "CREDENTIAL_NOT_ACTIVE");
@@ -1460,6 +1462,10 @@ export class WalletWorker {
         provider: command.provider,
         commandType: command.commandType,
       });
+      if (error instanceof HistoricalWalletStampSourceError) {
+        await this.deadLetter(command, error.safeErrorCode);
+        return;
+      }
       if (error instanceof Error && error.message.includes("stamp artwork digest mismatch")) {
         await this.deadLetter(command, "RENDER_ASSET_DIGEST_MISMATCH");
         return;
@@ -1777,10 +1783,16 @@ export class WalletWorker {
       include: { walletPassInstance: true },
     });
     if (mode === "TEST_ADAPTER" || registrations.length === 0) return;
+    const apnsCertificateSource =
+      this.environment.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 ??
+      this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64;
+    const apnsCertificatePassword = this.environment.APPLE_APNS_CERTIFICATE_PASSWORD_FILE
+      ? readFileSync(this.environment.APPLE_APNS_CERTIFICATE_PASSWORD_FILE, "utf8").trim()
+      : this.environment.APPLE_PASS_CERTIFICATE_PASSWORD;
     if (
       mode !== "REAL" ||
-      !this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
-      !this.environment.APPLE_PASS_CERTIFICATE_PASSWORD ||
+      !apnsCertificateSource ||
+      !apnsCertificatePassword ||
       !this.environment.APPLE_PASS_TYPE_IDENTIFIER
     ) {
       throw new Error("APNs pass certificate configuration is unavailable.");
@@ -1790,8 +1802,8 @@ export class WalletWorker {
         ? "https://api.push.apple.com"
         : "https://api.sandbox.push.apple.com";
     const client = connectHttp2(authority, {
-      pfx: bytesFromSource(this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
-      passphrase: this.environment.APPLE_PASS_CERTIFICATE_PASSWORD,
+      pfx: bytesFromSource(apnsCertificateSource),
+      passphrase: apnsCertificatePassword,
     });
     try {
       for (const registration of registrations) {
@@ -1856,17 +1868,27 @@ export class WalletWorker {
     }
   }
 
-  private async ensureGoogleProgressAsset(
+  private async ensureGoogleHeroAsset(
     pass: PassRecord,
-    stampRenderInput: PublishedMembershipStampRenderInput,
+    input: WalletMembershipInput,
   ): Promise<string> {
-    const visualDigest = publishedMembershipStampVisualDigest(stampRenderInput);
-    const programVersionId = pass.membership.enrollmentProgramVersionId;
-    const versionedVisualDigest = createHash("sha256")
-      .update(`${GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION}:${programVersionId}:${visualDigest}`)
+    const visualDigest = publishedMembershipStampVisualDigest(input.stampRenderInput);
+    const credentialDigest = createHash("sha256").update(input.credentialPayload).digest("hex");
+    const compositionDigest = createHash("sha256")
+      .update(`waflo-wallet-artwork-v4:${visualDigest}:`)
+      .update(input.organizationName)
+      .update("\0")
+      .update(input.programName)
+      .update("\0")
+      .update(input.displayName)
+      .update("\0")
+      .update(input.rewardSummary)
+      .update("\0")
+      .update(input.locale)
+      .update("\0")
+      .update(credentialDigest)
       .digest("hex");
-    const assetType = `GOOGLE_PROGRESS_${versionedVisualDigest}`;
-    const sharedAssetOwnership = googleProgressSharedAssetOwnership(programVersionId);
+    const assetType = `GOOGLE_HERO_V4_${compositionDigest}`;
     const cached = await this.prisma.publicWalletAsset.findFirst({
       where: { organizationId: pass.organizationId, assetType, revokedAt: null },
     });
@@ -1882,15 +1904,22 @@ export class WalletWorker {
         : cached;
       return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
-    // Preserve the merchant-authored ROW/GRID/RING/PATH topology. Google owns the
-    // 1032x812 hero viewport; Waflo must not rewrite layout geometry to fill it.
-    const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
-    const width = GOOGLE_WALLET_HERO_WIDTH;
-    const height = GOOGLE_WALLET_HERO_HEIGHT;
-    const bytes = await prepareGoogleWalletProgressHero(
-      rendered.svg,
-      stampRenderInput.visualTheme.backgroundColor ?? "#F7F4EE",
+    const rendered = renderPublishedMembershipStampSvg(input.stampRenderInput);
+    const composed = await composeWalletArtwork(
+      walletArtworkInputFromStampRender(
+        {
+          stampRenderInput: input.stampRenderInput,
+          rewardLabel: input.rewardSummary,
+          organizationName: input.organizationName,
+          programName: input.programName,
+          memberName: input.displayName,
+          credentialPayload: input.credentialPayload,
+        },
+        rendered,
+      ),
+      "GOOGLE_HERO",
     );
+    const { width, height, bytes } = composed;
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
     const objectKey = `wallet-public/${pass.organizationId}/${contentDigest}.png`;
     const publicToken = `wpa_${createHmac(
@@ -2222,14 +2251,10 @@ export class WalletWorker {
     const version = pass.membership.enrollmentProgramVersion;
     const theme = version.visualTheme;
     if (!theme) throw new Error("Published Wallet stamp artwork is unavailable.");
-    const [filledArtwork, emptyArtwork] = await Promise.all([
+    const [filledSource, emptySource] = await Promise.all([
       this.loadStampArtwork(theme.filledStampAsset),
       this.loadStampArtwork(theme.emptyStampAsset),
     ]);
-    const digest = (asset: typeof theme.filledStampAsset) =>
-      asset.variants.find((item) => item.variantCode === "STAMP_256")?.digest ??
-      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE")?.digest ??
-      asset.sha256Digest;
     const requiredStampCount = version.stampRule?.requiredStampCount ?? 8;
     const currentStampCount = pass.membership.progress?.currentCycleStampCount ?? 0;
     const { locale, translation } = resolvePassLocalizedContent(pass);
@@ -2265,6 +2290,7 @@ export class WalletWorker {
       currentStampCount,
       rewardReady: pass.membership.progress?.rewardReady ?? false,
       layoutType: theme.layoutType,
+      layoutPolicy: "BALANCED_WALLET_ROWS_V1",
       ...(Object.keys(layoutConfiguration).length > 0 ? { layoutConfiguration } : {}),
       visualTheme: {
         filledColor: theme.accentColor,
@@ -2275,11 +2301,11 @@ export class WalletWorker {
         stampSize: theme.stampSize,
         spacing: theme.stampSpacing,
       },
-      filledArtwork,
-      emptyArtwork,
+      filledArtwork: filledSource.artwork,
+      emptyArtwork: emptySource.artwork,
       assetDigests: {
-        filled: digest(theme.filledStampAsset),
-        empty: digest(theme.emptyStampAsset),
+        filled: filledSource.identity.renderDigest,
+        empty: emptySource.identity.renderDigest,
       },
       outputProfile,
     };
@@ -2291,46 +2317,17 @@ export class WalletWorker {
         ? Asset
         : never
       : never,
-  ): Promise<StampArtwork> {
-    const metadata = asset.safeMetadata;
-    if (
-      metadata &&
-      typeof metadata === "object" &&
-      !Array.isArray(metadata) &&
-      "inlineSvg" in metadata &&
-      typeof metadata.inlineSvg === "string"
-    ) {
-      return { kind: "svg", content: metadata.inlineSvg, trusted: true };
-    }
-    const variant =
-      asset.variants.find((item) => item.variantCode === "STAMP_256") ??
-      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE");
-    if (!variant?.mimeType.startsWith("image/")) {
-      throw new Error("Published Wallet stamp artwork has no processed variant.");
-    }
-    const result = await this.objectStorage.send(
-      new GetObjectCommand({
-        Bucket: this.environment.OBJECT_STORAGE_BUCKET,
-        Key: variant.objectKey,
-      }),
-    );
-    if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
-    const bytes = Buffer.from(await result.Body.transformToByteArray());
-    if (createHash("sha256").update(bytes).digest("hex") !== variant.digest) {
-      throw new Error("Published Wallet stamp artwork digest mismatch.");
-    }
-    const mimeType = variant.mimeType as StampArtwork extends {
-      kind: "data-uri";
-      mimeType: infer Mime;
-    }
-      ? Mime
-      : never;
-    return {
-      kind: "data-uri",
-      value: `data:${mimeType};base64,${bytes.toString("base64")}`,
-      mimeType,
-      trusted: true,
-    };
+  ) {
+    return loadHistoricalWalletStampSource(asset, async (objectKey) => {
+      const result = await this.objectStorage.send(
+        new GetObjectCommand({
+          Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+          Key: objectKey,
+        }),
+      );
+      if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
+      return Buffer.from(await result.Body.transformToByteArray());
+    });
   }
 
   private async objectStorageReady() {
