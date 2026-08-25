@@ -33,6 +33,20 @@ export interface LoadedHistoricalWalletStampSource {
   readonly identity: HistoricalWalletStampIdentity;
 }
 
+export type HistoricalWalletStampSourceErrorCode =
+  | "RENDER_ASSET_DIGEST_MISMATCH"
+  | "RENDER_ASSET_MISSING";
+
+export class HistoricalWalletStampSourceError extends Error {
+  constructor(
+    readonly safeErrorCode: HistoricalWalletStampSourceErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HistoricalWalletStampSourceError";
+  }
+}
+
 function sha256(bytes: string | Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -91,18 +105,22 @@ export async function loadHistoricalWalletStampSource(
   if (
     !variant ||
     (variant.variantCode !== "STAMP_256" && variant.variantCode !== "ORIGINAL_SAFE") ||
-    !["image/png", "image/jpeg", "image/webp"].includes(variant.mimeType)
+    !["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(variant.mimeType)
   ) {
-    throw new Error(
+    throw new HistoricalWalletStampSourceError(
+      "RENDER_ASSET_MISSING",
       `Published Wallet stamp asset ${asset.id} has no exact historical processed variant.`,
     );
   }
   const bytes = await getObject(variant.objectKey);
   const digest = sha256(bytes);
   if (digest !== variant.digest) {
-    throw new Error(`Published Wallet stamp asset ${asset.id} failed digest verification.`);
+    throw new HistoricalWalletStampSourceError(
+      "RENDER_ASSET_DIGEST_MISMATCH",
+      `Published Wallet stamp asset ${asset.id} failed digest verification.`,
+    );
   }
-  const mimeType = variant.mimeType as "image/png" | "image/jpeg" | "image/webp";
+  const mimeType = variant.mimeType as "image/png" | "image/jpeg" | "image/webp" | "image/svg+xml";
   return {
     artwork: {
       kind: "data-uri",

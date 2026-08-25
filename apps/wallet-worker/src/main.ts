@@ -50,7 +50,10 @@ import {
 import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
-import { loadHistoricalWalletStampSource } from "./historical-wallet-stamp-source.js";
+import {
+  HistoricalWalletStampSourceError,
+  loadHistoricalWalletStampSource,
+} from "./historical-wallet-stamp-source.js";
 
 const QUEUE_KEY = "waflo:wallet:commands";
 const SIGNAL_TTL_SECONDS = 180;
@@ -844,6 +847,10 @@ export class WalletWorker {
         provider: command.provider,
         commandType: command.commandType,
       });
+      if (error instanceof HistoricalWalletStampSourceError) {
+        await this.deadLetter(command, error.safeErrorCode);
+        return;
+      }
       if (error instanceof Error && error.message.includes("stamp artwork digest mismatch")) {
         await this.deadLetter(command, "RENDER_ASSET_DIGEST_MISMATCH");
         return;

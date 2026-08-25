@@ -139,7 +139,11 @@ describe("historical Wallet stamp source", () => {
         }),
         async () => Buffer.from("corrupt"),
       ),
-    ).rejects.toThrow("failed digest verification");
+    ).rejects.toMatchObject({
+      name: "HistoricalWalletStampSourceError",
+      safeErrorCode: "RENDER_ASSET_DIGEST_MISMATCH",
+      message: expect.stringContaining("failed digest verification"),
+    });
   });
 
   it("contains no template catalog or icon fallback", () => {

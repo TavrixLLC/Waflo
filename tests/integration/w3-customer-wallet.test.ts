@@ -5,6 +5,7 @@ import { createApiApplication } from "../../apps/api/src/app.js";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import { WalletWorker } from "../../apps/wallet-worker/src/main.js";
+import { queueWalletPassStateChange } from "../../packages/database/src/index.js";
 import { googleLoyaltyClassId } from "../../packages/wallet-google/src/index.js";
 import {
   createPublishedProgramVersion,
@@ -109,7 +110,7 @@ describe.sequential("W3 Customer and Wallet integration", () => {
     ).toBe(2);
   }, 120_000);
 
-  it("claims each provider issuance command once and creates immutable public progress art", async () => {
+  it("claims each provider issuance command once and creates immutable public hero artwork", async () => {
     const worker = new WalletWorker(prisma.client, {} as never, environment.values);
     const commands = await prisma.client.walletCommand.findMany({
       where: {
@@ -135,38 +136,49 @@ describe.sequential("W3 Customer and Wallet integration", () => {
     const googleAssets = await prisma.client.publicWalletAsset.findMany({
       where: {
         membershipId: firstMembershipId,
-        assetType: { startsWith: "GOOGLE_PROGRESS_" },
+        assetType: { startsWith: "GOOGLE_HERO_V4_" },
       },
     });
     expect(googleAssets).toHaveLength(1);
     expect(googleAssets[0]?.objectKey).not.toContain(firstMembershipId);
+    expect(googleAssets[0]).toMatchObject({ width: 1_032, height: 812, mimeType: "image/png" });
   }, 120_000);
 
-  it("deduplicates concurrent equivalent public renders and skips storage on a cache hit", async () => {
-    const sameProgressMemberships = await prisma.client.membership.findMany({
+  it("deduplicates concurrent equivalent member renders and skips storage on a cache hit", async () => {
+    const enrollment = await enroll(`enroll:${randomUUID()}`, "Concurrent Render Member");
+    expect(enrollment.statusCode).toBe(201);
+    const membership = await prisma.client.membership.findUniqueOrThrow({
       where: {
-        organizationId: fixture.organizationId,
-        customer: { displayName: "Same Person" },
+        publicMembershipId: responseData<{ membership: { publicMembershipId: string } }>(enrollment)
+          .membership.publicMembershipId,
       },
-      select: { id: true },
     });
-    expect(sameProgressMemberships).toHaveLength(2);
-    await prisma.client.membershipProgressProjection.updateMany({
-      where: { membershipId: { in: sameProgressMemberships.map((item) => item.id) } },
+    await prisma.client.membershipProgressProjection.update({
+      where: { membershipId: membership.id },
       data: { currentCycleStampCount: 1 },
     });
-    const commands = await prisma.client.walletCommand.findMany({
+    const pass = await prisma.client.walletPassInstance.findFirstOrThrow({
       where: {
-        membershipId: { in: sameProgressMemberships.map((item) => item.id) },
+        membershipId: membership.id,
         provider: "GOOGLE",
-        commandType: "ISSUE",
       },
     });
-    expect(commands).toHaveLength(2);
+    const issueCommand = await prisma.client.walletCommand.findFirstOrThrow({
+      where: { walletPassInstanceId: pass.id, commandType: "ISSUE" },
+    });
+    const update = await prisma.client.$transaction((transaction) =>
+      queueWalletPassStateChange(transaction, {
+        walletPassInstanceId: pass.id,
+        commandType: "UPDATE",
+        reason: "RECONCILIATION",
+        eventKey: `concurrent-render:${fixture.runId}`,
+      }),
+    );
+    const commands = [issueCommand, update.command];
     const before = await prisma.client.publicWalletAsset.count({
       where: {
         organizationId: fixture.organizationId,
-        assetType: { startsWith: "GOOGLE_PROGRESS_" },
+        assetType: { startsWith: "GOOGLE_HERO_V4_" },
       },
     });
     const generated = await Promise.all(
@@ -187,32 +199,18 @@ describe.sequential("W3 Customer and Wallet integration", () => {
       await prisma.client.publicWalletAsset.count({
         where: {
           organizationId: fixture.organizationId,
-          assetType: { startsWith: "GOOGLE_PROGRESS_" },
+          assetType: { startsWith: "GOOGLE_HERO_V4_" },
         },
       }),
     ).toBe(before + 1);
-
-    const cachedEnrollment = await enroll(`enroll:${randomUUID()}`, "Cached Render Member");
-    expect(cachedEnrollment.statusCode).toBe(201);
-    const cachedMembership = await prisma.client.membership.findUniqueOrThrow({
-      where: {
-        publicMembershipId: responseData<{ membership: { publicMembershipId: string } }>(
-          cachedEnrollment,
-        ).membership.publicMembershipId,
-      },
-      include: { progress: true },
-    });
-    await prisma.client.membershipProgressProjection.update({
-      where: { membershipId: cachedMembership.id },
-      data: { currentCycleStampCount: 1 },
-    });
-    const cachedCommand = await prisma.client.walletCommand.findFirstOrThrow({
-      where: {
-        membershipId: cachedMembership.id,
-        provider: "GOOGLE",
-        commandType: "ISSUE",
-      },
-    });
+    const cached = await prisma.client.$transaction((transaction) =>
+      queueWalletPassStateChange(transaction, {
+        walletPassInstanceId: pass.id,
+        commandType: "UPDATE",
+        reason: "RECONCILIATION",
+        eventKey: `cached-render:${fixture.runId}`,
+      }),
+    );
     let storageCalls = 0;
     const cachedWorker = new WalletWorker(prisma.client, {} as never, environment.values);
     Object.defineProperty(cachedWorker, "objectStorage", {
@@ -223,7 +221,7 @@ describe.sequential("W3 Customer and Wallet integration", () => {
         },
       },
     });
-    await expect(cachedWorker.processCommandById(cachedCommand.id, 20)).resolves.toBe(true);
+    await expect(cachedWorker.processCommandById(cached.command.id, 20)).resolves.toBe(true);
     expect(storageCalls).toBe(0);
   }, 120_000);
 
