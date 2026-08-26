@@ -1,7 +1,4 @@
 import { createHash, createHmac } from "node:crypto";
-import { zipSync } from "fflate";
-import forge from "node-forge";
-import sharp from "sharp";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
   composeAppleLegacyStripArtwork,
@@ -22,6 +19,9 @@ import {
   type WalletUpdateReason,
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
+import { zipSync } from "fflate";
+import forge from "node-forge";
+import sharp from "sharp";
 import {
   mapAppleGenericPass,
   type WalletPassGenerationInput,
@@ -142,14 +142,8 @@ export function mapAppleStoreCard(
     storeCard: {
       // Keep identity in the provider-owned logo/logoText row. The strip remains graphics-only.
       headerFields: [],
-      // Apple renders primary fields over strip.png. Put localized reward copy here and reserve
-      // the top of strip artwork so text never has to be rasterized into the PNG.
-      primaryFields: [
-        {
-          key: "rewardFront",
-          value: presentation.rewardSummary.slice(0, 80),
-        },
-      ],
+      // Keep reward copy on the details side. The strip carries the image-first presentation.
+      primaryFields: [],
       secondaryFields: [
         {
           key: "program",
@@ -369,6 +363,7 @@ async function progressStripImages(
         programName: input.programName,
         memberName: input.displayName,
         credentialPayload: input.credentialPayload,
+        ...(input.qrCenterLogo ? { qrCenterLogo: { bytes: input.qrCenterLogo } } : {}),
       },
       rendered,
     ),

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createQrPng } from "@waflo/qr-core";
+import { createQrPng, decodeQrImage } from "@waflo/qr-core";
 import type { PublishedMembershipStampRenderResult, StampLayout } from "@waflo/stamp-engine";
 import sharp from "sharp";
 
@@ -41,12 +41,12 @@ export interface WalletArtworkLayout {
 /** Explicit 1x layout contracts keep safe areas and visual hierarchy reviewable. */
 export const APPLE_POSTER_LAYOUT: WalletArtworkLayout = {
   safeArea: { left: 18, top: 22, width: 322, height: 404 },
-  identityRegion: { left: 22, top: 34, width: 180, height: 82 },
-  counterBadgeRegion: { left: 218, top: 34, width: 116, height: 88 },
-  stampPanelRegion: { left: 10, top: 126, width: 338, height: 204 },
-  stampRegion: { left: 32, top: 148, width: 294, height: 160 },
-  rewardRegion: { left: 22, top: 338, width: 210, height: 76 },
-  qrRegion: { left: 246, top: 334, width: 92, height: 92 },
+  identityRegion: { left: 22, top: 38, width: 190, height: 72 },
+  counterBadgeRegion: { left: 234, top: 30, width: 100, height: 96 },
+  stampPanelRegion: { left: 10, top: 130, width: 338, height: 176 },
+  stampRegion: { left: 32, top: 152, width: 294, height: 132 },
+  rewardRegion: { left: 22, top: 322, width: 176, height: 78 },
+  qrRegion: { left: 200, top: 286, width: 140, height: 140 },
   decorationRegion: { left: 0, top: 0, width: 358, height: 448 },
   centerToleranceRatio: 0.02,
 };
@@ -69,12 +69,12 @@ export const APPLE_LEGACY_LAYOUT: WalletArtworkLayout = {
 
 export const GOOGLE_HERO_LAYOUT: WalletArtworkLayout = {
   safeArea: { left: 54, top: 48, width: 924, height: 716 },
-  identityRegion: { left: 68, top: 64, width: 650, height: 108 },
-  counterBadgeRegion: { left: 786, top: 58, width: 178, height: 132 },
-  stampPanelRegion: { left: 32, top: 190, width: 968, height: 354 },
-  stampRegion: { left: 92, top: 226, width: 848, height: 282 },
-  rewardRegion: { left: 96, top: 580, width: 674, height: 136 },
-  qrRegion: { left: 800, top: 580, width: 136, height: 136 },
+  identityRegion: { left: 68, top: 76, width: 650, height: 108 },
+  counterBadgeRegion: { left: 786, top: 70, width: 178, height: 132 },
+  stampPanelRegion: { left: 32, top: 214, width: 968, height: 320 },
+  stampRegion: { left: 92, top: 250, width: 848, height: 248 },
+  rewardRegion: { left: 84, top: 574, width: 676, height: 146 },
+  qrRegion: { left: 786, top: 558, width: 192, height: 192 },
   decorationRegion: { left: 0, top: 0, width: 1_032, height: 812 },
   centerToleranceRatio: 0.02,
 };
@@ -91,7 +91,13 @@ export const walletArtworkPanelCorners = {
   GOOGLE_HERO: { topLeft: 72, topRight: 30, bottomLeft: 30, bottomRight: 72 },
 } as const;
 
-export const walletArtworkArabicTypeface = "'Noto Sans Arabic','Segoe UI','Arial',sans-serif";
+export const walletArtworkArabicTypeface =
+  "'Noto Sans Arabic','Noto Sans','DejaVu Sans','Segoe UI','Arial',sans-serif";
+
+export interface WalletArtworkQrCenterLogo {
+  /** Optional merchant/store mark. Unsafe or undecodable variants fall back to a plain QR. */
+  readonly bytes: Uint8Array;
+}
 
 export interface WalletArtworkCompositionInput {
   /** The unchanged output of the one authoritative template/stamp renderer. */
@@ -116,6 +122,7 @@ export interface WalletArtworkCompositionInput {
   readonly memberName: string;
   /** Opaque revocable Wallet credential. It is encoded only as a QR, never rendered as text. */
   readonly credentialPayload: string;
+  readonly qrCenterLogo?: WalletArtworkQrCenterLogo;
   readonly locale: "en" | "ar";
 }
 
@@ -141,6 +148,7 @@ export interface ComposedWalletArtwork {
   readonly counterBadgeRegion?: WalletArtworkPlacement;
   readonly rewardRegion?: WalletArtworkPlacement;
   readonly qrRegion?: WalletArtworkPlacement;
+  readonly qrCenterLogoApplied?: boolean;
 }
 
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -188,6 +196,12 @@ function assertCompositionInput(input: WalletArtworkCompositionInput): void {
   }
   for (const [name, value] of Object.entries(input.theme)) {
     if (!colorPattern.test(value)) throw new Error(`Wallet artwork ${name} is invalid.`);
+  }
+  if (
+    input.qrCenterLogo &&
+    (input.qrCenterLogo.bytes.byteLength < 32 || input.qrCenterLogo.bytes.byteLength > 512_000)
+  ) {
+    throw new Error("Wallet artwork QR center logo is invalid.");
   }
   if (
     !Number.isFinite(input.stampArtwork.width) ||
@@ -254,21 +268,36 @@ function wrapLabel(value: string, maxCharacters: number, maxLines = 2): string[]
   const words = normalized.split(" ");
   const lines: string[] = [];
   let current = "";
-  for (const word of words) {
+  let truncated = false;
+  for (const rawWord of words) {
+    const word =
+      Array.from(rawWord).length > maxCharacters
+        ? `${Array.from(rawWord)
+            .slice(0, Math.max(1, maxCharacters - 1))
+            .join("")}…`
+        : rawWord;
+    if (word !== rawWord) truncated = true;
     const candidate = current ? `${current} ${word}` : word;
     if (candidate.length <= maxCharacters || !current) {
       current = candidate;
       continue;
     }
-    lines.push(current);
-    current = word;
-    if (lines.length === maxLines - 1) break;
+    if (lines.length < maxLines - 1) {
+      lines.push(current);
+      current = word;
+      continue;
+    }
+    truncated = true;
+    break;
   }
   if (current && lines.length < maxLines) lines.push(current);
-  const consumed = lines.join(" ");
-  if (consumed.length < normalized.length && lines.length > 0) {
+  if (truncated && lines.length > 0) {
     const last = lines.length - 1;
-    lines[last] = `${(lines[last] ?? "").slice(0, Math.max(1, maxCharacters - 1)).trimEnd()}…`;
+    const graphemes = Array.from((lines[last] ?? "").replace(/…$/, ""));
+    lines[last] = `${graphemes
+      .slice(0, Math.max(1, maxCharacters - 1))
+      .join("")
+      .trimEnd()}…`;
   }
   return lines;
 }
@@ -281,15 +310,15 @@ function motif(
   secondary: string,
 ): string {
   if (layout === "RING") {
-    return `<circle cx="${width * 0.88}" cy="${height * 0.19}" r="${width * 0.22}" fill="none" stroke="${accent}" stroke-width="${Math.max(10, width * 0.028)}" opacity="0.13"/><circle cx="${width * 0.1}" cy="${height * 0.9}" r="${width * 0.16}" fill="none" stroke="${secondary}" stroke-width="${Math.max(7, width * 0.02)}" opacity="0.16"/>`;
+    return `<circle cx="${width * 0.84}" cy="${height * 0.2}" r="${width * 0.14}" fill="none" stroke="${accent}" stroke-width="${Math.max(10, width * 0.022)}" opacity="0.12"/><circle cx="${width * 0.13}" cy="${height * 0.84}" r="${width * 0.1}" fill="none" stroke="${secondary}" stroke-width="${Math.max(7, width * 0.016)}" opacity="0.14"/>`;
   }
   if (layout === "PATH") {
-    return `<path d="M-${width * 0.08} ${height * 0.22} C${width * 0.26} ${height * 0.03},${width * 0.61} ${height * 0.3},${width * 1.08} ${height * 0.1}" fill="none" stroke="${secondary}" stroke-width="${Math.max(18, width * 0.05)}" stroke-linecap="round" opacity="0.15"/><path d="M-${width * 0.04} ${height * 0.92} C${width * 0.36} ${height * 0.72},${width * 0.7} ${height * 0.98},${width * 1.04} ${height * 0.76}" fill="none" stroke="${accent}" stroke-width="${Math.max(8, width * 0.018)}" stroke-linecap="round" opacity="0.11"/>`;
+    return `<path d="M${width * 0.04} ${height * 0.2} C${width * 0.29} ${height * 0.08},${width * 0.6} ${height * 0.28},${width * 0.96} ${height * 0.12}" fill="none" stroke="${secondary}" stroke-width="${Math.max(18, width * 0.044)}" stroke-linecap="round" opacity="0.13"/><path d="M${width * 0.05} ${height * 0.84} C${width * 0.36} ${height * 0.7},${width * 0.68} ${height * 0.9},${width * 0.95} ${height * 0.76}" fill="none" stroke="${accent}" stroke-width="${Math.max(8, width * 0.016)}" stroke-linecap="round" opacity="0.1"/>`;
   }
   if (layout === "ROW") {
-    return `<circle cx="${width * 0.86}" cy="${height * 0.13}" r="${width * 0.19}" fill="${secondary}" opacity="0.12"/><circle cx="${width * 0.91}" cy="${height * 0.18}" r="${width * 0.08}" fill="${accent}" opacity="0.12"/>`;
+    return `<circle cx="${width * 0.84}" cy="${height * 0.16}" r="${width * 0.12}" fill="${secondary}" opacity="0.11"/><circle cx="${width * 0.89}" cy="${height * 0.19}" r="${width * 0.055}" fill="${accent}" opacity="0.11"/>`;
   }
-  return `<path d="M${width * 0.69} 0V${height * 0.16}M${width * 0.8} 0V${height * 0.2}M${width * 0.91} 0V${height * 0.15}M${width * 0.65} ${height * 0.07}H${width}M${width * 0.68} ${height * 0.15}H${width}" fill="none" stroke="${accent}" stroke-width="${Math.max(2, width * 0.005)}" opacity="0.11"/><rect x="${-width * 0.07}" y="${height * 0.79}" width="${width * 0.25}" height="${height * 0.25}" rx="${width * 0.03}" fill="${secondary}" opacity="0.11" transform="rotate(-9 ${width * 0.05} ${height * 0.9})"/>`;
+  return `<path d="M${width * 0.7} ${height * 0.045}V${height * 0.17}M${width * 0.8} ${height * 0.045}V${height * 0.2}M${width * 0.9} ${height * 0.045}V${height * 0.16}M${width * 0.67} ${height * 0.08}H${width * 0.96}M${width * 0.69} ${height * 0.15}H${width * 0.96}" fill="none" stroke="${accent}" stroke-width="${Math.max(2, width * 0.005)}" opacity="0.1"/><rect x="${width * 0.025}" y="${height * 0.77}" width="${width * 0.19}" height="${height * 0.18}" rx="${width * 0.03}" fill="${secondary}" opacity="0.1" transform="rotate(-7 ${width * 0.11} ${height * 0.86})"/>`;
 }
 
 function relativeLuminance(hex: string): number {
@@ -315,6 +344,21 @@ function readableTextColor(preferred: string, background: string): string {
   );
 }
 
+function fittedFontSize(
+  value: string,
+  preferredSize: number,
+  minimumSize: number,
+  availableWidth: number,
+  arabic: boolean,
+): number {
+  const characters = Math.max(1, Array.from(value).length);
+  const estimatedWidth = characters * preferredSize * (arabic ? 0.61 : 0.56);
+  return Math.max(
+    minimumSize,
+    Math.min(preferredSize, Number((preferredSize * (availableWidth / estimatedWidth)).toFixed(2))),
+  );
+}
+
 function counterBadgeSvg(
   input: WalletArtworkCompositionInput,
   region: WalletArtworkPlacement,
@@ -329,7 +373,7 @@ function counterBadgeSvg(
   const radius = Math.min(region.width, region.height) / 2;
   const labelSize = region.width > 150 ? 18 : 10;
   const valueSize = region.width > 150 ? 36 : 22;
-  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${region.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (region.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (region.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
+  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${region.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (region.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (region.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext" xml:lang="en">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
 }
 
 function identitySvg(
@@ -350,11 +394,34 @@ function identitySvg(
   const program = wrapLabel(input.programName, isGoogle ? 36 : 22, 1)[0] ?? "";
   const memberPrefix = isArabic ? "العضو" : "MEMBER";
   const member = wrapLabel(`${memberPrefix}: ${input.memberName}`, isGoogle ? 48 : 28, 1)[0] ?? "";
+  const availableWidth = region.width - inset * 2;
+  const organizationSize = fittedFontSize(
+    organization,
+    isGoogle ? 15 : 8,
+    isGoogle ? 11 : 6.5,
+    availableWidth,
+    isArabic,
+  );
+  const programSize = fittedFontSize(
+    program,
+    isGoogle ? 34 : 17,
+    isGoogle ? 23 : 11,
+    availableWidth,
+    isArabic,
+  );
+  const memberSize = fittedFontSize(
+    member,
+    isGoogle ? 21 : 10.5,
+    isGoogle ? 14 : 7.5,
+    availableWidth,
+    isArabic,
+  );
   const organizationY = region.top + (isGoogle ? 18 : 11);
   const programY = region.top + (isGoogle ? 61 : 40);
   const memberY = region.top + (isGoogle ? 98 : 69);
   const markerX = isArabic ? region.left + region.width - 4 : region.left;
-  return `<rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/><text x="${textX}" y="${organizationY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 15 : 8}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2 : 1.1}" fill="${textColor}" opacity="0.78" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(organization)}</text><text x="${textX}" y="${programY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 34 : 17}" font-weight="900" fill="${textColor}" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(program)}</text><text x="${textX}" y="${memberY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 21 : 10.5}" font-weight="700" fill="${textColor}" opacity="0.86" direction="${direction}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(member)}</text>`;
+  const clipId = `identity-${region.left}-${region.top}`;
+  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/><text x="${textX}" y="${organizationY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2 : 1.1}" fill="${textColor}" opacity="0.82" direction="${direction}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(organization)}</text><text x="${textX}" y="${programY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${programSize}" font-weight="900" fill="${textColor}" direction="${direction}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(program)}</text><text x="${textX}" y="${memberY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${direction}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(member)}</text></g>`;
 }
 
 function giftIconSvg(x: number, y: number, size: number, color: string): string {
@@ -378,22 +445,23 @@ function rewardPanelSvg(
         : "REWARD";
   const fallback = input.locale === "ar" ? "مكافأتك القادمة" : "Your next reward";
   const isGoogle = region.width > 500;
-  const appleCharacters = Math.max(12, Math.floor((region.width - 82) / 7.2));
+  const appleCharacters = Math.max(12, Math.floor((region.width - 72) / 6.2));
   const lines = wrapLabel(input.rewardLabel || fallback, isGoogle ? 36 : appleCharacters, 2);
   const isArabic = input.locale === "ar";
+  const darkTheme = relativeLuminance(backgroundColor) < 0.34;
   const fill = input.rewardReady ? accentColor : "#FFFFFF";
   const textColor = readableTextColor(
     input.rewardReady ? backgroundColor : foregroundColor,
-    input.rewardReady ? accentColor : "#FFFFFF",
+    input.rewardReady ? accentColor : backgroundColor,
   );
   const stroke = input.rewardReady ? backgroundColor : accentColor;
-  const iconSize = isGoogle ? 62 : 34;
-  const horizontalPadding = isGoogle ? 34 : 18;
+  const iconSize = isGoogle ? 62 : 28;
+  const horizontalPadding = isGoogle ? 34 : 14;
   const iconX = isArabic
     ? region.left + region.width - horizontalPadding - iconSize
     : region.left + horizontalPadding;
   const iconY = region.top + (region.height - iconSize) / 2;
-  const textGap = isGoogle ? 30 : 15;
+  const textGap = isGoogle ? 30 : 10;
   const textX = isArabic ? iconX - textGap : iconX + iconSize + textGap;
   // In SVG, `start` follows the active writing direction: it is the right edge
   // for RTL and the left edge for LTR. This keeps Arabic text left of the
@@ -401,16 +469,22 @@ function rewardPanelSvg(
   const textAnchor = "start";
   const eyebrowY = region.top + (isGoogle ? 43 : 26);
   const bodyY = region.top + (isGoogle ? 82 : 49);
-  const bodySize = isGoogle ? 30 : 15;
+  const availableTextWidth = region.width - horizontalPadding * 2 - iconSize - textGap - 18;
+  const bodySize = Math.min(
+    ...lines.map((line) =>
+      fittedFontSize(line, isGoogle ? 30 : 15, isGoogle ? 20 : 10.5, availableTextWidth, isArabic),
+    ),
+  );
   const lineGap = isGoogle ? 34 : 18;
-  return `<rect x="${region.left}" y="${region.top + 6}" width="${region.width}" height="${region.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="0.1"/><rect x="${region.left}" y="${region.top}" width="${region.width}" height="${region.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : 0.76}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="0.38"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.7" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(eyebrow)}</text>${lines
+  const clipId = `reward-${region.left}-${region.top}`;
+  return `<rect x="${region.left}" y="${region.top + 6}" width="${region.width}" height="${region.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${region.left}" y="${region.top}" width="${region.width}" height="${region.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${region.left + 10}" y="${region.top + 8}" width="${region.width - 20}" height="${region.height - 16}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(eyebrow)}</text>${lines
     .map(
       (line, index) =>
-        `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" lang="${isArabic ? "ar" : "en"}">${escapeXml(line)}</text>`,
+        `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(line)}</text>`,
     )
     .join(
       "",
-    )}<circle cx="${isArabic ? region.left + (isGoogle ? 32 : 16) : region.left + region.width - (isGoogle ? 32 : 16)}" cy="${region.top + region.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
+    )}</g><circle cx="${isArabic ? region.left + (isGoogle ? 32 : 16) : region.left + region.width - (isGoogle ? 32 : 16)}" cy="${region.top + region.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
 }
 
 function diagonalCornerPanelPath(
@@ -426,13 +500,27 @@ function diagonalCornerPanelPath(
 function imageFirstStampPanelSvg(
   region: WalletArtworkPlacement,
   accentColor: string,
+  backgroundColor: string,
+  foregroundColor: string,
   google: boolean,
 ): string {
   const corners = google
     ? walletArtworkPanelCorners.GOOGLE_HERO
     : walletArtworkPanelCorners.APPLE_POSTER;
   const path = diagonalCornerPanelPath(region, corners.topLeft, corners.topRight);
-  return `<path d="${path}" fill="#000000" opacity="0.08" transform="translate(0 ${google ? 11 : 6})"/><path d="${path}" fill="#FFFFFF" opacity="0.5" stroke="${accentColor}" stroke-width="${google ? 3 : 1.5}" stroke-opacity="0.2"/>`;
+  const darkTheme = relativeLuminance(backgroundColor) < 0.34;
+  return `<path d="${path}" fill="#000000" opacity="${darkTheme ? 0.16 : 0.07}" transform="translate(0 ${google ? 10 : 5})"/><path d="${path}" fill="${darkTheme ? "#FFFFFF" : foregroundColor}" opacity="${darkTheme ? 0.1 : 0.045}" stroke="${accentColor}" stroke-width="${google ? 3 : 1.5}" stroke-opacity="${darkTheme ? 0.26 : 0.18}"/><path d="M${region.left + corners.topLeft} ${region.top + 1}H${region.left + region.width - corners.topRight}" fill="none" stroke="#FFFFFF" stroke-width="${google ? 2 : 1}" stroke-linecap="round" opacity="${darkTheme ? 0.2 : 0.54}"/>`;
+}
+
+function qrFrameSvg(
+  region: WalletArtworkPlacement,
+  accentColor: string,
+  backgroundColor: string,
+  google: boolean,
+): string {
+  const radius = google ? 38 : 22;
+  const darkTheme = relativeLuminance(backgroundColor) < 0.34;
+  return `<rect x="${region.left}" y="${region.top + (google ? 9 : 5)}" width="${region.width}" height="${region.height}" rx="${radius}" fill="#000000" opacity="${darkTheme ? 0.2 : 0.1}"/><rect x="${region.left}" y="${region.top}" width="${region.width}" height="${region.height}" rx="${radius}" fill="#FFFEFC" stroke="${accentColor}" stroke-width="${google ? 4 : 2}" stroke-opacity="0.42"/><path d="M${region.left + radius} ${region.top + (google ? 3 : 2)}H${region.left + region.width - radius}" stroke="#FFFFFF" stroke-width="${google ? 3 : 1.5}" stroke-linecap="round" opacity="0.9"/>`;
 }
 
 function canvasSvg(
@@ -445,7 +533,6 @@ function canvasSvg(
   const logical = walletArtworkDimensions[target];
   const layout = walletArtworkLayouts[target];
   const { backgroundColor, accentColor, secondaryColor } = input.theme;
-  const typeface = walletArtworkArabicTypeface;
   const artworkMotif = motif(
     input.layoutType,
     logical.width,
@@ -457,17 +544,32 @@ function canvasSvg(
   let foreground = "";
   if (target === "APPLE_POSTER") {
     const regions = requiredImageFirstRegions(layout);
-    foreground = `${identitySvg(input, regions.identityRegion, typeface)}${imageFirstStampPanelSvg(layout.stampPanelRegion, accentColor, false)}${counterBadgeSvg(input, regions.counterBadgeRegion, typeface)}${rewardPanelSvg(input, regions.rewardRegion, typeface)}`;
+    foreground = `${imageFirstStampPanelSvg(layout.stampPanelRegion, accentColor, backgroundColor, input.theme.foregroundColor, false)}${qrFrameSvg(regions.qrRegion, accentColor, backgroundColor, false)}`;
   } else if (target === "APPLE_GENERIC_STRIP") {
     foreground = `<rect x="5" y="5" width="365" height="134" rx="25" fill="#000000" opacity="0.07" transform="translate(0 2)"/><rect x="5" y="5" width="365" height="134" rx="25" fill="#FFFFFF" opacity="0.5" stroke="${input.rewardReady ? secondaryColor : accentColor}" stroke-width="${input.rewardReady ? 4 : 1.5}" stroke-opacity="${input.rewardReady ? 0.72 : 0.18}"/>`;
   } else if (target === "APPLE_LEGACY_STRIP") {
     foreground = `<rect x="5" y="4" width="365" height="115" rx="23" fill="#000000" opacity="0.07" transform="translate(0 2)"/><rect x="5" y="4" width="365" height="115" rx="23" fill="#FFFFFF" opacity="0.5" stroke="${input.rewardReady ? secondaryColor : accentColor}" stroke-width="${input.rewardReady ? 4 : 1.5}" stroke-opacity="${input.rewardReady ? 0.72 : 0.18}"/>`;
   } else {
     const regions = requiredImageFirstRegions(layout);
-    foreground = `${identitySvg(input, regions.identityRegion, typeface)}${imageFirstStampPanelSvg(layout.stampPanelRegion, accentColor, true)}${counterBadgeSvg(input, regions.counterBadgeRegion, typeface)}${rewardPanelSvg(input, regions.rewardRegion, typeface)}`;
+    foreground = `${imageFirstStampPanelSvg(layout.stampPanelRegion, accentColor, backgroundColor, input.theme.foregroundColor, true)}${qrFrameSvg(regions.qrRegion, accentColor, backgroundColor, true)}`;
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><rect width="100%" height="100%" fill="${backgroundColor}"/><path d="M0 0H${logical.width}V${logical.height * 0.07}C${logical.width * 0.69} ${logical.height * 0.14},${logical.width * 0.34} ${logical.height * 0.02},0 ${logical.height * 0.12}Z" fill="${secondaryColor}" opacity="0.1"/>${artworkMotif}${foreground}<metadata data-composer="waflo-wallet-artwork-v4" data-target="${target}" data-scale="${scale}" data-source-stamp-digest="${input.stampArtwork.contentDigest}"/></svg>`;
+  const ambientId = `ambient-${target.toLocaleLowerCase("en-US")}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><radialGradient id="${ambientId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.18"/><stop offset="100%" stop-color="${secondaryColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${backgroundColor}"/><ellipse cx="${logical.width * 0.79}" cy="${logical.height * 0.18}" rx="${logical.width * 0.23}" ry="${logical.height * 0.19}" fill="url(#${ambientId})"/><path d="M${logical.width * 0.06} ${logical.height * 0.075}C${logical.width * 0.3} ${logical.height * 0.025},${logical.width * 0.56} ${logical.height * 0.13},${logical.width * 0.9} ${logical.height * 0.065}" fill="none" stroke="${secondaryColor}" stroke-width="${Math.max(4, logical.width * 0.012)}" stroke-linecap="round" opacity="0.08"/>${artworkMotif}${foreground}<metadata data-composer="waflo-wallet-artwork-v5" data-target="${target}" data-scale="${scale}" data-source-stamp-digest="${input.stampArtwork.contentDigest}"/></svg>`;
+}
+
+function canvasOverlaySvg(
+  input: WalletArtworkCompositionInput,
+  target: WalletArtworkTarget,
+  width: number,
+  height: number,
+): string | undefined {
+  if (target !== "APPLE_POSTER" && target !== "GOOGLE_HERO") return undefined;
+  const logical = walletArtworkDimensions[target];
+  const regions = requiredImageFirstRegions(walletArtworkLayouts[target]);
+  const typeface = walletArtworkArabicTypeface;
+  const overlay = `${identitySvg(input, regions.identityRegion, typeface)}${counterBadgeSvg(input, regions.counterBadgeRegion, typeface)}${rewardPanelSvg(input, regions.rewardRegion, typeface)}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}">${overlay}</svg>`;
 }
 
 function requiredImageFirstRegions(layout: WalletArtworkLayout): {
@@ -525,6 +627,83 @@ async function rasterizedVisibleStamp(input: WalletArtworkCompositionInput): Pro
     visibleBounds,
     aspectRatio: cropped.info.width / cropped.info.height,
   };
+}
+
+async function premiumQrArtwork(
+  input: WalletArtworkCompositionInput,
+  target: "APPLE_POSTER" | "GOOGLE_HERO",
+  frameRegion: WalletArtworkPlacement,
+  scale: WalletArtworkScale,
+): Promise<{
+  bytes: Buffer;
+  left: number;
+  top: number;
+  centerLogoApplied: boolean;
+}> {
+  const logicalInset = target === "GOOGLE_HERO" ? 14 : 7;
+  const inset = logicalInset * scale;
+  const width = frameRegion.width - inset * 2;
+  const left = frameRegion.left + inset;
+  const top = frameRegion.top + inset;
+  const plain = await createQrPng(input.credentialPayload, {
+    width,
+    // The surrounding white plate completes the quiet zone, so a one-module
+    // internal margin gives the data modules more physical size at Apple 1x.
+    margin: 1,
+    errorCorrectionLevel: "Q",
+  });
+  if (!input.qrCenterLogo) {
+    return { bytes: plain, left, top, centerLogoApplied: false };
+  }
+
+  try {
+    const logoBase = await createQrPng(input.credentialPayload, {
+      width,
+      margin: 1,
+      errorCorrectionLevel: "H",
+    });
+    const logoSource = sharp(Buffer.from(input.qrCenterLogo.bytes), {
+      failOn: "error",
+      limitInputPixels: 1_000_000,
+      sequentialRead: true,
+    });
+    const metadata = await logoSource.metadata();
+    if (
+      !metadata.width ||
+      !metadata.height ||
+      !new Set(["png", "jpeg", "webp"]).has(metadata.format ?? "") ||
+      (metadata.pages !== undefined && metadata.pages > 1)
+    ) {
+      throw new Error("Unsupported QR center logo.");
+    }
+    const plateSize = Math.max(14, Math.floor(width * 0.17));
+    const logoSize = Math.max(10, Math.floor(width * 0.115));
+    const logo = await logoSource
+      .resize({ width: logoSize, height: logoSize, fit: "contain", withoutEnlargement: false })
+      .png()
+      .toBuffer();
+    const plate = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${plateSize}" height="${plateSize}" viewBox="0 0 ${plateSize} ${plateSize}"><rect width="${plateSize}" height="${plateSize}" rx="${plateSize * 0.3}" fill="#FFFEFC"/></svg>`,
+      "utf8",
+    );
+    const plateLeft = Math.round((width - plateSize) / 2);
+    const logoLeft = Math.round((width - logoSize) / 2);
+    const styled = await sharp(logoBase)
+      .composite([
+        { input: plate, left: plateLeft, top: plateLeft },
+        { input: logo, left: logoLeft, top: logoLeft },
+      ])
+      .png({ compressionLevel: 9, adaptiveFiltering: true })
+      .toBuffer();
+    // Optional center marks are accepted only when the production decoder can
+    // still recover the exact opaque credential. Otherwise the plain QR wins.
+    if ((await decodeQrImage(styled, "image/png")) !== input.credentialPayload) {
+      throw new Error("QR center logo changed the decoded credential.");
+    }
+    return { bytes: styled, left, top, centerLogoApplied: true };
+  } catch {
+    return { bytes: plain, left, top, centerLogoApplied: false };
+  }
 }
 
 export async function validateWalletArtworkPng(input: {
@@ -600,17 +779,16 @@ export async function composeWalletArtwork(
   };
   const base = Buffer.from(canvasSvg(input, target, width, height, scale), "utf8");
   const qrRegion = scaledPlacement(layout.qrRegion, scale);
-  const qr = qrRegion
-    ? await createQrPng(input.credentialPayload, {
-        width: qrRegion.width,
-        margin: 2,
-        errorCorrectionLevel: "Q",
-      })
-    : undefined;
+  const qr =
+    qrRegion && (target === "APPLE_POSTER" || target === "GOOGLE_HERO")
+      ? await premiumQrArtwork(input, target, qrRegion, scale)
+      : undefined;
+  const overlay = canvasOverlaySvg(input, target, width, height);
   const bytes = await sharp(base)
     .composite([
       { input: resized.data, left: stampPlacement.left, top: stampPlacement.top },
-      ...(qr && qrRegion ? [{ input: qr, left: qrRegion.left, top: qrRegion.top }] : []),
+      ...(qr ? [{ input: qr.bytes, left: qr.left, top: qr.top }] : []),
+      ...(overlay ? [{ input: Buffer.from(overlay, "utf8"), left: 0, top: 0 }] : []),
     ])
     .png({ compressionLevel: 9, adaptiveFiltering: true })
     .toBuffer();
@@ -635,6 +813,7 @@ export async function composeWalletArtwork(
     ...(counterBadgeRegion ? { counterBadgeRegion } : {}),
     ...(rewardRegion ? { rewardRegion } : {}),
     ...(qrRegion ? { qrRegion } : {}),
+    ...(qr?.centerLogoApplied ? { qrCenterLogoApplied: true } : {}),
   };
 }
 
@@ -652,10 +831,13 @@ export async function composeApplePosterArtwork(
 export async function composeAppleLegacyStripArtwork(
   input: WalletArtworkCompositionInput,
 ): Promise<Readonly<Record<"times1" | "times2" | "times3", ComposedWalletArtwork>>> {
+  // Legacy Apple faces are native-data-heavy. Reward copy belongs to the
+  // details/back fields and is deliberately unavailable to the strip renderer.
+  const stripInput = { ...input, rewardLabel: "" };
   const [times1, times2, times3] = await Promise.all([
-    composeWalletArtwork(input, "APPLE_LEGACY_STRIP", 1),
-    composeWalletArtwork(input, "APPLE_LEGACY_STRIP", 2),
-    composeWalletArtwork(input, "APPLE_LEGACY_STRIP", 3),
+    composeWalletArtwork(stripInput, "APPLE_LEGACY_STRIP", 1),
+    composeWalletArtwork(stripInput, "APPLE_LEGACY_STRIP", 2),
+    composeWalletArtwork(stripInput, "APPLE_LEGACY_STRIP", 3),
   ] as const);
   return { times1, times2, times3 };
 }
@@ -663,10 +845,13 @@ export async function composeAppleLegacyStripArtwork(
 export async function composeAppleGenericStripArtwork(
   input: WalletArtworkCompositionInput,
 ): Promise<Readonly<Record<"times1" | "times2" | "times3", ComposedWalletArtwork>>> {
+  // Generic is the iOS 26-and-earlier fallback for Poster Generic. Keep its
+  // front strip artwork-only; reward copy remains in native back fields.
+  const stripInput = { ...input, rewardLabel: "" };
   const [times1, times2, times3] = await Promise.all([
-    composeWalletArtwork(input, "APPLE_GENERIC_STRIP", 1),
-    composeWalletArtwork(input, "APPLE_GENERIC_STRIP", 2),
-    composeWalletArtwork(input, "APPLE_GENERIC_STRIP", 3),
+    composeWalletArtwork(stripInput, "APPLE_GENERIC_STRIP", 1),
+    composeWalletArtwork(stripInput, "APPLE_GENERIC_STRIP", 2),
+    composeWalletArtwork(stripInput, "APPLE_GENERIC_STRIP", 3),
   ] as const);
   return { times1, times2, times3 };
 }
@@ -677,6 +862,7 @@ export function walletArtworkInputFromStampRender(
     readonly programName: string;
     readonly memberName: string;
     readonly credentialPayload: string;
+    readonly qrCenterLogo?: WalletArtworkQrCenterLogo;
     readonly rewardLabel: string;
     readonly stampRenderInput: {
       readonly layoutType: StampLayout;
@@ -714,6 +900,7 @@ export function walletArtworkInputFromStampRender(
     programName: input.programName,
     memberName: input.memberName,
     credentialPayload: input.credentialPayload,
+    ...(input.qrCenterLogo ? { qrCenterLogo: input.qrCenterLogo } : {}),
     locale: renderInput.locale,
   };
 }

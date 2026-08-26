@@ -350,9 +350,7 @@ describe("P3 Builder preview fidelity", () => {
       );
 
       expect(pass.storeCard.headerFields).toEqual([]);
-      expect(pass.storeCard.primaryFields).toEqual([
-        { key: "rewardFront", value: input.rewardSummary.slice(0, 80) },
-      ]);
+      expect(pass.storeCard.primaryFields).toEqual([]);
       expect(pass.storeCard.auxiliaryFields).toEqual([]);
       expect(pass.storeCard.backFields.some((field) => field.key === "member")).toBe(false);
       expect(composition.svg).toContain(String(program.value));

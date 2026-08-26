@@ -306,6 +306,8 @@ export interface WalletMembershipInput extends WalletProgramInput {
   readonly publicMembershipId: string;
   readonly displayName: string;
   readonly credentialPayload: string;
+  /** Optional processed merchant/store logo for the artwork QR center. */
+  readonly qrCenterLogo?: Uint8Array;
   readonly currentStampCount: number;
   readonly requiredStampCount: number;
   readonly rewardReady: boolean;
@@ -634,5 +636,4 @@ export function walletCommandIdempotencyKey(input: {
 
 /** Bump when provider-side class/pass presentation must be reconciled in place. */
 export const WALLET_PRESENTATION_SCHEMA_VERSION = 5;
-
 import type { PublishedMembershipStampRenderInput } from "@waflo/stamp-engine";

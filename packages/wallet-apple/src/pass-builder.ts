@@ -298,6 +298,7 @@ async function personalizedVariants(
       programName: input.programName,
       memberName: input.displayName,
       credentialPayload: input.credentialPayload,
+      ...(input.qrCenterLogo ? { qrCenterLogo: { bytes: input.qrCenterLogo } } : {}),
     },
     rendered,
   );

@@ -103,7 +103,32 @@ function allFieldValues(fields: {
 }
 
 describe("Apple Pass Builder migration", () => {
-  it("preserves installed-pass identity, update authentication, QR payload, colors, and field semantics", () => {
+  it("keeps legacy reward content on the details side and never in a front field", () => {
+    const rewardSummary = "A classic grooming service";
+    const input = { ...baseMembership, rewardSummary };
+    const legacy = mapAppleStoreCard(input, configuration, "a".repeat(43));
+    const migrated = mapAppleGenericPass(input, configuration, "a".repeat(43));
+    const frontValues = (fields: typeof legacy.storeCard) =>
+      [
+        ...fields.headerFields,
+        ...fields.primaryFields,
+        ...fields.secondaryFields,
+        ...fields.auxiliaryFields,
+      ].map((field) => field.value);
+
+    expect(frontValues(legacy.storeCard)).not.toContain(rewardSummary);
+    expect(legacy.storeCard.backFields).toContainEqual(
+      expect.objectContaining({ key: "reward", value: rewardSummary }),
+    );
+    expect(migrated.generic.backFields).toContainEqual(
+      expect.objectContaining({ key: "reward", value: rewardSummary }),
+    );
+    expect(migrated.posterGeneric.backFields).toContainEqual(
+      expect.objectContaining({ key: "reward", value: rewardSummary }),
+    );
+  });
+
+  it("preserves installed-pass identity, update authentication, QR payload, colors, and legacy Generic semantics", () => {
     const token = "a".repeat(43);
     const legacy = mapAppleStoreCard(baseMembership, configuration, token);
     const migrated = mapAppleGenericPass(baseMembership, configuration, token);
@@ -122,10 +147,12 @@ describe("Apple Pass Builder migration", () => {
     // Pass Builder is opt-in and intentionally uses Generic/Poster field placement;
     // preserve the installed-pass identity while keeping the legacy Store Card default intact.
     expect(allFieldValues(legacy.storeCard)).toMatchObject({
-      rewardFront: baseMembership.rewardSummary,
       program: baseMembership.programName,
       status: "Active",
     });
+    expect(legacy.storeCard.backFields).toContainEqual(
+      expect.objectContaining({ key: "reward", value: baseMembership.rewardSummary }),
+    );
     expect(allFieldValues(migrated.generic)).toMatchObject({
       progress: "3/8",
       member: baseMembership.displayName,

@@ -27,7 +27,6 @@ import {
 } from "../programs/published-stamp-render.js";
 import { TenantService } from "../tenancy/tenant.service.js";
 import { WalletProviderRegistry } from "./wallet-provider.registry.js";
-
 export async function resolveApplePassImagesWithFallback(
   objectStorage: ObjectStorage,
   assets: ReadonlyArray<PreviewAsset | null | undefined>,
@@ -421,6 +420,29 @@ export class WalletService {
       theme: version.visualTheme,
       outputProfile: pass.provider === "APPLE" ? "APPLE_WALLET" : "GOOGLE_WALLET",
     });
+    let qrCenterLogo: Buffer | undefined;
+    const logoVariant =
+      version.visualTheme.logoAsset?.variants.find(
+        (candidate) => candidate.variantCode === "ORIGINAL_SAFE",
+      ) ?? version.visualTheme.logoAsset?.variants[0];
+    if (
+      logoVariant &&
+      new Set(["image/png", "image/jpeg", "image/webp"]).has(logoVariant.mimeType) &&
+      logoVariant.fileSize >= 32 &&
+      logoVariant.fileSize <= 512_000
+    ) {
+      try {
+        const bytes = await this.objectStorage.get(logoVariant.objectKey);
+        if (
+          bytes.length === logoVariant.fileSize &&
+          createHash("sha256").update(bytes).digest("hex") === logoVariant.digest
+        ) {
+          qrCenterLogo = bytes;
+        }
+      } catch {
+        // Center branding is optional; pass generation and the plain QR remain available.
+      }
+    }
     const programInput: WalletProgramInput = {
       organizationId: membership.organizationId,
       organizationName: membership.organization.name,
@@ -466,6 +488,7 @@ export class WalletService {
       publicMembershipId: membership.publicMembershipId,
       displayName: membership.customer.displayName,
       credentialPayload: this.security.payloadForCredential(pass.membershipCredential),
+      ...(qrCenterLogo ? { qrCenterLogo } : {}),
       currentStampCount: progress,
       requiredStampCount: goal,
       rewardReady: membership.progress?.rewardReady ?? false,

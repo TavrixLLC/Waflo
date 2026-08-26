@@ -140,9 +140,9 @@ const passInclude = {
           locations: { select: { locationId: true } },
           visualTheme: {
             include: {
-              logoAsset: { include: { variants: true } },
               filledStampAsset: { include: { variants: true } },
               emptyStampAsset: { include: { variants: true } },
+              logoAsset: { include: { variants: true } },
             },
           },
         },
@@ -359,6 +359,7 @@ function mapPass(
   stampRenderInput: PublishedMembershipStampRenderInput,
   walletArtworkUrl?: string,
   applePassImages?: Readonly<Record<string, Uint8Array>>,
+  qrCenterLogo?: Uint8Array,
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
@@ -396,6 +397,7 @@ function mapPass(
           : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
     }),
     ...(walletArtworkUrl ? { walletArtworkUrl } : {}),
+    ...(qrCenterLogo ? { qrCenterLogo } : {}),
     walletPassInstanceId: pass.id,
     providerIdentity: pass.providerIdentity,
     publicMembershipId: membership.publicMembershipId,
@@ -1366,7 +1368,17 @@ export class WalletWorker {
           pass,
           pass.provider === "GOOGLE" ? "GOOGLE_WALLET" : "APPLE_WALLET",
         );
-        const baseInput = mapPass(pass, this.environment, stampRenderInput);
+        const qrCenterLogo = await this.loadQrCenterLogo(
+          pass.membership.enrollmentProgramVersion.visualTheme?.logoAsset,
+        );
+        const baseInput = mapPass(
+          pass,
+          this.environment,
+          stampRenderInput,
+          undefined,
+          undefined,
+          qrCenterLogo,
+        );
         let walletArtworkUrl: string | undefined;
         if (pass.provider === "GOOGLE") {
           try {
@@ -1387,6 +1399,7 @@ export class WalletWorker {
           stampRenderInput,
           walletArtworkUrl,
           applePassImages,
+          qrCenterLogo,
         );
         if (command.commandType === "ISSUE") {
           if (pass.membershipCredential.status !== "ACTIVE") {
@@ -1911,8 +1924,11 @@ export class WalletWorker {
     const sharedAssetOwnership = googleProgressSharedAssetOwnership(programVersionId);
     const visualDigest = publishedMembershipStampVisualDigest(input.stampRenderInput);
     const credentialDigest = createHash("sha256").update(input.credentialPayload).digest("hex");
+    const qrCenterLogoDigest = input.qrCenterLogo
+      ? createHash("sha256").update(input.qrCenterLogo).digest("hex")
+      : "none";
     const compositionDigest = createHash("sha256")
-      .update(`waflo-wallet-artwork-v4:${visualDigest}:`)
+      .update(`waflo-wallet-artwork-v5:${visualDigest}:`)
       .update(input.organizationName)
       .update("\0")
       .update(input.programName)
@@ -1923,9 +1939,11 @@ export class WalletWorker {
       .update("\0")
       .update(input.locale)
       .update("\0")
+      .update(qrCenterLogoDigest)
+      .update("\0")
       .update(credentialDigest)
       .digest("hex");
-    const assetType = `GOOGLE_HERO_V4_${compositionDigest}`;
+    const assetType = `GOOGLE_HERO_V5_${compositionDigest}`;
     const cached = await this.prisma.publicWalletAsset.findFirst({
       where: { organizationId: pass.organizationId, assetType, revokedAt: null },
     });
@@ -1953,6 +1971,7 @@ export class WalletWorker {
           programName: input.programName,
           memberName: input.displayName,
           credentialPayload: input.credentialPayload,
+          ...(input.qrCenterLogo ? { qrCenterLogo: { bytes: input.qrCenterLogo } } : {}),
         },
         rendered,
       ),
@@ -2367,6 +2386,43 @@ export class WalletWorker {
       if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
       return Buffer.from(await result.Body.transformToByteArray());
     });
+  }
+
+  private async loadQrCenterLogo(
+    asset:
+      | NonNullable<
+          PassRecord["membership"]["enrollmentProgramVersion"]["visualTheme"]
+        >["logoAsset"]
+      | undefined,
+  ): Promise<Buffer | undefined> {
+    if (!asset) return undefined;
+    const variant =
+      asset.variants.find((candidate) => candidate.variantCode === "ORIGINAL_SAFE") ??
+      asset.variants[0];
+    if (
+      !variant ||
+      !new Set(["image/png", "image/jpeg", "image/webp"]).has(variant.mimeType) ||
+      variant.fileSize < 32 ||
+      variant.fileSize > 512_000
+    ) {
+      return undefined;
+    }
+    try {
+      const result = await this.objectStorage.send(
+        new GetObjectCommand({
+          Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+          Key: variant.objectKey,
+        }),
+      );
+      if (!result.Body) return undefined;
+      const bytes = Buffer.from(await result.Body.transformToByteArray());
+      return bytes.length === variant.fileSize &&
+        createHash("sha256").update(bytes).digest("hex") === variant.digest
+        ? bytes
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async objectStorageReady() {

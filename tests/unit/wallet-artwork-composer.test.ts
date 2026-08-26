@@ -323,6 +323,15 @@ describe("Wallet artwork composition", () => {
     }
     expect(APPLE_POSTER_LAYOUT.stampPanelRegion.width).toBe(338);
     expect(GOOGLE_HERO_LAYOUT.stampPanelRegion.width).toBe(968);
+    expect(APPLE_POSTER_LAYOUT.qrRegion?.width).toBeGreaterThan(92);
+    expect(GOOGLE_HERO_LAYOUT.qrRegion?.width).toBeGreaterThan(136);
+    expect(
+      (GOOGLE_HERO_LAYOUT.qrRegion?.top ?? 0) + (GOOGLE_HERO_LAYOUT.qrRegion?.height ?? 0) / 2,
+    ).toBeGreaterThan(648);
+    expect(
+      walletArtworkDimensions.APPLE_POSTER.height -
+        ((APPLE_POSTER_LAYOUT.qrRegion?.top ?? 0) + (APPLE_POSTER_LAYOUT.qrRegion?.height ?? 0)),
+    ).toBeGreaterThanOrEqual(20);
   });
 
   it("enforces balanced panel breathing room and mirrored diagonal corners", () => {
@@ -423,12 +432,103 @@ describe("Wallet artwork composition", () => {
     expect(source).not.toMatch(/Scan at checkout|Scan code ending|Present this code/i);
   }, 30_000);
 
+  it("keeps the premium rounded QR decodable and applies a safe optional center logo", async () => {
+    const template = programTemplateCatalog.find(
+      (candidate) => candidate.code === "COFFEE" && candidate.version === 2,
+    );
+    if (!template) throw new Error("Coffee v2 template is required.");
+    const rendered = renderTemplate(template, { outputProfile: "GOOGLE_WALLET" });
+    const centerLogo = await sharp({
+      create: { width: 96, height: 96, channels: 4, background: "#E4572E" },
+    })
+      .composite([
+        {
+          input: Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><path d="M20 22l16 52 12-30 12 30 16-52" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+          ),
+        },
+      ])
+      .png()
+      .toBuffer();
+    const input = {
+      ...compositionInput(template, rendered),
+      qrCenterLogo: { bytes: centerLogo },
+    };
+    for (const target of ["APPLE_POSTER", "GOOGLE_HERO"] as const) {
+      const output = await composeWalletArtwork(input, target);
+      const qrRegion = output.qrRegion;
+      if (!qrRegion) throw new Error(`${target} QR region is required.`);
+      const qr = await sharp(output.bytes).extract(qrRegion).png().toBuffer();
+      await expect(decodeQrImage(qr, "image/png")).resolves.toBe(input.credentialPayload);
+      expect(output.qrCenterLogoApplied, target).toBe(true);
+    }
+  }, 30_000);
+
+  it("keeps legacy Apple reward copy out of both strip artwork variants", async () => {
+    const template = programTemplateCatalog.find(
+      (candidate) => candidate.code === "SALON" && candidate.version === 2,
+    );
+    if (!template) throw new Error("Salon v2 template is required.");
+    const rendered = renderTemplate(template, { outputProfile: "APPLE_WALLET" });
+    const input = compositionInput(template, rendered);
+    const changed = { ...input, rewardLabel: "A completely different reward detail" };
+    const [legacy, changedLegacy, generic, changedGeneric] = await Promise.all([
+      composeAppleLegacyStripArtwork(input),
+      composeAppleLegacyStripArtwork(changed),
+      composeAppleGenericStripArtwork(input),
+      composeAppleGenericStripArtwork(changed),
+    ]);
+    expect(legacy.times1.contentDigest).toBe(changedLegacy.times1.contentDigest);
+    expect(generic.times1.contentDigest).toBe(changedGeneric.times1.contentDigest);
+  }, 30_000);
+
+  it("rasterizes English and shaped Arabic text as the final layer on pale and dark themes", async () => {
+    const template = programTemplateCatalog.find(
+      (candidate) => candidate.code === "COFFEE" && candidate.version === 2,
+    );
+    if (!template) throw new Error("Coffee v2 template is required.");
+    for (const [locale, theme] of [
+      ["en", { backgroundColor: "#FFF8E7", foregroundColor: "#241916" }],
+      ["ar", { backgroundColor: "#172233", foregroundColor: "#FFFFFF" }],
+    ] as const) {
+      const rendered = renderTemplate(template, { locale, outputProfile: "GOOGLE_WALLET" });
+      const base = compositionInput(template, rendered, { locale });
+      const first = await composeWalletArtwork(
+        { ...base, theme: { ...base.theme, ...theme } },
+        "GOOGLE_HERO",
+      );
+      const second = await composeWalletArtwork(
+        {
+          ...base,
+          organizationName: locale === "ar" ? "متجر دجلة" : "Tigris Market",
+          programName: locale === "ar" ? "مكافآت الزوار" : "Visitor Rewards",
+          theme: { ...base.theme, ...theme },
+        },
+        "GOOGLE_HERO",
+      );
+      const region = first.identityRegion;
+      if (!region) throw new Error("Google identity region is required.");
+      const [firstCrop, secondCrop] = await Promise.all([
+        sharp(first.bytes).extract(region).png().toBuffer(),
+        sharp(second.bytes).extract(region).png().toBuffer(),
+      ]);
+      expect(createHash("sha256").update(firstCrop).digest("hex"), locale).not.toBe(
+        createHash("sha256").update(secondCrop).digest("hex"),
+      );
+    }
+    const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");
+    expect(source.indexOf("canvasOverlaySvg")).toBeLessThan(
+      source.indexOf("const overlay = canvasOverlaySvg"),
+    );
+    expect(readFileSync("deploy/vps/Dockerfile", "utf8")).toContain("fonts-noto-core");
+  }, 30_000);
+
   it("uses shaped RTL text semantics and mirrors Arabic reward geometry", () => {
     const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");
     expect(walletArtworkArabicTypeface).toMatch(/Noto Sans Arabic/);
     expect(source).toContain('direction="');
     expect(source).toContain('unicode-bidi="plaintext"');
-    expect(source).toContain('lang="');
+    expect(source).toContain('xml:lang="');
     expect(source).toContain("? region.left + region.width - horizontalPadding - iconSize");
     expect(source).toContain('const textAnchor = "start"');
     expect(source).toContain('const label = input.locale === "ar" ? "الأختام" : "STAMPS"');

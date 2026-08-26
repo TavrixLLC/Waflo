@@ -72,6 +72,10 @@ STOPSIGNAL SIGTERM
 CMD ["node", "dist/main.js"]
 
 FROM runtime AS wallet-worker
+USER root
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends fontconfig fonts-noto-core && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=wallet-worker-package --chown=waflo:waflo /output/wallet-worker /app
 WORKDIR /app
 USER waflo

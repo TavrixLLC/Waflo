@@ -1,20 +1,20 @@
 import {
-  renderPublishedMembershipStampSvg,
   type PublishedMembershipStampRenderInput,
+  renderPublishedMembershipStampSvg,
   type StampOutputProfile,
 } from "@waflo/stamp-engine";
 import type { ObjectStorage } from "./object-storage.js";
 import {
+  type PreviewAsset,
   previewAssetCacheIdentity,
   resolvePreviewAssetContent,
-  type PreviewAsset,
 } from "./preview-assets.js";
 
 export const publishedVisualThemeInclude = {
   include: {
-    logoAsset: { include: { variants: true } },
     filledStampAsset: { include: { variants: true } },
     emptyStampAsset: { include: { variants: true } },
+    logoAsset: { include: { variants: true } },
   },
 } as const;
 

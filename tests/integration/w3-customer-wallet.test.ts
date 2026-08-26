@@ -10,8 +10,8 @@ import { googleLoyaltyClassId } from "../../packages/wallet-google/src/index.js"
 import {
   createPublishedProgramVersion,
   createW3CustomerWalletFixture,
-  w3EnrollmentBase,
   type W3CustomerWalletFixture,
+  w3EnrollmentBase,
 } from "../helpers/w3-customer-wallet-fixture.js";
 
 let app: NestFastifyApplication;
@@ -136,7 +136,7 @@ describe.sequential("W3 Customer and Wallet integration", () => {
     const googleAssets = await prisma.client.publicWalletAsset.findMany({
       where: {
         programVersionId: fixture.versionId,
-        assetType: { startsWith: "GOOGLE_HERO_V4_" },
+        assetType: { startsWith: "GOOGLE_HERO_V5_" },
       },
     });
     expect(googleAssets).toHaveLength(1);
@@ -179,7 +179,7 @@ describe.sequential("W3 Customer and Wallet integration", () => {
     const before = await prisma.client.publicWalletAsset.count({
       where: {
         organizationId: fixture.organizationId,
-        assetType: { startsWith: "GOOGLE_HERO_V4_" },
+        assetType: { startsWith: "GOOGLE_HERO_V5_" },
       },
     });
     const generated = await Promise.all(
@@ -200,7 +200,7 @@ describe.sequential("W3 Customer and Wallet integration", () => {
       await prisma.client.publicWalletAsset.count({
         where: {
           organizationId: fixture.organizationId,
-          assetType: { startsWith: "GOOGLE_HERO_V4_" },
+          assetType: { startsWith: "GOOGLE_HERO_V5_" },
         },
       }),
     ).toBe(before + 1);
