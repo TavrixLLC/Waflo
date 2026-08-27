@@ -8,7 +8,15 @@ async function bootstrap(): Promise<void> {
   await app.listen(environment.values.API_PORT, "0.0.0.0");
 }
 
-void bootstrap().catch(() => {
-  process.stderr.write("Waflo API failed to start.\n");
+function safeStartupError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/(?:postgres(?:ql)?|redis|https?):\/\/[^\s"']+/giu, (url) => {
+    const scheme = url.slice(0, url.indexOf(":"));
+    return `${scheme}://[redacted]`;
+  });
+}
+
+void bootstrap().catch((error: unknown) => {
+  process.stderr.write(`Waflo API failed to start: ${safeStartupError(error)}\n`);
   process.exitCode = 1;
 });

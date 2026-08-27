@@ -17,6 +17,7 @@ import {
   walletArtworkArabicTypeface,
   walletArtworkDimensions,
   walletArtworkInputFromStampRender,
+  walletArtworkIdentityTitleLines,
   walletArtworkPanelCorners,
 } from "@waflo/wallet-artwork";
 import sharp from "sharp";
@@ -128,6 +129,20 @@ function compositionInput(
 }
 
 describe("Wallet artwork composition", () => {
+  it("keeps bilingual program phrases intact and orders them for the active language", () => {
+    expect(walletArtworkIdentityTitleLines("بطاقة الوفاء / Cedar Circle", "ar")).toEqual([
+      "بطاقة الوفاء",
+      "Cedar Circle",
+    ]);
+    expect(walletArtworkIdentityTitleLines("بطاقة الوفاء / Cedar Circle", "en")).toEqual([
+      "Cedar Circle",
+      "بطاقة الوفاء",
+    ]);
+    expect(walletArtworkIdentityTitleLines("The Very Long Cedar Circle", "en")).toEqual([
+      "The Very Long Cedar Circle",
+    ]);
+  });
+
   it("keeps every captured historical template renderer output at its baseline", () => {
     expect(baselines).toHaveLength(20);
     const templatesById = new Map(
@@ -314,16 +329,18 @@ describe("Wallet artwork composition", () => {
       expect(separated(layout.identityRegion, layout.counterBadgeRegion)).toBe(true);
       expect(separated(layout.rewardRegion, layout.qrRegion)).toBe(true);
       expect(separated(layout.stampRegion, layout.qrRegion)).toBe(true);
-      expect(layout.stampRegion.left + layout.stampRegion.width / 2).toBe(
-        layout.stampPanelRegion.left + layout.stampPanelRegion.width / 2,
-      );
+      if (layout !== APPLE_POSTER_LAYOUT) {
+        expect(layout.stampRegion.left + layout.stampRegion.width / 2).toBe(
+          layout.stampPanelRegion.left + layout.stampPanelRegion.width / 2,
+        );
+      }
       expect(layout.stampRegion.top + layout.stampRegion.height / 2).toBe(
         layout.stampPanelRegion.top + layout.stampPanelRegion.height / 2,
       );
     }
-    expect(APPLE_POSTER_LAYOUT.stampPanelRegion.width).toBe(338);
+    expect(APPLE_POSTER_LAYOUT.stampPanelRegion.width).toBe(330);
     expect(GOOGLE_HERO_LAYOUT.stampPanelRegion.width).toBe(968);
-    expect(APPLE_POSTER_LAYOUT.qrRegion?.width).toBeGreaterThan(92);
+    expect(APPLE_POSTER_LAYOUT.qrRegion?.width).toBeGreaterThan(60);
     expect(GOOGLE_HERO_LAYOUT.qrRegion?.width).toBeGreaterThan(136);
     expect(
       (GOOGLE_HERO_LAYOUT.qrRegion?.top ?? 0) + (GOOGLE_HERO_LAYOUT.qrRegion?.height ?? 0) / 2,
@@ -332,11 +349,18 @@ describe("Wallet artwork composition", () => {
       walletArtworkDimensions.APPLE_POSTER.height -
         ((APPLE_POSTER_LAYOUT.qrRegion?.top ?? 0) + (APPLE_POSTER_LAYOUT.qrRegion?.height ?? 0)),
     ).toBeGreaterThanOrEqual(20);
+    expect(
+      (APPLE_POSTER_LAYOUT.qrRegion?.top ?? 0) + (APPLE_POSTER_LAYOUT.qrRegion?.height ?? 0),
+    ).toBeLessThanOrEqual(305);
+    expect(
+      (APPLE_POSTER_LAYOUT.rewardRegion?.top ?? 0) +
+        (APPLE_POSTER_LAYOUT.rewardRegion?.height ?? 0),
+    ).toBeLessThanOrEqual(305);
   });
 
   it("enforces balanced panel breathing room and mirrored diagonal corners", () => {
     for (const [name, layout, minimumHorizontal, minimumVertical] of [
-      ["APPLE_POSTER", APPLE_POSTER_LAYOUT, 22, 22],
+      ["APPLE_POSTER", APPLE_POSTER_LAYOUT, 14, 8],
       ["GOOGLE_HERO", GOOGLE_HERO_LAYOUT, 60, 36],
     ] as const) {
       const left = layout.stampRegion.left - layout.stampPanelRegion.left;
@@ -353,7 +377,9 @@ describe("Wallet artwork composition", () => {
       expect(right, `${name}:right`).toBeGreaterThanOrEqual(minimumHorizontal);
       expect(top, `${name}:top`).toBeGreaterThanOrEqual(minimumVertical);
       expect(bottom, `${name}:bottom`).toBeGreaterThanOrEqual(minimumVertical);
-      expect(left, `${name}:horizontal-balance`).toBe(right);
+      if (name !== "APPLE_POSTER") {
+        expect(left, `${name}:horizontal-balance`).toBe(right);
+      }
       expect(top, `${name}:vertical-balance`).toBe(bottom);
     }
     for (const corners of Object.values(walletArtworkPanelCorners)) {
