@@ -10,8 +10,6 @@ describe("Stripe invoice retrieval", () => {
     );
 
     expect(source).toContain('"payments.data.payment.payment_intent"');
-    expect(source).not.toContain(
-      '"payments.data.payment.payment_intent.payment_method"',
-    );
+    expect(source).not.toContain('"payments.data.payment.payment_intent.payment_method"');
   });
 });
