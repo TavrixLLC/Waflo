@@ -20,6 +20,7 @@
     "@waflo/loyalty-ledger": "workspace:*",
     "@waflo/loyalty-policy": "workspace:*",
     "@waflo/operational-analytics": "workspace:*",
+    "dotenv": "17.4.2",
     "nodemailer": "9.0.3",
     "stripe": "22.3.2"
   },

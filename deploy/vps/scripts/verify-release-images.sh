@@ -26,7 +26,7 @@ image_digest() {
   printf '%s\n' "${digest}"
 }
 
-for package in migrate api merchant customer marketing operational-worker wallet-worker; do
+for package in migrate api merchant customer admin marketing operational-worker wallet-worker; do
   reference="${registry}/waflo-${package}:${release_sha}-${environment}"
   if ! docker buildx imagetools inspect "${reference}" >/dev/null 2>&1; then
     printf 'Missing immutable release image: %s\n' "${reference}" >&2

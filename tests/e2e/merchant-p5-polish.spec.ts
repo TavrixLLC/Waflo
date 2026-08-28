@@ -66,7 +66,9 @@ async function chooseFirstTemplate(page: Page, locale: "en" | "ar" = "en"): Prom
   await expect(page.locator(".builder-shell")).toBeVisible();
   const desktopPreview = page.locator(".builder-preview-desktop");
   if (await desktopPreview.isVisible())
-    await expect(desktopPreview.locator(".builder-preview-canvas img")).toBeVisible();
+    await expect(
+      desktopPreview.locator(".builder-preview-canvas img, .builder-preview-empty"),
+    ).toBeVisible();
   else await expect(page.locator(".builder-mobile-preview-action")).toBeVisible();
 }
 

@@ -205,13 +205,12 @@ secret as part of the hostname change.
 - exact production webhook URL: `https://api.waflo.app/v1/webhooks/stripe`
 
 Checkout is Stripe-hosted subscription Checkout. The API creates/associates one Stripe Customer per
-organization under invariant locks and uses provider and local idempotency keys. It maps the current
-Waflo `STARTER`, `GROWTH`, and `SCALE` plan plus `MONTHLY`, `QUARTERLY`, or `YEARLY` cadence to the
-corresponding configured recurring Price ID. Deployed environments require the complete nine-Price
-catalog because onboarding offers every plan/cadence combination. Partial catalogs fail environment
-validation, and release readiness verifies each live Stripe Price against Waflo's exact amount,
-currency, recurrence interval, interval count, and active state. Product IDs are not read. The
-success/cancel URLs are derived, not configurable:
+organization under invariant locks and uses provider and local idempotency keys. Waflo's immutable
+Pricing Catalog resolves the current `STARTER`, `GROWTH`, or `SCALE` price and `MONTHLY`,
+`QUARTERLY`, or `YEARLY` cadence from GLOBAL or an explicit regional override. Admin publication
+creates/verifies the corresponding Stripe Price and stores its internal binding. Release readiness
+verifies each binding against Waflo's exact amount, currency, recurrence interval, interval count,
+and active state. The success/cancel URLs are derived, not configurable:
 
 - staging success: `https://app-staging.waflo.app/en/dashboard/billing?checkout=returned`
 - staging cancel: `https://app-staging.waflo.app/en/dashboard/billing?checkout=canceled`
@@ -228,23 +227,14 @@ Customer Portal is available only when the existing organization has a Stripe Cu
 | --- | --- | --- |
 | `STRIPE_SECRET_KEY` | SECRET_VALUE | Staging must be `sk_test_...`; production must be `sk_live_...`. |
 | `STRIPE_WEBHOOK_SECRET` | SECRET_VALUE | Endpoint-specific `whsec_...`, separate for staging and production. |
-| `STRIPE_STARTER_MONTHLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring monthly Starter Price (USD 29.00 every month). |
-| `STRIPE_GROWTH_MONTHLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring monthly Growth Price (USD 69.00 every month). |
-| `STRIPE_SCALE_MONTHLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring monthly Scale Price (USD 129.00 every month). |
-| `STRIPE_STARTER_QUARTERLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring quarterly Starter Price (USD 79.75 every 3 months). |
-| `STRIPE_GROWTH_QUARTERLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring quarterly Growth Price (USD 189.75 every 3 months). |
-| `STRIPE_SCALE_QUARTERLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring quarterly Scale Price (USD 354.75 every 3 months). |
-| `STRIPE_STARTER_YEARLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring yearly Starter Price (USD 290.00 every year). |
-| `STRIPE_GROWTH_YEARLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring yearly Growth Price (USD 690.00 every year). |
-| `STRIPE_SCALE_YEARLY_PRICE_ID` | NON_SECRET_CONFIG | Required recurring yearly Scale Price (USD 1,290.00 every year). |
 | `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID` | NON_SECRET_CONFIG | Optional environment-specific `bpc_...`; required only to expose current Portal behavior. |
 | `STRIPE_RECONCILIATION_INTERVAL_MINUTES` | NON_SECRET_CONFIG | Integer 5–1440, template `60`. |
 | `STRIPE_RECONCILIATION_BATCH_SIZE` | NON_SECRET_CONFIG | Integer 1–500, template `50`. |
 | `STRIPE_PUBLISHABLE_KEY` | NON_SECRET_CONFIG | Required environment-specific browser key. Staging must use `pk_test_...`; production must use `pk_live_...`. |
 
 There is no separate `STRIPE_MODE`: deployment environment and key prefixes enforce TEST/LIVE
-isolation. The complete deployed contract—secret key, publishable key, webhook secret, and all nine
-Price IDs—must be present together or entirely absent. TEST and LIVE Price IDs, Customers,
+isolation. The complete deployed credential contract—secret key, publishable key, and webhook
+secret—must be present together or entirely absent. TEST and LIVE catalog bindings, Customers,
 subscriptions, endpoint secrets, and Portal configuration remain completely separate.
 
 The repository uses `stripe@22.3.2` without an override; that SDK sends its bundled default API
@@ -266,16 +256,18 @@ recover missing or delayed webhooks with multi-instance-safe leases.
 
 ### Stripe TEST-mode staging procedure
 
-1. In Stripe TEST mode create all nine recurring Prices (three plans across monthly, every-three-
-   months, and yearly cadences) and a TEST Portal configuration if Portal is used. Do not use LIVE
+1. In Stripe TEST mode configure Waflo's GLOBAL catalog and any deliberate regional overrides, then
+   publish the required plan/cadence PricingVersions through Waflo Admin. Waflo creates or verifies
+   the exact immutable Stripe Prices and stores their bindings; operators do not configure static
+   per-plan Stripe Price IDs. Create a TEST Portal configuration if Portal is used. Do not use LIVE
    objects.
 2. Create a TEST webhook endpoint at exactly
    `https://api-staging.waflo.app/v1/webhooks/stripe`, API version `2026-06-24.dahlia`, subscribing
    to the handled invoice, customer, and subscription events above. Install its `whsec_...`
    endpoint secret.
-3. Install `sk_test_...`, `pk_test_...`, the TEST webhook secret, all nine TEST Price IDs, optional
-   TEST `bpc_...`, and reconciliation settings; validate readiness and deploy staging outside this
-   task.
+3. Install `sk_test_...`, `pk_test_...`, the TEST webhook secret, optional TEST `bpc_...`, and
+   reconciliation settings; validate readiness and deploy staging outside this task. Verify the
+   Waflo catalog's stored TEST bindings rather than supplying Price IDs in environment configuration.
 4. In Merchant Web billing, choose an existing Waflo plan and initiate checkout. Complete Stripe
    hosted Checkout with a Stripe TEST card and return to the derived Waflo success URL.
 5. Confirm the webhook receives a valid raw-body signature, retrieves the current subscription,
@@ -295,9 +287,9 @@ relying on the delayed webhook. Resend the delayed event and confirm state remai
    confirm no TEST customer or object exists in LIVE mode.
 
 For LIVE mode, repeat object and endpoint creation in Stripe LIVE mode using the production URL,
-`sk_live_...`, a new production `whsec_...`, LIVE Price IDs, and optional LIVE Portal config. Validate
-production configuration, but do not enable or deploy it until staging provider verification and
-release approval are complete.
+`sk_live_...`, a new production `whsec_...`, and optional LIVE Portal config. Publish and verify
+the production Waflo catalog bindings separately from TEST. Validate production configuration, but
+do not enable or deploy it until staging provider verification and release approval are complete.
 
 ## Operator-only readiness
 

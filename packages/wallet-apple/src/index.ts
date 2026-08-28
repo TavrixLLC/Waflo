@@ -24,6 +24,7 @@ import forge from "node-forge";
 import sharp from "sharp";
 import {
   mapAppleGenericPass,
+  mapLegacyApplePresentation,
   type WalletPassGenerationInput,
   type WalletPassGenerator,
   type WalletPassGeneratorHealth,
@@ -35,6 +36,7 @@ export {
   type ApplePassBuilderGeneratorOptions,
   adoptedApplePassBuilderRevision,
   mapAppleGenericPass,
+  mapLegacyApplePresentation,
   parseAppleSigningKeyMap,
   type WalletPassGenerationInput,
   type WalletPassGenerator,
@@ -139,43 +141,7 @@ export function mapAppleStoreCard(
         messageEncoding: "iso-8859-1",
       },
     ],
-    storeCard: {
-      // Keep identity in the provider-owned logo/logoText row. The strip remains graphics-only.
-      headerFields: [],
-      // Keep reward copy on the details side. The strip carries the image-first presentation.
-      primaryFields: [],
-      secondaryFields: [
-        {
-          key: "program",
-          value: presentation.programName.slice(0, 80),
-        },
-      ],
-      auxiliaryFields: [],
-      backFields: [
-        {
-          key: "status",
-          label: presentation.labels.status,
-          value: presentation.status,
-          changeMessage: "%@",
-        },
-        {
-          key: "reward",
-          label: presentation.labels.reward,
-          value: presentation.rewardSummary.slice(0, 500),
-        },
-        {
-          key: "security",
-          label: presentation.labels.security,
-          value:
-            "This QR code is an opaque, revocable Waflo membership credential. Do not share screenshots.",
-        },
-        {
-          key: "operator",
-          label: presentation.labels.operator,
-          value: "Waflo is owned and operated by Tavrix LLC.",
-        },
-      ],
-    },
+    storeCard: mapLegacyApplePresentation(input) as AppleStoreCardPass["storeCard"],
   };
 }
 
@@ -319,21 +285,18 @@ export class Pkcs7ApplePassSigner implements ApplePassSigner {
 }
 
 async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
-  const image = (width: number, height: number, logo = false) => {
-    const markSize = Math.min(height, logo ? width / 3 : width);
-    const text = logo
-      ? `<text x="${markSize + Math.max(5, width * 0.04)}" y="${height * 0.7}" font-family="Arial,sans-serif" font-size="${height * 0.48}" font-weight="700" fill="#241916">WAFLO</text>`
-      : "";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${markSize}" height="${height}" rx="${Math.max(4, height * 0.18)}" fill="#E4572E"/><path d="M${markSize * 0.2} ${height * 0.28}l${markSize * 0.16} ${height * 0.46} ${markSize * 0.14}-${height * 0.27} ${markSize * 0.14} ${height * 0.27} ${markSize * 0.16}-${height * 0.46}" fill="none" stroke="#fff" stroke-width="${Math.max(2, markSize * 0.09)}" stroke-linecap="round" stroke-linejoin="round"/>${text}</svg>`;
+  const image = (width: number, height: number) => {
+    const markSize = Math.min(height, width);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${markSize}" height="${height}" rx="${Math.max(4, height * 0.18)}" fill="#E4572E"/><path d="M${markSize * 0.2} ${height * 0.28}l${markSize * 0.16} ${height * 0.46} ${markSize * 0.14}-${height * 0.27} ${markSize * 0.14} ${height * 0.27} ${markSize * 0.16}-${height * 0.46}" fill="none" stroke="#fff" stroke-width="${Math.max(2, markSize * 0.09)}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   };
   const [icon, icon2x, icon3x, logo, logo2x, logo3x] = await Promise.all([
     image(38, 38),
     image(76, 76),
     image(114, 114),
-    image(160, 50, true),
-    image(320, 100, true),
-    image(480, 150, true),
+    image(38, 38),
+    image(76, 76),
+    image(114, 114),
   ]);
   return {
     "icon.png": icon,
@@ -375,6 +338,46 @@ async function progressStripImages(
   };
 }
 
+/**
+ * Legacy Store Cards have one compact logo slot beside logoText. Normalize
+ * only pass-package derivatives, never the merchant source asset or Poster
+ * artwork, so a wide wordmark cannot consume the identity row.
+ */
+async function normalizeLegacyLogoImages(
+  images: Readonly<Record<string, Uint8Array>> | undefined,
+): Promise<Readonly<Record<string, Uint8Array>>> {
+  if (!images) return {};
+  const output: Record<string, Uint8Array> = { ...images };
+  await Promise.all(
+    (
+      [
+        ["logo.png", 38],
+        ["logo@2x.png", 76],
+        ["logo@3x.png", 114],
+      ] as const
+    ).map(async ([name, size]) => {
+      const source = images[name];
+      if (!source) return;
+      try {
+        output[name] = await sharp(source)
+          .trim({ background: { r: 255, g: 255, b: 255, alpha: 0 } })
+          .resize(size, size, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+          })
+          .png()
+          .toBuffer();
+      } catch {
+        // Source-image validity is checked earlier in the branding flow. Keep
+        // a supplied legacy/test asset when this presentation-only derivative
+        // cannot be raster-normalized.
+        output[name] = source;
+      }
+    }),
+  );
+  return output;
+}
+
 function appleStringsEscape(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
 }
@@ -387,7 +390,11 @@ function localizedStrings(
     locale === "ar"
       ? '"STAMPS" = "الأختام";\n"MEMBER" = "العضو";\n"STATUS" = "الحالة";\n"Transferred" = "تم النقل";\n"No longer valid" = "لم تعد صالحة";\n'
       : '"STAMPS" = "STAMPS";\n"MEMBER" = "MEMBER";\n"STATUS" = "STATUS";\n"Transferred" = "Transferred";\n"No longer valid" = "No longer valid";\n';
-  return `${structural}${replacements
+  const legacyLabels =
+    locale === "ar"
+      ? '"PROGRAM" = "\u0627\u0644\u0628\u0631\u0646\u0627\u0645\u062c";\n"REWARD" = "\u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629";\n"SECURITY" = "\u0627\u0644\u0623\u0645\u0627\u0646";\n'
+      : '"PROGRAM" = "PROGRAM";\n"REWARD" = "REWARD";\n"SECURITY" = "SECURITY";\n';
+  return `${structural}${legacyLabels}${replacements
     .map(({ key, value }) => `"${appleStringsEscape(key)}" = "${appleStringsEscape(value)}";\n`)
     .join("")}`;
 }
@@ -503,7 +510,7 @@ export class LegacyApplePassGenerator implements WalletPassGenerator {
       signer: this.signer,
       images: {
         ...(await progressStripImages(input.membership)),
-        ...(input.membership.applePassImages ?? {}),
+        ...(await normalizeLegacyLogoImages(input.membership.applePassImages)),
       },
       ...(input.membership.defaultLocale ? { defaultLocale: input.membership.defaultLocale } : {}),
       ...(input.membership.localizedContent

@@ -6,8 +6,10 @@ import {
   type NestInterceptor,
 } from "@nestjs/common";
 import type { ApiSuccess } from "@waflo/contracts";
+import type { AdminRole } from "@waflo/database";
 import type { FastifyRequest } from "fastify";
 import { map, type Observable } from "rxjs";
+import type { AdminPermission } from "../admin/admin-rbac.js";
 
 export interface AuthenticatedUser {
   id: string;
@@ -15,6 +17,16 @@ export interface AuthenticatedUser {
   email: string;
   preferredLocale: "EN" | "AR";
   emailVerifiedAt: Date | null;
+}
+
+export interface AuthenticatedAdmin {
+  id: string;
+  publicId: string;
+  displayName: string;
+  email: string;
+  preferredLocale: "EN" | "AR";
+  role: AdminRole;
+  permissions: readonly AdminPermission[];
 }
 
 export interface StaffDeviceRequestContext {
@@ -38,6 +50,9 @@ export interface WafloRequest extends FastifyRequest {
   currentUser?: AuthenticatedUser;
   currentSessionId?: string;
   currentSessionToken?: string;
+  currentAdmin?: AuthenticatedAdmin;
+  currentAdminSessionId?: string;
+  currentAdminSessionToken?: string;
   staffDeviceContext?: StaffDeviceRequestContext;
 }
 

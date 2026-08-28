@@ -30,6 +30,10 @@ export const planCodeSchema = z.enum(planCodes);
 export const billingCadences = ["monthly", "quarterly", "yearly"] as const;
 export type BillingCadence = (typeof billingCadences)[number];
 export const billingCadenceSchema = z.enum(billingCadences);
+export const subscriptionChangePreviewSchema = z
+  .object({ targetPlan: planCodeSchema, targetCadence: billingCadenceSchema })
+  .strict();
+export const subscriptionChangeConfirmSchema = z.object({}).strict();
 
 export const memberRoles = ["OWNER", "MANAGER", "STAFF"] as const;
 export type MemberRole = (typeof memberRoles)[number];

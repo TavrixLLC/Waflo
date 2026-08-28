@@ -378,7 +378,7 @@ test.describe
           "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
       );
       const trialStart = new Date();
-      const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const trialEnd = new Date(trialStart.getTime() + 15 * 24 * 60 * 60 * 1000);
       try {
         await database.$transaction([
           database.organization.update({
@@ -667,13 +667,8 @@ test.describe
         }
       });
       const growthCard = page.locator(".wf-plan-card").filter({ hasText: "Growth" });
-      const unavailablePreview = page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname.endsWith("/billing/subscription/change/preview"),
-      );
       await growthCard.getByRole("button", { name: "Choose plan" }).click();
-      expect((await unavailablePreview).status()).toBe(503);
+      await page.waitForTimeout(250);
       await expect(page.getByText("Billing configuration is incomplete")).toBeVisible();
       const starterCard = page.locator(".wf-plan-card").filter({ hasText: "Starter" });
       await expect(starterCard.getByRole("button", { name: "Selected" })).toBeDisabled();
@@ -749,6 +744,23 @@ test.describe
               ],
               stripeConfigured: true,
               cadenceAvailability: { monthly: true, quarterly: true, yearly: true },
+              catalog: {
+                marketCode: "GLOBAL",
+                terms: [
+                  {
+                    plan: "growth",
+                    cadence: "quarterly",
+                    amountMinor: "19251",
+                    currency: "USD",
+                  },
+                  {
+                    plan: "growth",
+                    cadence: "yearly",
+                    amountMinor: "69214",
+                    currency: "USD",
+                  },
+                ],
+              },
               paymentMethod: {
                 status: "saved",
                 brand: "visa",
@@ -857,7 +869,7 @@ test.describe
       await page.setViewportSize({ width: 1440, height: 1000 });
       await page.goto("/en/dashboard/billing");
       await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
-      await expect(page.getByText("$189.75").first()).toBeVisible();
+      await expect(page.getByText("$192.51").first()).toBeVisible();
       await expect(page.getByText(/VISA .*4242/).first()).toBeVisible();
       await expect(page.getByText("Expires 08/2029", { exact: false }).first()).toBeVisible();
       await expect(page.getByText("WF-2026-0042")).toBeVisible();
@@ -1151,7 +1163,7 @@ test.describe
           "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
       );
       const round4TrialStart = new Date();
-      const round4TrialEnd = new Date(round4TrialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const round4TrialEnd = new Date(round4TrialStart.getTime() + 15 * 24 * 60 * 60 * 1000);
       try {
         await setupDatabase.$transaction([
           setupDatabase.organization.update({

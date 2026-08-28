@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Req,
+} from "@nestjs/common";
 import {
   billingIdentitySchema,
   billingSubscriptionCancellationSchema,
@@ -8,6 +18,8 @@ import {
   refundRequestSchema,
   refundReviewSchema,
   selectedPlanSchema,
+  subscriptionChangeConfirmSchema,
+  subscriptionChangePreviewSchema,
 } from "@waflo/contracts";
 import { CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
@@ -18,6 +30,7 @@ import {
   parseUuid,
 } from "../common/validation.js";
 import { BillingService } from "./billing.service.js";
+import { AppError } from "../common/app-error.js";
 
 @Controller("v1/organizations/:organizationId/billing")
 export class BillingController {
@@ -45,35 +58,75 @@ export class BillingController {
     );
   }
 
+  // Persisted-preview flow for an existing subscription. The request carries
+  // intent only; commercial authority remains the catalog and durable preview.
+  @Post("subscription-change/preview")
+  @RateLimit(10, 300)
+  createSubscriptionChangePreview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    const input = parseInput(subscriptionChangePreviewSchema, body);
+    return this.billing.createSubscriptionChangePreview(
+      user.id,
+      parseUuid(organizationId),
+      input.targetPlan,
+      input.targetCadence,
+      request,
+    );
+  }
+
+  @Post("subscription-change/:previewId/confirm")
+  @RateLimit(10, 300)
+  confirmSubscriptionChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("previewId") previewId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    parseInput(subscriptionChangeConfirmSchema, body);
+    return this.billing.confirmSubscriptionChange(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(previewId),
+      request,
+    );
+  }
+
   @Post("subscription/change/preview")
   @RateLimit(10, 300)
   previewSubscriptionChange(
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
     @Body() body: unknown,
+    @Req() request: WafloRequest,
   ) {
-    return this.billing.previewSubscriptionChange(
+    const input = parseInput(billingSubscriptionChangeSchema, body);
+    return this.billing.createSubscriptionChangePreview(
       user.id,
       parseUuid(organizationId),
-      parseInput(billingSubscriptionChangeSchema, body),
+      input.plan,
+      input.cadence,
+      request,
     );
   }
 
   @Post("subscription/change")
   @RateLimit(5, 300)
   changeSubscription(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
-    @Body() body: unknown,
-    @Req() request: WafloRequest,
+    @CurrentUser() _user: AuthenticatedUser,
+    @Param("organizationId") _organizationId: string,
+    @Headers("x-idempotency-key") _idempotencyKey: string | undefined,
+    @Body() _body: unknown,
+    @Req() _request: WafloRequest,
   ) {
-    return this.billing.changeSubscription(
-      user.id,
-      parseUuid(organizationId),
-      parseInput(billingSubscriptionChangeSchema, body),
-      parseCheckoutIdempotencyKey(idempotencyKey),
-      request,
+    throw new AppError(
+      "SUBSCRIPTION_CHANGE_PREVIEW_REQUIRED",
+      "Confirm a persisted subscription-change preview instead.",
+      HttpStatus.CONFLICT,
     );
   }
 

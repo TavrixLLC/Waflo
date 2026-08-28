@@ -150,7 +150,7 @@ const en: MarketingCopy = {
     lede: "Waflo gives your customers a loyalty card that lives in their phone, while you run the program, locations, and team from one calm place.",
     primary: "Start free",
     secondary: "See how it works",
-    note: "7-day trial. Payment method required; nothing charged today.",
+    note: "15-day trial. Payment method required; nothing charged today.",
     stages: ["Visit", "Collect", "Reward"],
   },
   pass: {
@@ -305,7 +305,7 @@ const en: MarketingCopy = {
   cta: {
     eyebrow: "Bring the next visit closer",
     title: "Give them a reason to come back.",
-    lede: "Set up your card, choose your reward, and start a 7-day trial with nothing charged today.",
+    lede: "Set up your card, choose your reward, and start a 15-day trial with nothing charged today.",
     primary: "Start free",
     secondary: "Talk to us",
   },
@@ -356,7 +356,7 @@ const ar: MarketingCopy = {
     lede: "بطاقة ولاء تعيش في هاتف عميلك، ومساحة واحدة هادئة تدير منها البرنامج والفروع والفريق.",
     primary: "ابدأ مجانًا",
     secondary: "شاهد كيف يعمل",
-    note: "7 أيام تجريبية. البطاقة مطلوبة، ولا خصم اليوم.",
+    note: "15 يوماً تجريبياً. البطاقة مطلوبة، ولا خصم اليوم.",
     stages: ["يزور", "يجمع", "يستحق"],
   },
   pass: {
@@ -475,7 +475,7 @@ const ar: MarketingCopy = {
   cta: {
     eyebrow: "قرّب الزيارة القادمة",
     title: "امنحهم سببًا آخر للعودة.",
-    lede: "أنشئ بطاقتك واختر مكافأتك وابدأ تجربة لمدة 7 أيام من دون خصم اليوم.",
+    lede: "أنشئ بطاقتك واختر مكافأتك وابدأ تجربة لمدة 15 يوماً من دون خصم اليوم.",
     primary: "ابدأ مجانًا",
     secondary: "تحدث معنا",
   },

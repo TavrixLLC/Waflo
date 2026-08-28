@@ -22,6 +22,7 @@ import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import {
   CUSTOMER_CSRF,
+  IS_ADMIN_ROUTE,
   IS_PUBLIC,
   RATE_LIMIT,
   SKIP_CSRF,
@@ -45,6 +46,11 @@ export class SessionGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const adminRoute = this.reflector.getAllAndOverride<boolean>(IS_ADMIN_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (adminRoute) return true;
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
       context.getHandler(),
       context.getClass(),
@@ -113,6 +119,11 @@ export class CsrfGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const adminRoute = this.reflector.getAllAndOverride<boolean>(IS_ADMIN_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (adminRoute) return true;
     const request = context.switchToHttp().getRequest<WafloRequest>();
     if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
     const customerCsrf = this.reflector.getAllAndOverride<boolean | "optional">(CUSTOMER_CSRF, [

@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import marketingConfig from "../../apps/marketing-web/next.config";
-import dashboardConfig from "../../apps/merchant-dashboard/next.config";
-import customerConfig from "../../apps/customer-web/next.config";
+import adminConfig from "../../apps/admin-dashboard/next.config";
 import { createApiApplication, serializeHttpRequest } from "../../apps/api/src/app";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service";
 import {
@@ -9,6 +7,9 @@ import {
   safeNotificationActionUrl,
 } from "../../apps/api/src/notifications/notification.service";
 import { RateLimitService } from "../../apps/api/src/security/rate-limit.service";
+import customerConfig from "../../apps/customer-web/next.config";
+import marketingConfig from "../../apps/marketing-web/next.config";
+import dashboardConfig from "../../apps/merchant-dashboard/next.config";
 import {
   createErrorReporter,
   redactMetadata,
@@ -169,7 +170,7 @@ describe("repair-round security boundaries", () => {
 
   it("adds CSP everywhere and HSTS only in production without unsafe-eval", async () => {
     process.env.NODE_ENV = "production";
-    for (const config of [marketingConfig, dashboardConfig, customerConfig]) {
+    for (const config of [adminConfig, marketingConfig, dashboardConfig, customerConfig]) {
       const groups = (await config.headers?.()) ?? [];
       const headers = groups.flatMap((group) => group.headers);
       const csp = headers.find((header) => header.key === "Content-Security-Policy")?.value;
@@ -178,7 +179,7 @@ describe("repair-round security boundaries", () => {
       expect(headers.some((header) => header.key === "Strict-Transport-Security")).toBe(true);
     }
     process.env.NODE_ENV = "development";
-    for (const config of [marketingConfig, dashboardConfig, customerConfig]) {
+    for (const config of [adminConfig, marketingConfig, dashboardConfig, customerConfig]) {
       const groups = (await config.headers?.()) ?? [];
       expect(
         groups
@@ -189,14 +190,14 @@ describe("repair-round security boundaries", () => {
   });
 
   it("disables the vulnerable Next server-side image optimizer in every web app", () => {
-    for (const config of [marketingConfig, dashboardConfig, customerConfig]) {
+    for (const config of [adminConfig, marketingConfig, dashboardConfig, customerConfig]) {
       expect(config.images?.unoptimized).toBe(true);
     }
   });
 
   it("initializes non-production Swagger static assets through the Fastify adapter", async () => {
     process.env.NODE_ENV = "test";
-    const app = await createApiApplication({ logger: false });
+    const app = await createApiApplication({ logger: false, abortOnError: false });
     try {
       expect(app.getHttpAdapter().getInstance().printRoutes()).toContain("docs");
       const response = await app.inject({ method: "GET", url: "/route-that-does-not-exist" });

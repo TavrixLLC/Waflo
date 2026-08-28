@@ -2,7 +2,7 @@
 
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { billingCadenceCatalog, cadencePrice, planCatalog } from "@waflo/billing";
+import { billingCadenceCatalog, planCatalog } from "@waflo/billing";
 import {
   type BillingCadence,
   countryOptions,
@@ -51,7 +51,16 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
 import { beginGoogleReauthentication } from "../lib/oauth-reauthentication";
-import { billingPriceTruth, canPersistCatalogSelection } from "./billing-presentation";
+import { canPersistCatalogSelection } from "./billing-presentation";
+import {
+  formatBillingAmount,
+  formatBillingDate as formatSubscriptionChangeDate,
+  isSubscriptionChangePreviewExpired,
+  subscriptionChangeConfirmationRequest,
+  subscriptionChangeErrorKind,
+  subscriptionChangePreviewRequest,
+  type SubscriptionChangePreview as DurableSubscriptionChangePreview,
+} from "./billing-subscription-change";
 import type { DashboardSection, MembershipView } from "./dashboard";
 import { ProgramAssetPicker } from "./program-asset-uploader";
 import type { AssetItem, ProgramItem } from "./program-studio-types";
@@ -1250,6 +1259,15 @@ interface BillingView {
   }[];
   stripeConfigured: boolean;
   cadenceAvailability: Record<BillingCadence, boolean>;
+  catalog: {
+    marketCode: string;
+    terms: Array<{
+      plan: PlanCode;
+      cadence: BillingCadence;
+      amountMinor: string;
+      currency: string;
+    }>;
+  };
   paymentMethod:
     | { status: "none" | "unavailable"; reason?: string }
     | {
@@ -1338,17 +1356,6 @@ interface BillingView {
       limit?: number | null;
     }>;
   }>;
-}
-
-interface SubscriptionChangePreview {
-  currentPlan: PlanCode;
-  currentCadence: BillingCadence;
-  targetPlan: PlanCode;
-  targetCadence: BillingCadence;
-  amountDue: number;
-  currency: string;
-  effective: "IMMEDIATE" | "NO_CHANGE";
-  renewalDate: string | null;
 }
 
 interface PaymentMethodSetup {
@@ -1443,9 +1450,8 @@ export function BillingScreen({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState<PlanCode | null>(null);
-  const [subscriptionChange, setSubscriptionChange] = useState<SubscriptionChangePreview | null>(
-    null,
-  );
+  const [subscriptionChange, setSubscriptionChange] =
+    useState<DurableSubscriptionChangePreview | null>(null);
   const [subscriptionAction, setSubscriptionAction] = useState<
     "change" | "cancel" | "resume" | null
   >(null);
@@ -1624,14 +1630,12 @@ export function BillingScreen({
     setError("");
     setNotice("");
     try {
-      const preview = await apiFetch<SubscriptionChangePreview>(
-        `/v1/organizations/${membership.organization.id}/billing/subscription/change/preview`,
-        {
-          method: "POST",
-          body: JSON.stringify({ plan, cadence: selectedCadence }),
-        },
+      const preview = await subscriptionChangePreviewRequest(
+        apiFetch,
+        membership.organization.id,
+        plan,
+        selectedCadence,
       );
-      if (preview.effective === "NO_CHANGE") return;
       setCadence(selectedCadence);
       setSubscriptionChange(preview);
     } catch (caught) {
@@ -1658,27 +1662,27 @@ export function BillingScreen({
     setSubscriptionAction("change");
     setError("");
     try {
-      await apiFetch(
-        `/v1/organizations/${membership.organization.id}/billing/subscription/change`,
-        {
-          method: "POST",
-          headers: { "x-idempotency-key": globalThis.crypto.randomUUID() },
-          body: JSON.stringify({
-            plan: subscriptionChange.targetPlan,
-            cadence: subscriptionChange.targetCadence,
-          }),
-        },
+      await subscriptionChangeConfirmationRequest(
+        apiFetch,
+        membership.organization.id,
+        subscriptionChange.previewId,
       );
       setSubscriptionChange(null);
       setNotice(ar ? "تم تحديث اشتراكك عبر Stripe." : "Your Stripe subscription was updated.");
       await load();
     } catch (caught) {
+      const stalePreview =
+        caught instanceof ApiClientError && subscriptionChangeErrorKind(caught.code) === "stale";
       setError(
         message(
           caught,
-          ar
-            ? "تعذر تغيير الاشتراك. لم يتم تطبيق أي تغيير."
-            : "Unable to change the subscription. No change was applied.",
+          stalePreview
+            ? ar
+              ? "تغير الاشتراك أو السعر. اطلب معاينة جديدة قبل التأكيد."
+              : "Your subscription or price changed. Request a new preview before confirming."
+            : ar
+              ? "تعذر تغيير الاشتراك. لم يتم تطبيق أي تغيير."
+              : "Unable to change the subscription. No change was applied.",
         ),
       );
     } finally {
@@ -1823,16 +1827,17 @@ export function BillingScreen({
       setRefundSaving(false);
     }
   }
-  const priceTruth = data
-    ? billingPriceTruth({
-        plan: data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
-        cadence: data.selectedCadence,
-        nextExpectedAmount: data.authoritativeState.nextExpectedAmount,
-        currency: data.authoritativeState.currency,
-      })
-    : null;
-  const selectedCatalogPrice = priceTruth?.catalog ?? null;
+  const selectedCatalogPrice = data?.catalog.terms.find(
+    (term) =>
+      term.plan === (data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode) &&
+      term.cadence === data.selectedCadence,
+  );
   const subscriptionStatus = data?.authoritativeState.subscriptionStatus ?? "PENDING_ACTIVATION";
+  const subscriptionChangeEnabled =
+    data?.canManageBilling === true && ["ACTIVE", "TRIALING"].includes(subscriptionStatus);
+  const subscriptionChangeExpired = subscriptionChange
+    ? isSubscriptionChangePreviewExpired(subscriptionChange)
+    : false;
   const subscriptionStatusTone =
     subscriptionStatus === "ACTIVE" || subscriptionStatus === "TRIALING"
       ? "success"
@@ -1978,14 +1983,20 @@ export function BillingScreen({
                 <dt>{ar ? "السعر المعلن الحالي" : "Current catalog rate"}</dt>
                 <dd className="billing-overview__amount billing-overview__catalog-rate">
                   <bdi dir="ltr">
-                    ${selectedCatalogPrice?.monthlyEquivalentUsd.toFixed(2) ?? "—"}
+                    {selectedCatalogPrice
+                      ? formatBillingAmount(
+                          selectedCatalogPrice.amountMinor,
+                          selectedCatalogPrice.currency,
+                          locale,
+                        )
+                      : "—"}
                   </bdi>
-                  <span>{ar ? "/شهر" : "/mo"}</span>
+                  <span>{cadenceLabel(data.selectedCadence)}</span>
                 </dd>
                 <dd>
                   <small>
                     {selectedCatalogPrice
-                      ? `${ar ? "إجمالي" : "Billed"} $${selectedCatalogPrice.billedAmountUsd.toFixed(2)} ${cadenceLabel(data.selectedCadence).toLocaleLowerCase("en-US")}`
+                      ? `${ar ? "سعر سوق" : "Market rate"} ${data.catalog.marketCode}`
                       : ar
                         ? "غير متوفر"
                         : "Not available"}
@@ -2032,12 +2043,12 @@ export function BillingScreen({
               aria-label={ar ? "دورة الفوترة" : "Billing cadence"}
             >
               {(["monthly", "quarterly", "yearly"] as const).map((option) => {
-                const pricing = cadencePrice(
-                  data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode,
-                  option,
+                const pricing = data.catalog.terms.find(
+                  (term) =>
+                    term.plan === (data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode) &&
+                    term.cadence === option,
                 );
                 const definition = billingCadenceCatalog[option];
-                const savings = pricing.undiscountedAmountUsd - pricing.billedAmountUsd;
                 const discountLabel = option === "quarterly" ? "8.33%" : "16.67%";
                 return (
                   <label
@@ -2051,6 +2062,7 @@ export function BillingScreen({
                       checked={cadence === option}
                       disabled={
                         !data.cadenceAvailability[option] ||
+                        !pricing ||
                         saving !== null ||
                         !data.canManageBilling
                       }
@@ -2058,7 +2070,7 @@ export function BillingScreen({
                     />
                     <span>
                       <strong>{cadenceLabel(option)}</strong>
-                      {definition.discountRate ? (
+                      {!pricing ? null : definition.discountRate ? (
                         <Badge tone="success">
                           {option === "yearly"
                             ? ar
@@ -2069,24 +2081,20 @@ export function BillingScreen({
                       ) : null}
                     </span>
                     <b>
-                      <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi>
+                      <bdi dir="ltr">
+                        {pricing
+                          ? formatBillingAmount(pricing.amountMinor, pricing.currency, locale)
+                          : "—"}
+                      </bdi>
                     </b>
                     <small>
-                      {option === "monthly" ? (
-                        ar ? (
-                          "إجمالي الدفعة · دون خصم"
-                        ) : (
-                          "Total charge · no discount"
-                        )
-                      ) : (
-                        <>
-                          <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>/
-                          {ar ? "شهر" : "mo"}
-                          {" · "}
-                          {ar ? "وفّر" : "Save"} <bdi dir="ltr">${savings.toFixed(2)}</bdi> (
-                          {discountLabel})
-                        </>
-                      )}
+                      {option === "monthly"
+                        ? ar
+                          ? "إجمالي الدفعة · دون خصم"
+                          : "Total charge · no discount"
+                        : ar
+                          ? "المبلغ الإجمالي بحسب دورة الفوترة المحددة"
+                          : "The total amount for the selected billing cadence"}
                     </small>
                     {!data.cadenceAvailability[option] ? (
                       <em>{ar ? "غير متاح حالياً" : "Currently unavailable"}</em>
@@ -2128,6 +2136,12 @@ export function BillingScreen({
                   selected={data.selectedPlan.toLocaleLowerCase("en-US") === plan}
                   locale={locale}
                   cadence={cadence}
+                  showCatalogPrice={!subscriptionChangeEnabled}
+                  price={
+                    data.catalog.terms.find(
+                      (term) => term.plan === plan && term.cadence === cadence,
+                    ) ?? null
+                  }
                   {...(data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION"
                     ? { onSelect: (value: PlanCode) => void select(value) }
                     : data.canManageBilling && ["ACTIVE", "TRIALING"].includes(subscriptionStatus)
@@ -2481,8 +2495,8 @@ export function BillingScreen({
               title={ar ? "تجربتك جاهزة للإعداد" : "Your trial is ready to set up"}
             >
               {ar
-                ? "اختر الباقة وأضف بيانات الفوترة والبطاقة لبدء 7 أيام مجاناً. لن يتم الخصم اليوم."
-                : "Choose a plan and add billing details and a card to start 7 days free. Nothing is charged today."}
+                ? "اختر الباقة وأضف بيانات الفوترة والبطاقة لبدء 15 يوماً مجاناً. لن يتم الخصم اليوم."
+                : "Choose a plan and add billing details and a card to start 15 days free. Nothing is charged today."}
             </Alert>
           ) : null}
         </>
@@ -2504,24 +2518,37 @@ export function BillingScreen({
               <div>
                 <span>{ar ? "الاشتراك الحالي" : "Current"}</span>
                 <strong>
-                  {planCatalog[subscriptionChange.currentPlan].name} ·{" "}
-                  {cadenceLabel(subscriptionChange.currentCadence)}
+                  {planCatalog[subscriptionChange.current.plan].name} ·{" "}
+                  {cadenceLabel(subscriptionChange.current.cadence)}
                 </strong>
               </div>
               <div>
                 <span>{ar ? "الاشتراك الجديد" : "New"}</span>
                 <strong>
-                  {planCatalog[subscriptionChange.targetPlan].name} ·{" "}
-                  {cadenceLabel(subscriptionChange.targetCadence)}
+                  {planCatalog[subscriptionChange.target.plan].name} ·{" "}
+                  {cadenceLabel(subscriptionChange.target.cadence)}
                 </strong>
               </div>
               <div>
                 <span>{ar ? "المبلغ المستحق الآن" : "Due now"}</span>
                 <strong dir="ltr">
-                  {formatMoney(subscriptionChange.amountDue, subscriptionChange.currency)}
+                  {formatBillingAmount(
+                    subscriptionChange.proration.amountDueNow,
+                    subscriptionChange.target.currency,
+                    locale,
+                  )}
                 </strong>
               </div>
             </div>
+            <p className="dashboard-form__hint">
+              {subscriptionChangeExpired
+                ? ar
+                  ? "انتهت صلاحية المعاينة. اطلب معاينة جديدة قبل التأكيد."
+                  : "This preview has expired. Request a new preview before confirming."
+                : ar
+                  ? `تنتهي صلاحية هذه المعاينة في ${formatSubscriptionChangeDate(subscriptionChange.expiresAt, locale)}.`
+                  : `This preview expires ${formatSubscriptionChangeDate(subscriptionChange.expiresAt, locale)}.`}
+            </p>
             <Alert tone="warning" title={ar ? "يُطبق التغيير فوراً" : "This change is immediate"}>
               {ar
                 ? "يعيد Stripe حساب الفترة الحالية. لن يُطبق التغيير إذا تعذر تحصيل أي مبلغ مستحق."
@@ -2542,6 +2569,7 @@ export function BillingScreen({
               <Button
                 type="button"
                 loading={subscriptionAction === "change"}
+                disabled={subscriptionChangeExpired}
                 onClick={() => void confirmSubscriptionChange()}
               >
                 {ar ? "تأكيد التغيير" : "Confirm change"}

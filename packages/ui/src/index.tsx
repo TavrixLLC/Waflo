@@ -1296,16 +1296,22 @@ export function PlanCard({
   selected,
   locale,
   cadence = "monthly",
+  price,
+  showCatalogPrice = true,
   onSelect,
 }: {
   plan: PlanCode;
   selected: boolean;
   locale: Locale;
   cadence?: BillingCadence;
+  /** A server-authoritative catalog price for merchant billing surfaces. */
+  price?: { amountMinor: string; currency: string } | null;
+  /** Existing subscriptions must show the provider preview instead of a catalog estimate. */
+  showCatalogPrice?: boolean;
   onSelect?: (plan: PlanCode) => void;
 }) {
   const definition = planCatalog[plan];
-  const pricing = cadencePrice(plan, cadence);
+  const fallbackPricing = cadencePrice(plan, cadence);
   const cadenceDefinition = billingCadenceCatalog[cadence];
   const copy = locale === "ar";
   const cadenceLabel = copy
@@ -1316,7 +1322,26 @@ export function PlanCard({
         : "سنوي"
     : cadenceDefinition.label;
   const discountLabel = cadence === "quarterly" ? "8.33%" : cadence === "yearly" ? "16.67%" : "";
-  const savings = pricing.undiscountedAmountUsd - pricing.billedAmountUsd;
+  const currencyDigits = price
+    ? (new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: price.currency,
+      }).resolvedOptions().maximumFractionDigits ?? 2)
+    : 2;
+  const catalogAmount = price ? Number(price.amountMinor) / 10 ** currencyDigits : null;
+  const billingMonths = cadence === "monthly" ? 1 : cadence === "quarterly" ? 3 : 12;
+  const money = (amount: number, currency: string) =>
+    new Intl.NumberFormat(locale === "ar" ? "ar" : "en-US", {
+      style: "currency",
+      currency,
+    }).format(amount);
+  const billedAmount = price
+    ? money(catalogAmount ?? 0, price.currency)
+    : `$${fallbackPricing.billedAmountUsd.toFixed(2)}`;
+  const monthlyEquivalent = price
+    ? money((catalogAmount ?? 0) / billingMonths, price.currency)
+    : `$${fallbackPricing.monthlyEquivalentUsd.toFixed(2)}`;
+  const savings = fallbackPricing.undiscountedAmountUsd - fallbackPricing.billedAmountUsd;
   const count = (value: number | null, singular: string, plural: string, unboundedLabel: string) =>
     value === null ? unboundedLabel : `${value} ${value === 1 ? singular : plural}`;
   const benefits = [
@@ -1358,15 +1383,23 @@ export function PlanCard({
         </h3>
         {selected ? <Badge tone="brand">{copy ? "الخطة المختارة" : "Selected"}</Badge> : null}
       </div>
-      <p className="wf-plan-card__price">
-        <bdi dir="ltr">${pricing.monthlyEquivalentUsd.toFixed(2)}</bdi>
-        <span>/{copy ? "شهر" : "month"}</span>
-      </p>
-      <small className="wf-plan-card__cadence">
-        <bdi dir="ltr">${pricing.billedAmountUsd.toFixed(2)}</bdi> {copy ? "يُحصّل" : "billed"}{" "}
-        {copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}
-      </small>
-      {cadenceDefinition.discountRate ? (
+      {showCatalogPrice ? (
+        <>
+          <p className="wf-plan-card__price">
+            <bdi dir="ltr">{monthlyEquivalent}</bdi>
+            <span>/{copy ? "شهر" : "month"}</span>
+          </p>
+          <small className="wf-plan-card__cadence">
+            <bdi dir="ltr">{billedAmount}</bdi> {copy ? "يُحصّل" : "billed"}{" "}
+            {copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}
+          </small>
+        </>
+      ) : (
+        <small className="wf-plan-card__cadence">
+          {copy ? "تظهر الأسعار الدقيقة في المعاينة." : "Exact pricing is shown in the preview."}
+        </small>
+      )}
+      {showCatalogPrice && !price && cadenceDefinition.discountRate ? (
         <small className="wf-plan-card__equivalent">
           {cadence === "yearly" ? (copy ? "شهران مجاناً" : "2 months free") : null}
           {cadence === "yearly" ? " · " : null}

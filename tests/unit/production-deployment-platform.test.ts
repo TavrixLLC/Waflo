@@ -90,7 +90,9 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain("process.env.API_INTERNAL_URL");
     expect(playwrightRunner).toContain("await buildBrowserFrontends()");
     expect(playwrightRunner).toContain("prior isolated random API port");
-    expect(playwrightRunner).toContain('["chromium", "accessibility"].includes(project)');
+    expect(playwrightRunner).toContain(
+      '["chromium", "accessibility", "admin", "admin-accessibility"].includes(project)',
+    );
   });
 
   it("keeps browser fixtures bound to every isolated loopback API port", () => {
@@ -146,12 +148,13 @@ describe("production deployment platform", () => {
     expect(productionApplication).toContain("STRIPE_PUBLISHABLE_KEY=pk_live_PUBLIC_VALUE");
   });
 
-  it("documents the same complete Stripe catalog enforced by deployed configuration", () => {
-    expect(realProviderRunbook).toMatch(/complete nine-Price\s+catalog/u);
-    expect(realProviderRunbook).toContain("USD 79.75 every 3 months");
-    expect(realProviderRunbook).toContain("USD 1,290.00 every year");
-    expect(realProviderRunbook).toContain("publishable key, webhook secret, and all nine");
-    expect(realProviderRunbook).not.toContain("optional quarterly/yearly");
+  it("documents Waflo-owned catalog authority instead of static provider Price configuration", () => {
+    expect(realProviderRunbook).toContain("Pricing Catalog resolves");
+    expect(realProviderRunbook).toMatch(/Admin publication\s+creates\/verifies/u);
+    expect(realProviderRunbook).not.toMatch(
+      /STRIPE_(?:STARTER|GROWTH|SCALE)_(?:MONTHLY|QUARTERLY|YEARLY)_PRICE_ID/u,
+    );
+    expect(realProviderRunbook).not.toContain("complete nine-Price catalog");
   });
 
   it("contains no legacy deployment root or inter-container localhost dependency", () => {
@@ -244,7 +247,7 @@ describe("production deployment platform", () => {
   it("keeps each hardened tmpfs mount in one Compose argument", () => {
     expect(compose).not.toMatch(/tmpfs:\s*\[/u);
     expect(compose).not.toMatch(/^\s*-\s*(?:noexec|nosuid|nodev)\s*$/mu);
-    expect(compose.match(/^\s+- "\/[^"]+:rw,noexec,nosuid,size=\d+m"$/gmu)).toHaveLength(10);
+    expect(compose.match(/^\s+- "\/[^"]+:rw,noexec,nosuid,size=\d+m"$/gmu)).toHaveLength(12);
     expect(compose).toContain('      - "/tmp:rw,noexec,nosuid,size=64m"');
     expect(deploy.match(/compose run --rm migrate/gmu)).toHaveLength(1);
   });
@@ -273,6 +276,8 @@ describe("production deployment platform", () => {
     }
     expect(bake).toContain('target "merchant-staging"');
     expect(bake).toContain('target "merchant-production"');
+    expect(bake).toContain('target "admin-staging"');
+    expect(bake).toContain('target "admin-production"');
     expect(bake).toContain('DEPLOYMENT_ENVIRONMENT          = "staging"');
     expect(bake).toContain('DEPLOYMENT_ENVIRONMENT          = "production"');
     expect(bake).toContain('"type=provenance,mode=max"');
@@ -284,7 +289,7 @@ describe("production deployment platform", () => {
     expect(publishImages).toContain(
       `"${scriptDirectoryVariable}/smoke-node-release-images.sh" staging "${localReleaseShaVariable}"`,
     );
-    for (const service of ["api", "operational-worker", "wallet-worker"]) {
+    for (const service of ["api", "operational-worker", "wallet-worker", "admin"]) {
       expect(smokeNodeReleaseImages).toContain(service);
     }
     expect(smokeNodeReleaseImages).toContain("docker image inspect");

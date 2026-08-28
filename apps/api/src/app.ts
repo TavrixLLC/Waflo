@@ -1,12 +1,12 @@
 import "reflect-metadata";
+import { randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import fastifyCookie from "@fastify/cookie";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyMultipart from "@fastify/multipart";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { randomUUID } from "node:crypto";
-import type { IncomingMessage } from "node:http";
 import { parseEnvironment } from "@waflo/config";
 import { sanitizeRequestUrl } from "@waflo/security";
 import type { FastifyRequest } from "fastify";
@@ -15,6 +15,12 @@ import { EnvironmentService } from "./config/environment.service.js";
 
 export interface CreateApiApplicationOptions {
   logger?: boolean;
+  /**
+   * Test harnesses need Nest to throw initialization errors instead of
+   * terminating their worker process. Production keeps Nest's fail-fast
+   * default by leaving this unset.
+   */
+  abortOnError?: boolean;
 }
 
 export function serializeHttpRequest(
@@ -87,6 +93,7 @@ export async function createApiApplication(
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     rawBody: true,
     ...(options.logger === false ? { logger: false } : {}),
+    ...(options.abortOnError === false ? { abortOnError: false } : {}),
   });
   const environment = app.get(EnvironmentService);
 

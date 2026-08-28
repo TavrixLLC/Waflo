@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { createCipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -301,6 +302,7 @@ export class OperationalWorker {
       privacyRequestsProcessed: (await this.processOnePrivacyRequest()) ? 1 : 0,
       appleRevocationsProcessed: (await this.processOneAppleTokenRevocation()) ? 1 : 0,
       stripeSubscriptionsReconciled: await this.reconcileStripeSubscriptions(),
+      annualRepricingsApplied: await this.applyDueAnnualRepricings(),
       stripeCustomersReconciled: await this.reconcileStripeCustomerIdentities(),
       renewalRemindersQueued: await this.queueRenewalReminders(),
       billingRecoveriesProcessed: await this.processBillingRecoveries(),
@@ -309,6 +311,86 @@ export class OperationalWorker {
       integrityFindings: await this.sampleProjectionIntegrity(),
       cleanupItems: await this.cleanupExpiredState(),
     };
+  }
+
+  /** Applies only already-notified, durable repricing commands at a normal renewal. */
+  async applyDueAnnualRepricings(): Promise<number> {
+    if (!this.stripe) return 0;
+    const now = new Date();
+    const due = await this.prisma.subscriptionRepricing.findMany({
+      where: {
+        status: "SCHEDULED",
+        effectiveAt: { lte: now },
+        subscription: { currentPeriodEnd: { lte: now } },
+      },
+      include: { subscription: true, targetPricingVersion: true },
+      take: 50,
+    });
+    let applied = 0;
+    for (const transition of due) {
+      const claim = await this.prisma.subscriptionRepricing.updateMany({
+        where: { id: transition.id, status: "SCHEDULED" },
+        data: { status: "FAILED", failureCode: "PROCESSING" },
+      });
+      if (claim.count !== 1) continue;
+      try {
+        const targetPriceId = transition.targetPricingVersion.stripePriceId;
+        if (!targetPriceId) throw new Error("TARGET_PRICE_UNBOUND");
+        const providerSubscription = await this.stripe.subscriptions.retrieve(
+          transition.subscription.stripeSubscriptionId,
+        );
+        const providerItem = providerSubscription.items.data[0];
+        if (!providerItem) throw new Error("SUBSCRIPTION_ITEM_MISSING");
+        await this.stripe.subscriptions.update(
+          transition.subscription.stripeSubscriptionId,
+          {
+            items: [{ id: providerItem.id, price: targetPriceId }],
+            proration_behavior: "none",
+            metadata: {
+              pricingVersionId: transition.targetPricingVersionId,
+              pricingMarket: transition.targetPricingVersion.stripeBindingKey.split(":")[0] ?? "",
+            },
+          },
+          { idempotencyKey: `waflo:annual-reprice:${transition.idempotencyKey}` },
+        );
+        await this.prisma.$transaction(async (transaction) => {
+          await transaction.subscription.update({
+            where: { id: transition.subscriptionId },
+            data: {
+              pricingVersionId: transition.targetPricingVersionId,
+              stripePriceId: targetPriceId,
+              pricingCurrency: transition.targetPricingVersion.currency,
+              pricingAmountMinor: transition.targetPricingVersion.amountMinor,
+              grandfathered: false,
+            },
+          });
+          await transaction.subscriptionRepricing.update({
+            where: { id: transition.id },
+            data: { status: "APPLIED", failureCode: null },
+          });
+          await transaction.auditLog.create({
+            data: {
+              organizationId: transition.subscription.organizationId,
+              action: "billing.annual_repricing_applied",
+              targetType: "subscription",
+              targetId: transition.subscription.stripeSubscriptionId,
+              requestId: `annual-reprice:${transition.id}`,
+              metadata: {
+                targetPricingVersionId: transition.targetPricingVersionId,
+                noProration: true,
+              },
+            },
+          });
+        });
+        applied += 1;
+      } catch {
+        await this.prisma.subscriptionRepricing.updateMany({
+          where: { id: transition.id, status: "FAILED", failureCode: "PROCESSING" },
+          data: { status: "SCHEDULED", failureCode: "PROVIDER_UPDATE_FAILED" },
+        });
+      }
+    }
+    return applied;
   }
 
   async processOneAppleTokenRevocation(): Promise<boolean> {
@@ -521,7 +603,21 @@ export class OperationalWorker {
     leaseExpiresAt: Date,
   ) {
     const price = canonical.items.data[0]?.price;
-    const { plan, cadence } = this.planForStripePrice(price?.id);
+    if (!price?.id) throw new Error("STRIPE_PRICE_UNKNOWN");
+    const pricing = await this.prisma.pricingVersion.findUnique({
+      where: { stripePriceId: price.id },
+      include: { market: true },
+    });
+    if (
+      !pricing ||
+      canonical.items.data.length !== 1 ||
+      price.currency.toUpperCase() !== pricing.currency ||
+      price.unit_amount !== Number(pricing.amountMinor)
+    ) {
+      throw new Error("STRIPE_PRICE_BINDING_MISMATCH");
+    }
+    const plan = pricing.planCode.toLocaleLowerCase("en-US") as PlanCode;
+    const cadence = pricing.cadence.toLocaleLowerCase("en-US") as BillingCadence;
     const customerId =
       typeof canonical.customer === "string" ? canonical.customer : canonical.customer.id;
     await this.prisma.$transaction(async (transaction) => {
@@ -559,6 +655,10 @@ export class OperationalWorker {
         where: { id: local.id },
         data: {
           stripePriceId: price?.id ?? local.stripePriceId,
+          pricingVersionId: pricing.id,
+          pricingMarketCode: pricing.market.code,
+          pricingCurrency: pricing.currency,
+          pricingAmountMinor: pricing.amountMinor,
           planCode: dbPlanCode(plan),
           cadence: dbBillingCadence(cadence),
           status,
@@ -1184,20 +1284,6 @@ export class OperationalWorker {
       }
     }
     return sent;
-  }
-
-  private planForStripePrice(priceId: string | undefined): {
-    plan: PlanCode;
-    cadence: BillingCadence;
-  } {
-    for (const cadence of ["monthly", "quarterly", "yearly"] as const) {
-      for (const plan of ["starter", "growth", "scale"] as const) {
-        const key =
-          `STRIPE_${plan.toUpperCase()}_${cadence.toUpperCase()}_PRICE_ID` as keyof Environment;
-        if (priceId && priceId === this.environment[key]) return { plan, cadence };
-      }
-    }
-    throw new Error("STRIPE_PRICE_UNKNOWN");
   }
 
   private async recordHeartbeat(success: boolean, safeFailureCode?: string) {

@@ -30,7 +30,7 @@ export const en = {
   },
   trial: {
     pending:
-      "7 days free. Add a payment method now; your first charge is shown before you confirm.",
+      "15 days free. Add a payment method now; your first charge is shown before you confirm.",
   },
   errors: {
     retry: "Try again",

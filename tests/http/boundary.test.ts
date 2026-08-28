@@ -111,13 +111,49 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_waflo_http";
     process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_waflo_http";
     process.env.STRIPE_WEBHOOK_SECRET = webhookSecret;
-    process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
-    process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
-    process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
     process.env.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID = "bpc_test_w1_no_plan_switching";
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);
+    const globalMarket = await prisma.client.pricingMarket.upsert({
+      where: { code: "GLOBAL" },
+      update: { active: true, configuredCurrency: "USD" },
+      create: {
+        code: "GLOBAL",
+        kind: "GLOBAL",
+        configuredCurrency: "USD",
+        active: true,
+      },
+    });
+    await prisma.client.pricingVersion.upsert({
+      where: {
+        marketId_planCode_cadence_version: {
+          marketId: globalMarket.id,
+          planCode: "GROWTH",
+          cadence: "MONTHLY",
+          version: 1,
+        },
+      },
+      update: {
+        amountMinor: 6900,
+        currency: "USD",
+        stripePriceId: "price_test_growth",
+        status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+      },
+      create: {
+        marketId: globalMarket.id,
+        planCode: "GROWTH",
+        cadence: "MONTHLY",
+        version: 1,
+        amountMinor: 6900,
+        currency: "USD",
+        status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+        stripeProductId: "prod_test_growth",
+        stripePriceId: "price_test_growth",
+        stripeBindingKey: "http:global:growth:monthly:v1",
+        publishedAt: new Date(),
+      },
+    });
 
     owner = await createIdentity("owner");
     manager = await createIdentity("manager");
@@ -785,13 +821,13 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     const secondResult = second.json().data;
     expect(firstResult.setupIntentId).toBe(`seti_http_${runId}`);
     expect(firstResult.clientSecret).toBe(`seti_http_${runId}_secret_test`);
-    expect(firstResult.trialDays).toBe(7);
+    expect(firstResult.trialDays).toBe(15);
     expect(firstResult).not.toHaveProperty("url");
     expect(secondResult).toMatchObject({
       completed: false,
       setupIntentId: firstResult.setupIntentId,
       clientSecret: firstResult.clientSecret,
-      trialDays: 7,
+      trialDays: 15,
       amount: firstResult.amount,
       currency: firstResult.currency,
     });

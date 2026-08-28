@@ -21,6 +21,21 @@ enum UserStatus {
   DEACTIVATED
 }
 
+// Internal operators have a tenant-independent identity and capability role.
+// This is deliberately distinct from merchant OrganizationMember roles.
+enum AdminRole {
+  SUPER_ADMIN
+  PRICING_ADMIN
+  FINANCE
+  SUPPORT
+  READ_ONLY
+}
+
+enum AdminUserStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum MerchantAccountRequestType {
   DEACTIVATION
   DELETION
@@ -60,10 +75,63 @@ enum BillingStatus {
   CANCELED
 }
 
+// Waflo-owned catalog terms. Stripe Prices are immutable provider bindings,
+// never the catalog of record.
+enum PricingMarketKind {
+  GLOBAL
+  COUNTRY_OVERRIDE
+}
+
+enum PricingVersionStatus {
+  DRAFT
+  VALIDATED
+  ACTIVE_FOR_NEW_SUBSCRIPTIONS
+  RETIRED_FOR_NEW_SUBSCRIPTIONS
+}
+
 enum BillingCadence {
   MONTHLY
   QUARTERLY
   YEARLY
+}
+
+enum RepricingStatus {
+  SCHEDULED
+  APPLIED
+  CANCELED
+  SUPERSEDED
+  FAILED
+}
+
+enum RepricingNoticeStatus {
+  SCHEDULED
+  CREATED
+  CANCELED
+}
+
+enum RepricingCampaignStatus {
+  PREVIEWED
+  SCHEDULED
+  CANCELED
+  SUPERSEDED
+}
+
+enum RepricingCampaignMemberDisposition {
+  ELIGIBLE
+  EXCLUDED
+}
+
+enum SubscriptionChangePreviewStatus {
+  PENDING
+  CONFIRMED
+  EXPIRED
+  INVALIDATED
+}
+
+enum BillingFinancialEventType {
+  BILLED
+  COLLECTED
+  PAYMENT_FAILED
 }
 
 enum BillingEmailStatus {
@@ -630,6 +698,47 @@ model User {
   @@map("users")
 }
 
+model AdminUser {
+  id              String          @id @default(uuid()) @db.Uuid
+  publicId        String          @unique @default(uuid()) @map("public_id") @db.Uuid
+  displayName     String          @map("display_name") @db.VarChar(100)
+  email           String          @db.VarChar(254)
+  normalizedEmail String          @unique @map("normalized_email") @db.VarChar(254)
+  passwordHash    String          @map("password_hash") @db.Text
+  preferredLocale Locale          @default(EN) @map("preferred_locale")
+  role            AdminRole
+  status          AdminUserStatus @default(ACTIVE)
+  lastLoginAt     DateTime?       @map("last_login_at") @db.Timestamptz(6)
+  disabledAt      DateTime?       @map("disabled_at") @db.Timestamptz(6)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions        AdminSession[]
+  auditEvents     AuditLog[]      @relation("AdminAuditActor")
+  repricingCampaigns RepricingCampaign[] @relation("RepricingCampaignCreator")
+
+  @@index([status, role])
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  adminUserId      String    @map("admin_user_id") @db.Uuid
+  tokenHash        String    @unique @map("token_hash") @db.Char(64)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastActiveAt     DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revocationReason String?   @map("revocation_reason") @db.VarChar(120)
+  pricingReauthenticatedAt DateTime? @map("pricing_reauthenticated_at") @db.Timestamptz(6)
+  ipMetadata       String?   @map("ip_metadata") @db.VarChar(64)
+  userAgent        String?   @map("user_agent") @db.VarChar(512)
+  adminUser        AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId, expiresAt])
+  @@index([adminUserId, revokedAt])
+  @@map("admin_sessions")
+}
+
 model MerchantAccountLifecycleRequest {
   id                  String                       @id @default(uuid()) @db.Uuid
   userId              String                       @map("user_id") @db.Uuid
@@ -817,6 +926,8 @@ model Organization {
   slugHistory           MerchantSlugHistory[]
   billingProfile        OrganizationBillingProfile?
   subscriptions         Subscription[]
+  billingFinancialEvents BillingFinancialEvent[]
+  subscriptionChangePreviews BillingSubscriptionChangePreview[]
   webhookEvents         ProcessedWebhookEvent[]
   billingInvoices       BillingInvoice[]
   billingEmailOutbox    BillingEmailOutbox[]
@@ -1128,14 +1239,218 @@ model Subscription {
   reconciliationLeaseExpiresAt DateTime? @map("reconciliation_lease_expires_at") @db.Timestamptz(6)
   reconciliationAttemptCount Int         @default(0) @map("reconciliation_attempt_count")
   reconciliationFailureCode String?      @map("reconciliation_failure_code") @db.VarChar(120)
+  pricingVersionId         String?       @map("pricing_version_id") @db.Uuid
+  pricingMarketCode        String?       @map("pricing_market_code") @db.VarChar(32)
+  pricingCurrency          String?       @map("pricing_currency") @db.Char(3)
+  pricingAmountMinor       BigInt?       @map("pricing_amount_minor")
+  grandfathered            Boolean       @default(false)
   createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  pricingVersion           PricingVersion? @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  repricingTransitions     SubscriptionRepricing[]
+  repricingCampaignMembers RepricingCampaignMember[]
+  changePreviews           BillingSubscriptionChangePreview[]
+  financialEvents          BillingFinancialEvent[]
 
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
   @@index([reconciliationLeaseExpiresAt, lastProviderSyncAt])
   @@map("subscriptions")
+}
+
+model PricingMarket {
+  id                 String             @id @default(uuid()) @db.Uuid
+  code               String             @unique @db.VarChar(32)
+  kind               PricingMarketKind
+  countryCode        String?            @unique @map("country_code") @db.Char(2)
+  configuredCurrency String?            @map("configured_currency") @db.Char(3)
+  active             Boolean            @default(true)
+  fallbackMarketCode String?            @map("fallback_market_code") @db.VarChar(32)
+  annualEffectiveMonth Int?             @map("annual_effective_month")
+  annualEffectiveDay Int?               @map("annual_effective_day")
+  annualNoticeDays   Int                @default(30) @map("annual_notice_days")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  versions           PricingVersion[]
+  repricingCampaigns RepricingCampaign[]
+
+  @@index([kind, active])
+  @@map("pricing_markets")
+}
+
+model PricingVersion {
+  id                String               @id @default(uuid()) @db.Uuid
+  marketId          String               @map("market_id") @db.Uuid
+  planCode          PlanCode             @map("plan_code")
+  cadence           BillingCadence
+  version           Int
+  currency          String               @db.Char(3)
+  amountMinor       BigInt               @map("amount_minor")
+  status            PricingVersionStatus @default(DRAFT)
+  stripeProductId   String?              @map("stripe_product_id") @db.VarChar(255)
+  stripePriceId     String?              @unique @map("stripe_price_id") @db.VarChar(255)
+  stripeBindingKey  String               @unique @map("stripe_binding_key") @db.VarChar(180)
+  publishedAt       DateTime?            @map("published_at") @db.Timestamptz(6)
+  retiredAt         DateTime?            @map("retired_at") @db.Timestamptz(6)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  market            PricingMarket        @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  subscriptions     Subscription[]
+  repricingTargets  SubscriptionRepricing[] @relation("RepricingTarget")
+  sourceChangePreviews BillingSubscriptionChangePreview[] @relation("ChangePreviewSource")
+  targetChangePreviews BillingSubscriptionChangePreview[] @relation("ChangePreviewTarget")
+  financialEvents      BillingFinancialEvent[]
+  repricingCampaigns   RepricingCampaign[]
+
+  @@unique([marketId, planCode, cadence, version])
+  @@index([marketId, planCode, cadence, status])
+  @@map("pricing_versions")
+}
+
+model BillingSubscriptionChangePreview {
+  id                          String                          @id @default(uuid()) @db.Uuid
+  publicId                    String                          @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId              String                          @map("organization_id") @db.Uuid
+  subscriptionId              String                          @map("subscription_id") @db.Uuid
+  stripeSubscriptionId        String                          @map("stripe_subscription_id") @db.VarChar(255)
+  stripeSubscriptionItemId    String                          @map("stripe_subscription_item_id") @db.VarChar(255)
+  sourcePlan                  PlanCode                        @map("source_plan")
+  sourceCadence               BillingCadence                  @map("source_cadence")
+  sourcePricingVersionId      String                          @map("source_pricing_version_id") @db.Uuid
+  sourceStripePriceId         String                          @map("source_stripe_price_id") @db.VarChar(255)
+  sourceAmountMinor           BigInt                          @map("source_amount_minor")
+  sourceCurrency              String                          @map("source_currency") @db.Char(3)
+  targetPlan                  PlanCode                        @map("target_plan")
+  targetCadence               BillingCadence                  @map("target_cadence")
+  targetPricingVersionId      String                          @map("target_pricing_version_id") @db.Uuid
+  targetStripePriceId         String                          @map("target_stripe_price_id") @db.VarChar(255)
+  targetAmountMinor           BigInt                          @map("target_amount_minor")
+  targetCurrency              String                          @map("target_currency") @db.Char(3)
+  prorationDate               DateTime                        @map("proration_date") @db.Timestamptz(6)
+  providerFingerprint         String                          @map("provider_fingerprint") @db.Char(64)
+  amountDueNowMinor           BigInt                          @map("amount_due_now_minor")
+  creditAmountMinor           BigInt                          @map("credit_amount_minor")
+  prorationSummary            Json                            @map("proration_summary") @db.JsonB
+  nextRenewalAmountMinor      BigInt?                         @map("next_renewal_amount_minor")
+  nextRenewalAt               DateTime?                       @map("next_renewal_at") @db.Timestamptz(6)
+  status                      SubscriptionChangePreviewStatus @default(PENDING)
+  createdAt                   DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt                   DateTime                        @map("expires_at") @db.Timestamptz(6)
+  confirmedAt                 DateTime?                       @map("confirmed_at") @db.Timestamptz(6)
+  invalidatedAt               DateTime?                       @map("invalidated_at") @db.Timestamptz(6)
+  organization                Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription                Subscription                    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  sourcePricingVersion        PricingVersion                  @relation("ChangePreviewSource", fields: [sourcePricingVersionId], references: [id], onDelete: Restrict)
+  targetPricingVersion        PricingVersion                  @relation("ChangePreviewTarget", fields: [targetPricingVersionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, expiresAt])
+  @@index([subscriptionId, status, expiresAt])
+  @@map("billing_subscription_change_previews")
+}
+
+model SubscriptionRepricing {
+  id                    String          @id @default(uuid()) @db.Uuid
+  subscriptionId        String          @map("subscription_id") @db.Uuid
+  campaignId            String?         @map("campaign_id") @db.Uuid
+  targetPricingVersionId String         @map("target_pricing_version_id") @db.Uuid
+  effectiveAt           DateTime        @map("effective_at") @db.Timestamptz(6)
+  noticeSentAt          DateTime?       @map("notice_sent_at") @db.Timestamptz(6)
+  noticeStatus          RepricingNoticeStatus @default(SCHEDULED) @map("notice_status")
+  noticeSnapshot        Json?           @map("notice_snapshot") @db.JsonB
+  replacesRepricingId   String?         @map("replaces_repricing_id") @db.Uuid
+  replacedByRepricingId String?         @unique @map("replaced_by_repricing_id") @db.Uuid
+  status                RepricingStatus @default(SCHEDULED)
+  stripeScheduleId      String?         @unique @map("stripe_schedule_id") @db.VarChar(255)
+  idempotencyKey        String          @unique @map("idempotency_key") @db.VarChar(255)
+  failureCode           String?         @map("failure_code") @db.VarChar(120)
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subscription          Subscription    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  campaign              RepricingCampaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  targetPricingVersion  PricingVersion  @relation("RepricingTarget", fields: [targetPricingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([subscriptionId, status])
+  @@index([campaignId, status])
+  @@index([status, effectiveAt])
+  @@map("subscription_repricing")
+}
+
+model RepricingCampaign {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  publicId              String                  @unique @default(uuid()) @map("public_id") @db.Uuid
+  marketId              String                  @map("market_id") @db.Uuid
+  planCode              PlanCode                @map("plan_code")
+  cadence               BillingCadence
+  targetPricingVersionId String                 @map("target_pricing_version_id") @db.Uuid
+  currency              String                  @db.Char(3)
+  effectiveOnOrAfter    DateTime                @map("effective_on_or_after") @db.Timestamptz(6)
+  noticeDays            Int                     @map("notice_days")
+  status                RepricingCampaignStatus @default(PREVIEWED)
+  previewSnapshot       Json                    @map("preview_snapshot") @db.JsonB
+  previewedAt           DateTime                @default(now()) @map("previewed_at") @db.Timestamptz(6)
+  previewExpiresAt      DateTime                @map("preview_expires_at") @db.Timestamptz(6)
+  scheduledAt           DateTime?               @map("scheduled_at") @db.Timestamptz(6)
+  canceledAt            DateTime?               @map("canceled_at") @db.Timestamptz(6)
+  createdByAdminUserId  String?                 @map("created_by_admin_user_id") @db.Uuid
+  replacesCampaignId    String?                 @unique @map("replaces_campaign_id") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  market                PricingMarket           @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  targetPricingVersion  PricingVersion          @relation(fields: [targetPricingVersionId], references: [id], onDelete: Restrict)
+  createdByAdminUser    AdminUser?              @relation("RepricingCampaignCreator", fields: [createdByAdminUserId], references: [id], onDelete: SetNull)
+  replacesCampaign      RepricingCampaign?      @relation("RepricingCampaignReplacement", fields: [replacesCampaignId], references: [id], onDelete: Restrict)
+  replacedByCampaign    RepricingCampaign?      @relation("RepricingCampaignReplacement")
+  members               RepricingCampaignMember[]
+  commands              SubscriptionRepricing[]
+
+  @@index([marketId, planCode, cadence, status])
+  @@index([status, effectiveOnOrAfter])
+  @@map("repricing_campaigns")
+}
+
+model RepricingCampaignMember {
+  id                    String                              @id @default(uuid()) @db.Uuid
+  campaignId            String                              @map("campaign_id") @db.Uuid
+  subscriptionId        String                              @map("subscription_id") @db.Uuid
+  disposition           RepricingCampaignMemberDisposition
+  exclusionCode         String?                             @map("exclusion_code") @db.VarChar(80)
+  expectedRenewalAt     DateTime?                           @map("expected_renewal_at") @db.Timestamptz(6)
+  createdAt             DateTime                            @default(now()) @map("created_at") @db.Timestamptz(6)
+  campaign              RepricingCampaign                   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  subscription          Subscription                        @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, subscriptionId])
+  @@index([campaignId, disposition, expectedRenewalAt])
+  @@map("repricing_campaign_members")
+}
+
+model BillingFinancialEvent {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  organizationId     String                    @map("organization_id") @db.Uuid
+  subscriptionId     String                    @map("subscription_id") @db.Uuid
+  pricingVersionId   String?                   @map("pricing_version_id") @db.Uuid
+  provider           String                    @db.VarChar(40)
+  providerEventId    String                    @map("provider_event_id") @db.VarChar(255)
+  providerObjectId   String                    @map("provider_object_id") @db.VarChar(255)
+  type               BillingFinancialEventType
+  planCode           PlanCode?                 @map("plan_code")
+  pricingMarketCode  String?                   @map("pricing_market_code") @db.VarChar(32)
+  currency           String                    @db.Char(3)
+  amountMinor        BigInt                    @map("amount_minor")
+  providerOccurredAt DateTime                  @map("provider_occurred_at") @db.Timestamptz(6)
+  livemode           Boolean
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription       Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  pricingVersion     PricingVersion?           @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerEventId])
+  @@index([type, providerOccurredAt])
+  @@index([currency, type, providerOccurredAt])
+  @@index([planCode, type, providerOccurredAt])
+  @@index([pricingMarketCode, type, providerOccurredAt])
+  @@index([organizationId, providerOccurredAt])
+  @@map("billing_financial_events")
 }
 
 model ProcessedWebhookEvent {
@@ -1163,6 +1478,7 @@ model AuditLog {
   id             String        @id @default(uuid()) @db.Uuid
   organizationId String?       @map("organization_id") @db.Uuid
   actorUserId    String?       @map("actor_user_id") @db.Uuid
+  actorAdminUserId String?     @map("actor_admin_user_id") @db.Uuid
   action         String        @db.VarChar(160)
   targetType     String        @map("target_type") @db.VarChar(100)
   targetId       String?       @map("target_id") @db.VarChar(255)
@@ -1174,10 +1490,12 @@ model AuditLog {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   actor          User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  adminActor     AdminUser?    @relation("AdminAuditActor", fields: [actorAdminUserId], references: [id], onDelete: SetNull)
   location       Location?     @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([actorAdminUserId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
 }

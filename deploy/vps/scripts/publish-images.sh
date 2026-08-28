@@ -79,21 +79,23 @@ declare -A target_references=(
   [wallet-worker]="${registry}/waflo-wallet-worker:${release_sha}-staging"
   [merchant-staging]="${registry}/waflo-merchant:${release_sha}-staging"
   [customer-staging]="${registry}/waflo-customer:${release_sha}-staging"
+  [admin-staging]="${registry}/waflo-admin:${release_sha}-staging"
   [marketing-staging]="${registry}/waflo-marketing:${release_sha}-staging"
   [merchant-production]="${registry}/waflo-merchant:${release_sha}-production"
   [customer-production]="${registry}/waflo-customer:${release_sha}-production"
+  [admin-production]="${registry}/waflo-admin:${release_sha}-production"
   [marketing-production]="${registry}/waflo-marketing:${release_sha}-production"
 )
 
 if [[ "${release_scope}" == "staging" ]]; then
   targets=(
     migrate api operational-worker wallet-worker
-    merchant-staging customer-staging marketing-staging
+    merchant-staging customer-staging admin-staging marketing-staging
   )
 else
   targets=(
     migrate api operational-worker wallet-worker
-    merchant-production customer-production marketing-production
+    merchant-production customer-production admin-production marketing-production
   )
 fi
 

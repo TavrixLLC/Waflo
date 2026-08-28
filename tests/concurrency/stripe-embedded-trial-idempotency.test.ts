@@ -198,7 +198,7 @@ function buildStripeMock(state: StripeFixture) {
         const existing = state.subscriptionByIdempotencyKey.get(key);
         if (existing) return existing;
         const start = Math.floor(Date.now() / 1000);
-        const end = start + 7 * 24 * 60 * 60;
+        const end = start + 15 * 24 * 60 * 60;
         const priceId = String(params.items?.[0]?.price);
         const invoice = {
           id: `in_trial_${state.namespace}`,
@@ -308,7 +308,7 @@ function trialInput(email = "billing@example.test") {
     billingIdentity: {
       name: "Waflo Trial Merchant",
       email,
-      countryCode: "US",
+      countryCode: "AQ",
       addressLine1: "1 Market Street",
       addressLine2: null,
       city: "San Francisco",
@@ -326,27 +326,41 @@ function markSetupSucceeded(state: StripeFixture, setupIntentId: string) {
 }
 
 beforeAll(async () => {
-  for (const key of [
-    "STRIPE_SECRET_KEY",
-    "STRIPE_PUBLISHABLE_KEY",
-    "STRIPE_WEBHOOK_SECRET",
-    "STRIPE_STARTER_MONTHLY_PRICE_ID",
-    "STRIPE_GROWTH_MONTHLY_PRICE_ID",
-    "STRIPE_SCALE_MONTHLY_PRICE_ID",
-  ]) {
+  for (const key of ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"]) {
     savedEnvironment[key] = process.env[key];
   }
   process.env.STRIPE_SECRET_KEY = "sk_test_embedded_trial";
   process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_embedded_trial";
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_embedded_trial";
-  process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_trial_starter_monthly";
-  process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_trial_growth_monthly";
-  process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_trial_scale_monthly";
   environment = new EnvironmentService();
   prisma = new PrismaService(environment);
   audit = new AuditService(prisma);
   tenant = new TenantService(prisma, audit);
   notifications = { send: vi.fn(async () => undefined) } as unknown as NotificationService;
+  const market = await prisma.client.pricingMarket.create({
+    data: {
+      code: `TRIAL_${runId}`.toUpperCase(),
+      kind: "COUNTRY_OVERRIDE",
+      countryCode: "AQ",
+      configuredCurrency: "USD",
+      active: true,
+    },
+  });
+  await prisma.client.pricingVersion.create({
+    data: {
+      marketId: market.id,
+      planCode: "GROWTH",
+      cadence: "MONTHLY",
+      version: 1,
+      currency: "USD",
+      amountMinor: 6900,
+      status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+      stripeProductId: "prod_trial_growth",
+      stripePriceId: "price_trial_growth_monthly",
+      stripeBindingKey: `trial:${runId}:growth:monthly:v1`,
+      publishedAt: new Date(),
+    },
+  });
 });
 
 afterAll(async () => {
@@ -357,7 +371,7 @@ afterAll(async () => {
   }
 });
 
-describe.sequential("embedded Stripe seven-day trial idempotency", () => {
+describe.sequential("embedded Stripe 15-day trial idempotency", () => {
   it("keeps hosted Checkout permanently disabled", async () => {
     const { service } = buildBilling();
     await expect(service.checkout()).rejects.toMatchObject({ code: "HOSTED_CHECKOUT_REMOVED" });
@@ -377,12 +391,12 @@ describe.sequential("embedded Stripe seven-day trial idempotency", () => {
     expect(prepared).toMatchObject({
       completed: false,
       publishableKey: "pk_test_embedded_trial",
-      trialDays: 7,
+      trialDays: 15,
       amount: 6900,
       currency: "USD",
     });
     expect(prepared.expectedFirstChargeAt.getTime() - prepared.expectedTrialStart.getTime()).toBe(
-      7 * 24 * 60 * 60 * 1000,
+      15 * 24 * 60 * 60 * 1000,
     );
     const setup = state.setupById.get(String(prepared.setupIntentId));
     expect(setup).toMatchObject({
@@ -500,7 +514,7 @@ describe.sequential("embedded Stripe seven-day trial idempotency", () => {
     ).toBe(0);
   });
 
-  it("creates exactly one authoritative seven-day trial and a zero-dollar invoice", async () => {
+  it("creates exactly one authoritative 15-day trial and a zero-dollar invoice", async () => {
     const account = await merchant("complete");
     const { service, state } = buildBilling();
     const key = randomUUID();
@@ -527,7 +541,7 @@ describe.sequential("embedded Stripe seven-day trial idempotency", () => {
       paymentMethod: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2032 },
     });
     expect(completed.trialEnd.getTime() - completed.trialStart.getTime()).toBe(
-      7 * 24 * 60 * 60 * 1000,
+      15 * 24 * 60 * 60 * 1000,
     );
     expect(completed.firstChargeAt).toEqual(completed.trialEnd);
     expect(
@@ -551,7 +565,7 @@ describe.sequential("embedded Stripe seven-day trial idempotency", () => {
     const create = state.subscriptionCreateParams[0];
     expect(create).toMatchObject({
       collection_method: "charge_automatically",
-      trial_period_days: 7,
+      trial_period_days: 15,
       trial_settings: { end_behavior: { missing_payment_method: "cancel" } },
       payment_settings: {
         payment_method_types: ["card"],
@@ -597,7 +611,7 @@ describe.sequential("embedded Stripe seven-day trial idempotency", () => {
       await prisma.client.auditLog.count({
         where: {
           organizationId: account.organizationId,
-          action: "billing.seven_day_trial_started",
+          action: "billing.trial_started",
         },
       }),
     ).toBe(1);
@@ -630,7 +644,7 @@ describe.sequential("embedded Stripe seven-day trial idempotency", () => {
       data: {
         subscriptionStatus: "CANCELED",
         trialStart: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
-        trialEnd: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        trialEnd: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
       },
     });
     const { service } = buildBilling();

@@ -42,32 +42,21 @@ Wallet notification/promotion consent is no longer presented on the save surface
 ## Billing cadence and Stripe setup
 
 Cadence is independent from the Starter, Growth, or Scale tier and is stored as `BillingCadence`
-(`MONTHLY`, `QUARTERLY`, or `YEARLY`) on the billing profile and provider subscription. Monthly is
-unchanged. Quarterly charges three monthly prices less 7%; yearly charges twelve monthly prices
-less 17%. Calculations round the final charge to USD cents and the UI shows both the charge and its
-monthly equivalent.
+(`MONTHLY`, `QUARTERLY`, or `YEARLY`) on the billing profile and subscription snapshot. Waflo's
+immutable Pricing Catalog owns the exact native-currency amount and cadence. GLOBAL is the
+deterministic fallback; a country receives a fixed regional amount only through an explicit market
+override. There is no FX-driven customer pricing.
 
-Stripe requires six external recurring Prices before quarterly/yearly checkout can be enabled:
+An authorized Admin creates a Waflo draft, validates it, and publishes it. Publishing creates or
+resolves the matching immutable Stripe Price, verifies its amount/currency/recurrence, and stores
+the binding internally. Operators never configure per-plan Stripe Price IDs in environment files.
+Existing subscribers retain their joined version; merchant plan changes use a durable
+provider-calculated preview before confirmation. Keep Customer Portal plan switching disabled:
+Waflo remains the commercial authority.
 
-- `STRIPE_STARTER_QUARTERLY_PRICE_ID`
-- `STRIPE_GROWTH_QUARTERLY_PRICE_ID`
-- `STRIPE_SCALE_QUARTERLY_PRICE_ID`
-- `STRIPE_STARTER_YEARLY_PRICE_ID`
-- `STRIPE_GROWTH_YEARLY_PRICE_ID`
-- `STRIPE_SCALE_YEARLY_PRICE_ID`
-
-Create each Price with the exact charge shown by Waflo for its tier/cadence and attach it to a
-customer-readable Product/line description such as `Waflo Starter — Quarterly`, then set the IDs
-in the staging or production application environment. Configure all three Prices in a cadence group;
-partial groups fail environment validation. No code path claims those cadences are available until
-the corresponding ID is configured. Keep Customer Portal plan switching disabled: plan changes go
-through Waflo's downgrade prerequisites. Provider webhooks also reject an invalid lower-tier
-transition instead of silently applying it.
-
-The single migration `20260812193000_staff_qr_billing_cadence` also adds the billing identity,
-authoritative invoice projection, durable billing-email outbox, dunning recovery state, and Staff
-interactive-login constraints required by this final pre-commit repair. It remains the only new
-migration; previously deployed migrations are not edited.
+The original billing-identity migration remains intact. Later catalog, subscription-preview,
+financial-evidence, and Admin migrations are additive; previously deployed migrations are not
+edited.
 
 ## Authoritative billing and customer identity
 

@@ -16,6 +16,7 @@ Copy `.env.example` to `.env`. Validation happens at API startup. Empty Stripe/S
 | `MARKETING_WEB_URL` | Yes | Public marketing origin |
 | `MERCHANT_DASHBOARD_URL` | Yes | Auth/action-link origin |
 | `CUSTOMER_WEB_URL` | Yes | Customer application origin |
+| `ADMIN_DASHBOARD_URL` | Yes | Internal Admin origin |
 | `API_PUBLIC_URL` | Yes | Browser/server API origin |
 | `ALLOWED_ORIGINS` | Yes | Comma-separated CORS/CSRF allowlist |
 | `COOKIE_SECURE`, `COOKIE_NAME` | Yes | Session-cookie policy |
@@ -27,7 +28,7 @@ Copy `.env.example` to `.env`. Validation happens at API startup. Empty Stripe/S
 | `SCALE_LOCATION_LIMIT`, `SCALE_TEAM_LIMIT` | Optional | Configurable Scale limits; blank means unspecified |
 | `STRIPE_SECRET_KEY` | Stripe | Stripe server key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe | Endpoint signing secret |
-| `STRIPE_*_MONTHLY_PRICE_ID` | Stripe | Starter/Growth/Scale recurring Price IDs |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe | Stripe browser key |
 | `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID` | Required with Stripe | Fixed Portal configuration with subscription price switching disabled for W1 |
 | `SENTRY_DSN` | Optional | Future error-monitoring adapter |
 | `LOG_LEVEL` | Yes | Structured API log level |
@@ -76,8 +77,11 @@ Local SMTP is `127.0.0.1:1025`; the mailbox UI is `http://localhost:8025`. Regis
 
 ## Stripe test mode
 
-1. In Stripe test mode create monthly USD Prices for Starter ($29), Growth ($69), and Scale ($129).
-2. Put the test secret key and Price IDs in `.env`.
+1. Configure test-mode Stripe server, publishable, webhook, and Portal values. Do not configure
+   customer price IDs in environment variables.
+2. Create and publish Waflo catalog drafts through protected Admin Pricing or the operator CLI.
+   Waflo creates/verifies the immutable Stripe Product/Price binding; administrators never enter a
+   Stripe Price ID as commercial input.
 3. Install/authenticate Stripe CLI.
 4. Run:
 
@@ -85,8 +89,16 @@ Local SMTP is `127.0.0.1:1025`; the mailbox UI is `http://localhost:8025`. Regis
    stripe listen --forward-to http://localhost:4000/v1/webhooks/stripe
    ```
 
-5. Copy the emitted `whsec_...` value to `STRIPE_WEBHOOK_SECRET`, restart the API, and use Checkout from the Owner billing screen.
-6. Trigger lifecycle events with Stripe CLI or complete a test Checkout. Re-delivering the same event must be idempotent.
+5. Copy the emitted `whsec_...` value to `STRIPE_WEBHOOK_SECRET`, restart the API, and use
+   Checkout from the Owner billing screen.
+6. Trigger lifecycle events with Stripe CLI or complete a test Checkout. Re-delivering the same
+   event must be idempotent. Required event coverage is maintained by Stripe Health and includes
+   the currently configured invoice, subscription, customer, and Checkout lifecycle events.
+
+For pre-catalog subscriptions, use the controlled sequence in
+`docs/billing-regional-pricing.md`: dry run `pnpm tsx scripts/bootstrap-legacy-stripe-pricing.mts`,
+then an approved TEST-mode `--write`, then replay. Bootstrap records exact historical bindings and
+snapshots only; it never updates a Stripe Subscription, invoice, or Price.
 
 Without credentials, billing pages remain usable and the API reports `STRIPE_NOT_CONFIGURED`; no fake session URL is returned.
 
@@ -106,7 +118,8 @@ http://today.lvh.me:3002
 http://alnahr.lvh.me:3002/?lang=ar
 ```
 
-Production requires wildcard DNS/TLS for `*.waflo.app` to the customer application and separate DNS/TLS for `waflo.app`, `app.waflo.app`, and `api.waflo.app`.
+Production requires wildcard DNS/TLS for `*.waflo.app` to the customer application and separate
+DNS/TLS for `waflo.app`, `app.waflo.app`, `admin.waflo.app`, and `api.waflo.app`.
 
 ## CI and test operation
 
@@ -128,7 +141,11 @@ pnpm db:validate
 
 ## Deployment assumptions
 
-Build and deploy the API and three Next.js applications as separate services from the same release. Run migrations before API traffic. Configure HTTPS-only origins and cookies, SMTP, PostgreSQL, Redis, Stripe, wildcard DNS/TLS, backups, and monitoring. There is no deployment manifest tied to a cloud vendor in W1.
+Build and deploy the API and four Next.js applications as separate services from the same release.
+Run migrations before API traffic. Configure HTTPS-only origins and cookies, SMTP, PostgreSQL,
+Redis, Stripe, wildcard DNS/TLS, backups, and monitoring. Route `admin.waflo.app` to the
+`admin-web` service according to the deployment runbook. There is no deployment manifest tied to a
+cloud vendor in W1.
 
 ## Troubleshooting
 
@@ -136,5 +153,6 @@ Build and deploy the API and three Next.js applications as separate services fro
 - Registration stalls/fails: verify Mailpit/SMTP is reachable at `127.0.0.1:1025`; SMTP has bounded connection/socket timeouts.
 - Login returns CSRF error: access the dashboard through its configured origin and include credentials; refresh to renew the CSRF token.
 - Customer page is 404: verify organization status/slug and use `?tenant=` or a valid `.localhost`/`.lvh.me` host.
-- Checkout unavailable: verify all three Price IDs, secret key, and webhook secret, then restart the API.
+- Checkout unavailable: verify the active Waflo PricingVersion has a matching Stripe binding, plus
+  the Stripe key and webhook secret, then restart the API.
 - Readiness fails: inspect PostgreSQL and Redis health with `docker compose ps`.

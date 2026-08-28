@@ -32,6 +32,7 @@ x-build: &application-build
     NEXT_PUBLIC_DASHBOARD_URL: "${NEXT_PUBLIC_DASHBOARD_URL:?NEXT_PUBLIC_DASHBOARD_URL is required}"
     NEXT_PUBLIC_MARKETING_URL: "${NEXT_PUBLIC_MARKETING_URL:?NEXT_PUBLIC_MARKETING_URL is required}"
     NEXT_PUBLIC_CUSTOMER_URL: "${NEXT_PUBLIC_CUSTOMER_URL:-}"
+    NEXT_PUBLIC_ADMIN_URL: "${NEXT_PUBLIC_ADMIN_URL:?NEXT_PUBLIC_ADMIN_URL is required}"
     NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: "${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN:-}"
 
 services:
@@ -287,6 +288,31 @@ services:
       app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
       app.waflo.release: "${RELEASE_SHA}"
 
+  admin-web:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-admin:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: admin-web
+    environment:
+      WAFLO_SERVICE: waflo-admin
+    networks: [edge]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/admin-dashboard/.next/cache:rw,noexec,nosuid,size=64m"
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3003/en/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    mem_limit: "${ADMIN_MEMORY_LIMIT:-288m}"
+    cpus: "${ADMIN_CPU_LIMIT:-0.50}"
+    labels:
+      app.waflo.service: admin-web
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
   marketing-web:
     <<: *application-runtime
     image: "${IMAGE_REGISTRY:-local}/waflo-marketing:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
@@ -389,6 +415,8 @@ services:
       merchant-web:
         condition: service_healthy
       customer-web:
+        condition: service_healthy
+      admin-web:
         condition: service_healthy
       marketing-web:
         condition: service_healthy

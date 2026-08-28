@@ -731,6 +731,25 @@ export function formatPlanPrice(plan: PlanCode): string {
   }).format(planCatalog[plan].monthlyPriceUsd);
 }
 
+/** Formats persisted minor units; never assumes currencies have two decimals. */
+export function formatMoney(
+  amountMinor: bigint | number,
+  currency: string,
+  locale: "en" | "ar" = "en",
+): string {
+  const normalized = currency.toUpperCase();
+  const digits =
+    new Intl.NumberFormat(locale === "ar" ? "ar" : "en-US", {
+      style: "currency",
+      currency: normalized,
+    }).resolvedOptions().maximumFractionDigits ?? 2;
+  const amount = Number(amountMinor) / 10 ** digits;
+  return new Intl.NumberFormat(locale === "ar" ? "ar" : "en-US", {
+    style: "currency",
+    currency: normalized,
+  }).format(amount);
+}
+
 export interface TrialState {
   readonly status: BillingStatus;
   readonly started: boolean;

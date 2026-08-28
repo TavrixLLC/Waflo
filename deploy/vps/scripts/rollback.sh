@@ -26,7 +26,7 @@ printf 'Rolling application images back to %s; no database rollback will run.\n'
 compose config --quiet
 compose pull --policy always "${APPLICATION_SERVICES[@]}"
 compose up -d --no-build --wait --wait-timeout 240 \
-  api merchant-web customer-web marketing-web operational-worker wallet-worker cloudflared
+  api merchant-web customer-web admin-web marketing-web operational-worker wallet-worker cloudflared
 compose exec -T api node -e \
   "fetch('http://127.0.0.1:4000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 assert_public_health

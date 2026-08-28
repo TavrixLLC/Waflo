@@ -44,6 +44,7 @@ function render(environment) {
   const apiOrigin = staging ? "https://api-staging.waflo.app" : "https://api.waflo.app";
   const customerOrigin = staging ? "https://card-staging.waflo.app" : "https://card.waflo.app";
   const marketingOrigin = staging ? "https://staging.waflo.app" : "https://waflo.app";
+  const adminOrigin = staging ? "https://admin.staging.waflo.app" : "https://admin.waflo.app";
   const applicationEnvironment = join(scratch, `application-${environment}.env`);
   const secretEnvironment = join(scratch, `application-${environment}.secret.env`);
   writeFileSync(
@@ -53,6 +54,7 @@ function render(environment) {
       `DEPLOYMENT_ENVIRONMENT=${environment}`,
       "SUPPORT_EMAIL=support@example.invalid",
       `LEGAL_EFFECTIVE_DATE=${staging ? "" : "2026-08-10"}`,
+      `ADMIN_DASHBOARD_URL=${adminOrigin}`,
       "GOOGLE_WALLET_MODE=REAL",
       "GOOGLE_WALLET_ISSUER_ID=1234567890123456789",
       "GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64=/run/waflo-provider-secrets/google-wallet-service-account.json",
@@ -67,15 +69,6 @@ function render(environment) {
       `APPLE_PASS_WEB_SERVICE_URL=${apiOrigin}/v1/apple-wallet`,
       "APPLE_APNS_ENVIRONMENT=production",
       `STRIPE_PUBLISHABLE_KEY=${staging ? "pk_test_dummy" : "pk_live_dummy"}`,
-      "STRIPE_STARTER_MONTHLY_PRICE_ID=price_dummy_starter",
-      "STRIPE_GROWTH_MONTHLY_PRICE_ID=price_dummy_growth",
-      "STRIPE_SCALE_MONTHLY_PRICE_ID=price_dummy_scale",
-      "STRIPE_STARTER_QUARTERLY_PRICE_ID=price_dummy_starter_quarterly",
-      "STRIPE_GROWTH_QUARTERLY_PRICE_ID=price_dummy_growth_quarterly",
-      "STRIPE_SCALE_QUARTERLY_PRICE_ID=price_dummy_scale_quarterly",
-      "STRIPE_STARTER_YEARLY_PRICE_ID=price_dummy_starter_yearly",
-      "STRIPE_GROWTH_YEARLY_PRICE_ID=price_dummy_growth_yearly",
-      "STRIPE_SCALE_YEARLY_PRICE_ID=price_dummy_scale_yearly",
       "STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID=bpc_dummy",
       "",
     ].join("\n"),
@@ -118,6 +111,7 @@ function render(environment) {
     NEXT_PUBLIC_DASHBOARD_URL: staging ? "https://app-staging.waflo.app" : "https://app.waflo.app",
     NEXT_PUBLIC_MARKETING_URL: marketingOrigin,
     NEXT_PUBLIC_CUSTOMER_URL: customerOrigin,
+    NEXT_PUBLIC_ADMIN_URL: adminOrigin,
     NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: "pk.compose_validation.public",
   };
   const result = spawnSync(
@@ -179,7 +173,7 @@ for (const environment of ["staging", "production"]) {
   if (!model.services.api.image.includes("4357675fad87bc8371e7832b6c0beee22b5caf61")) {
     throw new Error("The release SHA is missing from application image identity.");
   }
-  for (const serviceName of ["merchant-web", "customer-web", "marketing-web"]) {
+  for (const serviceName of ["merchant-web", "customer-web", "admin-web", "marketing-web"]) {
     if (model.services[serviceName].build?.args?.DEPLOYMENT_ENVIRONMENT !== environment) {
       throw new Error(`${serviceName} did not receive the environment-qualified Web build flag.`);
     }
@@ -189,6 +183,14 @@ for (const environment of ["staging", "production"]) {
     "pk.compose_validation.public"
   ) {
     throw new Error("merchant-web did not receive a valid public Mapbox build token.");
+  }
+  const expectedAdminOrigin =
+    environment === "staging" ? "https://admin.staging.waflo.app" : "https://admin.waflo.app";
+  if (
+    model.services["admin-web"].build?.args?.NEXT_PUBLIC_ADMIN_URL !== expectedAdminOrigin ||
+    model.services["admin-web"].environment?.ADMIN_DASHBOARD_URL !== expectedAdminOrigin
+  ) {
+    throw new Error("admin-web did not receive the environment-qualified Admin URL contract.");
   }
   if (model.services.cloudflared.environment?.TUNNEL_TOKEN) {
     throw new Error("Cloudflare token must not be an environment value.");
@@ -224,6 +226,7 @@ for (const environment of ["staging", "production"]) {
   for (const serviceName of [
     "merchant-web",
     "customer-web",
+    "admin-web",
     "marketing-web",
     "operational-worker",
   ]) {

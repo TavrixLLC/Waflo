@@ -11,13 +11,13 @@
   "labelColor": "rgb(36,25,22)",
   "generic": {
     "headerFields": [{ "key": "progress", "label": "STAMPS", "value": "0/8" }],
-    "primaryFields": [{ "key": "program", "value": "Loyalty program" }],
-    "secondaryFields": [{ "key": "member", "label": "MEMBER", "value": "Member" }],
+    "primaryFields": [{ "key": "reward", "label": "REWARD", "value": "Reward" }],
+    "secondaryFields": [{ "key": "program", "label": "PROGRAM", "value": "Loyalty program" }],
     "auxiliaryFields": [
+      { "key": "member", "label": "MEMBER", "value": "Member" },
       { "key": "status", "label": "STATUS", "value": "Active", "changeMessage": "%@" }
     ],
     "backFields": [
-      { "key": "reward", "label": "REWARD", "value": "Reward" },
       {
         "key": "security",
         "label": "SECURITY",

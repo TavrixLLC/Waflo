@@ -1,22 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { hashPassword } from "../../packages/auth/src/index.js";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AuditService } from "../../apps/api/src/audit/audit.service.js";
 import {
   BillingService,
   type StripeSubscriptionProvider,
 } from "../../apps/api/src/billing/billing.service.js";
+import { PricingCatalogService } from "../../apps/api/src/billing/pricing-catalog.service.js";
 import type { WafloRequest } from "../../apps/api/src/common/request-context.js";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import type { NotificationService } from "../../apps/api/src/notifications/notification.service.js";
 import { TenantService } from "../../apps/api/src/tenancy/tenant.service.js";
 import { OperationalWorker } from "../../apps/operational-worker/src/main.js";
+import { hashPassword } from "../../packages/auth/src/index.js";
 
 const PRICE_STARTER = "price_reconcile_starter";
 const PRICE_GROWTH = "price_reconcile_growth";
 const PRICE_SCALE = "price_reconcile_scale";
+const priceTerms = {
+  [PRICE_STARTER]: { plan: "STARTER", amountMinor: 1900 },
+  [PRICE_GROWTH]: { plan: "GROWTH", amountMinor: 2900 },
+  [PRICE_SCALE]: { plan: "SCALE", amountMinor: 9900 },
+} as const;
 
 describe.sequential("production Stripe subscription reconciliation", () => {
   let prisma: PrismaService;
@@ -64,6 +70,45 @@ describe.sequential("production Stripe subscription reconciliation", () => {
     );
     ownerId = owner.id;
     outsiderId = outsider.id;
+
+    const global = await prisma.client.pricingMarket.upsert({
+      where: { code: "GLOBAL" },
+      update: { active: true, configuredCurrency: "USD" },
+      create: {
+        code: "GLOBAL",
+        kind: "GLOBAL",
+        configuredCurrency: "USD",
+        active: true,
+      },
+    });
+    await Promise.all(
+      Object.entries(priceTerms).map(([stripePriceId, terms]) =>
+        prisma.client.pricingVersion.upsert({
+          where: {
+            marketId_planCode_cadence_version: {
+              marketId: global.id,
+              planCode: terms.plan,
+              cadence: "MONTHLY",
+              version: 1,
+            },
+          },
+          update: { stripePriceId, amountMinor: terms.amountMinor, currency: "USD" },
+          create: {
+            marketId: global.id,
+            planCode: terms.plan,
+            cadence: "MONTHLY",
+            version: 1,
+            currency: "USD",
+            amountMinor: terms.amountMinor,
+            status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+            stripeProductId: `prod_reconcile_${terms.plan.toLowerCase()}`,
+            stripePriceId,
+            stripeBindingKey: `reconcile:${terms.plan.toLowerCase()}:monthly:v1`,
+            publishedAt: new Date(),
+          },
+        }),
+      ),
+    );
   });
 
   afterAll(async () => prisma.onModuleDestroy());
@@ -107,6 +152,7 @@ describe.sequential("production Stripe subscription reconciliation", () => {
     plan = "growth",
   ) {
     const now = Math.floor(Date.now() / 1000);
+    const terms = priceTerms[priceId as keyof typeof priceTerms] ?? priceTerms[PRICE_GROWTH];
     return {
       id: input.subscriptionId,
       object: "subscription",
@@ -121,7 +167,11 @@ describe.sequential("production Stripe subscription reconciliation", () => {
           {
             id: `si_${input.subscriptionId}`,
             object: "subscription_item",
-            price: { id: priceId } as Stripe.Price,
+            price: {
+              id: priceId,
+              currency: "usd",
+              unit_amount: terms.amountMinor,
+            } as Stripe.Price,
             current_period_start: now - 60,
             current_period_end: now + 86_400,
           } as Stripe.SubscriptionItem,
@@ -134,7 +184,14 @@ describe.sequential("production Stripe subscription reconciliation", () => {
 
   function service(provider: StripeSubscriptionProvider) {
     const notifications = { send: vi.fn(async () => undefined) } as unknown as NotificationService;
-    const billing = new BillingService(prisma, environment, tenant, audit, notifications);
+    const billing = new BillingService(
+      prisma,
+      environment,
+      tenant,
+      audit,
+      notifications,
+      new PricingCatalogService(prisma, environment),
+    );
     billing.subscriptionProvider = provider;
     return billing;
   }

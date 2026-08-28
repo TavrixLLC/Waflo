@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
+const optionalPositiveInteger = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.coerce.number().int().positive().optional(),
+);
 const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
 const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
@@ -57,6 +61,7 @@ export const environmentSchema = z
     MARKETING_WEB_URL: z.url().default("http://localhost:3000"),
     MERCHANT_DASHBOARD_URL: z.url().default("http://localhost:3001"),
     CUSTOMER_WEB_URL: z.url().default("http://localhost:3002"),
+    ADMIN_DASHBOARD_URL: z.url().default("http://localhost:3003"),
     API_PUBLIC_URL: z.url().default("http://localhost:4000"),
     OBJECT_STORAGE_ENDPOINT: z.url().default("http://127.0.0.1:9000"),
     OBJECT_STORAGE_REGION: z.string().min(1).default("us-east-1"),
@@ -71,7 +76,9 @@ export const environmentSchema = z
       .default("waflo-local-signing-secret-change-before-production"),
     ALLOWED_ORIGINS: z
       .string()
-      .default("http://localhost:3000,http://localhost:3001,http://localhost:3002"),
+      .default(
+        "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003",
+      ),
     COOKIE_SECURE: z.stringbool().default(false),
     COOKIE_SAME_SITE: z.enum(["LAX", "NONE"]).default("LAX"),
     COOKIE_NAME: z.string().min(1).default("waflo_session"),
@@ -79,6 +86,9 @@ export const environmentSchema = z
     SESSION_IDLE_TTL_MINUTES: z.coerce.number().int().min(15).max(43_200).default(1_440),
     CUSTOMER_COOKIE_NAME: z.string().min(1).default("waflo_customer"),
     CUSTOMER_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(90),
+    ADMIN_COOKIE_NAME: z.string().min(1).default("waflo_admin_session"),
+    ADMIN_SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(8),
+    ADMIN_SESSION_IDLE_TTL_MINUTES: z.coerce.number().int().min(5).max(1_440).default(60),
     CUSTOMER_DATA_ENCRYPTION_KEY_V1: z
       .string()
       .min(32)
@@ -165,20 +175,11 @@ export const environmentSchema = z
     EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION: z.coerce.number().int().min(1).default(1),
     EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON: z.string().optional(),
     MERCHANT_BASE_DOMAIN: z.string().min(3).default("waflo.app"),
-    SCALE_LOCATION_LIMIT: z.coerce.number().int().positive().optional(),
-    SCALE_TEAM_LIMIT: z.coerce.number().int().positive().optional(),
+    SCALE_LOCATION_LIMIT: optionalPositiveInteger,
+    SCALE_TEAM_LIMIT: optionalPositiveInteger,
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_PUBLISHABLE_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
-    STRIPE_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
-    STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
-    STRIPE_SCALE_MONTHLY_PRICE_ID: z.string().optional(),
-    STRIPE_STARTER_QUARTERLY_PRICE_ID: z.string().optional(),
-    STRIPE_GROWTH_QUARTERLY_PRICE_ID: z.string().optional(),
-    STRIPE_SCALE_QUARTERLY_PRICE_ID: z.string().optional(),
-    STRIPE_STARTER_YEARLY_PRICE_ID: z.string().optional(),
-    STRIPE_GROWTH_YEARLY_PRICE_ID: z.string().optional(),
-    STRIPE_SCALE_YEARLY_PRICE_ID: z.string().optional(),
     STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID: z.string().optional(),
     STRIPE_RECONCILIATION_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
     STRIPE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
@@ -243,49 +244,6 @@ export const environmentSchema = z
         path: ["NODE_ENV"],
         message: "Staging and production must run optimized production builds.",
       });
-    }
-    const quarterlyPrices = [
-      value.STRIPE_STARTER_QUARTERLY_PRICE_ID,
-      value.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
-      value.STRIPE_SCALE_QUARTERLY_PRICE_ID,
-    ];
-    const yearlyPrices = [
-      value.STRIPE_STARTER_YEARLY_PRICE_ID,
-      value.STRIPE_GROWTH_YEARLY_PRICE_ID,
-      value.STRIPE_SCALE_YEARLY_PRICE_ID,
-    ];
-    if (quarterlyPrices.some(Boolean) && !quarterlyPrices.every(Boolean)) {
-      context.addIssue({
-        code: "custom",
-        path: ["STRIPE_STARTER_QUARTERLY_PRICE_ID"],
-        message: "All three quarterly Stripe Price IDs must be complete or absent.",
-      });
-    }
-    if (yearlyPrices.some(Boolean) && !yearlyPrices.every(Boolean)) {
-      context.addIssue({
-        code: "custom",
-        path: ["STRIPE_STARTER_YEARLY_PRICE_ID"],
-        message: "All three yearly Stripe Price IDs must be complete or absent.",
-      });
-    }
-    for (const key of [
-      "STRIPE_STARTER_MONTHLY_PRICE_ID",
-      "STRIPE_GROWTH_MONTHLY_PRICE_ID",
-      "STRIPE_SCALE_MONTHLY_PRICE_ID",
-      "STRIPE_STARTER_QUARTERLY_PRICE_ID",
-      "STRIPE_GROWTH_QUARTERLY_PRICE_ID",
-      "STRIPE_SCALE_QUARTERLY_PRICE_ID",
-      "STRIPE_STARTER_YEARLY_PRICE_ID",
-      "STRIPE_GROWTH_YEARLY_PRICE_ID",
-      "STRIPE_SCALE_YEARLY_PRICE_ID",
-    ] as const) {
-      if (value[key] && !/^price_[A-Za-z0-9][A-Za-z0-9_]*$/.test(value[key])) {
-        context.addIssue({
-          code: "custom",
-          path: [key],
-          message: "Stripe billing plans require Price IDs in price_ format.",
-        });
-      }
     }
     if (!deployed) return;
     if (value.COOKIE_SAME_SITE === "NONE" && !value.COOKIE_SECURE) {
@@ -406,6 +364,13 @@ export const environmentSchema = z
         code: "custom",
         path: ["CUSTOMER_COOKIE_NAME"],
         message: "Staging and production must use the __Host-waflo_customer cookie.",
+      });
+    }
+    if (value.ADMIN_COOKIE_NAME !== "__Host-waflo_admin_session") {
+      context.addIssue({
+        code: "custom",
+        path: ["ADMIN_COOKIE_NAME"],
+        message: "Staging and production must use the __Host-waflo_admin_session cookie.",
       });
     }
     const unsafeW3Secrets = [
@@ -600,6 +565,7 @@ export const environmentSchema = z
       "MARKETING_WEB_URL",
       "MERCHANT_DASHBOARD_URL",
       "CUSTOMER_WEB_URL",
+      "ADMIN_DASHBOARD_URL",
       "API_PUBLIC_URL",
       "WALLET_PUBLIC_BASE_URL",
     ] as const) {
@@ -617,6 +583,7 @@ export const environmentSchema = z
             MARKETING_WEB_URL: "https://staging.waflo.app",
             MERCHANT_DASHBOARD_URL: "https://app-staging.waflo.app",
             CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+            ADMIN_DASHBOARD_URL: "https://admin.staging.waflo.app",
             API_PUBLIC_URL: "https://api-staging.waflo.app",
             WALLET_PUBLIC_BASE_URL: "https://api-staging.waflo.app/v1/public/wallet-assets",
           }
@@ -624,6 +591,7 @@ export const environmentSchema = z
             MARKETING_WEB_URL: "https://waflo.app",
             MERCHANT_DASHBOARD_URL: "https://app.waflo.app",
             CUSTOMER_WEB_URL: "https://card.waflo.app",
+            ADMIN_DASHBOARD_URL: "https://admin.waflo.app",
             API_PUBLIC_URL: "https://api.waflo.app",
             WALLET_PUBLIC_BASE_URL: "https://api.waflo.app/v1/public/wallet-assets",
           };
@@ -661,9 +629,9 @@ export const environmentSchema = z
         message: "Google Wallet public assets must use the authoritative API origin.",
       });
     }
-    const googleWalletOrigins = value.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",").map((origin) =>
-      origin.trim(),
-    );
+    const googleWalletOrigins = value.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
     if (
       googleWalletOrigins.length !== 1 ||
       googleWalletOrigins[0] !== new URL(publicAuthority.CUSTOMER_WEB_URL).origin
@@ -707,14 +675,17 @@ export const environmentSchema = z
       new URL(value.MARKETING_WEB_URL).origin,
       new URL(value.MERCHANT_DASHBOARD_URL).origin,
       new URL(value.CUSTOMER_WEB_URL).origin,
+      new URL(value.ADMIN_DASHBOARD_URL).origin,
     ]);
     if (value.DEPLOYMENT_ENVIRONMENT === "production") {
       const marketing = new URL(value.MARKETING_WEB_URL);
       if (marketing.hostname === "waflo.app") exactOrigins.add("https://www.waflo.app");
     }
     if (
+      origins.length !== exactOrigins.size ||
       origins.some((origin) => !exactOrigins.has(origin)) ||
-      origins.length !== new Set(origins).size
+      origins.length !== new Set(origins).size ||
+      [...exactOrigins].some((origin) => !origins.includes(origin))
     ) {
       context.addIssue({
         code: "custom",
@@ -757,22 +728,13 @@ export const environmentSchema = z
       value.STRIPE_SECRET_KEY,
       value.STRIPE_PUBLISHABLE_KEY,
       value.STRIPE_WEBHOOK_SECRET,
-      value.STRIPE_STARTER_MONTHLY_PRICE_ID,
-      value.STRIPE_GROWTH_MONTHLY_PRICE_ID,
-      value.STRIPE_SCALE_MONTHLY_PRICE_ID,
-      value.STRIPE_STARTER_QUARTERLY_PRICE_ID,
-      value.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
-      value.STRIPE_SCALE_QUARTERLY_PRICE_ID,
-      value.STRIPE_STARTER_YEARLY_PRICE_ID,
-      value.STRIPE_GROWTH_YEARLY_PRICE_ID,
-      value.STRIPE_SCALE_YEARLY_PRICE_ID,
     ];
     if (stripeCore.some(Boolean) && !stripeCore.every(Boolean)) {
       context.addIssue({
         code: "custom",
         path: ["STRIPE_SECRET_KEY"],
         message:
-          "Stripe secret and publishable keys, webhook secret, and all nine Price IDs must be complete or absent.",
+          "Stripe secret and publishable keys and webhook secret must be complete or absent.",
       });
     }
     if (
@@ -873,11 +835,13 @@ export const platformDomains = {
   marketing: "waflo.app",
   dashboard: "app.waflo.app",
   customer: "card.waflo.app",
+  admin: "admin.waflo.app",
   api: "api.waflo.app",
   staging: {
     marketing: "staging.waflo.app",
     dashboard: "app-staging.waflo.app",
     customer: "card-staging.waflo.app",
+    admin: "admin.staging.waflo.app",
     api: "api-staging.waflo.app",
   },
 } as const;

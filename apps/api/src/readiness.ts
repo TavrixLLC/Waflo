@@ -6,9 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { cadencePrice } from "@waflo/billing";
 import { parseEnvironment } from "@waflo/config";
-import type { BillingCadence, PlanCode } from "@waflo/contracts";
 import { Redis } from "ioredis";
 import Stripe from "stripe";
 import { createApiApplication } from "./app.js";
@@ -124,42 +122,6 @@ async function main() {
     environment.STRIPE_SECRET_KEY,
     environment.STRIPE_PUBLISHABLE_KEY,
     environment.STRIPE_WEBHOOK_SECRET,
-    environment.STRIPE_STARTER_MONTHLY_PRICE_ID,
-    environment.STRIPE_GROWTH_MONTHLY_PRICE_ID,
-    environment.STRIPE_SCALE_MONTHLY_PRICE_ID,
-    environment.STRIPE_STARTER_QUARTERLY_PRICE_ID,
-    environment.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
-    environment.STRIPE_SCALE_QUARTERLY_PRICE_ID,
-    environment.STRIPE_STARTER_YEARLY_PRICE_ID,
-    environment.STRIPE_GROWTH_YEARLY_PRICE_ID,
-    environment.STRIPE_SCALE_YEARLY_PRICE_ID,
-  ];
-  const stripePrices: ReadonlyArray<{
-    plan: PlanCode;
-    cadence: BillingCadence;
-    id: string | undefined;
-  }> = [
-    { plan: "starter", cadence: "monthly", id: environment.STRIPE_STARTER_MONTHLY_PRICE_ID },
-    { plan: "growth", cadence: "monthly", id: environment.STRIPE_GROWTH_MONTHLY_PRICE_ID },
-    { plan: "scale", cadence: "monthly", id: environment.STRIPE_SCALE_MONTHLY_PRICE_ID },
-    {
-      plan: "starter",
-      cadence: "quarterly",
-      id: environment.STRIPE_STARTER_QUARTERLY_PRICE_ID,
-    },
-    {
-      plan: "growth",
-      cadence: "quarterly",
-      id: environment.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
-    },
-    {
-      plan: "scale",
-      cadence: "quarterly",
-      id: environment.STRIPE_SCALE_QUARTERLY_PRICE_ID,
-    },
-    { plan: "starter", cadence: "yearly", id: environment.STRIPE_STARTER_YEARLY_PRICE_ID },
-    { plan: "growth", cadence: "yearly", id: environment.STRIPE_GROWTH_YEARLY_PRICE_ID },
-    { plan: "scale", cadence: "yearly", id: environment.STRIPE_SCALE_YEARLY_PRICE_ID },
   ];
   const stripeStatus = async (): Promise<ComponentResult> => {
     if (!stripeConfiguration.some(Boolean)) return { status: "DISABLED" };
@@ -167,31 +129,17 @@ async function main() {
     try {
       const stripe = new Stripe(environment.STRIPE_SECRET_KEY as string);
       await stripe.balance.retrieve();
-      for (const configured of stripePrices) {
-        if (!configured.id) return { status: "CONFIG_MISSING" };
-        const price = await stripe.prices.retrieve(configured.id);
-        const expectedAmount = Math.round(
-          cadencePrice(configured.plan, configured.cadence).billedAmountUsd * 100,
-        );
-        const expectedInterval = configured.cadence === "yearly" ? "year" : "month";
-        const expectedIntervalCount = configured.cadence === "quarterly" ? 3 : 1;
-        if (
-          !price.active ||
-          price.type !== "recurring" ||
-          price.unit_amount !== expectedAmount ||
-          price.currency.toLocaleLowerCase("en-US") !== "usd" ||
-          price.recurring?.interval !== expectedInterval ||
-          price.recurring.interval_count !== expectedIntervalCount
-        ) {
-          return {
-            status: "INVALID_CONFIG",
-            metadata: {
-              mode: environment.DEPLOYMENT_ENVIRONMENT === "production" ? "LIVE" : "TEST",
-              invalidCatalogEntry: `${configured.plan}:${configured.cadence}`,
-            },
-          };
-        }
-      }
+      const unpublishedCatalogCount = await prisma.client.pricingVersion.count({
+        where: { status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS", stripePriceId: null },
+      });
+      if (unpublishedCatalogCount > 0)
+        return {
+          status: "INVALID_CONFIG",
+          metadata: {
+            mode: environment.DEPLOYMENT_ENVIRONMENT === "production" ? "LIVE" : "TEST",
+            unpublishedCatalogCount,
+          },
+        };
       return {
         status: "READY",
         metadata: {

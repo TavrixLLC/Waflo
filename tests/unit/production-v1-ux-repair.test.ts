@@ -161,51 +161,19 @@ describe("production-v1 UX and billing repair", () => {
     expect(cadencePrice("scale", "yearly").billedAmountUsd).toBe(1290);
   });
 
-  it("keeps monthly bootable without cadence IDs and rejects partial cadence groups", () => {
-    const monthly = {
+  it("keeps Stripe Price IDs out of environment pricing authority", () => {
+    const stripeConfiguration = {
       NODE_ENV: "test",
       STRIPE_SECRET_KEY: "sk_test_monthly",
+      STRIPE_PUBLISHABLE_KEY: "pk_test_monthly",
       STRIPE_WEBHOOK_SECRET: "whsec_monthly",
-      STRIPE_STARTER_MONTHLY_PRICE_ID: "price_monthly_starter",
-      STRIPE_GROWTH_MONTHLY_PRICE_ID: "price_monthly_growth",
-      STRIPE_SCALE_MONTHLY_PRICE_ID: "price_monthly_scale",
     };
-    expect(parseEnvironment(monthly).STRIPE_STARTER_QUARTERLY_PRICE_ID).toBeUndefined();
-    expect(() =>
-      parseEnvironment({
-        ...monthly,
-        STRIPE_STARTER_QUARTERLY_PRICE_ID: "price_quarterly_starter",
-      }),
-    ).toThrow("Invalid Waflo environment configuration");
-    expect(() =>
-      parseEnvironment({
-        ...monthly,
-        STRIPE_STARTER_YEARLY_PRICE_ID: "price_yearly_starter",
-        STRIPE_GROWTH_YEARLY_PRICE_ID: "price_yearly_growth",
-      }),
-    ).toThrow("Invalid Waflo environment configuration");
-    expect(
-      parseEnvironment({
-        ...monthly,
-        STRIPE_STARTER_QUARTERLY_PRICE_ID: "price_quarterly_starter",
-        STRIPE_GROWTH_QUARTERLY_PRICE_ID: "price_quarterly_growth",
-        STRIPE_SCALE_QUARTERLY_PRICE_ID: "price_quarterly_scale",
-      }).STRIPE_SCALE_QUARTERLY_PRICE_ID,
-    ).toBe("price_quarterly_scale");
-    expect(
-      parseEnvironment({
-        ...monthly,
-        STRIPE_STARTER_YEARLY_PRICE_ID: "price_yearly_starter",
-        STRIPE_GROWTH_YEARLY_PRICE_ID: "price_yearly_growth",
-        STRIPE_SCALE_YEARLY_PRICE_ID: "price_yearly_scale",
-      }).STRIPE_SCALE_YEARLY_PRICE_ID,
-    ).toBe("price_yearly_scale");
-    expect(() =>
-      parseEnvironment({
-        ...monthly,
-        STRIPE_STARTER_MONTHLY_PRICE_ID: "prod_not_a_price",
-      }),
-    ).toThrow("Invalid Waflo environment configuration");
+    const parsed = parseEnvironment({
+      ...stripeConfiguration,
+      STRIPE_STARTER_MONTHLY_PRICE_ID: "price_not_pricing_authority",
+    });
+    expect("STRIPE_STARTER_MONTHLY_PRICE_ID" in parsed).toBe(false);
+    expect(parsed.STRIPE_SECRET_KEY).toBe(stripeConfiguration.STRIPE_SECRET_KEY);
   });
 
   it("uses complete canonical ISO countries and runtime IANA timezones", () => {

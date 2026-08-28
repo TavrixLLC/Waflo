@@ -470,7 +470,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     expect((await auth.me(ownerId)).lastSelectedOrganizationId).toBe(organizationBId);
   });
 
-  it("requires an active 7-day trial before completing onboarding", async () => {
+  it("requires an active 15-day trial before completing onboarding", async () => {
     const location = await locations.create(
       ownerId,
       organizationAId,
@@ -485,7 +485,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
       organizations.completeOnboarding(ownerId, organizationAId, request),
     ).rejects.toMatchObject({ code: "BILLING_ACTIVATION_REQUIRED" });
     const trialStart = new Date();
-    const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const trialEnd = new Date(trialStart.getTime() + 15 * 24 * 60 * 60 * 1000);
     await prisma.client.organizationBillingProfile.update({
       where: { organizationId: organizationAId },
       data: {
@@ -507,7 +507,7 @@ describe.sequential("Waflo W1 service and database integration", () => {
     expect(
       (complete.billingProfile?.trialEnd?.getTime() ?? 0) -
         (complete.billingProfile?.trialStart?.getTime() ?? 0),
-    ).toBe(7 * 24 * 60 * 60 * 1000);
+    ).toBe(15 * 24 * 60 * 60 * 1000);
   });
 
   it("enforces the Starter active-location limit", async () => {
@@ -960,13 +960,13 @@ describe.sequential("Waflo W1 service and database integration", () => {
     });
   });
 
-  it("authorizes billing reads for Owners and reports the active 7-day trial", async () => {
+  it("authorizes billing reads for Owners and reports the active 15-day trial", async () => {
     const state = await billing.get(ownerId, organizationAId);
     expect(state.profile).toMatchObject({
       subscriptionStatus: "TRIALING",
     });
     expect(state.trialPolicy).toEqual({
-      durationDays: 7,
+      durationDays: 15,
       startsOnFirstProgramPublication: false,
       paymentMethodRequired: true,
     });

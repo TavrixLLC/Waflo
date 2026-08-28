@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { parseEnvironment, type Environment } from "@waflo/config";
+import { type Environment, parseEnvironment } from "@waflo/config";
 
 @Injectable()
 export class EnvironmentService {
@@ -17,14 +17,16 @@ export class EnvironmentService {
       : "waflo_customer_csrf";
   }
 
+  get adminCsrfCookieName(): string {
+    return this.values.NODE_ENV === "production" ? "__Host-waflo_admin_csrf" : "waflo_admin_csrf";
+  }
+
+  get adminOrigin(): string {
+    return new URL(this.values.ADMIN_DASHBOARD_URL).origin;
+  }
+
   get stripeConfigured(): boolean {
-    return Boolean(
-      this.values.STRIPE_SECRET_KEY &&
-        this.values.STRIPE_WEBHOOK_SECRET &&
-        this.values.STRIPE_STARTER_MONTHLY_PRICE_ID &&
-        this.values.STRIPE_GROWTH_MONTHLY_PRICE_ID &&
-        this.values.STRIPE_SCALE_MONTHLY_PRICE_ID,
-    );
+    return Boolean(this.values.STRIPE_SECRET_KEY && this.values.STRIPE_WEBHOOK_SECRET);
   }
 
   get trustedProxies(): readonly string[] {

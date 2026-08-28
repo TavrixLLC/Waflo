@@ -34,9 +34,11 @@ group "release" {
     "wallet-worker",
     "merchant-staging",
     "customer-staging",
+    "admin-staging",
     "marketing-staging",
     "merchant-production",
     "customer-production",
+    "admin-production",
     "marketing-production",
   ]
 }
@@ -70,6 +72,7 @@ target "_production-build" {
     NEXT_PUBLIC_DASHBOARD_URL       = "https://app.waflo.app"
     NEXT_PUBLIC_MARKETING_URL       = "https://waflo.app"
     NEXT_PUBLIC_CUSTOMER_URL        = "https://card.waflo.app"
+    NEXT_PUBLIC_ADMIN_URL           = "https://admin.waflo.app"
     NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN = MAPBOX_PRODUCTION_PUBLIC_TOKEN
   }
 }
@@ -87,6 +90,7 @@ target "_staging-build" {
     NEXT_PUBLIC_DASHBOARD_URL       = "https://app-staging.waflo.app"
     NEXT_PUBLIC_MARKETING_URL       = "https://staging.waflo.app"
     NEXT_PUBLIC_CUSTOMER_URL        = "https://card-staging.waflo.app"
+    NEXT_PUBLIC_ADMIN_URL           = "https://admin.staging.waflo.app"
     NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN = MAPBOX_STAGING_PUBLIC_TOKEN
   }
 }
@@ -141,6 +145,12 @@ target "customer-staging" {
   tags     = ["${IMAGE_REGISTRY}/waflo-customer:${RELEASE_SHA}-staging"]
 }
 
+target "admin-staging" {
+  inherits = ["_staging-build"]
+  target   = "admin-web"
+  tags     = ["${IMAGE_REGISTRY}/waflo-admin:${RELEASE_SHA}-staging"]
+}
+
 target "marketing-staging" {
   inherits = ["_staging-build"]
   target   = "marketing-web"
@@ -157,6 +167,12 @@ target "customer-production" {
   inherits = ["_production-build"]
   target   = "customer-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-customer:${RELEASE_SHA}-production"]
+}
+
+target "admin-production" {
+  inherits = ["_production-build"]
+  target   = "admin-web"
+  tags     = ["${IMAGE_REGISTRY}/waflo-admin:${RELEASE_SHA}-production"]
 }
 
 target "marketing-production" {

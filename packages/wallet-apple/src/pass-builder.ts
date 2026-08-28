@@ -102,12 +102,55 @@ function membershipStatus(input: WalletMembershipInput): string {
   return "Active";
 }
 
+/**
+ * Native field hierarchy for the iOS 26-and-earlier Generic/Store Card face.
+ *
+ * Keep merchant identity in logoText, reserve the compact header tier for
+ * progress, and make the approved reward the primary front-facing value. The
+ * Poster Generic mapping intentionally does not consume this helper.
+ */
+export function mapLegacyApplePresentation(input: WalletMembershipInput): ApplePassFields {
+  return {
+    headerFields: [
+      {
+        key: "progress",
+        label: "STAMPS",
+        value: `${input.currentStampCount}/${input.requiredStampCount}`,
+      },
+    ],
+    primaryFields: [{ key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) }],
+    secondaryFields: [{ key: "program", label: "PROGRAM", value: input.programName.slice(0, 80) }],
+    auxiliaryFields: [
+      { key: "member", label: "MEMBER", value: input.displayName.slice(0, 80) },
+      {
+        key: "status",
+        label: "STATUS",
+        value: membershipStatus(input),
+        changeMessage: "%@",
+      },
+    ],
+    backFields: [
+      {
+        key: "security",
+        label: "SECURITY",
+        value:
+          "This QR is an opaque, revocable Waflo membership credential. Do not share screenshots.",
+      },
+      {
+        key: "operator",
+        label: "WAFLO",
+        value: "Waflo is owned and operated by Tavrix LLC.",
+      },
+    ],
+  };
+}
+
 export function mapAppleGenericPass(
   input: WalletMembershipInput,
   configuration: ApplePassGeneratorConfiguration,
   authenticationToken: string,
 ): AppleGenericPassDocument {
-  const progress = `${input.currentStampCount}/${input.requiredStampCount}`;
+  const posterProgress = `${input.currentStampCount}/${input.requiredStampCount}`;
   const inactive =
     input.transferred ||
     input.membershipStatus !== "ACTIVE" ||
@@ -121,7 +164,7 @@ export function mapAppleGenericPass(
     value: membershipStatus(input),
     changeMessage: "%@",
   };
-  const backFields = [
+  const posterBackFields = [
     { key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) },
     {
       key: "security",
@@ -156,15 +199,7 @@ export function mapAppleGenericPass(
         messageEncoding: "iso-8859-1",
       },
     ],
-    generic: {
-      // Legacy Generic keeps its native front fields. Poster Generic below is
-      // the image-first iOS 27+ surface and intentionally has no front fields.
-      headerFields: [{ key: "progress", label: "STAMPS", value: progress }],
-      primaryFields: [program],
-      secondaryFields: [member],
-      auxiliaryFields: [status],
-      backFields,
-    },
+    generic: mapLegacyApplePresentation(input),
     posterGeneric: {
       // Identity, progress, reward, and the QR are image-first on Poster Generic.
       // Semantic values remain on the back/details side for accessibility.
@@ -172,8 +207,8 @@ export function mapAppleGenericPass(
         { ...program, label: "PROGRAM" },
         member,
         status,
-        { key: "progress_detail", label: "STAMPS", value: progress },
-        ...backFields,
+        { key: "progress_detail", label: "STAMPS", value: posterProgress },
+        ...posterBackFields,
       ],
     },
   };
@@ -275,7 +310,10 @@ async function brandVariants(width: number, height: number, includeText: boolean
 function defaultBrandImages() {
   immutableBrandImages ??= Promise.all([
     brandVariants(38, 38, false),
-    brandVariants(160, 50, true),
+    // Legacy Generic already renders merchant identity through logoText. A
+    // compact mark-only logo prevents a second wordmark from consuming the
+    // header row. Poster Generic uses the separate primaryLogo slot below.
+    brandVariants(38, 38, false),
     brandVariants(126, 30, true),
   ]).then(([icon, logo, primaryLogo]) => ({ icon, logo, primaryLogo }));
   return immutableBrandImages;

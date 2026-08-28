@@ -13,7 +13,7 @@ compose config --quiet
 
 # Build sequentially. BuildKit reuses the single frozen-lockfile dependency and
 # workspace build layers, while avoiding concurrent memory spikes on the VPS.
-for service in migrate api merchant-web customer-web marketing-web operational-worker wallet-worker; do
+for service in migrate api merchant-web customer-web admin-web marketing-web operational-worker wallet-worker; do
   printf 'Building %s for %s (%s)\n' "${service}" "${environment}" "${release_sha}"
   compose build --pull "${service}"
 done

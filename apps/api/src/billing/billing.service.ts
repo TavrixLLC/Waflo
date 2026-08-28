@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import {
   billingFailurePolicy,
   billingGraceDeadline,
   billingRecoverySchedule,
-  cadencePrice,
   planCatalog,
   planDowngradeViolations,
   programPublicationFeatureViolations,
@@ -23,7 +22,7 @@ import type {
 } from "@waflo/contracts";
 import { Prisma } from "@waflo/database";
 import Stripe from "stripe";
-import { AuditService } from "../audit/audit.service.js";
+import { AuditService, auditLogCreateData } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import {
   withInvariantLock,
@@ -34,6 +33,13 @@ import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { NotificationService } from "../notifications/notification.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
+import { type ResolvedPrice, PricingCatalogService } from "./pricing-catalog.service.js";
+import {
+  type StripeSubscriptionPreviewProvider,
+  SUBSCRIPTION_CHANGE_PREVIEW_TTL_MS,
+  stripeSubscriptionFingerprint,
+  summarizeStripeInvoicePreview,
+} from "./stripe-subscription-preview.js";
 
 // ---------------------------------------------------------------------------
 // Types / utilities
@@ -51,7 +57,7 @@ const WEBHOOK_LEASE_MS = 2 * 60 * 1000;
 const REFUND_EXECUTION_LEASE_MS = 2 * 60 * 1000;
 const activeRefundStatuses = ["REQUESTED", "UNDER_REVIEW", "APPROVED", "PROCESSING"] as const;
 const committedRefundStatuses = ["APPROVED", "PROCESSING", "SUCCEEDED"] as const;
-const TRIAL_DAYS = 7;
+const TRIAL_DAYS = 15;
 const TRIAL_SECONDS = TRIAL_DAYS * 24 * 60 * 60;
 
 function cleanBillingIdentity(input: BillingIdentityInput) {
@@ -148,7 +154,7 @@ function statusToDb(status: BillingStatus) {
 // ---------------------------------------------------------------------------
 
 /** Typed adapter so Stripe SDK calls can be mocked deterministically in tests. */
-export interface StripeSubscriptionProvider {
+export interface StripeSubscriptionProvider extends StripeSubscriptionPreviewProvider {
   /** Retrieve the current canonical subscription object from the provider. */
   retrieveSubscription(subscriptionId: string): Promise<Stripe.Subscription>;
   retrieveInvoice?(invoiceId: string): Promise<Stripe.Invoice>;
@@ -164,6 +170,7 @@ export interface StripeSubscriptionProvider {
 @Injectable()
 export class BillingService {
   private readonly stripe: Stripe | null;
+  private readonly pricing: PricingCatalogService;
   /**
    * Overridable subscription provider.
    * In production this calls stripe.subscriptions.retrieve().
@@ -179,7 +186,12 @@ export class BillingService {
     private readonly tenant: TenantService,
     private readonly audit: AuditService,
     _notifications: NotificationService,
+    @Optional() pricing?: PricingCatalogService,
   ) {
+    // Nest supplies the catalog in production. Keeping a local construction
+    // fallback preserves release's direct-service test/support callers while
+    // using the same database-backed catalog authority, never static Price IDs.
+    this.pricing = pricing ?? new PricingCatalogService(prisma, environment);
     this.stripe = environment.values.STRIPE_SECRET_KEY
       ? new Stripe(environment.values.STRIPE_SECRET_KEY, {
           appInfo: { name: "Waflo", version: "1.0.0", url: "https://waflo.app" },
@@ -194,13 +206,29 @@ export class BillingService {
           expand: ["items.data.price"],
         });
       },
+      createInvoicePreview: async (input) =>
+        this.requireStripe().invoices.createPreview({
+          subscription: input.subscriptionId,
+          subscription_details: {
+            items: [{ id: input.subscriptionItemId, price: input.targetPriceId }],
+            proration_behavior: "create_prorations",
+            proration_date: input.prorationDate,
+          },
+        }),
+      updateSubscriptionItem: async (input) =>
+        this.requireStripe().subscriptions.update(input.subscriptionId, {
+          items: [{ id: input.subscriptionItemId, price: input.targetPriceId }],
+          metadata: { plan: input.targetPlan, cadence: input.targetCadence },
+          proration_behavior: input.prorationBehavior,
+          proration_date: input.prorationDate,
+        }),
       retrieveInvoice: async (invoiceId: string) => {
         const stripe = this.requireStripe();
         return stripe.invoices.retrieve(invoiceId, {
           expand: [
             "default_payment_method",
             "parent.subscription_details.subscription",
-            "payments.data.payment.payment_intent.payment_method",
+            "payments.data.payment.payment_intent",
           ],
         });
       },
@@ -215,6 +243,420 @@ export class BillingService {
       createRefund: async (params: Stripe.RefundCreateParams, idempotencyKey: string) =>
         this.requireStripe().refunds.create(params, { idempotencyKey }),
     };
+  }
+
+  async createSubscriptionChangePreview(
+    userId: string,
+    organizationId: string,
+    targetPlan: PlanCode,
+    targetCadence: BillingCadence,
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "billing.manage");
+    const local = await this.prisma.client.subscription.findFirst({
+      where: {
+        organizationId,
+        status: { in: ["ACTIVE", "TRIALING", "PAST_DUE", "GRACE_PERIOD"] },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    if (!local)
+      throw new AppError(
+        "ACTIVE_SUBSCRIPTION_REQUIRED",
+        "An active Stripe subscription is required to preview this change.",
+        HttpStatus.CONFLICT,
+      );
+    if (
+      !local.pricingVersionId ||
+      !local.pricingMarketCode ||
+      !local.pricingCurrency ||
+      local.pricingAmountMinor === null
+    )
+      throw new AppError(
+        "SUBSCRIPTION_PRICING_SNAPSHOT_MISSING",
+        "The current subscription pricing snapshot is incomplete.",
+        HttpStatus.CONFLICT,
+      );
+    const cadence = targetCadence.toUpperCase() as "MONTHLY" | "QUARTERLY" | "YEARLY";
+    if (local.planCode === planToDb(targetPlan) && local.cadence === cadence)
+      throw new AppError(
+        "SUBSCRIPTION_CHANGE_NOOP",
+        "The subscription already uses the requested plan and cadence.",
+        HttpStatus.CONFLICT,
+      );
+    const target = await this.pricing.resolveForMarket(
+      local.pricingMarketCode,
+      targetPlan,
+      cadence,
+    );
+    if (target.currency !== local.pricingCurrency)
+      throw new AppError(
+        "SUBSCRIPTION_CHANGE_CURRENCY_UNSUPPORTED",
+        "An in-place subscription change cannot change currency.",
+        HttpStatus.CONFLICT,
+      );
+    let providerSubscription: Stripe.Subscription;
+    try {
+      providerSubscription = await this.subscriptionProvider.retrieveSubscription(
+        local.stripeSubscriptionId,
+      );
+    } catch {
+      throw new AppError(
+        "STRIPE_SUBSCRIPTION_RETRIEVAL_FAILED",
+        "The subscription change preview is temporarily unavailable.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    const item = providerSubscription.items.data[0];
+    const providerCustomerId =
+      typeof providerSubscription.customer === "string"
+        ? providerSubscription.customer
+        : providerSubscription.customer.id;
+    const profile = await this.prisma.client.organizationBillingProfile.findUniqueOrThrow({
+      where: { organizationId },
+    });
+    if (
+      providerSubscription.id !== local.stripeSubscriptionId ||
+      providerSubscription.items.data.length !== 1 ||
+      !item ||
+      item.price.id !== local.stripePriceId ||
+      item.price.currency.toUpperCase() !== local.pricingCurrency ||
+      item.price.unit_amount !== Number(local.pricingAmountMinor) ||
+      !profile.stripeCustomerId ||
+      providerCustomerId !== profile.stripeCustomerId
+    )
+      throw new AppError(
+        "STRIPE_SUBSCRIPTION_SNAPSHOT_MISMATCH",
+        "Stripe subscription state does not match Waflo's commercial snapshot.",
+        HttpStatus.CONFLICT,
+      );
+    const prorationDate = Math.floor(Date.now() / 1000);
+    let invoice: Stripe.Invoice;
+    try {
+      invoice = await this.subscriptionProvider.createInvoicePreview({
+        subscriptionId: providerSubscription.id,
+        subscriptionItemId: item.id,
+        targetPriceId: target.stripePriceId,
+        prorationDate,
+      });
+    } catch {
+      throw new AppError(
+        "STRIPE_PRORATION_PREVIEW_FAILED",
+        "Stripe could not preview this subscription change.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    if (invoice.currency.toUpperCase() !== target.currency)
+      throw new AppError(
+        "STRIPE_PREVIEW_CURRENCY_MISMATCH",
+        "Stripe preview currency does not match the Waflo pricing contract.",
+        HttpStatus.CONFLICT,
+      );
+    const summary = summarizeStripeInvoicePreview(invoice);
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + SUBSCRIPTION_CHANGE_PREVIEW_TTL_MS);
+    const preview = await this.prisma.client.billingSubscriptionChangePreview.create({
+      data: {
+        organizationId,
+        subscriptionId: local.id,
+        stripeSubscriptionId: local.stripeSubscriptionId,
+        stripeSubscriptionItemId: item.id,
+        sourcePlan: local.planCode,
+        sourceCadence: local.cadence,
+        sourcePricingVersionId: local.pricingVersionId,
+        sourceStripePriceId: local.stripePriceId,
+        sourceAmountMinor: local.pricingAmountMinor,
+        sourceCurrency: local.pricingCurrency,
+        targetPlan: planToDb(targetPlan),
+        targetCadence: cadence,
+        targetPricingVersionId: target.pricingVersionId,
+        targetStripePriceId: target.stripePriceId,
+        targetAmountMinor: target.amountMinor,
+        targetCurrency: target.currency,
+        prorationDate: new Date(prorationDate * 1000),
+        providerFingerprint: stripeSubscriptionFingerprint(providerSubscription, item),
+        amountDueNowMinor: BigInt(summary.amountDueNow),
+        creditAmountMinor: BigInt(summary.creditAmount),
+        prorationSummary: summary.lines,
+        nextRenewalAmountMinor:
+          summary.nextRenewalAmount === null ? null : BigInt(summary.nextRenewalAmount),
+        nextRenewalAt: summary.nextRenewalAt,
+        status: "PENDING",
+        createdAt,
+        expiresAt,
+      },
+    });
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "billing.subscription_change_preview_created",
+        targetType: "billing_subscription_change_preview",
+        targetId: preview.publicId,
+        metadata: {
+          sourcePlan: local.planCode,
+          targetPlan: planToDb(targetPlan),
+          targetCadence: cadence,
+          targetPricingVersionId: target.pricingVersionId,
+        },
+      },
+      request,
+    );
+    return {
+      previewId: preview.publicId,
+      current: {
+        plan: dbToPlan(local.planCode),
+        cadence: local.cadence.toLowerCase(),
+        amountMinor: local.pricingAmountMinor.toString(),
+        currency: local.pricingCurrency,
+      },
+      target: {
+        plan: targetPlan,
+        cadence: targetCadence,
+        amountMinor: target.amountMinor.toString(),
+        currency: target.currency,
+      },
+      proration: {
+        amountDueNow: summary.amountDueNow.toString(),
+        creditAmount: summary.creditAmount.toString(),
+        nextRenewalAmount:
+          summary.nextRenewalAmount === null ? null : summary.nextRenewalAmount.toString(),
+        nextRenewalAt: summary.nextRenewalAt,
+        lines: summary.lines,
+      },
+      expiresAt,
+    };
+  }
+
+  async confirmSubscriptionChange(
+    userId: string,
+    organizationId: string,
+    previewPublicId: string,
+    request: WafloRequest,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "billing.manage");
+    const initial = await this.prisma.client.billingSubscriptionChangePreview.findFirst({
+      where: { publicId: previewPublicId, organizationId },
+      select: { subscriptionId: true },
+    });
+    if (!initial)
+      throw new AppError(
+        "SUBSCRIPTION_CHANGE_PREVIEW_NOT_FOUND",
+        "The subscription change preview was not found.",
+        HttpStatus.NOT_FOUND,
+      );
+    return withInvariantLock(
+      this.prisma.client,
+      `billing-subscription-change:${initial.subscriptionId}`,
+      async (transaction) => {
+        const preview = await transaction.billingSubscriptionChangePreview.findFirst({
+          where: { publicId: previewPublicId, organizationId },
+        });
+        if (!preview)
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PREVIEW_NOT_FOUND",
+            "The subscription change preview was not found.",
+            HttpStatus.NOT_FOUND,
+          );
+        if (preview.status === "CONFIRMED")
+          return this.subscriptionChangeConfirmationResponse(preview, "pending_reconciliation");
+        if (preview.status === "INVALIDATED")
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PREVIEW_INVALIDATED",
+            "This subscription change preview is no longer valid.",
+            HttpStatus.CONFLICT,
+          );
+        if (preview.status === "EXPIRED" || preview.expiresAt <= new Date()) {
+          if (preview.status === "PENDING")
+            await transaction.billingSubscriptionChangePreview.update({
+              where: { id: preview.id },
+              data: { status: "EXPIRED", invalidatedAt: new Date() },
+            });
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PREVIEW_EXPIRED",
+            "This subscription change preview expired. Request a new preview.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const local = await transaction.subscription.findFirst({
+          where: { id: preview.subscriptionId, organizationId },
+        });
+        if (!local)
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_STATE_CHANGED",
+            "The subscription changed after this preview.",
+            HttpStatus.CONFLICT,
+          );
+        if (
+          local.stripeSubscriptionId !== preview.stripeSubscriptionId ||
+          local.planCode !== preview.sourcePlan ||
+          local.cadence !== preview.sourceCadence ||
+          local.pricingVersionId !== preview.sourcePricingVersionId ||
+          local.stripePriceId !== preview.sourceStripePriceId ||
+          local.pricingMarketCode === null
+        )
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_STATE_CHANGED",
+            "The subscription changed after this preview.",
+            HttpStatus.CONFLICT,
+          );
+        const targetVersion = await transaction.pricingVersion.findUnique({
+          where: { id: preview.targetPricingVersionId },
+          include: { market: true },
+        });
+        if (
+          !targetVersion ||
+          targetVersion.market.code !== local.pricingMarketCode ||
+          targetVersion.planCode !== preview.targetPlan ||
+          targetVersion.cadence !== preview.targetCadence ||
+          targetVersion.currency !== preview.targetCurrency ||
+          targetVersion.amountMinor !== preview.targetAmountMinor ||
+          targetVersion.stripePriceId !== preview.targetStripePriceId
+        )
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_TARGET_PRICING_CHANGED",
+            "The target pricing contract changed after this preview.",
+            HttpStatus.CONFLICT,
+          );
+        const authoritativeTarget = await this.pricing.resolveForOrganization(
+          organizationId,
+          dbToPlan(preview.targetPlan),
+          preview.targetCadence,
+        );
+        if (authoritativeTarget.marketCode !== local.pricingMarketCode)
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PRICING_MARKET_CHANGED",
+            "The organization's pricing market changed after this preview.",
+            HttpStatus.CONFLICT,
+          );
+        if (
+          authoritativeTarget.pricingVersionId !== preview.targetPricingVersionId ||
+          authoritativeTarget.stripePriceId !== preview.targetStripePriceId
+        )
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PREVIEW_STALE",
+            "A new pricing preview is required.",
+            HttpStatus.CONFLICT,
+          );
+        let provider: Stripe.Subscription;
+        try {
+          provider = await this.subscriptionProvider.retrieveSubscription(
+            preview.stripeSubscriptionId,
+          );
+        } catch {
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PROVIDER_FAILED",
+            "Stripe could not confirm this subscription change.",
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
+        }
+        const profile = await transaction.organizationBillingProfile.findUniqueOrThrow({
+          where: { organizationId },
+        });
+        const customerId =
+          typeof provider.customer === "string" ? provider.customer : provider.customer.id;
+        const item = provider.items.data[0];
+        if (
+          provider.id !== preview.stripeSubscriptionId ||
+          provider.items.data.length !== 1 ||
+          !item ||
+          item.id !== preview.stripeSubscriptionItemId ||
+          !profile.stripeCustomerId ||
+          customerId !== profile.stripeCustomerId
+        )
+          throw new AppError(
+            "STRIPE_SUBSCRIPTION_ITEM_INVALID",
+            "Stripe subscription item state is invalid.",
+            HttpStatus.CONFLICT,
+          );
+        const currentPriceId = item.price.id;
+        let confirmedProvider = provider;
+        if (currentPriceId === preview.targetStripePriceId) {
+          // Provider success may have occurred before a prior local failure.
+          if (
+            item.price.currency.toUpperCase() !== preview.targetCurrency ||
+            item.price.unit_amount !== Number(preview.targetAmountMinor)
+          )
+            throw new AppError(
+              "SUBSCRIPTION_CHANGE_PROVIDER_STATE_AMBIGUOUS",
+              "Stripe state requires reconciliation before retrying.",
+              HttpStatus.CONFLICT,
+            );
+        } else {
+          if (
+            currentPriceId !== preview.sourceStripePriceId ||
+            stripeSubscriptionFingerprint(provider, item) !== preview.providerFingerprint
+          )
+            throw new AppError(
+              "SUBSCRIPTION_CHANGE_PREVIEW_STALE",
+              "The Stripe subscription changed after this preview.",
+              HttpStatus.CONFLICT,
+            );
+          try {
+            confirmedProvider = await this.subscriptionProvider.updateSubscriptionItem({
+              subscriptionId: preview.stripeSubscriptionId,
+              subscriptionItemId: preview.stripeSubscriptionItemId,
+              targetPriceId: preview.targetStripePriceId,
+              targetPlan: dbToPlan(preview.targetPlan),
+              targetCadence: dbToCadence(preview.targetCadence),
+              prorationDate: Math.floor(preview.prorationDate.getTime() / 1000),
+              prorationBehavior: "create_prorations",
+            });
+          } catch {
+            throw new AppError(
+              "SUBSCRIPTION_CHANGE_PROVIDER_FAILED",
+              "Stripe could not apply this subscription change.",
+              HttpStatus.SERVICE_UNAVAILABLE,
+            );
+          }
+          const updatedItem = confirmedProvider.items.data[0];
+          if (
+            confirmedProvider.id !== preview.stripeSubscriptionId ||
+            confirmedProvider.items.data.length !== 1 ||
+            !updatedItem ||
+            updatedItem.id !== preview.stripeSubscriptionItemId ||
+            updatedItem.price.id !== preview.targetStripePriceId
+          )
+            throw new AppError(
+              "SUBSCRIPTION_CHANGE_PROVIDER_STATE_AMBIGUOUS",
+              "Stripe did not return the expected subscription state.",
+              HttpStatus.CONFLICT,
+            );
+        }
+        const confirmedAt = new Date();
+        const confirmed = await transaction.billingSubscriptionChangePreview.update({
+          where: { id: preview.id },
+          data: { status: "CONFIRMED", confirmedAt },
+        });
+        await transaction.billingSubscriptionChangePreview.updateMany({
+          where: {
+            subscriptionId: preview.subscriptionId,
+            id: { not: preview.id },
+            status: "PENDING",
+          },
+          data: { status: "INVALIDATED", invalidatedAt: confirmedAt },
+        });
+        await transaction.auditLog.create({
+          data: auditLogCreateData(
+            {
+              organizationId,
+              actorUserId: userId,
+              action: "billing.subscription_change_confirmed",
+              targetType: "billing_subscription_change_preview",
+              targetId: preview.publicId,
+              metadata: {
+                sourcePlan: preview.sourcePlan,
+                targetPlan: preview.targetPlan,
+                targetPricingVersionId: preview.targetPricingVersionId,
+                providerConverged: currentPriceId === preview.targetStripePriceId,
+              },
+            },
+            request,
+          ),
+        });
+        return this.subscriptionChangeConfirmationResponse(confirmed, confirmedProvider.status);
+      },
+    );
   }
 
   async get(userId: string, organizationId: string) {
@@ -261,6 +703,9 @@ export class BillingService {
       organization.billingInvoices.find(
         (invoice) => invoice.amountRemaining > 0 && invoice.status !== "void",
       ) ?? null;
+    const cadenceAvailability =
+      await this.pricing.cadenceAvailabilityForOrganization(organizationId);
+    const catalog = await this.pricing.catalogTermsForOrganization(organizationId);
     const owner = organization.members[0]?.user;
     return {
       selectedPlan: organization.selectedPlan,
@@ -279,11 +724,8 @@ export class BillingService {
       customerPortalAvailable: Boolean(organization.billingProfile?.stripeCustomerId),
       subscriptions: organization.subscriptions,
       stripeConfigured: this.environment.stripeConfigured,
-      cadenceAvailability: {
-        monthly: this.cadenceConfigured("monthly"),
-        quarterly: this.cadenceConfigured("quarterly"),
-        yearly: this.cadenceConfigured("yearly"),
-      },
+      cadenceAvailability,
+      catalog,
       paymentMethod,
       billingIdentity: {
         name: organization.billingProfile?.billingName ?? organization.name,
@@ -401,22 +843,30 @@ export class BillingService {
     const requestFingerprint = createHash("sha256")
       .update(JSON.stringify({ plan: input.plan, cadence: input.cadence, identity }), "utf8")
       .digest("hex");
-    const priceId = this.priceId(input.plan, input.cadence);
-    const price = await stripe.prices.retrieve(priceId);
-    const charge = this.assertTrialPrice(price, input.plan, input.cadence);
     const now = new Date();
 
     let command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
       where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
     });
+    if (
+      command &&
+      (command.requestFingerprint !== requestFingerprint || command.planCode !== planKey)
+    ) {
+      throw new AppError(
+        "BILLING_COMMAND_CONFLICT",
+        "This billing action was already used with different details.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const resolvedPrice = await this.pricing.resolveForCountry(
+      identity.countryCode,
+      input.plan,
+      cadenceToDb(input.cadence),
+    );
+    const priceId = resolvedPrice.stripePriceId;
+    const price = await stripe.prices.retrieve(priceId);
+    const charge = this.assertCatalogPrice(price, resolvedPrice);
     if (command) {
-      if (command.requestFingerprint !== requestFingerprint || command.planCode !== planKey) {
-        throw new AppError(
-          "BILLING_COMMAND_CONFLICT",
-          "This billing action was already used with different details.",
-          HttpStatus.CONFLICT,
-        );
-      }
       if (command.status === "SUBSCRIPTION_CREATED") {
         const expectedTrialStart = command.completedAt ?? command.createdAt;
         return {
@@ -602,9 +1052,10 @@ export class BillingService {
         HttpStatus.GONE,
       );
     }
-    const priceId = this.priceId(plan, cadence);
+    const resolvedPrice = await this.catalogPriceForOrganization(organizationId, plan, cadence);
+    const priceId = resolvedPrice.stripePriceId;
     const price = await stripe.prices.retrieve(priceId);
-    const charge = this.assertTrialPrice(price, plan, cadence);
+    const charge = this.assertCatalogPrice(price, resolvedPrice);
 
     const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId, {
       expand: ["payment_method"],
@@ -685,7 +1136,7 @@ export class BillingService {
     ) {
       throw new AppError(
         "STRIPE_TRIAL_CONTRACT_INVALID",
-        "Stripe did not create the required 7-day trial.",
+        "Stripe did not create the required 15-day trial.",
         HttpStatus.CONFLICT,
       );
     }
@@ -746,6 +1197,11 @@ export class BillingService {
         where: { stripeSubscriptionId: subscription.id },
         update: {
           stripePriceId: priceId,
+          pricingVersionId: resolvedPrice.pricingVersionId,
+          pricingMarketCode: resolvedPrice.marketCode,
+          pricingCurrency: resolvedPrice.currency,
+          pricingAmountMinor: resolvedPrice.amountMinor,
+          grandfathered: false,
           planCode: planToDb(plan),
           cadence: cadenceToDb(cadence),
           status: "TRIALING",
@@ -758,6 +1214,11 @@ export class BillingService {
           organizationId,
           stripeSubscriptionId: subscription.id,
           stripePriceId: priceId,
+          pricingVersionId: resolvedPrice.pricingVersionId,
+          pricingMarketCode: resolvedPrice.marketCode,
+          pricingCurrency: resolvedPrice.currency,
+          pricingAmountMinor: resolvedPrice.amountMinor,
+          grandfathered: false,
           planCode: planToDb(plan),
           cadence: cadenceToDb(cadence),
           status: "TRIALING",
@@ -834,7 +1295,7 @@ export class BillingService {
         {
           organizationId,
           actorUserId: userId,
-          action: "billing.seven_day_trial_started",
+          action: "billing.trial_started",
           targetType: "subscription",
           targetId: subscription.id,
           metadata: {
@@ -918,8 +1379,9 @@ export class BillingService {
         HttpStatus.GONE,
       );
     }
-    const price = await stripe.prices.retrieve(this.priceId(plan, cadence));
-    const charge = this.assertTrialPrice(price, plan, cadence);
+    const resolvedPrice = await this.catalogPriceForOrganization(organizationId, plan, cadence);
+    const price = await stripe.prices.retrieve(resolvedPrice.stripePriceId);
+    const charge = this.assertCatalogPrice(price, resolvedPrice);
     const expectedTrialStart = new Date();
     return {
       plan,
@@ -1280,11 +1742,19 @@ export class BillingService {
     await this.requireBillingOwner(userId, organizationId);
     const stripe = this.requireStripe();
     const context = await this.activeSubscriptionContext(organizationId);
-    const current = this.planForPrice(context.item.price.id);
+    const currentTerm = await this.pricing.resolveStripePrice(context.item.price.id);
+    const current = { plan: currentTerm.plan, cadence: dbToCadence(currentTerm.cadence) };
     await this.assertSubscriptionChangeAllowed(organizationId, current.plan, input.plan);
-    const targetPriceId = this.priceId(input.plan, input.cadence);
+    const target = context.local.pricingMarketCode
+      ? await this.pricing.resolveForMarket(
+          context.local.pricingMarketCode,
+          input.plan,
+          cadenceToDb(input.cadence),
+        )
+      : await this.catalogPriceForOrganization(organizationId, input.plan, input.cadence);
+    const targetPriceId = target.stripePriceId;
     const targetPrice = await stripe.prices.retrieve(targetPriceId);
-    const targetCharge = this.assertTrialPrice(targetPrice, input.plan, input.cadence);
+    const targetCharge = this.assertCatalogPrice(targetPrice, target);
     const unchanged = current.plan === input.plan && current.cadence === input.cadence;
     if (unchanged) {
       return {
@@ -1349,14 +1819,22 @@ export class BillingService {
     await this.requireBillingOwner(userId, organizationId);
     const stripe = this.requireStripe();
     const context = await this.activeSubscriptionContext(organizationId);
-    const current = this.planForPrice(context.item.price.id);
+    const currentTerm = await this.pricing.resolveStripePrice(context.item.price.id);
+    const current = { plan: currentTerm.plan, cadence: dbToCadence(currentTerm.cadence) };
     await this.assertSubscriptionChangeAllowed(organizationId, current.plan, input.plan);
     if (current.plan === input.plan && current.cadence === input.cadence) {
       return { changed: false, reason: "NO_CHANGE" as const };
     }
-    const targetPriceId = this.priceId(input.plan, input.cadence);
+    const target = context.local.pricingMarketCode
+      ? await this.pricing.resolveForMarket(
+          context.local.pricingMarketCode,
+          input.plan,
+          cadenceToDb(input.cadence),
+        )
+      : await this.catalogPriceForOrganization(organizationId, input.plan, input.cadence);
+    const targetPriceId = target.stripePriceId;
     const targetPrice = await stripe.prices.retrieve(targetPriceId);
-    this.assertTrialPrice(targetPrice, input.plan, input.cadence);
+    this.assertCatalogPrice(targetPrice, target);
     const prorationDate = Math.floor(Date.now() / 1000);
     let updated: Stripe.Subscription;
     try {
@@ -2485,7 +2963,7 @@ export class BillingService {
         expand: [
           "default_payment_method",
           "parent.subscription_details.subscription",
-          "payments.data.payment.payment_intent.payment_method",
+          "payments.data.payment.payment_intent",
         ],
       });
     } catch {
@@ -2640,7 +3118,9 @@ export class BillingService {
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
-    const { plan, cadence } = this.planForPrice(priceId);
+    const pricing = await this.pricing.resolveStripePrice(priceId);
+    const plan = pricing.plan;
+    const cadence = dbToCadence(pricing.cadence);
     const metadataPlan = currentSubscription.metadata.plan;
     const metadataCadence = currentSubscription.metadata.cadence;
     if (
@@ -2766,6 +3246,10 @@ export class BillingService {
       where: { stripeSubscriptionId: subscriptionId },
       update: {
         stripePriceId: priceId,
+        pricingVersionId: pricing.pricingVersionId,
+        pricingMarketCode: pricing.marketCode,
+        pricingCurrency: pricing.currency,
+        pricingAmountMinor: pricing.amountMinor,
         planCode: planToDb(plan),
         cadence: cadenceToDb(cadence),
         status: statusToDb(localStatus),
@@ -2786,6 +3270,10 @@ export class BillingService {
         organizationId: profile.organizationId,
         stripeSubscriptionId: subscriptionId,
         stripePriceId: priceId,
+        pricingVersionId: pricing.pricingVersionId,
+        pricingMarketCode: pricing.marketCode,
+        pricingCurrency: pricing.currency,
+        pricingAmountMinor: pricing.amountMinor,
         planCode: planToDb(plan),
         cadence: cadenceToDb(cadence),
         status: statusToDb(localStatus),
@@ -3816,7 +4304,7 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
-    this.planForPrice(item.price.id);
+    await this.pricing.resolveStripePrice(item.price.id);
     return { local, profile, snapshot, item, customerId };
   }
 
@@ -3839,15 +4327,15 @@ export class BillingService {
     }
   }
 
-  private assertTrialPrice(price: Stripe.Price, plan: PlanCode, cadence: BillingCadence) {
-    const expectedAmount = Math.round(cadencePrice(plan, cadence).billedAmountUsd * 100);
-    const expectedInterval = cadence === "yearly" ? "year" : "month";
-    const expectedIntervalCount = cadence === "quarterly" ? 3 : 1;
+  private assertCatalogPrice(price: Stripe.Price, expected: ResolvedPrice) {
+    const expectedInterval = expected.cadence === "YEARLY" ? "year" : "month";
+    const expectedIntervalCount = expected.cadence === "QUARTERLY" ? 3 : 1;
     if (
       !price.active ||
       price.type !== "recurring" ||
-      price.unit_amount !== expectedAmount ||
-      price.currency.toLocaleLowerCase("en-US") !== "usd" ||
+      price.id !== expected.stripePriceId ||
+      price.unit_amount !== Number(expected.amountMinor) ||
+      price.currency.toLocaleUpperCase("en-US") !== expected.currency ||
       price.recurring?.interval !== expectedInterval ||
       price.recurring.interval_count !== expectedIntervalCount
     ) {
@@ -3860,6 +4348,43 @@ export class BillingService {
     return { amount: price.unit_amount, currency: price.currency.toUpperCase() };
   }
 
+  private async catalogPriceForOrganization(
+    organizationId: string,
+    plan: PlanCode,
+    cadence: BillingCadence,
+  ) {
+    return this.pricing.resolveForOrganization(organizationId, plan, cadenceToDb(cadence));
+  }
+
+  private subscriptionChangeConfirmationResponse(
+    preview: {
+      publicId: string;
+      sourcePlan: "STARTER" | "GROWTH" | "SCALE";
+      sourceCadence: "MONTHLY" | "QUARTERLY" | "YEARLY";
+      targetPlan: "STARTER" | "GROWTH" | "SCALE";
+      targetCadence: "MONTHLY" | "QUARTERLY" | "YEARLY";
+      targetCurrency: string;
+      targetAmountMinor: bigint;
+      confirmedAt: Date | null;
+    },
+    providerStatus: string,
+  ) {
+    return {
+      previewId: preview.publicId,
+      status: "CONFIRMED" as const,
+      change: {
+        fromPlan: dbToPlan(preview.sourcePlan),
+        fromCadence: preview.sourceCadence.toLowerCase(),
+        toPlan: dbToPlan(preview.targetPlan),
+        toCadence: preview.targetCadence.toLowerCase(),
+        currency: preview.targetCurrency,
+        targetAmountMinor: preview.targetAmountMinor.toString(),
+      },
+      confirmedAt: preview.confirmedAt,
+      providerState: { subscriptionStatus: providerStatus },
+    };
+  }
+
   private requireStripe(): Stripe {
     if (!this.stripe || !this.environment.stripeConfigured) {
       throw new AppError(
@@ -3870,64 +4395,5 @@ export class BillingService {
       );
     }
     return this.stripe;
-  }
-
-  private cadenceConfigured(cadence: BillingCadence): boolean {
-    return (["starter", "growth", "scale"] as const).every((plan) =>
-      Boolean(this.configuredPriceId(plan, cadence)),
-    );
-  }
-
-  private configuredPriceId(plan: PlanCode, cadence: BillingCadence): string | undefined {
-    const priceIds: Record<BillingCadence, Record<PlanCode, string | undefined>> = {
-      monthly: {
-        starter: this.environment.values.STRIPE_STARTER_MONTHLY_PRICE_ID,
-        growth: this.environment.values.STRIPE_GROWTH_MONTHLY_PRICE_ID,
-        scale: this.environment.values.STRIPE_SCALE_MONTHLY_PRICE_ID,
-      },
-      quarterly: {
-        starter: this.environment.values.STRIPE_STARTER_QUARTERLY_PRICE_ID,
-        growth: this.environment.values.STRIPE_GROWTH_QUARTERLY_PRICE_ID,
-        scale: this.environment.values.STRIPE_SCALE_QUARTERLY_PRICE_ID,
-      },
-      yearly: {
-        starter: this.environment.values.STRIPE_STARTER_YEARLY_PRICE_ID,
-        growth: this.environment.values.STRIPE_GROWTH_YEARLY_PRICE_ID,
-        scale: this.environment.values.STRIPE_SCALE_YEARLY_PRICE_ID,
-      },
-    };
-    return priceIds[cadence][plan];
-  }
-
-  private priceId(plan: PlanCode, cadence: BillingCadence): string {
-    const priceId = this.configuredPriceId(plan, cadence);
-    if (!priceId) {
-      throw new AppError(
-        "STRIPE_PRICE_NOT_CONFIGURED",
-        "The selected plan and billing cadence do not have a Stripe price configured.",
-        HttpStatus.SERVICE_UNAVAILABLE,
-        { plan, cadence },
-      );
-    }
-    return priceId;
-  }
-
-  private planForPrice(priceId: string): { plan: PlanCode; cadence: BillingCadence } {
-    const configured = new Map<string, { plan: PlanCode; cadence: BillingCadence }>();
-    for (const cadence of ["monthly", "quarterly", "yearly"] as const) {
-      for (const plan of ["starter", "growth", "scale"] as const) {
-        const configuredPriceId = this.configuredPriceId(plan, cadence);
-        if (configuredPriceId) configured.set(configuredPriceId, { plan, cadence });
-      }
-    }
-    const result = configured.get(priceId);
-    if (!result) {
-      throw new AppError(
-        "STRIPE_PRICE_UNKNOWN",
-        "The Stripe price is not present in the configured plan map.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    return result;
   }
 }

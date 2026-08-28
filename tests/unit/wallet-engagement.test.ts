@@ -180,9 +180,9 @@ describe("Wallet provider-native nearby relevance", () => {
       }),
     ]);
     expect(pass.maxDistance).toBe(2000);
-    expect(pass.storeCard.backFields.find((field) => field.key === "status")?.changeMessage).toBe(
-      "%@",
-    );
+    expect(
+      pass.storeCard.auxiliaryFields.find((field) => field.key === "status")?.changeMessage,
+    ).toBe("%@");
   });
 
   it("removes Apple relevance when disabled and enforces the 10-location provider limit", () => {
@@ -465,7 +465,7 @@ describe("Wallet Engagement input safety", () => {
       "unsafe\u0000control",
       "Hello {{customerName}}",
       "Hello {customerName}",
-      "Use sk_live_1234567890abcdef",
+      "Use sk_live_example-1234",
       "x".repeat(241),
     ]) {
       expect(() => walletCampaignCreateSchema.parse({ ...validCampaign, body })).toThrow();

@@ -452,7 +452,7 @@ export class OrganizationsService {
     ) {
       throw new AppError(
         "BILLING_ACTIVATION_REQUIRED",
-        "Complete payment setup and start your 7-day trial before finishing onboarding.",
+        "Complete payment setup and start your 15-day trial before finishing onboarding.",
         HttpStatus.PAYMENT_REQUIRED,
       );
     }

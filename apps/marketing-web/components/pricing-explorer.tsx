@@ -112,7 +112,7 @@ export function PricingExplorer({
         <div className="marketing-pricing-cta__promise">
           <CreditCard size={20} aria-hidden="true" />
           <p>
-            <strong>{ar ? "7 أيام مجاناً" : "7 days free"}</strong>
+            <strong>{ar ? "15 يوماً مجاناً" : "15 days free"}</strong>
             <span>
               {ar
                 ? "أضف معلومات الفوترة والبطاقة بأمان. تبدأ التجربة بفاتورة قيمتها $0 ولن يُخصم منك شيء اليوم."

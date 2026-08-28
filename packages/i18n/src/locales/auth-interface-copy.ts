@@ -43,7 +43,7 @@ export const authInterfaceCopy = {
       createError: "Unable to create account.",
       title: "Create your merchant account",
       intro:
-        "Create your account, choose a plan, and start 7 days free after adding a payment method.",
+        "Create your account, choose a plan, and start 15 days free after adding a payment method.",
       verificationRecovery: "Try sending the verification email again",
       passwordHint: "At least 12 characters. Password managers are welcome.",
       termsAgreement: "I agree to the Terms of Service.",
@@ -206,7 +206,7 @@ export const authInterfaceCopy = {
       passwordsDoNotMatch: "كلمتا المرور غير متطابقتين.",
       createError: "تعذر إنشاء الحساب.",
       title: "أنشئ حساب التاجر",
-      intro: "أنشئ حسابك، ثم اختر باقتك وابدأ 7 أيام مجاناً بعد إضافة طريقة الدفع.",
+      intro: "أنشئ حسابك، ثم اختر باقتك وابدأ 15 يوماً مجاناً بعد إضافة طريقة الدفع.",
       verificationRecovery: "حاول إرسال رسالة التأكيد مرة أخرى",
       passwordHint: "12 حرفاً على الأقل. يمكنك استخدام مدير كلمات المرور.",
       termsAgreement: "أوافق على شروط الاستخدام.",

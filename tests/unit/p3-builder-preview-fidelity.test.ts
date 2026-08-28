@@ -341,17 +341,23 @@ describe("P3 Builder preview fidelity", () => {
       const composition = preview("APPLE_WALLET", progress);
       const program = required(pass.storeCard.secondaryFields[0], "Apple program field");
       const status = required(
-        pass.storeCard.backFields.find((field) => field.key === "status"),
-        "Apple status back field",
+        pass.storeCard.auxiliaryFields.find((field) => field.key === "status"),
+        "Apple status front field",
       );
       const reward = required(
-        pass.storeCard.backFields.find((field) => field.key === "reward"),
-        "Apple reward back field",
+        pass.storeCard.primaryFields.find((field) => field.key === "reward"),
+        "Apple reward front field",
       );
 
-      expect(pass.storeCard.headerFields).toEqual([]);
-      expect(pass.storeCard.primaryFields).toEqual([]);
-      expect(pass.storeCard.auxiliaryFields).toEqual([]);
+      expect(pass.storeCard.headerFields).toContainEqual(
+        expect.objectContaining({ key: "progress", value: `${progress}/${goal}` }),
+      );
+      expect(pass.storeCard.primaryFields).toContainEqual(
+        expect.objectContaining({ key: "reward", value: input.rewardSummary }),
+      );
+      expect(pass.storeCard.auxiliaryFields).toContainEqual(
+        expect.objectContaining({ key: "member", value: input.displayName }),
+      );
       expect(pass.storeCard.backFields.some((field) => field.key === "member")).toBe(false);
       expect(composition.svg).toContain(String(program.value));
       expect(composition.svg).toContain(String(status.label));

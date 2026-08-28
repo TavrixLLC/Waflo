@@ -40,6 +40,9 @@ importers:
       '@types/supertest':
         specifier: 7.2.1
         version: 7.2.1
+      '@waflo/database':
+        specifier: workspace:*
+        version: link:packages/database
       '@waflo/stamp-engine':
         specifier: workspace:*
         version: link:packages/stamp-engine
@@ -58,6 +61,9 @@ importers:
       sharp:
         specifier: ^0.35.3
         version: 0.35.3(@types/node@26.1.1)
+      stripe:
+        specifier: 22.3.2
+        version: 22.3.2(@types/node@26.1.1)
       supertest:
         specifier: 7.2.2
         version: 7.2.2
@@ -76,6 +82,55 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+
+  apps/admin-dashboard:
+    dependencies:
+      '@tailwindcss/postcss':
+        specifier: 4.3.3
+        version: 4.3.3
+      '@waflo/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
+      '@waflo/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
+      '@waflo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@waflo/security':
+        specifier: workspace:*
+        version: link:../../packages/security
+      '@waflo/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      lucide-react:
+        specifier: 1.27.0
+        version: 1.27.0(react@19.2.8)
+      next:
+        specifier: 16.2.12
+        version: 16.2.12(@opentelemetry/api@1.9.1)(@playwright/test@1.62.0)(@types/node@26.1.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+      tailwindcss:
+        specifier: 4.3.3
+        version: 4.3.3
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+      '@types/react':
+        specifier: 19.2.17
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: 19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   apps/api:
     dependencies:
@@ -432,6 +487,9 @@ importers:
       '@waflo/operational-analytics':
         specifier: workspace:*
         version: link:../../packages/operational-analytics
+      dotenv:
+        specifier: 17.4.2
+        version: 17.4.2
       nodemailer:
         specifier: 9.0.3
         version: 9.0.3

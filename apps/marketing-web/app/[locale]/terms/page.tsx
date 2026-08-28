@@ -47,8 +47,8 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
           <h2>{ar ? "الخطط والفوترة" : "Plans and billing"}</h2>
           <p>
             {ar
-              ? "تبدأ التجربة المجانية لمدة 7 أيام بعد اختيار الباقة ووتيرة الدفع وإضافة طريقة دفع صالحة وتأكيد الاشتراك. نوضح السعر وتاريخ أول دفعة قبل التأكيد."
-              : "The seven-day free trial starts after you choose a plan and billing cadence, add a valid payment method, and confirm the subscription. We show the price and first charge date before confirmation."}
+              ? "تبدأ التجربة المجانية لمدة 15 يوماً بعد اختيار الباقة ووتيرة الدفع وإضافة طريقة دفع صالحة وتأكيد الاشتراك. نوضح السعر وتاريخ أول دفعة قبل التأكيد."
+              : "The 15-day free trial starts after you choose a plan and billing cadence, add a valid payment method, and confirm the subscription. We show the price and first charge date before confirmation."}
           </p>
           <h2>{ar ? "المراجعة القانونية" : "Legal review"}</h2>
           <p>

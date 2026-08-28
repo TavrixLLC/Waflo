@@ -28,6 +28,8 @@ const runLabel = `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID(
 const supportedProjects = new Set([
   "chromium",
   "accessibility",
+  "admin",
+  "admin-accessibility",
   "design-review",
   "w3",
   "w3-accessibility",
@@ -46,7 +48,8 @@ if (!supportedProjects.has(project)) {
  */
 const isolatedDatabase =
   process.env.WAFLO_ISOLATED_E2E === "1" ||
-  (process.env.WAFLO_ISOLATED_E2E !== "0" && ["chromium", "accessibility"].includes(project));
+  (process.env.WAFLO_ISOLATED_E2E !== "0" &&
+    ["chromium", "accessibility", "admin", "admin-accessibility"].includes(project));
 if (isolatedDatabase) {
   Object.assign(process.env, {
     NODE_ENV: "test",
@@ -195,6 +198,9 @@ async function buildBrowserFrontends() {
   const customer = pnpmCommand(["--filter", "@waflo/customer-web", "build"]);
   if ((await runCommand(customer.command, customer.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser Customer build failed.");
+  const admin = pnpmCommand(["--filter", "@waflo/admin-dashboard", "build"]);
+  if ((await runCommand(admin.command, admin.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser Admin build failed.");
 }
 
 const commands = [
@@ -240,6 +246,24 @@ const commands = [
     cwd: path.join(root, "apps", "customer-web"),
     entry: path.join(root, "apps", "customer-web", "node_modules", "next", "dist", "bin", "next"),
     args: ["start", "-p", "3002"],
+    frontend: true,
+  },
+  {
+    name: "admin",
+    port: 3003,
+    readyUrl: "http://127.0.0.1:3003/en/login",
+    cwd: path.join(root, "apps", "admin-dashboard"),
+    entry: path.join(
+      root,
+      "apps",
+      "admin-dashboard",
+      "node_modules",
+      "next",
+      "dist",
+      "bin",
+      "next",
+    ),
+    args: ["start", "-p", "3003"],
     frontend: true,
   },
 ];

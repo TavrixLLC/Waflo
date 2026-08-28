@@ -174,23 +174,20 @@ describe("production environment and provider boundaries", () => {
     ).toThrow("Staging accepts Stripe test-mode keys only");
   });
 
-  it("requires complete environment-isolated Stripe configuration", () => {
+  it("requires complete environment-isolated Stripe credential configuration", () => {
     expect(() =>
       parseEnvironment({
         NODE_ENV: "production",
         DEPLOYMENT_ENVIRONMENT: "staging",
         STRIPE_SECRET_KEY: "sk_test_partial",
       }),
-    ).toThrow("all nine Price IDs must be complete or absent");
+    ).toThrow("Stripe secret and publishable keys and webhook secret must be complete or absent");
     expect(() =>
       parseEnvironment({
         NODE_ENV: "production",
         DEPLOYMENT_ENVIRONMENT: "production",
         STRIPE_SECRET_KEY: "sk_test_wrong_environment",
         STRIPE_WEBHOOK_SECRET: "whsec_test",
-        STRIPE_STARTER_MONTHLY_PRICE_ID: "price_starter",
-        STRIPE_GROWTH_MONTHLY_PRICE_ID: "price_growth",
-        STRIPE_SCALE_MONTHLY_PRICE_ID: "price_scale",
       }),
     ).toThrow("Production accepts Stripe live-mode keys only");
   });

@@ -108,16 +108,15 @@ notification fails; delivery failure is retried and audited.
 
 ## Stripe — REQUIRED_ONLY_IF_BILLING_IS_ENABLED
 
-Create separate Stripe TEST and LIVE Prices, portal configuration, server key,
+Create separate Stripe TEST and LIVE credentials, portal configuration, server key,
 and webhook endpoint `https://<api-origin>/v1/webhooks/stripe`. The current staging endpoint is
 `https://api-staging.waflo.app/v1/webhooks/stripe`. Set
-`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, the three
-`STRIPE_*_MONTHLY_PRICE_ID` values,
+`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`,
 `STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID`,
 `STRIPE_RECONCILIATION_INTERVAL_MINUTES`, and
 `STRIPE_RECONCILIATION_BATCH_SIZE`. Staging rejects live keys; production
-rejects test keys. The current browser UI does not use a publishable key and
-Product IDs are not configuration inputs. Verify checkout, signed webhook,
+rejects test keys. Waflo's database-backed Pricing Catalog owns published Price bindings;
+neither Price IDs nor Product IDs are environment inputs. Verify checkout, signed webhook,
 entitlement, and canonical scheduled reconciliation. Never commit keys or
 webhook secrets. See the exact environment contract and procedures in
 [`docs/release/real-provider-configuration.md`](release/real-provider-configuration.md).

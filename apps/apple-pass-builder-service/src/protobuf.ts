@@ -14,7 +14,7 @@ const expectedImageSizes: Readonly<
   Record<PassBuilderImageSlot, readonly [width: number, height: number]>
 > = {
   icon: [38, 38],
-  logo: [160, 50],
+  logo: [38, 38],
   primaryLogo: [126, 30],
   artwork: [358, 448],
   strip: [375, 144],

@@ -158,7 +158,7 @@ test("recovers an already completed trial after a browser retry", async ({ page 
           clientSecret: null,
           setupIntentId,
           publishableKey: "pk_test_not_loaded_for_completed_trial",
-          trialDays: 7,
+          trialDays: 15,
           amount: 2900,
           currency: "USD",
           expectedTrialStart: "2026-08-13T09:00:00.000Z",

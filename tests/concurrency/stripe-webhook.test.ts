@@ -11,6 +11,7 @@ import {
   BillingService,
   type StripeSubscriptionProvider,
 } from "../../apps/api/src/billing/billing.service";
+import { PricingCatalogService } from "../../apps/api/src/billing/pricing-catalog.service";
 import type { WafloRequest } from "../../apps/api/src/common/request-context";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service";
 import { PrismaService } from "../../apps/api/src/database/prisma.service";
@@ -29,9 +30,6 @@ const request = {
 const previousStripeEnvironment = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
-  STRIPE_STARTER_MONTHLY_PRICE_ID: process.env.STRIPE_STARTER_MONTHLY_PRICE_ID,
-  STRIPE_GROWTH_MONTHLY_PRICE_ID: process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID,
-  STRIPE_SCALE_MONTHLY_PRICE_ID: process.env.STRIPE_SCALE_MONTHLY_PRICE_ID,
 };
 
 let prisma: PrismaService;
@@ -41,6 +39,27 @@ let organizationAId = "";
 let organizationBId = "";
 const customerA = `cus_a_${runId}`;
 const customerB = `cus_b_${runId}`;
+const priceTerms = {
+  price_test_starter: { plan: "STARTER", amountMinor: 1900 },
+  price_test_growth: { plan: "GROWTH", amountMinor: 2900 },
+  price_test_scale: { plan: "SCALE", amountMinor: 9900 },
+} as const;
+
+function billingWithCatalog(
+  environment: EnvironmentService,
+  audit: AuditService,
+  tenant: TenantService,
+  notifications: NotificationService,
+) {
+  return new BillingService(
+    prisma,
+    environment,
+    tenant,
+    audit,
+    notifications,
+    new PricingCatalogService(prisma, environment),
+  );
+}
 
 /**
  * Build a minimal mock Stripe.Subscription that satisfies the provider adapter.
@@ -56,6 +75,8 @@ function buildMockSub(input: {
   canceledAt?: number | null;
 }): Stripe.Subscription {
   const now = Math.floor(Date.now() / 1000);
+  const terms =
+    priceTerms[input.priceId as keyof typeof priceTerms] ?? priceTerms.price_test_growth;
   return {
     id: input.id,
     object: "subscription",
@@ -70,7 +91,11 @@ function buildMockSub(input: {
         {
           id: `si_${input.id}`,
           object: "subscription_item",
-          price: { id: input.priceId } as Stripe.Price,
+          price: {
+            id: input.priceId,
+            currency: "usd",
+            unit_amount: terms.amountMinor,
+          } as Stripe.Price,
           current_period_start: now - 60,
           current_period_end: now + 2_592_000,
         } as Stripe.SubscriptionItem,
@@ -293,9 +318,6 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
   beforeAll(async () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_waflo_concurrency";
     process.env.STRIPE_WEBHOOK_SECRET = webhookSecret;
-    process.env.STRIPE_STARTER_MONTHLY_PRICE_ID = "price_test_starter";
-    process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID = "price_test_growth";
-    process.env.STRIPE_SCALE_MONTHLY_PRICE_ID = "price_test_scale";
     const environment = new EnvironmentService();
     prisma = new PrismaService(environment);
     const audit = new AuditService(prisma);
@@ -304,9 +326,47 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
     const notifications = { send: sendNotification } as unknown as NotificationService;
     organizationAId = await createOrganization(customerA);
     organizationBId = await createOrganization(customerB);
+    const global = await prisma.client.pricingMarket.upsert({
+      where: { code: "GLOBAL" },
+      update: { active: true, configuredCurrency: "USD" },
+      create: {
+        code: "GLOBAL",
+        kind: "GLOBAL",
+        configuredCurrency: "USD",
+        active: true,
+      },
+    });
+    await Promise.all(
+      Object.entries(priceTerms).map(([stripePriceId, terms]) =>
+        prisma.client.pricingVersion.upsert({
+          where: {
+            marketId_planCode_cadence_version: {
+              marketId: global.id,
+              planCode: terms.plan,
+              cadence: "MONTHLY",
+              version: 1,
+            },
+          },
+          update: { stripePriceId, amountMinor: terms.amountMinor, currency: "USD" },
+          create: {
+            marketId: global.id,
+            planCode: terms.plan,
+            cadence: "MONTHLY",
+            version: 1,
+            currency: "USD",
+            amountMinor: terms.amountMinor,
+            status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+            stripeProductId: `prod_webhook_${terms.plan.toLowerCase()}`,
+            stripePriceId,
+            stripeBindingKey: `webhook:${terms.plan.toLowerCase()}:monthly:v1`,
+            publishedAt: new Date(),
+          },
+        }),
+      ),
+    );
 
     function createTestBilling(subsMap: Map<string, Stripe.Subscription>) {
-      const b = new BillingService(prisma, environment, tenant, audit, notifications);
+      const b = billingWithCatalog(environment, audit, tenant, notifications);
       b.subscriptionProvider = makeMockProvider(subsMap);
       return b;
     }
@@ -349,7 +409,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const b = new BillingService(prisma, environment, tenant, audit, notifications);
+    const b = billingWithCatalog(environment, audit, tenant, notifications);
     b.subscriptionProvider = makeMockProvider(subs);
 
     const results = await Promise.all([
@@ -570,7 +630,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const bInvalid = new BillingService(prisma, environment, tenant, audit, notifications);
+    const bInvalid = billingWithCatalog(environment, audit, tenant, notifications);
     bInvalid.subscriptionProvider = makeMockProvider(invalidSubs);
     await expect(
       bInvalid.processWebhook(invalid.payload, invalid.signature, request),
@@ -597,7 +657,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const bValid = new BillingService(prisma, environment, tenant, audit, notifications);
+    const bValid = billingWithCatalog(environment, audit, tenant, notifications);
     bValid.subscriptionProvider = makeMockProvider(validSubs);
     await expect(bValid.processWebhook(valid.payload, valid.signature, request)).resolves.toEqual({
       received: true,
@@ -651,7 +711,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const b = new BillingService(prisma, environment, tenant, audit, notifications);
+    const b = billingWithCatalog(environment, audit, tenant, notifications);
     b.subscriptionProvider = makeMockProvider(subs);
     await expect(b.processWebhook(signed.payload, signed.signature, request)).resolves.toEqual({
       received: true,
@@ -692,7 +752,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const b = new BillingService(prisma, environment, tenant, audit, notifications);
+    const b = billingWithCatalog(environment, audit, tenant, notifications);
     b.subscriptionProvider = makeMockProvider(subs);
     await expect(b.processWebhook(signed.payload, signed.signature, request)).rejects.toMatchObject(
       { code: "STRIPE_CUSTOMER_ORGANIZATION_MISMATCH" },
@@ -725,7 +785,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const bIp = new BillingService(prisma, environment, tenant, audit, notifications);
+    const bIp = billingWithCatalog(environment, audit, tenant, notifications);
     bIp.subscriptionProvider = makeMockProvider(invalidPlanSubs);
     await expect(
       bIp.processWebhook(...(Object.values(sign(invalidPlanEvent)) as [Buffer, string]), request),
@@ -751,7 +811,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const bMm = new BillingService(prisma, environment, tenant, audit, notifications);
+    const bMm = billingWithCatalog(environment, audit, tenant, notifications);
     bMm.subscriptionProvider = makeMockProvider(mismatchSubs);
     await expect(
       bMm.processWebhook(...(Object.values(sign(mismatchEvent)) as [Buffer, string]), request),
@@ -776,7 +836,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const bUk = new BillingService(prisma, environment, tenant, audit, notifications);
+    const bUk = billingWithCatalog(environment, audit, tenant, notifications);
     bUk.subscriptionProvider = makeMockProvider(unknownSubs);
     await expect(
       bUk.processWebhook(...(Object.values(sign(unknownEvent)) as [Buffer, string]), request),
@@ -834,7 +894,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
         }),
       ],
     ]);
-    const b = new BillingService(prisma, environment, tenant, audit, notifications);
+    const b = billingWithCatalog(environment, audit, tenant, notifications);
     b.subscriptionProvider = makeMockProvider(subs);
     await expect(b.processWebhook(signed.payload, signed.signature, request)).rejects.toMatchObject(
       {

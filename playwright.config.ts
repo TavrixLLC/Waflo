@@ -35,6 +35,16 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
+      name: "admin",
+      testMatch: /(?:^|[/\\])admin\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], ...localChrome },
+    },
+    {
+      name: "admin-accessibility",
+      testMatch: /(?:^|[/\\])admin-accessibility\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], ...localChrome },
+    },
+    {
       name: "design-review",
       testMatch:
         /(?:^|[/\\])(?:merchant-design-review|merchant-targeted-branding-visual|merchant-i18n-closure-visual)\.spec\.ts$/,

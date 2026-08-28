@@ -59,7 +59,7 @@ interface TrialSetupResponse {
   clientSecret: string | null;
   setupIntentId: string;
   publishableKey: string;
-  trialDays: 7;
+  trialDays: 15;
   amount: number;
   currency: string;
   expectedTrialStart: string;
@@ -69,7 +69,7 @@ interface TrialSetupResponse {
 interface TrialPreview {
   plan: PlanCode;
   cadence: BillingCadence;
-  trialDays: 7;
+  trialDays: 15;
   amount: number;
   currency: string;
   expectedTrialStart: string;

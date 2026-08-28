@@ -1,6 +1,19 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { createErrorReporter } from "@waflo/security";
+import { AdminController } from "./admin/admin.controller.js";
+import { AdminCsrfGuard, AdminPermissionGuard, AdminSessionGuard } from "./admin/admin.guard.js";
+import { AdminAnalyticsController } from "./admin/admin-analytics.controller.js";
+import { AdminAnalyticsService } from "./admin/admin-analytics.service.js";
+import { AdminAuthService } from "./admin/admin-auth.service.js";
+import { AdminCustomersController } from "./admin/admin-customers.controller.js";
+import { AdminCustomersService } from "./admin/admin-customers.service.js";
+import { AdminPricingController } from "./admin/admin-pricing.controller.js";
+import { AdminPricingService } from "./admin/admin-pricing.service.js";
+import { AdminRepricingController } from "./admin/admin-repricing.controller.js";
+import { AdminRepricingService } from "./admin/admin-repricing.service.js";
+import { AdminStripeHealthController } from "./admin/admin-stripe-health.controller.js";
+import { AdminStripeHealthService } from "./admin/admin-stripe-health.service.js";
 import { AuditController } from "./audit/audit.controller.js";
 import { AuditService } from "./audit/audit.service.js";
 import { AccountAccessService } from "./account/account-access.service.js";
@@ -10,6 +23,8 @@ import { ExternalAuthController } from "./auth/external-auth.controller.js";
 import { ExternalAuthService } from "./auth/external-auth.service.js";
 import { BillingController, WebhooksController } from "./billing/billing.controller.js";
 import { BillingService } from "./billing/billing.service.js";
+import { AnnualRepricingOperationsService } from "./billing/annual-repricing-operations.service.js";
+import { PricingCatalogService } from "./billing/pricing-catalog.service.js";
 import { ErrorEnvelopeFilter } from "./common/error.filter.js";
 import { ERROR_REPORTER } from "./common/error-reporter.js";
 import { EnvelopeInterceptor } from "./common/request-context.js";
@@ -72,6 +87,12 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
 
 @Module({
   controllers: [
+    AdminAnalyticsController,
+    AdminCustomersController,
+    AdminPricingController,
+    AdminRepricingController,
+    AdminStripeHealthController,
+    AdminController,
     AuthController,
     ExternalAuthController,
     OrganizationsController,
@@ -102,6 +123,12 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     CustomerWalletEngagementController,
   ],
   providers: [
+    AdminAnalyticsService,
+    AdminCustomersService,
+    AdminPricingService,
+    AdminRepricingService,
+    AdminStripeHealthService,
+    AdminAuthService,
     EnvironmentService,
     PrismaService,
     AuditService,
@@ -142,6 +169,8 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
         }),
     },
     BillingService,
+    PricingCatalogService,
+    AnnualRepricingOperationsService,
     HostResolutionService,
     {
       provide: ERROR_REPORTER,
@@ -151,8 +180,11 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     },
     { provide: APP_GUARD, useClass: ApiRateLimitGuard },
     { provide: APP_GUARD, useClass: SessionGuard },
+    { provide: APP_GUARD, useClass: AdminSessionGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
+    { provide: APP_GUARD, useClass: AdminCsrfGuard },
     { provide: APP_GUARD, useClass: CustomerCsrfGuard },
+    { provide: APP_GUARD, useClass: AdminPermissionGuard },
     { provide: APP_GUARD, useClass: StaffDeviceSignatureGuard },
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
     { provide: APP_FILTER, useClass: ErrorEnvelopeFilter },

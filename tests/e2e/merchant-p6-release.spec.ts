@@ -442,7 +442,9 @@ async function captureFinalReleaseVisuals(context: BrowserContext): Promise<void
   await builder.setViewportSize({ width: 1440, height: 900 });
   await builder.goto("/en/dashboard/programs/new");
   await chooseFirstTemplate(builder);
-  await expect(builder.locator(".builder-preview-desktop img")).toBeVisible();
+  await expect(
+    builder.locator(".builder-preview-desktop img, .builder-preview-empty").first(),
+  ).toBeVisible();
   await capture(builder, "03-final-builder.png");
   await builder.close();
 

@@ -11,6 +11,7 @@ readonly -a APPLICATION_SERVICES=(
   api
   merchant-web
   customer-web
+  admin-web
   marketing-web
   operational-worker
   wallet-worker

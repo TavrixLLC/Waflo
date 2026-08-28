@@ -103,7 +103,7 @@ function allFieldValues(fields: {
 }
 
 describe("Apple Pass Builder migration", () => {
-  it("keeps legacy reward content on the details side and never in a front field", () => {
+  it("puts legacy reward content in the front primary field", () => {
     const rewardSummary = "A classic grooming service";
     const input = { ...baseMembership, rewardSummary };
     const legacy = mapAppleStoreCard(input, configuration, "a".repeat(43));
@@ -116,11 +116,11 @@ describe("Apple Pass Builder migration", () => {
         ...fields.auxiliaryFields,
       ].map((field) => field.value);
 
-    expect(frontValues(legacy.storeCard)).not.toContain(rewardSummary);
-    expect(legacy.storeCard.backFields).toContainEqual(
+    expect(frontValues(legacy.storeCard)).toContain(rewardSummary);
+    expect(legacy.storeCard.primaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),
     );
-    expect(migrated.generic.backFields).toContainEqual(
+    expect(migrated.generic.primaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),
     );
     expect(migrated.posterGeneric.backFields).toContainEqual(
@@ -150,7 +150,7 @@ describe("Apple Pass Builder migration", () => {
       program: baseMembership.programName,
       status: "Active",
     });
-    expect(legacy.storeCard.backFields).toContainEqual(
+    expect(legacy.storeCard.primaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: baseMembership.rewardSummary }),
     );
     expect(allFieldValues(migrated.generic)).toMatchObject({
@@ -293,7 +293,7 @@ describe("Apple Pass Builder migration", () => {
         const scale = scaleName === "times1" ? 1 : scaleName === "times2" ? 2 : 3;
         const sizes = {
           icon: [38, 38],
-          logo: [160, 50],
+          logo: [38, 38],
           primaryLogo: [126, 30],
           artwork: [358, 448],
           strip: [375, 144],
