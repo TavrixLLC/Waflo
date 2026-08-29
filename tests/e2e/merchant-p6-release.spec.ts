@@ -3,6 +3,7 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type BrowserContext, type Page, test } from "@playwright/test";
 import sharp from "sharp";
+import { expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
 const evidenceDirectory = path.resolve("test-results/evidence/handoff-p6-final");
@@ -442,9 +443,7 @@ async function captureFinalReleaseVisuals(context: BrowserContext): Promise<void
   await builder.setViewportSize({ width: 1440, height: 900 });
   await builder.goto("/en/dashboard/programs/new");
   await chooseFirstTemplate(builder);
-  await expect(
-    builder.locator(".builder-preview-desktop img, .builder-preview-empty").first(),
-  ).toBeVisible();
+  await expectBuilderPreviewReady(builder.locator(".builder-preview-desktop"));
   await capture(builder, "03-final-builder.png");
   await builder.close();
 

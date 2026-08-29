@@ -571,28 +571,6 @@ export function validateProgramConfiguration(input: ValidationEngineInput): {
           "Increase contrast between the accent and background colors.",
         ),
       );
-    if (input.visual.layoutType === "RING" && input.goal > 20)
-      issues.push(
-        issue(
-          "RING_LAYOUT_DENSE",
-          "warning",
-          "stampLayout",
-          "CUSTOMER_WEB",
-          "Ring layouts become dense above 20 stamps.",
-          "Use Grid or Path, or lower the stamp goal.",
-        ),
-      );
-    if (input.visual.layoutType === "PATH" && input.goal < 3)
-      issues.push(
-        issue(
-          "PATH_LAYOUT_TOO_SHORT",
-          "error",
-          "stampLayout",
-          "CUSTOMER_WEB",
-          "Path layout requires at least three stamps.",
-          "Increase the stamp goal or use Row.",
-        ),
-      );
     if (input.visual.stampSize + input.visual.stampSpacing > 112)
       issues.push(
         issue(

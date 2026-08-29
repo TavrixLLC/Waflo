@@ -150,7 +150,7 @@ describe("W2 Round 3 template catalog and application", () => {
       expect(template.artwork.filled.version).toBe(2);
       expect(template.artwork.empty.version).toBe(2);
       expect(template.artwork.milestone.version).toBe(2);
-      expect(template.layout.type).toMatch(/^(ROW|GRID|PATH|RING)$/);
+      expect(template.layout.type).toBe("GRID");
       expect(template.customerWeb.variant).toBeTruthy();
       expect(template.apple.barcodeLabel).toBeTruthy();
       expect(template.google.barcodeLabel).toBeTruthy();
@@ -188,7 +188,7 @@ describe("W2 Round 3 template catalog and application", () => {
     expect(switched.templateVersion).toBe(2);
     expect(switched.translations.en.programName).toBe(carWash.copy.en.programName);
     expect(switched.requiredStampCount).toBe(carWash.recommendedStampGoal);
-    expect(switched.visualTheme.layoutType).toBe("PATH");
+    expect(switched.visualTheme.layoutType).toBe("GRID");
   });
 
   it("keeps the template-switch confirmation mapping explicit and complete", () => {
@@ -304,7 +304,7 @@ describe("W2 Round 3 platform, preview cache, and truthful assets", () => {
     }
   });
 
-  it("renders selected background artwork only where supported and warns elsewhere", () => {
+  it("uses the current Google compositor fallback without the retired background warning", () => {
     const backgroundDataUri = `data:image/png;base64,${Buffer.from("background").toString("base64")}`;
     const customer = composeProgramPreview(previewInput("CUSTOMER_WEB", backgroundDataUri));
     const apple = composeProgramPreview(previewInput("APPLE_WALLET", backgroundDataUri));
@@ -316,7 +316,8 @@ describe("W2 Round 3 platform, preview cache, and truthful assets", () => {
     expect(apple.warnings.map((warning) => warning.code)).toContain(
       "APPLE_BACKGROUND_ARTWORK_UNSUPPORTED",
     );
-    expect(google.warnings.map((warning) => warning.code)).toContain(
+    expect(google.svg).toContain('data-google-hero-artwork-composition="stamps-only"');
+    expect(google.warnings.map((warning) => warning.code)).not.toContain(
       "GOOGLE_BACKGROUND_ARTWORK_UNSUPPORTED",
     );
   });

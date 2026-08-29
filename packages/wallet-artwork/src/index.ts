@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { createQrPng, decodeQrImage } from "@waflo/qr-core";
-import type { PublishedMembershipStampRenderResult, StampLayout } from "@waflo/stamp-engine";
+import {
+  balancedWalletStampDistribution,
+  type PublishedMembershipStampRenderResult,
+  type StampLayout,
+} from "@waflo/stamp-engine";
 import sharp from "sharp";
 
 export type WalletArtworkTarget =
@@ -163,6 +167,8 @@ export interface ComposedWalletArtwork {
   readonly sourceVisibleBounds: WalletArtworkVisibleBounds;
   readonly sourceVisibleRasterAspectRatio: number;
   readonly stampPlacement: WalletArtworkPlacement;
+  /** Present only for the legacy Apple strip, which always uses tidy row groups. */
+  readonly stampGridRows?: readonly number[];
   readonly stampPanelRegion: WalletArtworkPlacement;
   readonly stampRegion: WalletArtworkPlacement;
   readonly identityRegion?: WalletArtworkPlacement;
@@ -324,22 +330,15 @@ function wrapLabel(value: string, maxCharacters: number, maxLines = 2): string[]
 }
 
 function motif(
-  layout: StampLayout,
+  _layout: StampLayout,
   width: number,
   height: number,
   accent: string,
   secondary: string,
   includeLowerAccent = true,
 ): string {
-  if (layout === "RING") {
-    return `<circle cx="${width * 0.84}" cy="${height * 0.2}" r="${width * 0.14}" fill="none" stroke="${accent}" stroke-width="${Math.max(10, width * 0.022)}" opacity="0.12"/><circle cx="${width * 0.13}" cy="${height * 0.84}" r="${width * 0.1}" fill="none" stroke="${secondary}" stroke-width="${Math.max(7, width * 0.016)}" opacity="0.14"/>`;
-  }
-  if (layout === "PATH") {
-    return `<path d="M${width * 0.04} ${height * 0.2} C${width * 0.29} ${height * 0.08},${width * 0.6} ${height * 0.28},${width * 0.96} ${height * 0.12}" fill="none" stroke="${secondary}" stroke-width="${Math.max(18, width * 0.044)}" stroke-linecap="round" opacity="0.13"/><path d="M${width * 0.05} ${height * 0.84} C${width * 0.36} ${height * 0.7},${width * 0.68} ${height * 0.9},${width * 0.95} ${height * 0.76}" fill="none" stroke="${accent}" stroke-width="${Math.max(8, width * 0.016)}" stroke-linecap="round" opacity="0.1"/>`;
-  }
-  if (layout === "ROW") {
-    return `<circle cx="${width * 0.84}" cy="${height * 0.16}" r="${width * 0.12}" fill="${secondary}" opacity="0.11"/><circle cx="${width * 0.89}" cy="${height * 0.19}" r="${width * 0.055}" fill="${accent}" opacity="0.11"/>`;
-  }
+  // Decoration follows the only supported topology. This prevents historical
+  // PATH/RING configuration values from reintroducing non-grid visual language.
   return `<path d="M${width * 0.7} ${height * 0.045}V${height * 0.17}M${width * 0.8} ${height * 0.045}V${height * 0.2}M${width * 0.9} ${height * 0.045}V${height * 0.16}M${width * 0.67} ${height * 0.08}H${width * 0.96}M${width * 0.69} ${height * 0.15}H${width * 0.96}" fill="none" stroke="${accent}" stroke-width="${Math.max(2, width * 0.005)}" opacity="0.1"/>${includeLowerAccent ? `<rect x="${width * 0.025}" y="${height * 0.77}" width="${width * 0.19}" height="${height * 0.18}" rx="${width * 0.03}" fill="${secondary}" opacity="0.1" transform="rotate(-7 ${width * 0.11} ${height * 0.86})"/>` : ""}`;
 }
 
@@ -809,6 +808,213 @@ async function rasterizedVisibleStamp(input: WalletArtworkCompositionInput): Pro
   };
 }
 
+/**
+ * Legacy Wallet strips are much smaller than the modern Poster and Google
+ * surfaces. Their visual grammar is intentionally fixed to the approved
+ * wallet row distribution, even when the original customer-facing program
+ * happened to use a path or ring. This only changes placement; each tile is
+ * cut from the already-rendered authoritative artwork, preserving the exact
+ * historical filled and empty assets and their state/order.
+ */
+export function legacyAppleStampGridRows(total: number): readonly number[] {
+  return balancedWalletStampDistribution(total).rows;
+}
+
+interface LegacyAppleStampTile {
+  readonly index: number;
+  readonly bytes: Buffer;
+}
+
+function assertLegacyAppleArtworkHasNoTextGlyphs(input: WalletArtworkCompositionInput): void {
+  // Provider artwork is a visual-only surface. Accessibility metadata on the
+  // source SVG is not painted by Sharp, but visible SVG text would be; reject
+  // it here instead of allowing an accidental caption into the strip.
+  if (/<(?:text|tspan|textPath)\b/i.test(input.stampArtwork.svg)) {
+    throw new Error("Legacy Apple stamp artwork must not contain text glyphs.");
+  }
+}
+
+async function rasterizedLegacyAppleStampTiles(
+  input: WalletArtworkCompositionInput,
+): Promise<readonly LegacyAppleStampTile[]> {
+  assertLegacyAppleArtworkHasNoTextGlyphs(input);
+  const source = await sharp(Buffer.from(input.stampArtwork.svg, "utf8"), { density: 216 })
+    .ensureAlpha()
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  const xScale = source.info.width / input.stampArtwork.width;
+  const yScale = source.info.height / input.stampArtwork.height;
+  const half = input.stampSize / 2;
+  return Promise.all(
+    [...input.stampArtwork.positions]
+      .sort((left, right) => left.index - right.index)
+      .map(async (position) => {
+        // The renderer places every historical asset into this complete square
+        // viewport. Extracting that viewport retains the full asset (including
+        // its transparent breathing room) before a contain-only resize.
+        const left = Math.max(0, Math.floor((position.x - half) * xScale));
+        const top = Math.max(0, Math.floor((position.y - half) * yScale));
+        const right = Math.min(source.info.width, Math.ceil((position.x + half) * xScale));
+        const bottom = Math.min(source.info.height, Math.ceil((position.y + half) * yScale));
+        if (right <= left || bottom <= top) {
+          throw new Error("Legacy Apple stamp artwork tile is outside its source canvas.");
+        }
+        return {
+          index: position.index,
+          bytes: await sharp(source.data)
+            .extract({ left, top, width: right - left, height: bottom - top })
+            .png()
+            .toBuffer(),
+        };
+      }),
+  );
+}
+
+function legacyAppleSurfaceSvg(
+  input: WalletArtworkCompositionInput,
+  width: number,
+  height: number,
+  scale: WalletArtworkScale,
+): string {
+  const logical = walletArtworkDimensions.APPLE_LEGACY_STRIP;
+  const { backgroundColor, accentColor, secondaryColor } = input.theme;
+  const id = `legacy-surface-${scale}`;
+  // This is deliberately a continuous field, not a framed image card: the
+  // top/bottom fades let the strip settle into the native Wallet background.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><linearGradient id="${id}-top" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.16"/><stop offset="42%" stop-color="${secondaryColor}" stop-opacity="0.045"/><stop offset="100%" stop-color="${backgroundColor}" stop-opacity="0"/></linearGradient><linearGradient id="${id}-bottom" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.11"/><stop offset="42%" stop-color="${accentColor}" stop-opacity="0.025"/><stop offset="100%" stop-color="${backgroundColor}" stop-opacity="0"/></linearGradient><radialGradient id="${id}-glow" cx="86%" cy="20%" r="48%"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.13"/><stop offset="100%" stop-color="${accentColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${backgroundColor}"/><rect width="100%" height="100%" fill="url(#${id}-glow)"/><path d="M-8 18C81 3 160 17 243 8S351 4 385 16" fill="none" stroke="${secondaryColor}" stroke-width="1.2" stroke-linecap="round" opacity="0.14"/><path d="M-12 106C78 117 147 104 227 112S334 118 385 101" fill="none" stroke="${accentColor}" stroke-width="1" stroke-linecap="round" opacity="0.11"/><rect width="100%" height="42" fill="url(#${id}-top)"/><rect y="81" width="100%" height="42" fill="url(#${id}-bottom)"/><metadata data-composer="waflo-legacy-apple-strip-v1" data-text="none" data-layout="balanced-wallet-rows"/></svg>`;
+}
+
+async function composeLegacyAppleStripArtwork(
+  input: WalletArtworkCompositionInput,
+  scale: WalletArtworkScale,
+): Promise<ComposedWalletArtwork> {
+  const target = "APPLE_LEGACY_STRIP" as const;
+  const dimensions = walletArtworkDimensions[target];
+  const layout = APPLE_LEGACY_LAYOUT;
+  const width = dimensions.width * scale;
+  const height = dimensions.height * scale;
+  const rows = legacyAppleStampGridRows(input.requiredStampCount);
+  const tiles = await rasterizedLegacyAppleStampTiles(input);
+  if (tiles.length !== input.requiredStampCount) {
+    throw new Error("Legacy Apple stamp artwork tile count does not match progress semantics.");
+  }
+
+  const columns = Math.max(...rows);
+  const rowCount = rows.length;
+  const grid = {
+    left: layout.stampRegion.left * scale,
+    top: layout.stampRegion.top * scale,
+    width: layout.stampRegion.width * scale,
+    height: layout.stampRegion.height * scale,
+  };
+  const source = await rasterizedVisibleStamp(input);
+  const sourceGapRatio =
+    (source.aspectRatio * rowCount - columns) / (columns - 1 - source.aspectRatio * (rowCount - 1));
+  const estimatedTileSize =
+    Number.isFinite(sourceGapRatio) && sourceGapRatio >= 0
+      ? Math.min(
+          grid.width / (columns + (columns - 1) * sourceGapRatio),
+          grid.height / (rowCount + (rowCount - 1) * sourceGapRatio),
+        )
+      : Math.min(
+          grid.width / (columns + (columns - 1) * 0.16),
+          grid.height / (rowCount + (rowCount - 1) * 0.16),
+        );
+  // Preserve the authoritative group's proportions while keeping a single,
+  // even gap value in both axes. This avoids squeezing wide historical marks
+  // on small legacy strips without introducing a second stamp renderer.
+  const gap = Math.max(
+    scale,
+    Math.round(
+      estimatedTileSize *
+        (Number.isFinite(sourceGapRatio) && sourceGapRatio >= 0 ? sourceGapRatio : 0.16),
+    ),
+  );
+  const tileSize = Math.max(
+    1,
+    Math.floor(
+      Math.min(
+        (grid.width - (columns - 1) * gap) / columns,
+        (grid.height - (rowCount - 1) * gap) / rowCount,
+      ),
+    ),
+  );
+  const resizedTiles = await Promise.all(
+    tiles.map(async (tile) => ({
+      index: tile.index,
+      bytes: await sharp(tile.bytes)
+        .resize({
+          width: tileSize,
+          height: tileSize,
+          fit: "contain",
+          withoutEnlargement: false,
+          kernel: sharp.kernel.lanczos3,
+        })
+        .png()
+        .toBuffer(),
+    })),
+  );
+  const gridHeight = rowCount * tileSize + (rowCount - 1) * gap;
+  const top = Math.round(grid.top + (grid.height - gridHeight) / 2);
+  const composites: Array<{ input: Buffer; left: number; top: number }> = [];
+  let cursor = 0;
+  for (const [rowIndex, count] of rows.entries()) {
+    const rowWidth = count * tileSize + (count - 1) * gap;
+    const left = Math.round(grid.left + (grid.width - rowWidth) / 2);
+    for (let column = 0; column < count; column += 1) {
+      const tile = resizedTiles[cursor];
+      if (!tile || tile.index !== cursor) {
+        throw new Error("Legacy Apple stamp artwork order is invalid.");
+      }
+      composites.push({
+        input: tile.bytes,
+        left: left + column * (tileSize + gap),
+        top: top + rowIndex * (tileSize + gap),
+      });
+      cursor += 1;
+    }
+  }
+  const widestRow = Math.max(...rows);
+  const rawWidth = widestRow * tileSize + (widestRow - 1) * gap;
+  const rawHeight = gridHeight;
+  const reportedHeight = Math.min(rawHeight, Math.round(rawWidth / source.aspectRatio));
+  const reportedWidth = Math.min(rawWidth, Math.round(reportedHeight * source.aspectRatio));
+  // `stampPlacement` reports the visible artwork group rather than transparent
+  // stamp viewports. Some historical marks are intentionally tall or narrow,
+  // so the source's visible aspect ratio remains the correct contract here.
+  const stampPlacement = {
+    left: Math.round(grid.left + (grid.width - reportedWidth) / 2),
+    top: Math.round(grid.top + (grid.height - reportedHeight) / 2),
+    width: reportedWidth,
+    height: reportedHeight,
+  };
+  const bytes = await sharp(Buffer.from(legacyAppleSurfaceSvg(input, width, height, scale), "utf8"))
+    .composite(composites)
+    .png({ compressionLevel: 9, adaptiveFiltering: true })
+    .toBuffer();
+  await validateWalletArtworkPng({ bytes, target, scale });
+  return {
+    bytes,
+    target,
+    scale,
+    width,
+    height,
+    contentDigest: createHash("sha256").update(bytes).digest("hex"),
+    sourceStampDigest: input.stampArtwork.contentDigest,
+    sourceVisibleBounds: source.visibleBounds,
+    sourceVisibleRasterAspectRatio: source.aspectRatio,
+    stampPlacement,
+    stampGridRows: rows,
+    stampPanelRegion: {
+      left: layout.stampPanelRegion.left * scale,
+      top: layout.stampPanelRegion.top * scale,
+      width: layout.stampPanelRegion.width * scale,
+      height: layout.stampPanelRegion.height * scale,
+    },
+    stampRegion: grid,
+  };
+}
+
 async function premiumQrArtwork(
   input: WalletArtworkCompositionInput,
   target: "APPLE_POSTER" | "GOOGLE_HERO",
@@ -1098,6 +1304,9 @@ export async function composeWalletArtwork(
   assertCompositionInput(input);
   if (target === "APPLE_POSTER") {
     return composeApplePosterFromGoogleMaster(input, scale);
+  }
+  if (target === "APPLE_LEGACY_STRIP") {
+    return composeLegacyAppleStripArtwork(input, scale);
   }
   if (target === "GOOGLE_HERO" && scale !== 1) {
     throw new Error("Google hero artwork has one fixed 1032x812 output size.");

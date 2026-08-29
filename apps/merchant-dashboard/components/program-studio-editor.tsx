@@ -2651,7 +2651,7 @@ function StudioSectionContent({
       </div>
     );
 
-  if (section === "layout") return <LayoutEditor draft={draft} update={update} plan={plan} />;
+  if (section === "layout") return <LayoutEditor draft={draft} update={update} />;
 
   if (["customer-preview", "apple-preview", "google-preview"].includes(section))
     return <PreviewSettings section={section} draft={draft} update={update} />;
@@ -3203,39 +3203,16 @@ function OperationsPolicyEditor({
 function LayoutEditor({
   draft,
   update,
-  plan,
 }: {
   draft: ProgramDraftInput;
   update: (transform: (current: ProgramDraftInput) => ProgramDraftInput) => void;
-  plan: "STARTER" | "GROWTH" | "SCALE";
 }) {
   const ui = useStudioUi();
   return (
     <div className="studio-section-content">
-      <div className="studio-layout-grid">
-        {(["ROW", "GRID", "PATH", "RING"] as const).map((layout) => {
-          const locked = plan === "STARTER" && ["PATH", "RING"].includes(layout);
-          return (
-            <button
-              type="button"
-              key={layout}
-              disabled={locked}
-              className={
-                draft.visualTheme.layoutType === layout ? "studio-layout-option--selected" : ""
-              }
-              onClick={() =>
-                update((current) => ({
-                  ...current,
-                  visualTheme: { ...current.visualTheme, layoutType: layout },
-                }))
-              }
-            >
-              <strong>{layout}</strong>
-              <small>{locked ? "Growth required" : ui.responsiveLayout}</small>
-            </button>
-          );
-        })}
-      </div>
+      <Alert tone="info" title="Grid stamp layout">
+        Stamps are arranged automatically in balanced rows for every card and Wallet surface.
+      </Alert>
       <div className="studio-form-grid">
         <FormField label={ui.stampSize}>
           <input
@@ -3265,50 +3242,6 @@ function LayoutEditor({
             }
           />
         </FormField>
-        {["GRID", "PATH"].includes(draft.visualTheme.layoutType) ? (
-          <FormField label={ui.columns}>
-            <TextInput
-              type="number"
-              min={draft.visualTheme.layoutType === "PATH" ? 3 : 2}
-              max={6}
-              value={draft.visualTheme.layoutConfiguration.columns ?? 4}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  visualTheme: {
-                    ...current.visualTheme,
-                    layoutConfiguration: {
-                      ...current.visualTheme.layoutConfiguration,
-                      columns: Number(event.target.value),
-                    },
-                  },
-                }))
-              }
-            />
-          </FormField>
-        ) : null}
-        {draft.visualTheme.layoutType === "RING" ? (
-          <FormField label={ui.startAngle}>
-            <TextInput
-              type="number"
-              min={-180}
-              max={180}
-              value={draft.visualTheme.layoutConfiguration.startAngle ?? -90}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  visualTheme: {
-                    ...current.visualTheme,
-                    layoutConfiguration: {
-                      ...current.visualTheme.layoutConfiguration,
-                      startAngle: Number(event.target.value),
-                    },
-                  },
-                }))
-              }
-            />
-          </FormField>
-        ) : null}
       </div>
       <div className="studio-check-grid">
         <Checkbox

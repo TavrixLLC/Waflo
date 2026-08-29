@@ -589,7 +589,9 @@ async function seedProgram(input: ProgramSeed, now: Date) {
     create: {
       organizationId: IDs.organization,
       programVersionId: input.versionId,
-      emailCollectionMode: "OPTIONAL",
+      // Retained for compatibility with historical records; enrollment now collects phone only.
+      emailCollectionMode: "HIDDEN",
+      phoneCollectionMode: "OPTIONAL",
       primaryCustomerLocale: "EN",
       allowLocaleSelection: true,
       customerTermsRequired: true,

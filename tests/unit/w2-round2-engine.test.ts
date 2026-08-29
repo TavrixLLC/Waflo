@@ -98,8 +98,9 @@ describe("W2 Round 2 visual pipeline", () => {
 
     expect(new Set([customer.digest, apple.digest, google.digest]).size).toBe(3);
     expect(customer.svg).toContain("Customer Web preview");
-    expect(apple.svg).toContain("Apple Wallet preview only");
-    expect(google.svg).toContain("Google Wallet preview only");
+    expect(apple.svg).toContain("Apple legacy Wallet preview");
+    expect(apple.svg).toContain('data-apple-preview-variant="LEGACY"');
+    expect(google.svg).toContain("Google Wallet preview");
     expect(customer.svg).toContain("مكافآت وافلو");
     expect(apple.width).not.toBe(customer.width);
   });
@@ -140,7 +141,7 @@ describe("W2 Round 2 validation engine", () => {
         backgroundColor: "#ffffff",
         foregroundColor: "#fefefe",
         accentColor: "#fdfdfd",
-        layoutType: "PATH",
+        layoutType: "GRID",
         stampSize: 96,
         stampSpacing: 32,
         applePreviewConfig: {},
@@ -171,11 +172,12 @@ describe("W2 Round 2 validation engine", () => {
         "ACTIVE_LOCATION_REQUIRED",
         "ASSET_REQUIRED",
         "COLOR_CONTRAST_LOW",
-        "PATH_LAYOUT_TOO_SHORT",
+        "STAMP_LAYOUT_SPACING_DENSE",
         "PREVIEW_STALE",
         "PREVIEW_PROFILE_MISSING",
       ]),
     );
+    expect(codes).not.toContain("PATH_LAYOUT_TOO_SHORT");
     expect(
       issues.every(
         (item) =>

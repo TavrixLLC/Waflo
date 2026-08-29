@@ -3,7 +3,6 @@ import {
   applyTemplateToDraft,
   createQuickDraft,
   type LocationItem,
-  type PreviewProfile,
   type ProgramDraftInput,
   type TemplateItem,
   type ValidationIssue,
@@ -28,7 +27,7 @@ export function shouldScheduleBuilderAutosave(
 
 export function builderPreviewCacheKey(
   revision: number,
-  profile: PreviewProfile,
+  profile: string,
   locale: string,
   progress: number,
   assetGeneration: number,
@@ -240,7 +239,7 @@ export function createBuilderDraft(
       secondaryColor: "#C9D0CC",
       mutedColor: "#717C76",
       layoutType: "GRID",
-      layoutConfiguration: { columns: 4 },
+      layoutConfiguration: {},
       stampSize: 44,
       stampSpacing: 10,
       customerWebVariant: "MINIMAL",

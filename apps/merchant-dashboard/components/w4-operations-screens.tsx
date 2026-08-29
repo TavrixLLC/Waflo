@@ -61,8 +61,8 @@ interface CustomerListItem {
   displayName: string;
   preferredLocale: "EN" | "AR";
   status: string;
-  maskedEmail: string | null;
-  emailVerificationStatus: string | null;
+  maskedPhone: string | null;
+  phoneVerificationStatus: string | null;
   memberships: CustomerMembershipListItem[];
   createdAt: string;
 }
@@ -426,7 +426,7 @@ export function CustomersOperationsScreen({
               <TextInput
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={ar ? "الاسم أو البريد" : "Name or email"}
+                placeholder={ar ? "الاسم أو الهاتف" : "Name or phone"}
               />
             </FormField>
             <FormField label={ar ? "حالة العضوية" : "Membership status"}>
@@ -480,7 +480,7 @@ export function CustomersOperationsScreen({
                   <span>
                     <strong>{item.displayName}</strong>
                     <small>
-                      {item.maskedEmail ?? (ar ? "لا يوجد بريد محفوظ" : "No stored email")}
+                      {item.maskedPhone ?? (ar ? "لا يوجد رقم هاتف محفوظ" : "No stored phone")}
                     </small>
                     <small className="dashboard-member__mobile-meta">
                       {membershipSummary} · {statusLabel}
@@ -568,7 +568,7 @@ export function CustomersOperationsScreen({
               />
               <span>
                 {customer.contacts[0]?.maskedDisplayValue ??
-                  (ar ? "لا يوجد بريد محفوظ" : "No stored email")}
+                  (ar ? "لا يوجد رقم هاتف محفوظ" : "No stored phone")}
               </span>
             </div>
             <h3>{ar ? "بطاقات الولاء" : "Loyalty cards"}</h3>

@@ -38,7 +38,6 @@ import {
   Sparkles,
   WandSparkles,
 } from "lucide-react";
-import Image from "next/image";
 import {
   type CSSProperties,
   type Dispatch,
@@ -73,7 +72,6 @@ import {
   type AssetItem,
   apiDraft,
   type LocationItem,
-  type PreviewProfile,
   type ProgramDetail,
   type ProgramDraftInput,
   type ProgramTranslationInput,
@@ -89,14 +87,15 @@ import {
   templateStyleLabel,
 } from "./template-gallery-presentation";
 
-const previewProfiles = ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
+const previewProfiles = ["APPLE_LEGACY", "APPLE_IOS27", "GOOGLE_WALLET"] as const;
+type DashboardWalletPreviewProfile = (typeof previewProfiles)[number];
 
 interface PreviewResult {
   svg: string;
   width: number;
   height: number;
   warnings: Array<{ code: string; message: string }>;
-  profile: PreviewProfile;
+  profile: "APPLE_WALLET" | "GOOGLE_WALLET";
 }
 
 interface PreviewState {
@@ -139,18 +138,18 @@ const sectionIcons = {
   review: Check,
 } as const;
 
-function previewSource(svg: string): string {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 function builderText(locale: InterfaceLocale | Locale) {
   return localeRegistry[locale].messages.merchant.loyalty.builder;
 }
 
-function previewLabel(profile: PreviewProfile, locale: InterfaceLocale | Locale): string {
-  if (profile === "APPLE_WALLET") return "Apple Wallet";
+function previewLabel(
+  profile: DashboardWalletPreviewProfile,
+  locale: InterfaceLocale | Locale,
+): string {
+  if (profile === "APPLE_LEGACY") return "Apple Legacy";
+  if (profile === "APPLE_IOS27") return "Apple iOS 27+";
   if (profile === "GOOGLE_WALLET") return "Google Wallet";
-  return builderText(locale).customer;
+  return builderText(locale).preview;
 }
 
 function merchantError(error: unknown, locale: InterfaceLocale | Locale): string {
@@ -219,9 +218,11 @@ export function ProgramCardBuilder({
   const [activeSection, setActiveSection] = useState<BuilderSection>("languages");
   const [language, setLanguage] = useState<string>(ar ? "ar" : "en");
   const [previewLocale, setPreviewLocale] = useState<string>(ar ? "ar" : "en");
-  const [profile, setProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
+  const [profile, setProfile] = useState<DashboardWalletPreviewProfile>("APPLE_LEGACY");
   const [progress, setProgress] = useState(0);
-  const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewState>>>({});
+  const [previews, setPreviews] = useState<
+    Partial<Record<DashboardWalletPreviewProfile, PreviewState>>
+  >({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [assetGeneration, setAssetGeneration] = useState(0);
@@ -376,7 +377,7 @@ export function ProgramCardBuilder({
   }, [activeSection]);
 
   const previewKey = useCallback(
-    (nextProfile: PreviewProfile) =>
+    (nextProfile: DashboardWalletPreviewProfile) =>
       builderPreviewCacheKey(
         revisionRef.current,
         nextProfile,
@@ -388,7 +389,10 @@ export function ProgramCardBuilder({
   );
 
   const loadPreview = useCallback(
-    async (nextProfile: PreviewProfile, force = false): Promise<PreviewResult | null> => {
+    async (
+      nextProfile: DashboardWalletPreviewProfile,
+      force = false,
+    ): Promise<PreviewResult | null> => {
       const persistedDraft = draftRef.current;
       if (!persistedDraft || JSON.stringify(apiDraft(persistedDraft)) !== persistedRef.current)
         return null;
@@ -401,8 +405,15 @@ export function ProgramCardBuilder({
       setPreviewLoading(true);
       setPreviewError(false);
       try {
+        const apiProfile = nextProfile === "GOOGLE_WALLET" ? "GOOGLE_WALLET" : "APPLE_WALLET";
+        const appleWalletVariant =
+          nextProfile === "GOOGLE_WALLET"
+            ? ""
+            : nextProfile === "APPLE_IOS27"
+              ? "&appleWalletVariant=poster"
+              : "&appleWalletVariant=legacy";
         const result = await apiFetch<PreviewResult>(
-          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${nextProfile}&locale=${encodeURIComponent(previewLocale)}`,
+          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${apiProfile}${appleWalletVariant}&locale=${encodeURIComponent(previewLocale)}`,
         );
         const sourceDraft = structuredClone(persistedDraft);
         const nextPreview = { key, result, sourceDraft } satisfies PreviewState;
@@ -426,8 +437,27 @@ export function ProgramCardBuilder({
     return () => window.clearTimeout(timer);
   }, [loadPreview, profile, saveState]);
 
+  const loadCustomerWebPreview = useCallback(async (): Promise<boolean> => {
+    const persistedDraft = draftRef.current;
+    if (!persistedDraft || JSON.stringify(apiDraft(persistedDraft)) !== persistedRef.current)
+      return false;
+    try {
+      await apiFetch<PreviewResult>(
+        `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=CUSTOMER_WEB&locale=${encodeURIComponent(previewLocale)}`,
+      );
+      return true;
+    } catch (caught) {
+      setPreviewError(true);
+      setError(merchantError(caught, interfaceLocale));
+      return false;
+    }
+  }, [interfaceLocale, organizationId, previewLocale, programId, progress]);
+
   async function ensureAllPreviews(): Promise<boolean> {
-    const results = await Promise.all(previewProfiles.map((item) => loadPreview(item)));
+    const results = await Promise.all([
+      ...previewProfiles.map((item) => loadPreview(item)),
+      loadCustomerWebPreview(),
+    ]);
     return results.every(Boolean);
   }
 
@@ -1749,41 +1779,6 @@ function AdvancedSection({
         </p>
       </div>
       <details className="builder-disclosure">
-        <summary>{builderText(interfaceLocale).ui.stampArrangement}</summary>
-        <div className="builder-layout-options">
-          {(["ROW", "GRID", "PATH", "RING"] as const).map((layout) => {
-            const locked = !proAvailable && (layout === "PATH" || layout === "RING");
-            const labels = {
-              ROW: builderText(interfaceLocale).ui.horizontal,
-              GRID: builderText(interfaceLocale).ui.classic,
-              PATH: builderText(interfaceLocale).ui.flowing,
-              RING: builderText(interfaceLocale).ui.circular,
-            };
-            return (
-              <button
-                type="button"
-                key={layout}
-                disabled={locked}
-                aria-pressed={draft.visualTheme.layoutType === layout}
-                onClick={() =>
-                  update((current) => ({
-                    ...current,
-                    visualTheme: { ...current.visualTheme, layoutType: layout },
-                  }))
-                }
-              >
-                <strong>{labels[layout]}</strong>
-                <small>
-                  {locked
-                    ? builderText(interfaceLocale).ui.growthRequired
-                    : builderText(interfaceLocale).ui.responsiveArrangement}
-                </small>
-              </button>
-            );
-          })}
-        </div>
-      </details>
-      <details className="builder-disclosure">
         <summary>{builderText(interfaceLocale).ui.previewSurfaceDetails}</summary>
         <div className="builder-form-stack">
           <div className="builder-subheading">
@@ -2116,8 +2111,8 @@ function PreviewPanel({
   interfaceLocale: InterfaceLocale;
   previewLocale: string;
   setPreviewLocale: Dispatch<SetStateAction<string>>;
-  profile: PreviewProfile;
-  setProfile: Dispatch<SetStateAction<PreviewProfile>>;
+  profile: DashboardWalletPreviewProfile;
+  setProfile: Dispatch<SetStateAction<DashboardWalletPreviewProfile>>;
   progress: number;
   setProgress: Dispatch<SetStateAction<number>>;
   preview: PreviewState | undefined;
@@ -2208,7 +2203,7 @@ function PreviewPanel({
         aria-busy={previewLoading}
         className={`builder-preview-canvas builder-preview-canvas--${profile.toLocaleLowerCase("en-US")} ${preview ? "builder-preview-canvas--ready" : "builder-preview-canvas--empty"}`}
       >
-        {preview && profile !== "CUSTOMER_WEB" ? (
+        {preview ? (
           <span
             className={`wallet-preview-image-stack wallet-preview-image-stack--${profile.toLocaleLowerCase("en-US")}`}
           >
@@ -2220,15 +2215,6 @@ function PreviewPanel({
               width={preview.result.width}
             />
           </span>
-        ) : preview ? (
-          <Image
-            src={previewSource(displaySvg)}
-            alt={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
-            width={preview.result.width}
-            height={preview.result.height}
-            unoptimized
-            priority
-          />
         ) : (
           <div className="builder-preview-empty" role="status">
             <RefreshCcw

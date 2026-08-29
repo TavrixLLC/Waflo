@@ -64,6 +64,7 @@ test("public, authentication, and form-error screens have no serious accessibili
     "http://localhost:3001/en/logged-out",
     "http://localhost:3001/en/session-expired",
     "http://localhost:3002/?tenant=today",
+    "http://today.localhost:3002/join/cookie-card",
   ]) {
     await page.goto(url);
     await expectNoCriticalViolations(page);

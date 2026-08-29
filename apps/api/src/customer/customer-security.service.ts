@@ -14,9 +14,12 @@ import {
   encryptCustomerValue,
   hashCustomerToken,
   hashNormalizedEmail,
+  hashNormalizedPhone,
   maskEmail,
+  maskPhone,
   membershipCredentialHash,
   normalizeEmail,
+  normalizePhone,
   type VersionedSecret,
 } from "@waflo/customer-security";
 import {
@@ -95,6 +98,28 @@ export class CustomerSecurityService {
 
   emailRequestFingerprint(email: string): string {
     return hashNormalizedEmail(normalizeEmail(email), this.contactLookupKey);
+  }
+
+  preparePhone(organizationId: string, phone: string) {
+    const id = randomUUID();
+    const normalized = normalizePhone(phone);
+    const encrypted = encryptCustomerValue(normalized, {
+      organizationId,
+      recordId: id,
+      purpose: "customer-phone",
+      keyring: this.customerKeyring,
+    });
+    return {
+      id,
+      encryptedValue: encrypted.serialized,
+      encryptionKeyVersion: encrypted.keyVersion,
+      normalizedValueHash: hashNormalizedPhone(normalized, this.contactLookupKey),
+      maskedDisplayValue: maskPhone(normalized),
+    };
+  }
+
+  phoneRequestFingerprint(phone: string): string {
+    return hashNormalizedPhone(normalizePhone(phone), this.contactLookupKey);
   }
 
   decryptEmail(contact: { id: string; organizationId: string; encryptedValue: string }): string {

@@ -154,6 +154,7 @@ export class CustomerCardService {
       (item) => item.membershipCredentialId === boundCredential?.id,
     );
     const email = membership.customer.contacts.find((item) => item.type === "EMAIL");
+    const phone = membership.customer.contacts.find((item) => item.type === "PHONE");
     if (!membership.enrollmentProgramVersion.visualTheme) {
       throw new AppError(
         "PROGRAM_ASSET_CONTENT_UNAVAILABLE",
@@ -188,8 +189,8 @@ export class CustomerCardService {
       customer: {
         displayName: membership.customer.displayName,
         preferredLocale: interfaceLocale,
-        maskedEmail: email?.maskedDisplayValue ?? null,
-        emailVerificationStatus: email?.verificationStatus ?? null,
+        maskedPhone: phone?.maskedDisplayValue ?? null,
+        phoneVerificationStatus: phone?.verificationStatus ?? null,
       },
       merchant: {
         name: membership.organization.name,
@@ -258,7 +259,7 @@ export class CustomerCardService {
         accentColor: membership.enrollmentProgramVersion.visualTheme?.accentColor ?? "#E4572E",
         secondaryColor:
           membership.enrollmentProgramVersion.visualTheme?.secondaryColor ?? "#F3A712",
-        layoutType: membership.enrollmentProgramVersion.visualTheme?.layoutType ?? "GRID",
+        layoutType: "GRID",
       },
       membershipQr:
         credentialActive && boundCredential

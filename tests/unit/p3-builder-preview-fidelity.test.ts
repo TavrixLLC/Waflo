@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { artworkFor } from "../../apps/api/src/programs/library-artwork.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import {
   findProgramTemplate,
   latestProgramTemplates,
@@ -32,6 +33,7 @@ function preview(
     logoDataUri?: string;
     merchantBrandLogoDataUri?: string;
   },
+  appleWalletVariant?: "LEGACY" | "POSTER",
 ) {
   const template = required(findProgramTemplate("COFFEE"), "Classic Roast template");
   const filled = required(artworkFor(template.artwork.filled), "filled coffee artwork");
@@ -82,6 +84,7 @@ function preview(
     ...(template.presentation ? { presentation: template.presentation } : {}),
     apple: template.apple,
     google: template.google,
+    ...(appleWalletVariant ? { appleWalletVariant } : {}),
   });
 }
 
@@ -218,10 +221,10 @@ describe("P3 Builder preview fidelity", () => {
     ["ckb", "rtl"],
     ["ku-Arab-IQ", "rtl"],
   ])(
-    "keeps the %s Google card free of numeric and customer identity fields",
+    "keeps the %s Google card free of customer identity fields while showing progress",
     (locale, direction) => {
       const composition = preview("GOOGLE_WALLET", 0, locale);
-      expect(composition.svg).not.toContain('data-stamp-counter="true"');
+      expect(composition.svg).toContain('data-google-counter="true"');
       expect(composition.svg).not.toContain('data-google-core-field="points"');
       expect(composition.svg).not.toContain("Demo customer");
       expect(composition.svg).not.toContain("عميل تجريبي");
@@ -238,23 +241,22 @@ describe("P3 Builder preview fidelity", () => {
     expect(composition.svg).toContain('data-provider-managed-layout="true"');
     expect(composition.svg).toContain('data-provider-managed-text-color="true"');
     expect(composition.svg).toContain('data-google-hero-aspect="1032:812"');
-    expect(composition.svg).toContain(
-      'data-google-card-surface="true" x="24" y="40" width="412" height="716"',
-    );
+    expect(composition.svg).toContain('data-google-card-surface="true"');
+    expect(composition.svg).toContain('data-google-counter="true"');
     expect(composition.svg).toContain(
       'data-google-hero-region="true" data-google-hero-artwork-composition="stamps-only"',
     );
-    expect(composition.svg).toContain('x="44" y="366" width="372" height="293"');
+    expect(composition.svg).toContain('x="62" y="150" width="336" height="250"');
     expect(composition.svg).toContain('data-google-reward-row="true"');
     expect(embeddedStampSvg(composition.svg)).not.toContain('data-integrated-reward="true"');
     expect(embeddedStampSvg(composition.svg)).not.toContain(rewardSummary);
     expect(composition.svg).toContain(rewardSummary);
     const qrRegion = composition.svg.indexOf('data-google-barcode-region="provider-managed"');
     const hero = composition.svg.indexOf('data-google-hero-region="true"');
-    const supportingFields = composition.svg.indexOf('data-google-below-fold-fields="true"');
+    const reward = composition.svg.indexOf('data-google-reward-row="true"');
     expect(qrRegion).toBeGreaterThan(-1);
-    expect(qrRegion).toBeLessThan(hero);
-    expect(hero).toBeLessThan(supportingFields);
+    expect(hero).toBeLessThan(reward);
+    expect(reward).toBeLessThan(qrRegion);
     const providerChrome = composition.svg.replace(
       /data:image\/svg\+xml;base64,[^"']+/gu,
       "embedded-stamp-artwork",
@@ -266,15 +268,31 @@ describe("P3 Builder preview fidelity", () => {
   it("keeps Apple front fields minimal and identifies its provider-managed back fields", () => {
     const composition = preview("APPLE_WALLET", 4);
     expect(composition.svg).toContain('data-apple-front-surface="true"');
-    expect(composition.svg).toContain('data-apple-back-fields="true"');
+    expect(composition.svg).toContain('data-apple-native-fields="true"');
     expect(composition.svg).toContain('data-apple-strip-aspect="375:144"');
-    expect(composition.svg).toContain('data-apple-field-role="primary"');
+    expect(composition.svg).toContain('data-apple-header-field="stamps"');
+    expect(composition.svg).toContain('data-apple-secondary-field="reward"');
+    expect(composition.svg).toContain(
+      'data-apple-field-groups="header:stamps;secondary:reward;back:member,status,program"',
+    );
+    expect(composition.svg).not.toContain('data-apple-field-role="primary"');
     expect(embeddedStampSvg(composition.svg)).not.toContain('data-integrated-reward="true"');
     expect(embeddedStampSvg(composition.svg)).not.toContain(rewardSummary);
     expect(composition.svg).toContain(rewardSummary);
-    expect(composition.svg.indexOf('data-apple-front-surface="true"')).toBeLessThan(
-      composition.svg.indexOf('data-apple-back-fields="true"'),
+    expect(composition.svg.indexOf('data-apple-progress-artwork="stamps-only"')).toBeLessThan(
+      composition.svg.indexOf('data-apple-secondary-field="reward"'),
     );
+  });
+
+  it("renders the separate approved Apple iOS 27+ Poster composition", () => {
+    const composition = preview("APPLE_WALLET", 4, "en", undefined, "POSTER");
+    expect(composition.svg).toContain('data-apple-preview-variant="POSTER"');
+    expect(composition.svg).toContain('data-poster-identity="true"');
+    expect(composition.svg).toContain('data-poster-counter="true"');
+    expect(composition.svg).toContain('data-poster-stamp-panel="true"');
+    expect(composition.svg).toContain('data-poster-reward-pill="true"');
+    expect(composition.svg).toContain('data-apple-barcode-region="provider-managed"');
+    expect(embeddedStampSvg(composition.svg)).not.toContain(rewardSummary);
   });
 
   it.each(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const)(
@@ -310,7 +328,7 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).toContain(
         `data-barcode-format="${profile === "APPLE_WALLET" ? "QR" : "QR_CODE"}"`,
       );
-      expect(composition.svg).toContain("المكافأة جاهزة");
+      expect(composition.svg).not.toContain("Demo customer");
     },
   );
 
@@ -339,37 +357,33 @@ describe("P3 Builder preview fidelity", () => {
         "authentication-token",
       );
       const composition = preview("APPLE_WALLET", progress);
-      const program = required(pass.storeCard.secondaryFields[0], "Apple program field");
-      const status = required(
-        pass.storeCard.auxiliaryFields.find((field) => field.key === "status"),
-        "Apple status front field",
-      );
       const reward = required(
-        pass.storeCard.primaryFields.find((field) => field.key === "reward"),
+        pass.storeCard.secondaryFields.find((field) => field.key === "reward"),
         "Apple reward front field",
       );
 
       expect(pass.storeCard.headerFields).toContainEqual(
         expect.objectContaining({ key: "progress", value: `${progress}/${goal}` }),
       );
-      expect(pass.storeCard.primaryFields).toContainEqual(
+      expect(pass.storeCard.primaryFields).toEqual([]);
+      expect(pass.storeCard.secondaryFields).toContainEqual(
         expect.objectContaining({ key: "reward", value: input.rewardSummary }),
       );
-      expect(pass.storeCard.auxiliaryFields).toContainEqual(
-        expect.objectContaining({ key: "member", value: input.displayName }),
+      expect(pass.storeCard.backFields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: "program" }),
+          expect.objectContaining({ key: "member", value: input.displayName }),
+          expect.objectContaining({ key: "status" }),
+        ]),
       );
-      expect(pass.storeCard.backFields.some((field) => field.key === "member")).toBe(false);
-      expect(composition.svg).toContain(String(program.value));
-      expect(composition.svg).toContain(String(status.label));
-      expect(composition.svg).toContain(String(status.value));
       expect(composition.svg).toContain(String(reward.value));
       expect(composition.svg).not.toContain(input.displayName);
-      expect(composition.svg).not.toContain(`${progress}/${goal}`);
       expect(composition.svg).toContain('data-barcode-format="QR"');
       expect(composition.svg).not.toContain("data-barcode-fallback");
       expect(composition.svg).toContain('data-apple-strip-safe-area="true"');
-      expect(composition.svg).toContain('data-apple-field-role="primary"');
-      expect(composition.svg).toContain('data-apple-field-role="secondary"');
+      expect(composition.svg).toContain('data-apple-header-field="stamps"');
+      expect(composition.svg).toContain('data-apple-secondary-field="reward"');
+      expect(composition.svg).not.toContain('data-apple-field-role="primary"');
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );
@@ -386,7 +400,6 @@ describe("P3 Builder preview fidelity", () => {
         "issuer.class",
       );
       const composition = preview("GOOGLE_WALLET", progress);
-      const status = required(loyaltyObject.textModulesData[1], "Google status module");
 
       expect(composition.svg).toContain(loyaltyClass.issuerName);
       expect(composition.svg).toContain(loyaltyClass.programName);
@@ -394,9 +407,7 @@ describe("P3 Builder preview fidelity", () => {
       expect(loyaltyObject).not.toHaveProperty("accountId");
       expect(loyaltyObject).not.toHaveProperty("loyaltyPoints");
       expect(composition.svg).not.toContain(input.displayName);
-      expect(composition.svg).not.toContain(`${progress}/${goal}`);
-      expect(composition.svg).toContain(status.header);
-      expect(composition.svg).toContain(status.body);
+      expect(composition.svg).not.toContain("STATUS");
       expect(composition.svg).toContain('data-barcode-format="QR_CODE"');
       expect(loyaltyClass.textModulesData).not.toContainEqual(
         expect.objectContaining({ id: "reward" }),
@@ -415,4 +426,86 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );
+
+  it("uses the production compositor output in every dashboard Wallet preview", async () => {
+    const template = required(findProgramTemplate("COFFEE"), "Classic Roast template");
+    const filled = required(artworkFor(template.artwork.filled), "filled coffee artwork");
+    const empty = required(artworkFor(template.artwork.empty), "empty coffee artwork");
+    const rendered = renderStampSvg({
+      goal,
+      progress: 4,
+      layout: "GRID",
+      layoutConfiguration: template.layout.configuration,
+      outputProfile: "GOOGLE_WALLET",
+      filledColor: template.colors.accent,
+      emptyColor: template.colors.secondary,
+      accentColor: template.colors.accent,
+      backgroundColor: template.colors.background,
+      foregroundColor: template.colors.foreground,
+      stampSize: template.layout.stampSize,
+      spacing: template.layout.stampSpacing,
+      filledArtwork: { kind: "svg", content: filled.content, trusted: true },
+      emptyArtwork: { kind: "svg", content: empty.content, trusted: true },
+      label: "4/8",
+      rewardLabel: rewardSummary,
+      locale: "en",
+      rewardReady: false,
+      progressLabelVisible: false,
+      rewardLabelVisible: false,
+    });
+    const base = {
+      locale: "en",
+      organizationName,
+      programName,
+      shortDescription: "A warm reward for regular coffee visits.",
+      rewardSummary,
+      terms: "One stamp per qualifying purchase.",
+      progress: 4,
+      goal,
+      stampSvg: rendered.svg,
+      stampLayout: "GRID" as const,
+      backgroundColor: template.colors.background,
+      foregroundColor: template.colors.foreground,
+      accentColor: template.colors.accent,
+      secondaryColor: template.colors.secondary,
+      customerWebVariant: template.customerWeb.variant,
+      apple: template.apple,
+      google: template.google,
+    };
+    const variants = [
+      ["GOOGLE_WALLET", undefined, "GOOGLE_HERO", "data-google-native-identity"],
+      ["APPLE_WALLET", "POSTER", "APPLE_POSTER", "data-poster-artwork"],
+      ["APPLE_WALLET", "LEGACY", "APPLE_LEGACY_STRIP", "data-apple-progress-strip"],
+    ] as const;
+
+    for (const [profile, appleWalletVariant, target, platformMarker] of variants) {
+      const walletArtwork = await composeDashboardWalletArtwork({
+        profile,
+        ...(appleWalletVariant ? { appleWalletVariant } : {}),
+        locale: "en",
+        renderedStamp: rendered,
+        stampSize: template.layout.stampSize,
+        organizationName,
+        programName,
+        rewardSummary,
+        progress: 4,
+        goal,
+        backgroundColor: template.colors.background,
+        foregroundColor: template.colors.foreground,
+        accentColor: template.colors.accent,
+        secondaryColor: template.colors.secondary,
+      });
+      const composition = composeProgramPreview({
+        ...base,
+        profile,
+        ...(appleWalletVariant ? { appleWalletVariant } : {}),
+        walletArtwork,
+      });
+
+      expect(walletArtwork.target).toBe(target);
+      expect(walletArtwork.dataUri).toMatch(/^data:image\/png;base64,/u);
+      expect(composition.svg).toContain(`data-production-wallet-artwork="${target}"`);
+      expect(composition.svg).toContain(platformMarker);
+    }
+  });
 });

@@ -21,6 +21,7 @@ import {
 
 export const GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION = "google-progress-v5";
 
+/** Input compatibility only: historical persisted values normalize to Grid. */
 type GoogleProgressLayout = "ROW" | "GRID" | "PATH" | "RING";
 
 interface GoogleProgressArtworkCompositionInput {
@@ -38,21 +39,20 @@ interface GoogleProgressArtworkCompositionInput {
 
 /**
  * Google renders loyalty hero artwork in a near-square 1032x812 region. The canvas may
- * letterbox wide or tall artwork, but the provider adapter must not rewrite the merchant's
- * authored ROW/GRID/RING/PATH topology to compensate for provider-owned geometry.
+ * letterbox wide or tall artwork. Waflo owns the normalized Grid topology.
  */
 export function resolveGoogleProgressArtworkComposition(
   input: GoogleProgressArtworkCompositionInput,
 ): Readonly<{
-  layout: GoogleProgressLayout;
-  layoutConfiguration: GoogleProgressArtworkCompositionInput["layoutConfiguration"];
+  layout: "GRID";
+  layoutConfiguration: undefined;
   adapted: false;
 }> {
-  // Google owns the hero canvas aspect ratio, but Waflo owns the authored stamp topology.
-  // Preserve ROW/GRID/RING/PATH exactly and accept provider-native letterboxing when necessary.
+  // The input is deliberately ignored: obsolete persisted layout values must fail closed to Grid.
+  void input;
   return {
-    layout: input.layout,
-    layoutConfiguration: input.layoutConfiguration,
+    layout: "GRID",
+    layoutConfiguration: undefined,
     adapted: false,
   };
 }

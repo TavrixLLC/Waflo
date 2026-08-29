@@ -202,6 +202,7 @@ export class ProgramsController {
     @Query("progress") progress = "0",
     @Query("layout") layout?: string,
     @Query("profile") profile = "CUSTOMER_WEB",
+    @Query("appleWalletVariant") appleWalletVariant?: string,
     @Query("locale") locale = "en",
   ) {
     const numericProgress = Number(progress);
@@ -211,6 +212,9 @@ export class ProgramsController {
       !Number.isInteger(numericProgress) ||
       numericProgress < 0 ||
       !["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"].includes(normalizedProfile) ||
+      (appleWalletVariant !== undefined &&
+        (normalizedProfile !== "APPLE_WALLET" ||
+          !["legacy", "poster"].includes(appleWalletVariant.toLowerCase()))) ||
       !parsedLocale.success
     )
       throw new AppError(
@@ -232,6 +236,7 @@ export class ProgramsController {
       normalizedProfile as "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET",
       parsedLocale.data,
       request,
+      appleWalletVariant?.toLowerCase() === "poster" ? "POSTER" : "LEGACY",
     );
   }
 

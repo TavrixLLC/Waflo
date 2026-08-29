@@ -105,9 +105,12 @@ function membershipStatus(input: WalletMembershipInput): string {
 /**
  * Native field hierarchy for the iOS 26-and-earlier Generic/Store Card face.
  *
- * Keep merchant identity in logoText, reserve the compact header tier for
- * progress, and make the approved reward the primary front-facing value. The
- * Poster Generic mapping intentionally does not consume this helper.
+ * Keep merchant identity in logoText and reserve the compact header tier for
+ * progress. Apple places a legacy primary field on top of the strip artwork,
+ * so the reward deliberately uses the secondary tier below it. Program,
+ * member, and status are useful details, but overwhelm the compact legacy
+ * face, so they deliberately live on the back. The Poster Generic mapping
+ * intentionally does not consume this helper.
  */
 export function mapLegacyApplePresentation(input: WalletMembershipInput): ApplePassFields {
   return {
@@ -118,9 +121,13 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
         value: `${input.currentStampCount}/${input.requiredStampCount}`,
       },
     ],
-    primaryFields: [{ key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) }],
-    secondaryFields: [{ key: "program", label: "PROGRAM", value: input.programName.slice(0, 80) }],
-    auxiliaryFields: [
+    // On pre-Poster Apple Wallet, primary fields are composited over strip
+    // artwork. Keep this empty so native text cannot obscure the stamps.
+    primaryFields: [],
+    secondaryFields: [{ key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) }],
+    auxiliaryFields: [],
+    backFields: [
+      { key: "program", label: "PROGRAM", value: input.programName.slice(0, 80) },
       { key: "member", label: "MEMBER", value: input.displayName.slice(0, 80) },
       {
         key: "status",
@@ -128,8 +135,6 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
         value: membershipStatus(input),
         changeMessage: "%@",
       },
-    ],
-    backFields: [
       {
         key: "security",
         label: "SECURITY",

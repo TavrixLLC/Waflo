@@ -1713,3 +1713,248 @@ body {
     border-radius: 24px;
   }
 }
+
+/* Enrollment is a desktop card counter, not a phone-sized form in empty space. */
+.customer-page.join-page {
+  width: min(100% - clamp(2rem, 5vw, 6rem), 92rem);
+  padding-block: clamp(1rem, 2vw, 2rem) clamp(2.5rem, 5vw, 5rem);
+}
+
+.join-page .join-layout {
+  grid-template-columns: minmax(0, 1.18fr) minmax(23rem, 0.82fr);
+  align-items: start;
+  gap: clamp(1.5rem, 4vw, 4.5rem);
+  padding-block: clamp(2rem, 5vw, 4.5rem);
+}
+
+.join-page .program-story {
+  min-width: 0;
+  min-height: clamp(32rem, 53vw, 43rem);
+  padding: clamp(1.5rem, 3vw, 2.75rem);
+  align-content: start;
+  gap: clamp(1rem, 2vw, 1.7rem);
+}
+
+.join-page .program-story__header,
+.join-page .program-story__progress,
+.join-page .program-story > .reward-card,
+.join-page .program-story > .program-details {
+  min-width: 0;
+}
+
+.join-page .program-story h1 {
+  max-width: 18ch;
+  font-size: clamp(2.1rem, 4vw, 4.1rem);
+  line-height: 1.02;
+}
+
+.join-page .program-story .customer-lead {
+  max-width: 56ch;
+  font-size: clamp(0.95rem, 1.25vw, 1.08rem);
+}
+
+.join-page .published-stamp-artwork--preview {
+  width: min(100%, 37rem);
+  max-height: 17rem;
+  margin-block: 0.25rem 0.65rem;
+}
+
+.join-page .stamp-preview-count {
+  margin-block-end: 0;
+  font-size: 0.9rem;
+}
+
+.join-page .reward-card {
+  max-width: none;
+  padding: clamp(1rem, 2vw, 1.35rem);
+}
+
+.join-page .reward-card > div {
+  min-width: 0;
+}
+
+.join-page .reward-card strong,
+.join-page .reward-card p {
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.join-page .program-details {
+  margin-block-start: auto;
+}
+
+.join-page .enrollment-card {
+  position: sticky;
+  top: 1.5rem;
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: clamp(1.5rem, 3vw, 2.35rem);
+  border-radius: 28px;
+  box-shadow: 0 1.25rem 3.5rem rgb(36 25 22 / 12%);
+}
+
+.join-page .enrollment-card__heading {
+  align-items: start;
+  gap: 0.65rem 1rem;
+  margin-block-end: 1.75rem;
+}
+
+.join-page .enrollment-card__heading h2 {
+  max-width: 19ch;
+  font-size: clamp(1.45rem, 2vw, 1.8rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.join-page .enrollment-form {
+  gap: 1.2rem;
+}
+
+.join-page .enrollment-form .wf-field {
+  gap: 0.55rem;
+}
+
+.join-page .enrollment-form .wf-input {
+  min-height: 3.4rem;
+  padding-inline: 1rem;
+  background: rgb(247 244 238 / 82%);
+  font-size: 1rem;
+}
+
+.join-page .enrollment-form .wf-check {
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.join-page .enrollment-form .wf-check input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  flex: 0 0 auto;
+}
+
+.join-page .customer-terms {
+  padding: 0;
+  overflow: hidden;
+  background: rgb(247 244 238 / 74%);
+}
+
+.join-page .customer-terms summary {
+  min-height: 3rem;
+  padding: 0.8rem 1rem;
+  color: var(--program-ink);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.join-page .customer-terms[open] summary {
+  border-block-end: 1px solid var(--waflo-border);
+}
+
+.join-page .customer-terms p {
+  max-height: 12rem;
+  margin: 0;
+  padding: 0.9rem 1rem 1rem;
+  overflow: auto;
+}
+
+.join-page .enrollment-form > .wf-button {
+  width: 100%;
+  min-height: 3.35rem;
+  margin-block-start: 0.15rem;
+  font-size: 1rem;
+}
+
+.join-page .privacy-note {
+  max-width: 56ch;
+  font-size: 0.8rem;
+}
+
+@media (min-width: 900px) {
+  .join-page .program-story[data-composition="EDITORIAL"],
+  .join-page .program-story[data-composition="LABEL_FRAME"] {
+    grid-template-columns: minmax(0, 1fr) minmax(14.5rem, 0.68fr);
+  }
+
+  .join-page .program-story[data-composition="SIDE_TOTEM"] {
+    grid-template-columns: minmax(11rem, 0.4fr) minmax(0, 1fr);
+  }
+
+  .join-page .program-story[data-composition="SPLIT_HERO"] > :not(.program-story__motif) {
+    width: min(76%, 36rem);
+  }
+}
+
+@media (max-width: 980px) {
+  .customer-page.join-page {
+    width: min(100% - 2rem, 72rem);
+  }
+
+  .join-page .join-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(1.25rem, 3vw, 2rem);
+  }
+
+  .join-page .program-story {
+    min-height: 0;
+  }
+
+  .join-page .enrollment-card {
+    position: static;
+    width: min(100%, 42rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .customer-page.join-page {
+    width: min(100% - 1.25rem, 42rem);
+    padding-block: 0.75rem 2rem;
+  }
+
+  .join-page .join-layout {
+    gap: 1rem;
+    padding-block: 1.25rem 2rem;
+  }
+
+  .join-page .program-story {
+    padding: 1.25rem;
+    border-radius: 24px;
+  }
+
+  .join-page .program-story h1 {
+    max-width: 15ch;
+    font-size: clamp(2rem, 10vw, 2.75rem);
+  }
+
+  .join-page .published-stamp-artwork--preview {
+    max-height: 12rem;
+  }
+
+  .join-page .reward-card {
+    gap: 0.8rem;
+  }
+
+  .join-page .reward-card > span {
+    flex-basis: 3rem;
+    width: 3rem;
+    height: 3rem;
+  }
+
+  .join-page .enrollment-card {
+    width: 100%;
+    padding: 1.25rem;
+    border-radius: 24px;
+  }
+
+  .join-page .enrollment-card__heading {
+    grid-template-columns: minmax(0, 1fr);
+    margin-block-end: 1.25rem;
+  }
+
+  .join-page .enrollment-card__heading .wf-search-select {
+    width: 100%;
+  }
+}

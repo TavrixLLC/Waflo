@@ -3,6 +3,7 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
+import { expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
 const evidenceDirectory = path.resolve("test-results/evidence/uiux/p5-final-repair");
@@ -87,7 +88,7 @@ async function openBuilder(
   if (studioState !== "LIVE") {
     const desktopPreview = page.locator(".builder-preview-desktop");
     if (await desktopPreview.isVisible()) {
-      await expect(desktopPreview.locator(".builder-preview-canvas img")).toBeVisible();
+      await expectBuilderPreviewReady(desktopPreview);
     }
   }
 }
@@ -229,9 +230,8 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
   const previewResponses: Array<{ locale: string; svg: string }> = [];
   await openBuilder(page, {
     locale: "ar",
-    onBuilderPreview: (profile, previewLocale, svg) => {
-      if (profile === "CUSTOMER_WEB") previewResponses.push({ locale: previewLocale, svg });
-    },
+    onBuilderPreview: (_profile, previewLocale, svg) =>
+      previewResponses.push({ locale: previewLocale, svg }),
   });
   await page.getByRole("button", { name: /اللغات/u }).click();
   await addBuilderLanguage(page, "Arabic");
@@ -247,11 +247,7 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
       ),
     )
     .toBe(true);
-  const previewImage = page.locator(".builder-preview-desktop .builder-preview-canvas img");
-  await expect(previewImage).toBeVisible();
-  expect(decodeURIComponent((await previewImage.getAttribute("src")) ?? "")).toContain(
-    localizedName,
-  );
+  await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
 });
 
 test("keeps focused bottom fields above the mobile Builder footer", async ({ page }) => {
@@ -293,7 +289,7 @@ test("keeps Wallet preview tabs selectable without implying provider readiness",
       { exact: true },
     ),
   ).toBeVisible();
-  for (const name of ["Apple Wallet", "Google Wallet"]) {
+  for (const name of ["Apple Legacy", "Apple iOS 27+", "Google Wallet"]) {
     const tab = preview.getByRole("tab", { name });
     await expect(tab).toBeEnabled();
     const affordance = await tab.evaluate((element) => {
@@ -395,7 +391,7 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   await arabicBuilder.getByRole("button", { name: /اللغات/u }).click();
   await addBuilderLanguage(arabicBuilder, "Arabic");
   await arabicBuilder.getByRole("tab", { name: /العربية/u }).click();
-  await expect(arabicBuilder.locator(".builder-preview-desktop img")).toBeVisible();
+  await expectBuilderPreviewReady(arabicBuilder.locator(".builder-preview-desktop"));
   await screenshot(arabicBuilder, "04-builder-arabic-localized-content.png");
   await arabicBuilder.close();
 

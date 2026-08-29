@@ -415,6 +415,11 @@ test.describe
         .click();
       await page.getByLabel("Card name in your dashboard").fill("Browser Studio Rewards Updated");
       await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+      const builderPreview = page.locator(".builder-preview-desktop");
+      for (const surface of ["Apple Legacy", "Apple iOS 27+", "Google Wallet"]) {
+        await builderPreview.getByRole("tab", { name: surface }).click();
+        await expectBuilderPreviewReady(builderPreview);
+      }
       await page.getByRole("button", { name: "Review card" }).click();
       await expect(
         page.getByText("Readiness checks passed", { exact: true }).first(),
@@ -1272,7 +1277,11 @@ test.describe
         await expect(cropDialog).toBeVisible();
         await expect(cropDialog.getByText("Horizontal position")).toHaveCount(0);
         await expect(cropDialog.getByText("Vertical position")).toHaveCount(0);
-        const cropSurface = cropDialog.getByRole("button", { name: /Crop area/ });
+        const cropSurface = cropDialog.locator(".studio-crop-preview");
+        const cropResult = cropDialog.getByRole("img", { name: "Crop preview" });
+        const cropHandle = cropDialog.getByRole("button", { name: /: resize$/u });
+        await expect(cropResult).toBeVisible();
+        await expect(cropHandle).toBeVisible();
         const cropBounds = await cropSurface.boundingBox();
         if (!cropBounds) throw new Error("Crop surface bounds are unavailable.");
         await page.mouse.move(
@@ -1285,6 +1294,35 @@ test.describe
           cropBounds.y + cropBounds.height * 0.6,
         );
         await page.mouse.up();
+        await cropSurface.focus();
+        const cropFrame = cropDialog.locator(".studio-crop-safe-area");
+        const cropFrameBeforeKeyboardMove = await cropFrame.getAttribute("style");
+        await page.keyboard.press("ArrowRight");
+        await expect(cropFrame).not.toHaveAttribute("style", cropFrameBeforeKeyboardMove ?? "");
+        await cropSurface.hover();
+        const zoomBeforeWheel = await cropDialog.getByRole("slider").inputValue();
+        await page.mouse.wheel(0, -120);
+        await expect
+          .poll(() => cropDialog.getByRole("slider").inputValue())
+          .not.toBe(zoomBeforeWheel);
+        const cropHandleBounds = await cropHandle.boundingBox();
+        if (!cropHandleBounds) throw new Error("Crop resize handle bounds are unavailable.");
+        const cropFrameBeforeResize = await cropFrame.getAttribute("style");
+        await page.mouse.move(
+          cropHandleBounds.x + cropHandleBounds.width / 2,
+          cropHandleBounds.y + cropHandleBounds.height / 2,
+        );
+        await page.mouse.down();
+        await page.mouse.move(cropHandleBounds.x - 24, cropHandleBounds.y - 24);
+        await page.mouse.up();
+        await expect(cropFrame).not.toHaveAttribute("style", cropFrameBeforeResize ?? "");
+        await mkdir(screenshots, { recursive: true });
+        await cropDialog.screenshot({
+          path: `${screenshots}/60-r5-custom-stamp-crop-dialog.png`,
+          animations: "disabled",
+        });
+        await cropDialog.getByRole("button", { name: "Reset crop" }).click();
+        await expect(cropDialog.getByRole("slider")).toHaveValue("1");
         await cropDialog.getByRole("slider").fill("1.5");
         await expect(cropDialog.getByRole("slider")).toHaveValue("1.5");
         await cropDialog.getByRole("button", { name: "Zoom in" }).click();
@@ -1332,6 +1370,13 @@ test.describe
       });
       const merchantCropDialog = page.getByRole("dialog", { name: "Crop image safely" });
       await expect(merchantCropDialog).toBeVisible();
+      await expect(merchantCropDialog.getByRole("img", { name: "Crop preview" })).toBeVisible();
+      await expect(merchantCropDialog.getByRole("button", { name: /: resize$/u })).toBeVisible();
+      await mkdir(screenshots, { recursive: true });
+      await merchantCropDialog.screenshot({
+        path: `${screenshots}/61-r5-merchant-logo-crop-dialog.png`,
+        animations: "disabled",
+      });
       const merchantLogoUploaded = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -1375,7 +1420,7 @@ test.describe
         ).toBeVisible();
         await screenshot(page, "56-r4-archived-image-reupload-restored");
 
-        for (const surface of ["Customer", "Apple Wallet", "Google Wallet"]) {
+        for (const surface of ["Apple Legacy", "Apple iOS 27+", "Google Wallet"]) {
           await page.getByRole("tab", { name: surface, exact: true }).click();
           await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
         }

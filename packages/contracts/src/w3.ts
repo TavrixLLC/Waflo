@@ -8,11 +8,11 @@ export const programPublicSlugSchema = z
   .max(50)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
-export const emailCollectionModeSchema = z.enum(["HIDDEN", "OPTIONAL", "REQUIRED"]);
+export const phoneCollectionModeSchema = z.enum(["HIDDEN", "OPTIONAL", "REQUIRED"]);
 
 export const programEnrollmentPolicySchema = z
   .object({
-    emailCollectionMode: emailCollectionModeSchema,
+    phoneCollectionMode: phoneCollectionModeSchema,
     primaryCustomerLocale: z.enum(["en", "ar"]),
     allowLocaleSelection: z.boolean(),
     marketingConsentVisible: z.boolean(),
@@ -26,11 +26,11 @@ export const programEnrollmentPolicySchema = z
 export const enrollmentInputSchema = z
   .object({
     displayName: z.string().trim().min(1).max(120),
-    email: z.union([z.literal(""), z.email().max(254)]).optional(),
+    phone: z.string().trim().min(5).max(30).optional(),
     preferredLocale: z.enum(["en", "ar"]),
     programTermsAccepted: z.literal(true),
     wafloPrivacyAccepted: z.literal(true),
-    marketingEmailConsent: z.boolean().default(false),
+    marketingPhoneConsent: z.boolean().default(false),
     formStartedAt: z.number().int().positive(),
     website: z.string().max(0).default(""),
   })

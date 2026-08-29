@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
+  balancedWalletStampDistribution,
+  layoutStampPositions,
   type PublishedMembershipStampRenderResult,
   renderPublishedMembershipStampSvg,
   type StampOutputProfile,
@@ -18,6 +20,7 @@ import {
   walletArtworkDimensions,
   walletArtworkInputFromStampRender,
   walletArtworkIdentityTitleLines,
+  legacyAppleStampGridRows,
   walletArtworkPanelCorners,
 } from "@waflo/wallet-artwork";
 import sharp from "sharp";
@@ -31,18 +34,6 @@ import {
   programTemplateCatalog,
 } from "../../packages/contracts/src/program-template-catalog.js";
 import { decodeQrImage } from "../../packages/qr-core/src/index.js";
-
-interface RendererBaseline {
-  readonly id: string;
-  readonly width: number;
-  readonly height: number;
-  readonly contentDigest: string;
-  readonly positionsDigest: string;
-}
-
-const baselines = JSON.parse(
-  readFileSync("tests/fixtures/wallet-stamp-renderer-baseline.json", "utf8"),
-) as RendererBaseline[];
 
 function renderTemplate(
   template: ProgramTemplateDefinition,
@@ -143,33 +134,23 @@ describe("Wallet artwork composition", () => {
     ]);
   });
 
-  it("keeps every captured historical template renderer output at its baseline", () => {
-    expect(baselines).toHaveLength(20);
-    const templatesById = new Map(
-      programTemplateCatalog.map((template) => [`${template.code}-v${template.version}`, template]),
-    );
-    for (const baseline of baselines) {
-      const id = baseline.id;
-      const template = templatesById.get(id);
-      expect(template, id).toBeDefined();
-      if (!template) continue;
+  it("normalizes every built-in template to the shared grid without replacing stamp assets", () => {
+    expect(programTemplateCatalog.length).toBeGreaterThan(0);
+    for (const template of programTemplateCatalog) {
+      const id = `${template.code}-v${template.version}`;
+      expect(template.layout.type, id).toBe("GRID");
+      expect(template.layout.configuration, id).toEqual({});
+
       const rendered = renderTemplate(template);
-      expect(
-        {
-          width: rendered.width,
-          height: rendered.height,
-          contentDigest: rendered.contentDigest,
-          positionsDigest: createHash("sha256")
-            .update(JSON.stringify(rendered.positions))
-            .digest("hex"),
-        },
-        id,
-      ).toEqual({
-        width: baseline.width,
-        height: baseline.height,
-        contentDigest: baseline.contentDigest,
-        positionsDigest: baseline.positionsDigest,
-      });
+      const expectedRows = balancedWalletStampDistribution(template.recommendedStampGoal).rows;
+      const actualRows = [...new Set(rendered.positions.map((position) => position.y))].map(
+        (rowY) => rendered.positions.filter((position) => position.y === rowY).length,
+      );
+      expect(actualRows, id).toEqual(expectedRows);
+      expect((rendered.svg.match(/preserveAspectRatio="xMidYMid meet"/g) ?? []).length, id).toBe(
+        template.recommendedStampGoal,
+      );
+      expect(rendered.svg, id).toContain('data-visual-state="FILLED"');
     }
   });
 
@@ -249,19 +230,14 @@ describe("Wallet artwork composition", () => {
     );
     if (!base) throw new Error("Coffee v2 template is required.");
     const scenarios = [
-      { goal: 1, type: "RING" as const, configuration: { startAngle: -90 }, rows: [1] },
-      { goal: 4, type: "PATH" as const, configuration: { columns: 3 }, rows: [4] },
-      { goal: 5, type: "ROW" as const, configuration: { maxPerRow: 5 }, rows: [5] },
-      {
-        goal: 6,
-        type: "PATH" as const,
-        configuration: { columns: 3, serpentine: true },
-        rows: [3, 3],
-      },
-      { goal: 7, type: "RING" as const, configuration: { startAngle: -90 }, rows: [4, 3] },
-      { goal: 8, type: "RING" as const, configuration: { startAngle: -90 }, rows: [4, 4] },
-      { goal: 9, type: "GRID" as const, configuration: { columns: 3 }, rows: [5, 4] },
-      { goal: 10, type: "GRID" as const, configuration: { columns: 5 }, rows: [5, 5] },
+      { goal: 1, rows: [1] },
+      { goal: 4, rows: [4] },
+      { goal: 5, rows: [5] },
+      { goal: 6, rows: [3, 3] },
+      { goal: 7, rows: [4, 3] },
+      { goal: 8, rows: [4, 4] },
+      { goal: 9, rows: [5, 4] },
+      { goal: 10, rows: [5, 5] },
     ];
     for (const scenario of scenarios) {
       const template: ProgramTemplateDefinition = {
@@ -269,8 +245,8 @@ describe("Wallet artwork composition", () => {
         recommendedStampGoal: scenario.goal,
         layout: {
           ...base.layout,
-          type: scenario.type,
-          configuration: scenario.configuration,
+          type: "GRID",
+          configuration: {},
         },
       };
       const rendered = renderTemplate(template, {
@@ -506,6 +482,35 @@ describe("Wallet artwork composition", () => {
     ]);
     expect(legacy.times1.contentDigest).toBe(changedLegacy.times1.contentDigest);
     expect(generic.times1.contentDigest).toBe(changedGeneric.times1.contentDigest);
+  }, 30_000);
+
+  it("uses a visual-only Grid for legacy Apple strips and fails obsolete layouts closed", async () => {
+    const template = programTemplateCatalog.find(
+      (candidate) => candidate.code === "COFFEE" && candidate.version === 2,
+    );
+    if (!template) throw new Error("Coffee v2 template is required.");
+    const rendered = renderTemplate(template, { outputProfile: "CUSTOMER_WEB" });
+    const input = compositionInput(template, rendered);
+    const [legacy, changedText] = await Promise.all([
+      composeAppleLegacyStripArtwork(input),
+      composeAppleLegacyStripArtwork({
+        ...input,
+        organizationName: "Different merchant",
+        programName: "Different program",
+        memberName: "Different member",
+        rewardLabel: "Different reward",
+        credentialPayload: "different-opaque-credential",
+      }),
+    ]);
+    expect(legacy.times1.stampGridRows).toEqual([4, 4]);
+    expect(legacyAppleStampGridRows(8)).toEqual([4, 4]);
+    expect(layoutStampPositions(8, "RING").map(({ x, y }) => ({ x, y }))).toEqual(
+      layoutStampPositions(8, "GRID").map(({ x, y }) => ({ x, y })),
+    );
+    expect(legacy.times1.contentDigest).toBe(changedText.times1.contentDigest);
+    const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");
+    expect(source).toContain('data-text="none"');
+    expect(source).toContain("Legacy Apple stamp artwork must not contain text glyphs.");
   }, 30_000);
 
   it("rasterizes English and shaped Arabic text as the final layer on pale and dark themes", async () => {

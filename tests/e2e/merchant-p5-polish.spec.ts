@@ -3,6 +3,7 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
+import { expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
 const evidenceDirectory = path.resolve("test-results/evidence/uiux/p5-end-to-end-polish");
@@ -65,10 +66,7 @@ async function chooseFirstTemplate(page: Page, locale: "en" | "ar" = "en"): Prom
   await selectFirstTemplate(page, locale);
   await expect(page.locator(".builder-shell")).toBeVisible();
   const desktopPreview = page.locator(".builder-preview-desktop");
-  if (await desktopPreview.isVisible())
-    await expect(
-      desktopPreview.locator(".builder-preview-canvas img, .builder-preview-empty"),
-    ).toBeVisible();
+  if (await desktopPreview.isVisible()) await expectBuilderPreviewReady(desktopPreview);
   else await expect(page.locator(".builder-mobile-preview-action")).toBeVisible();
 }
 

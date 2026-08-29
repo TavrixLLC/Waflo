@@ -49,7 +49,7 @@ export interface PublicProgram {
     layoutType: string;
   };
   policy: {
-    emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
+    phoneCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
     primaryCustomerLocale: "en" | "ar";
     allowLocaleSelection: boolean;
     marketingConsentVisible: boolean;

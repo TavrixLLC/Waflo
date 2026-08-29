@@ -1,9 +1,13 @@
 import type { ProgramDraftInput } from "./program-studio-types";
 
-export function walletPreviewQrOverlay(profile: "APPLE_WALLET" | "GOOGLE_WALLET") {
-  return profile === "APPLE_WALLET"
-    ? { left: "33.2609%", top: "56.0377%", width: "33.4783%", height: "29.0566%" }
-    : { left: "33.2609%", top: "21.0256%", width: "33.4783%", height: "19.7436%" };
+export function walletPreviewQrOverlay(
+  profile: "APPLE_LEGACY" | "APPLE_IOS27" | "APPLE_WALLET" | "GOOGLE_WALLET",
+) {
+  if (profile === "APPLE_LEGACY" || profile === "APPLE_WALLET")
+    return { left: "32.1739%", top: "62.8571%", width: "35.6522%", height: "23.4286%" };
+  if (profile === "APPLE_IOS27")
+    return { left: "32.1739%", top: "71.5789%", width: "35.6522%", height: "21.5789%" };
+  return { left: "32.1739%", top: "68.5%", width: "35.6522%", height: "20.5%" };
 }
 
 export const walletPreviewQrRows = [

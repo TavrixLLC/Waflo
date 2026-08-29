@@ -291,7 +291,6 @@ async function prepareEmailTransferRace(displayName: string) {
     payload: {
       ...w3EnrollmentBase,
       displayName,
-      email,
       formStartedAt: Date.now() - 2_000,
     },
   });
@@ -302,6 +301,16 @@ async function prepareEmailTransferRace(displayName: string) {
   const membership = await prisma.client.membership.findUniqueOrThrow({
     where: { publicMembershipId },
     include: { credentials: true, walletPassInstances: true },
+  });
+  await prisma.client.customerContact.create({
+    data: {
+      ...security.prepareEmail(fixture.organizationId, email),
+      organizationId: fixture.organizationId,
+      customerId: membership.customerId,
+      type: "EMAIL",
+      verificationStatus: "UNVERIFIED",
+      isPrimary: true,
+    },
   });
   const card = await app.inject({
     method: "GET",

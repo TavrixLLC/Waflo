@@ -180,9 +180,10 @@ describe("Wallet provider-native nearby relevance", () => {
       }),
     ]);
     expect(pass.maxDistance).toBe(2000);
-    expect(
-      pass.storeCard.auxiliaryFields.find((field) => field.key === "status")?.changeMessage,
-    ).toBe("%@");
+    expect(pass.storeCard.auxiliaryFields.find((field) => field.key === "status")).toBeUndefined();
+    expect(pass.storeCard.backFields.find((field) => field.key === "status")?.changeMessage).toBe(
+      "%@",
+    );
   });
 
   it("removes Apple relevance when disabled and enforces the 10-location provider limit", () => {

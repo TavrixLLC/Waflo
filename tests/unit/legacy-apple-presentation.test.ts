@@ -82,21 +82,24 @@ describe("legacy Apple Wallet presentation", () => {
   it("uses the corrected hierarchy for the standalone legacy Store Card generator", () => {
     const pass = mapAppleStoreCard(membership, configuration, "a".repeat(43));
     expect(pass.storeCard.headerFields[0]).toMatchObject({ key: "progress", value: "5/8" });
-    expect(pass.storeCard.primaryFields[0]).toMatchObject({
+    expect(pass.storeCard.primaryFields).toEqual([]);
+    expect(pass.storeCard.secondaryFields[0]).toMatchObject({
       key: "reward",
       label: "REWARD",
       value: membership.rewardSummary,
     });
-    expect(pass.storeCard.secondaryFields[0]).toMatchObject({
+    expect(pass.storeCard.auxiliaryFields).toEqual([]);
+    expect(pass.storeCard.backFields).toContainEqual({
       key: "program",
       label: "PROGRAM",
       value: membership.programName,
     });
   });
 
-  it("puts reward immediately on the legacy front primary tier", () => {
+  it("puts reward below legacy strip artwork in the native secondary tier", () => {
     const presentation = mapLegacyApplePresentation(membership);
-    expect(presentation.primaryFields).toContainEqual(
+    expect(presentation.primaryFields).toEqual([]);
+    expect(presentation.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: membership.rewardSummary }),
     );
     expect(frontFields(presentation).map((field) => field.value)).toContain(
@@ -111,6 +114,21 @@ describe("legacy Apple Wallet presentation", () => {
     );
   });
 
+  it("keeps program, member, and status out of the compact legacy front", () => {
+    const presentation = mapLegacyApplePresentation(membership);
+    expect(presentation.secondaryFields).toEqual([
+      expect.objectContaining({ key: "reward", value: membership.rewardSummary }),
+    ]);
+    expect(presentation.auxiliaryFields).toEqual([]);
+    expect(presentation.backFields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "program", value: membership.programName }),
+        expect.objectContaining({ key: "member", value: membership.displayName }),
+        expect.objectContaining({ key: "status", value: "Active" }),
+      ]),
+    );
+  });
+
   it("serializes the expected current/required stamp count", () => {
     const pass = mapAppleGenericPass(membership, configuration, "a".repeat(43));
     expect(pass.generic.headerFields?.[0]?.value).toBe("5/8");
@@ -118,7 +136,8 @@ describe("legacy Apple Wallet presentation", () => {
 
   it("does not leave reward exclusively in backFields", () => {
     const pass = mapAppleGenericPass(membership, configuration, "a".repeat(43));
-    expect(pass.generic.primaryFields).toContainEqual(expect.objectContaining({ key: "reward" }));
+    expect(pass.generic.primaryFields).toEqual([]);
+    expect(pass.generic.secondaryFields).toContainEqual(expect.objectContaining({ key: "reward" }));
     expect(pass.generic.backFields).not.toContainEqual(expect.objectContaining({ key: "reward" }));
   });
 

@@ -19,6 +19,9 @@ export interface ProvisionAdminInput {
 }
 
 export async function provisionAdminAccount(client: PrismaClient, input: ProvisionAdminInput) {
+  if (!adminRoles.includes(input.role as (typeof adminRoles)[number])) {
+    throw new Error(`Administrator role must be one of: ${adminRoles.join(", ")}.`);
+  }
   const normalizedEmail = normalizeEmail(input.email);
   const proposed = {
     normalizedEmail,
@@ -31,7 +34,7 @@ export async function provisionAdminAccount(client: PrismaClient, input: Provisi
   }
   if (!input.write) return { mode: "dry-run" as const, account: proposed };
   if (!input.password || input.password.length < 12) {
-    throw new Error("Write mode requires a password of at least 12 characters via stdin.");
+    throw new Error("Write mode requires a password of at least 12 characters.");
   }
   const passwordHash = await hashPassword(input.password);
   const account = await client.$transaction(async (transaction) => {

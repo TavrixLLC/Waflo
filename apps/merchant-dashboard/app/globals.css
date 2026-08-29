@@ -10098,6 +10098,161 @@ html:lang(ckb-Arab-IQ) body {
   height: 2.5rem;
   padding: 0;
 }
+
+/* The crop dialog uses the source-coordinate crop sent to the API. Keeping the
+   full source visible makes every pixel reachable before zooming. */
+.wf-dialog.studio-crop-dialog {
+  width: min(68rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+}
+
+.studio-crop-dialog .wf-dialog__body {
+  padding: 1.25rem 1.4rem 1.4rem;
+}
+
+.studio-crop-layout {
+  grid-template-columns: minmax(0, 1.45fr) minmax(15rem, 0.55fr);
+  align-items: start;
+  gap: clamp(1rem, 2vw, 1.75rem);
+}
+
+.studio-crop-workspace {
+  position: relative;
+  min-width: 0;
+}
+
+.studio-crop-preview {
+  min-height: 0;
+  max-height: min(54dvh, 38rem);
+  margin: auto;
+  overflow: hidden;
+  background-color: #e9e6df;
+  background-image:
+    linear-gradient(45deg, rgb(24 33 43 / 7%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(24 33 43 / 7%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(24 33 43 / 7%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(24 33 43 / 7%) 75%);
+  background-position:
+    0 0,
+    0 0,
+    0.75rem 0.75rem,
+    0.75rem 0.75rem;
+  background-size: 1.5rem 1.5rem;
+  border: 1px solid rgb(24 33 43 / 13%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 42%),
+    var(--waflo-shadow-card);
+  isolation: isolate;
+}
+
+.studio-crop-preview img {
+  object-fit: fill;
+}
+
+.studio-crop-safe-area {
+  inset: auto;
+  display: block;
+  border: 2px solid #fff;
+  border-radius: 0.75rem;
+  box-shadow:
+    0 0 0 999px rgb(10 15 23 / 46%),
+    0 1px 0 rgb(0 0 0 / 30%);
+  cursor: move;
+  pointer-events: none;
+}
+
+.studio-crop-safe-area::before {
+  position: absolute;
+  inset: -1px;
+  border: 1px dashed rgb(16 24 40 / 70%);
+  border-radius: inherit;
+  content: "";
+}
+
+.studio-crop-handle {
+  position: absolute;
+  inset: auto;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  background: var(--waflo-brick);
+  border: 3px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgb(12 18 28 / 28%);
+  cursor: nwse-resize;
+  touch-action: none;
+  translate: -50% -50%;
+}
+
+.studio-crop-handle::before,
+.studio-crop-handle::after {
+  position: absolute;
+  width: 0.55rem;
+  height: 2px;
+  background: #fff;
+  content: "";
+}
+
+.studio-crop-handle::before {
+  rotate: 45deg;
+}
+
+.studio-crop-handle::after {
+  rotate: -45deg;
+}
+
+.studio-crop-handle:focus-visible {
+  outline: 3px solid #111827;
+  outline-offset: 3px;
+}
+
+.studio-crop-result {
+  position: relative;
+  min-height: 8rem;
+  overflow: hidden;
+  background: #e9e6df;
+  border: 1px solid rgb(24 33 43 / 12%);
+  border-radius: 0.85rem;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 45%);
+}
+
+.studio-crop-result img {
+  position: absolute;
+  max-width: none;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.studio-crop-result > span {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 0.42rem 0.55rem;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(11 18 28 / 75%));
+  font-size: 0.72rem;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+@media (max-width: 52rem) {
+  .wf-dialog.studio-crop-dialog {
+    width: min(100%, calc(100vw - 1rem));
+  }
+
+  .studio-crop-dialog .wf-dialog__body {
+    padding: 1rem;
+  }
+
+  .studio-crop-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .studio-crop-result {
+    width: min(100%, 24rem);
+  }
+}
 .studio-section-nav__group {
   display: block;
   padding: 0.9rem 0.75rem 0.35rem;
@@ -11284,5 +11439,73 @@ html:lang(ckb-Arab-IQ) body {
   .auth-loyalty-preview,
   .onboarding-progress__item {
     transition-duration: 0.01ms;
+  }
+}
+
+/* Wallet variants share the production compositor; these frames only preserve its proportions. */
+.builder-preview-canvas--apple_legacy,
+.builder-preview-canvas--apple_ios27 {
+  background: #15171b;
+}
+
+/* The native Apple canvas is dark while the shared empty state defaults to light-surface ink. */
+.builder-preview-canvas--apple_legacy .builder-preview-empty,
+.builder-preview-canvas--apple_ios27 .builder-preview-empty {
+  color: #d7d9de;
+}
+
+.builder-preview-canvas--apple_legacy .builder-preview-empty strong,
+.builder-preview-canvas--apple_ios27 .builder-preview-empty strong {
+  color: #f7f8fa;
+}
+
+.wallet-preview-image-stack--apple_legacy {
+  max-width: min(100%, 24.5rem);
+  aspect-ratio: 460 / 700;
+}
+
+.wallet-preview-image-stack--apple_ios27 {
+  max-width: min(100%, 23.25rem);
+  aspect-ratio: 460 / 660;
+}
+
+.wallet-preview-image-stack--google_wallet {
+  max-width: min(100%, 22.4rem);
+  aspect-ratio: 460 / 650;
+}
+
+.builder-preview-canvas .wallet-preview-image-stack,
+.studio-device-frame .wallet-preview-image-stack {
+  justify-self: center;
+}
+
+.builder-preview-tabs button {
+  min-height: 3.35rem;
+  text-wrap: balance;
+}
+
+.studio-device-frame .wallet-preview-image-stack--apple_legacy {
+  max-width: min(100%, 26rem);
+}
+
+.studio-device-frame .wallet-preview-image-stack--apple_ios27 {
+  max-width: min(100%, 24.5rem);
+}
+
+@media (max-width: 520px) {
+  .builder-preview-canvas {
+    min-height: min(66dvh, 35rem);
+    padding: 0.55rem;
+  }
+
+  .builder-preview-tabs {
+    gap: 0.28rem;
+  }
+
+  .builder-preview-tabs button {
+    min-height: 3.7rem;
+    padding-inline: 0.2rem;
+    font-size: 0.71rem;
+    line-height: 1.15;
   }
 }

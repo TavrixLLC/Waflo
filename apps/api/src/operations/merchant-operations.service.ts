@@ -83,13 +83,13 @@ export class MerchantOperationsService {
     await this.tenant.requireMembership(userId, organizationId, "customers.view");
     const search = query.search?.trim();
     let exactCustomerIds: string[] | undefined;
-    if (search?.includes("@")) {
-      const contactHash = this.customerSecurity.emailRequestFingerprint(search);
+    if (search?.startsWith("+") || /^0?7\d{8,}$/u.test(search ?? "")) {
+      const contactHash = this.customerSecurity.phoneRequestFingerprint(search ?? "");
       exactCustomerIds = (
         await this.prisma.client.customerContact.findMany({
           where: {
             organizationId,
-            type: "EMAIL",
+            type: "PHONE",
             normalizedValueHash: contactHash,
             archivedAt: null,
           },
@@ -103,7 +103,7 @@ export class MerchantOperationsService {
         organizationId,
         archivedAt: null,
         ...(search
-          ? search.includes("@")
+          ? search.startsWith("+") || /^0?7\d{8,}$/u.test(search)
             ? { id: { in: exactCustomerIds ?? [] } }
             : { displayName: { contains: search, mode: "insensitive" } }
           : {}),
@@ -119,7 +119,7 @@ export class MerchantOperationsService {
       },
       include: {
         contacts: {
-          where: { type: "EMAIL", isPrimary: true, archivedAt: null },
+          where: { type: "PHONE", isPrimary: true, archivedAt: null },
           select: { maskedDisplayValue: true, verificationStatus: true },
         },
         memberships: {
@@ -141,8 +141,8 @@ export class MerchantOperationsService {
         displayName: customer.displayName,
         preferredLocale: customer.preferredLocale,
         status: customer.status,
-        maskedEmail: customer.contacts[0]?.maskedDisplayValue ?? null,
-        emailVerificationStatus: customer.contacts[0]?.verificationStatus ?? null,
+        maskedPhone: customer.contacts[0]?.maskedDisplayValue ?? null,
+        phoneVerificationStatus: customer.contacts[0]?.verificationStatus ?? null,
         memberships: customer.memberships.map((membership) => ({
           id: membership.id,
           publicMembershipId: membership.publicMembershipId,
@@ -242,7 +242,7 @@ export class MerchantOperationsService {
             preferredLocale: true,
             status: true,
             contacts: {
-              where: { type: "EMAIL", isPrimary: true, archivedAt: null },
+              where: { type: "PHONE", isPrimary: true, archivedAt: null },
               select: { maskedDisplayValue: true, verificationStatus: true },
             },
           },

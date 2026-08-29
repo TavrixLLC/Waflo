@@ -356,7 +356,8 @@ export type LocationInput = z.infer<typeof locationSchema>;
 
 export const programEditingModeSchema = z.enum(["quick", "pro"]);
 export const programStatusSchema = z.enum(programOperationalStatuses);
-export const stampLayoutSchema = z.enum(["ROW", "GRID", "PATH", "RING"]);
+/** Grid is the only configurable layout. Persisted legacy values are normalized by renderers. */
+export const stampLayoutSchema = z.literal("GRID");
 export const rewardTypeSchema = z.enum([
   "TEXT_REWARD",
   "FREE_ITEM",
@@ -406,15 +407,7 @@ const rewardInputSchema = z.object({
   ),
 });
 
-const layoutConfigurationSchema = z
-  .object({
-    columns: z.number().int().min(2).max(6).optional(),
-    maxPerRow: z.number().int().min(2).max(10).optional(),
-    serpentine: z.boolean().optional(),
-    startAngle: z.number().min(-180).max(180).optional(),
-  })
-  .strict()
-  .default({});
+const layoutConfigurationSchema = z.object({}).strict().default({});
 
 const applePreviewConfigSchema = z
   .object({
@@ -472,24 +465,7 @@ const visualThemeInputSchema = z
     applePreviewConfig: applePreviewConfigSchema,
     googlePreviewConfig: googlePreviewConfigSchema,
   })
-  .strict()
-  .superRefine((value, context) => {
-    const columns = value.layoutConfiguration.columns;
-    if (value.layoutType === "GRID" && columns && columns > value.stampSize / 8) {
-      context.addIssue({
-        code: "custom",
-        path: ["layoutConfiguration", "columns"],
-        message: "Grid columns are too dense for the configured stamp size.",
-      });
-    }
-    if (value.layoutType !== "RING" && value.layoutConfiguration.startAngle !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["layoutConfiguration", "startAngle"],
-        message: "Start angle is only supported by the ring layout.",
-      });
-    }
-  });
+  .strict();
 
 const programInputSchema = z
   .object({

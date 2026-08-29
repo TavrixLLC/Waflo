@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-export type StampLayout = "ROW" | "GRID" | "PATH" | "RING";
+/**
+ * Legacy values are accepted only while reading existing records. Every render
+ * resolves them to the Grid placement policy below.
+ */
+export type StampLayout = "ROW" | "GRID" | "PATH" | "RING" | "CIRCLE";
 export type StampOutputProfile = "JOIN_PREVIEW" | "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET";
 
 export type StampArtwork =
@@ -61,14 +65,19 @@ export interface StampPosition {
 }
 
 export interface BalancedWalletStampDistribution {
-  readonly layout: "ROW" | "GRID";
+  readonly layout: "GRID";
   readonly layoutConfiguration: StampLayoutConfiguration;
   readonly rows: readonly number[];
 }
 
 /**
- * Wallet-only placement policy. It changes positions, never the persisted
+ * Product-wide placement policy. It changes positions, never the persisted
  * filled/empty artwork bytes consumed by the authoritative renderer.
+ *
+ * `ROW`, `PATH`, `RING`, and `CIRCLE` remain in the input type solely so
+ * already-published records can be read safely. They are deliberately
+ * normalized here rather than rendered, which makes Grid the single supported
+ * output everywhere.
  */
 export function balancedWalletStampDistribution(total: number): BalancedWalletStampDistribution {
   if (!Number.isInteger(total) || total < 1 || total > 30) {
@@ -76,8 +85,8 @@ export function balancedWalletStampDistribution(total: number): BalancedWalletSt
   }
   if (total <= 5) {
     return {
-      layout: "ROW",
-      layoutConfiguration: { maxPerRow: total },
+      layout: "GRID",
+      layoutConfiguration: { columns: total },
       rows: [total],
     };
   }
@@ -188,22 +197,12 @@ function fallbackArtwork(filled: boolean, filledColor: string, emptyColor: strin
   };
 }
 
-function clampInteger(
-  value: number | undefined,
-  minimum: number,
-  maximum: number,
-  fallback: number,
-) {
-  if (!Number.isInteger(value)) return fallback;
-  return Math.max(minimum, Math.min(maximum, value as number));
-}
-
 export function layoutStampPositions(
   goal: number,
-  layout: StampLayout,
+  _layout: StampLayout,
   size = 48,
   spacing = 8,
-  configuration: StampLayoutConfiguration = {},
+  _configuration: StampLayoutConfiguration = {},
 ): StampPosition[] {
   if (!Number.isInteger(goal) || goal < 1 || goal > 30)
     throw new Error("Stamp goal must be between 1 and 30.");
@@ -211,41 +210,17 @@ export function layoutStampPositions(
   if (!Number.isFinite(spacing) || spacing < 0 || spacing > 32)
     throw new Error("Invalid stamp spacing.");
 
+  const distribution = balancedWalletStampDistribution(goal);
   const positions: StampPosition[] = [];
   const gap = size + spacing;
-  const gridColumns = clampInteger(
-    configuration.columns,
-    2,
-    6,
-    Math.min(5, Math.max(2, Math.ceil(Math.sqrt(goal)))),
-  );
-  const rowLength = clampInteger(configuration.maxPerRow, 2, 10, Math.min(10, goal));
-  const pathColumns = clampInteger(configuration.columns, 3, 6, Math.min(5, goal));
-  const startAngle = ((configuration.startAngle ?? -90) * Math.PI) / 180;
-
-  for (let index = 0; index < goal; index += 1) {
-    let x = 0;
-    let y = 0;
-    if (layout === "ROW") {
-      x = (index % rowLength) * gap;
-      y = Math.floor(index / rowLength) * gap;
-    } else if (layout === "GRID") {
-      x = (index % gridColumns) * gap;
-      y = Math.floor(index / gridColumns) * gap;
-    } else if (layout === "PATH") {
-      const row = Math.floor(index / pathColumns);
-      const column = index % pathColumns;
-      const serpentineColumn =
-        configuration.serpentine === false || row % 2 === 0 ? column : pathColumns - 1 - column;
-      x = serpentineColumn * gap;
-      y = row * gap + Math.sin((column / Math.max(1, pathColumns - 1)) * Math.PI) * spacing;
-    } else {
-      const radius = Math.max(size * 1.6, (goal * gap) / (Math.PI * 2));
-      const angle = (Math.PI * 2 * index) / goal + startAngle;
-      x = radius + Math.cos(angle) * radius;
-      y = radius + Math.sin(angle) * radius;
+  for (const [row, rowLength] of distribution.rows.entries()) {
+    const rowWidth = rowLength * gap - spacing;
+    const fullWidth = Math.max(...distribution.rows) * gap - spacing;
+    const offset = (fullWidth - rowWidth) / 2;
+    for (let column = 0; column < rowLength; column += 1) {
+      const index = positions.length;
+      positions.push({ index, x: offset + column * gap, y: row * gap, filled: false });
     }
-    positions.push({ index, x, y, filled: false });
   }
   const minX = Math.min(...positions.map((position) => position.x));
   const minY = Math.min(...positions.map((position) => position.y));
@@ -330,51 +305,7 @@ function legacyLayoutStampPositions(
   spacing: number,
   configuration: StampLayoutConfiguration,
 ): StampPosition[] {
-  if (!Number.isInteger(goal) || goal < 1 || goal > 30) {
-    throw new Error("Stamp goal must be between 1 and 30.");
-  }
-  const gap = size + spacing;
-  const gridColumns = clampInteger(
-    configuration.columns,
-    2,
-    6,
-    Math.min(5, Math.max(2, Math.ceil(Math.sqrt(goal)))),
-  );
-  const rowLength = clampInteger(configuration.maxPerRow, 2, 10, Math.min(10, goal));
-  const pathColumns = clampInteger(configuration.columns, 3, 6, Math.min(5, goal));
-  const startAngle = ((configuration.startAngle ?? -90) * Math.PI) / 180;
-  const positions: StampPosition[] = [];
-  for (let index = 0; index < goal; index += 1) {
-    let x = 0;
-    let y = 0;
-    if (layout === "ROW") {
-      x = (index % rowLength) * gap;
-      y = Math.floor(index / rowLength) * gap;
-    } else if (layout === "GRID") {
-      x = (index % gridColumns) * gap;
-      y = Math.floor(index / gridColumns) * gap;
-    } else if (layout === "PATH") {
-      const row = Math.floor(index / pathColumns);
-      const column = index % pathColumns;
-      const serpentineColumn =
-        configuration.serpentine === false || row % 2 === 0 ? column : pathColumns - 1 - column;
-      x = serpentineColumn * gap;
-      y = row * gap + Math.sin((column / Math.max(1, pathColumns - 1)) * Math.PI) * spacing;
-    } else {
-      const radius = Math.max(size * 1.6, (goal * gap) / (Math.PI * 2));
-      const angle = (Math.PI * 2 * index) / goal + startAngle;
-      x = radius + Math.cos(angle) * radius;
-      y = radius + Math.sin(angle) * radius;
-    }
-    positions.push({ index, x, y, filled: false });
-  }
-  const minX = Math.min(...positions.map((position) => position.x));
-  const minY = Math.min(...positions.map((position) => position.y));
-  return positions.map((position) => ({
-    ...position,
-    x: position.x - minX + size / 2,
-    y: position.y - minY + size / 2,
-  }));
+  return layoutStampPositions(goal, layout, size, spacing, configuration);
 }
 
 function renderLegacyPublishedMembershipStampSvg(
@@ -383,18 +314,15 @@ function renderLegacyPublishedMembershipStampSvg(
     { rendererSchemaVersion: "waflo-stamp-render-v1" }
   >,
 ): PublishedMembershipStampRenderResult {
-  const walletDistribution =
-    input.layoutPolicy === "BALANCED_WALLET_ROWS_V1"
-      ? balancedWalletStampDistribution(input.requiredStampCount)
-      : null;
+  const walletDistribution = balancedWalletStampDistribution(input.requiredStampCount);
   const size = input.visualTheme.stampSize ?? 48;
   const spacing = input.visualTheme.spacing ?? 8;
   const positions = legacyLayoutStampPositions(
     input.requiredStampCount,
-    walletDistribution?.layout ?? input.layoutType,
+    walletDistribution.layout,
     size,
     spacing,
-    walletDistribution?.layoutConfiguration ?? input.layoutConfiguration ?? {},
+    walletDistribution.layoutConfiguration,
   ).map((position) => ({
     ...position,
     filled:
@@ -430,9 +358,9 @@ function renderLegacyPublishedMembershipStampSvg(
         requiredStampCount: input.requiredStampCount,
         currentStampCount: input.currentStampCount,
         rewardReady: input.rewardReady,
-        layoutType: input.layoutType,
-        layoutConfiguration: input.layoutConfiguration ?? {},
-        ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
+        layoutType: walletDistribution.layout,
+        layoutConfiguration: walletDistribution.layoutConfiguration,
+        layoutPolicy: "GRID_ONLY_V1",
         visualTheme: input.visualTheme,
         assetDigests: input.assetDigests,
         outputProfile: input.outputProfile,
@@ -484,9 +412,10 @@ export function publishedMembershipStampVisualDigest(
           requiredStampCount: input.requiredStampCount,
           currentStampCount: input.currentStampCount,
           rewardReady: input.rewardReady,
-          layoutType: input.layoutType,
-          layoutConfiguration: input.layoutConfiguration ?? {},
-          ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
+          layoutType: balancedWalletStampDistribution(input.requiredStampCount).layout,
+          layoutConfiguration: balancedWalletStampDistribution(input.requiredStampCount)
+            .layoutConfiguration,
+          layoutPolicy: "GRID_ONLY_V1",
           visualTheme: input.visualTheme,
           assetDigests: input.assetDigests,
           outputProfile: input.outputProfile,
@@ -506,9 +435,10 @@ export function publishedMembershipStampVisualDigest(
         requiredStampCount: input.requiredStampCount,
         currentStampCount: input.currentStampCount,
         rewardReady: input.rewardReady,
-        layoutType: input.layoutType,
-        layoutConfiguration: input.layoutConfiguration ?? {},
-        ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
+        layoutType: balancedWalletStampDistribution(input.requiredStampCount).layout,
+        layoutConfiguration: balancedWalletStampDistribution(input.requiredStampCount)
+          .layoutConfiguration,
+        layoutPolicy: "GRID_ONLY_V1",
         visualTheme: input.visualTheme,
         assetDigests: input.assetDigests,
         outputProfile: input.outputProfile,
@@ -526,19 +456,12 @@ export function renderPublishedMembershipStampSvg(
     return renderLegacyPublishedMembershipStampSvg(input);
   }
 
-  const walletDistribution =
-    input.layoutPolicy === "BALANCED_WALLET_ROWS_V1"
-      ? balancedWalletStampDistribution(input.requiredStampCount)
-      : null;
+  const walletDistribution = balancedWalletStampDistribution(input.requiredStampCount);
   const rendered = renderStampSvg({
     goal: input.requiredStampCount,
     progress: input.currentStampCount,
-    layout: walletDistribution?.layout ?? input.layoutType,
-    ...(walletDistribution
-      ? { layoutConfiguration: walletDistribution.layoutConfiguration }
-      : input.layoutConfiguration
-        ? { layoutConfiguration: input.layoutConfiguration }
-        : {}),
+    layout: walletDistribution.layout,
+    layoutConfiguration: walletDistribution.layoutConfiguration,
     filledColor: input.visualTheme.filledColor,
     emptyColor: input.visualTheme.emptyColor,
     accentColor: input.visualTheme.accentColor,
@@ -574,9 +497,9 @@ export function renderPublishedMembershipStampSvg(
         requiredStampCount: input.requiredStampCount,
         currentStampCount: input.currentStampCount,
         rewardReady: input.rewardReady,
-        layoutType: input.layoutType,
-        layoutConfiguration: input.layoutConfiguration ?? {},
-        ...(input.layoutPolicy ? { layoutPolicy: input.layoutPolicy } : {}),
+        layoutType: walletDistribution.layout,
+        layoutConfiguration: walletDistribution.layoutConfiguration,
+        layoutPolicy: "GRID_ONLY_V1",
         visualTheme: input.visualTheme,
         assetDigests: input.assetDigests,
         outputProfile: input.outputProfile,

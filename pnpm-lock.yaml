@@ -209,6 +209,9 @@ importers:
       '@waflo/wallet-apple':
         specifier: workspace:*
         version: link:../../packages/wallet-apple
+      '@waflo/wallet-artwork':
+        specifier: workspace:*
+        version: link:../../packages/wallet-artwork
       '@waflo/wallet-core':
         specifier: workspace:*
         version: link:../../packages/wallet-core

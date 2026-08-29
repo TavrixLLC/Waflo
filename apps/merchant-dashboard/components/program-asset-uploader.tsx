@@ -1,10 +1,18 @@
 "use client";
 
-import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
+import { type InterfaceLocale, localeRegistry } from "@waflo/i18n";
 import { Alert, Button, FormField, Modal } from "@waflo/ui";
 import { Crop, ImagePlus, Upload, ZoomIn, ZoomOut } from "lucide-react";
 import Image from "next/image";
-import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
 import type { AssetCategory, AssetItem } from "./program-studio-types";
 
@@ -12,6 +20,14 @@ const maximumUploadBytes = 2 * 1024 * 1024;
 const acceptedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const fullImageCrop = { x: 0, y: 0, width: 1, height: 1, zoom: 1 };
 const initialCrop = { x: 1 / 24, y: 1 / 24, width: 11 / 12, height: 11 / 12, zoom: 12 / 11 };
+
+type CropState = typeof fullImageCrop;
+type CropDrag = {
+  mode: "PAN" | "RESIZE";
+  pointerX: number;
+  pointerY: number;
+  crop: CropState;
+};
 
 function AssetThumbnail({ asset, label }: { asset: AssetItem; label: string }) {
   const [source, setSource] = useState("");
@@ -75,12 +91,10 @@ export function ProgramAssetPicker({
   const copy =
     localeRegistry[interfaceLocale ?? (ar ? "ar" : "en")].messages.merchant.assetUploader;
   const fileInput = useRef<HTMLInputElement>(null);
-  const dragOrigin = useRef<{
-    pointerX: number;
-    pointerY: number;
-    cropX: number;
-    cropY: number;
-  } | null>(null);
+  const cropWorkspace = useRef<HTMLDivElement>(null);
+  const dragOrigin = useRef<CropDrag | null>(null);
+  const activePointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinchOrigin = useRef<{ distance: number; zoom: number } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
@@ -99,55 +113,85 @@ export function ProgramAssetPicker({
     return Math.min(maximum, Math.max(minimum, value));
   }
 
-  function zoomTo(nextZoom: number): void {
-    setCrop((current) => {
-      const zoom = clamp(nextZoom, 1, 4);
-      const width = 1 / zoom;
-      const height = 1 / zoom;
-      const focalX = current.x + current.width / 2;
-      const focalY = current.y + current.height / 2;
-      return {
-        x: clamp(focalX - width / 2, 0, 1 - width),
-        y: clamp(focalY - height / 2, 0, 1 - height),
-        width,
-        height,
-        zoom,
-      };
-    });
-  }
-
-  function beginPan(event: PointerEvent<HTMLButtonElement>): void {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragOrigin.current = {
-      pointerX: event.clientX,
-      pointerY: event.clientY,
-      cropX: crop.x,
-      cropY: crop.y,
+  function cropForZoom(current: CropState, nextZoom: number): CropState {
+    const zoom = clamp(nextZoom, 1, 4);
+    const width = 1 / zoom;
+    const height = 1 / zoom;
+    const focalX = current.x + current.width / 2;
+    const focalY = current.y + current.height / 2;
+    return {
+      x: clamp(focalX - width / 2, 0, 1 - width),
+      y: clamp(focalY - height / 2, 0, 1 - height),
+      width,
+      height,
+      zoom,
     };
   }
 
-  function pan(event: PointerEvent<HTMLButtonElement>): void {
+  function zoomTo(nextZoom: number): void {
+    setCrop((current) => {
+      return cropForZoom(current, nextZoom);
+    });
+  }
+
+  function pointerDistance(): number | null {
+    const [first, second] = [...activePointers.current.values()];
+    if (!first || !second) return null;
+    return Math.hypot(first.x - second.x, first.y - second.y);
+  }
+
+  function beginCropInteraction(event: PointerEvent<HTMLElement>, mode: CropDrag["mode"]): void {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    dragOrigin.current = {
+      mode,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      crop,
+    };
+    const distance = pointerDistance();
+    pinchOrigin.current = distance === null ? null : { distance, zoom: crop.zoom };
+  }
+
+  function moveCropInteraction(event: PointerEvent<HTMLElement>): void {
+    activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const pinch = pinchOrigin.current;
+    const distance = pointerDistance();
+    if (pinch && distance !== null) {
+      zoomTo(pinch.zoom * (distance / pinch.distance));
+      return;
+    }
     const origin = dragOrigin.current;
     if (!origin) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
+    const bounds =
+      cropWorkspace.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
     const deltaX = (event.clientX - origin.pointerX) / bounds.width;
     const deltaY = (event.clientY - origin.pointerY) / bounds.height;
+    if (origin.mode === "RESIZE") {
+      const delta = Math.max(deltaX, deltaY);
+      const maximum = Math.min(1 - origin.crop.x, 1 - origin.crop.y);
+      const width = clamp(origin.crop.width + delta, 0.25, maximum);
+      setCrop({ ...origin.crop, width, height: width, zoom: 1 / width });
+      return;
+    }
     setCrop((current) => ({
       ...current,
-      x: clamp(origin.cropX - deltaX / current.zoom, 0, 1 - current.width),
-      y: clamp(origin.cropY - deltaY / current.zoom, 0, 1 - current.height),
+      x: clamp(origin.crop.x - deltaX * current.width, 0, 1 - current.width),
+      y: clamp(origin.crop.y - deltaY * current.height, 0, 1 - current.height),
     }));
   }
 
-  function endPan(event: PointerEvent<HTMLButtonElement>): void {
-    dragOrigin.current = null;
+  function endCropInteraction(event: PointerEvent<HTMLElement>): void {
+    activePointers.current.delete(event.pointerId);
+    if (activePointers.current.size < 2) pinchOrigin.current = null;
+    if (activePointers.current.size === 0) dragOrigin.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }
 
-  function keyboardPan(event: KeyboardEvent<HTMLButtonElement>): void {
+  function keyboardPan(event: KeyboardEvent<HTMLElement>): void {
     const movement = event.shiftKey ? 0.05 : 0.01;
     const delta = {
       ArrowLeft: [-movement, 0],
@@ -162,6 +206,11 @@ export function ProgramAssetPicker({
       x: clamp(current.x + (delta[0] ?? 0), 0, 1 - current.width),
       y: clamp(current.y + (delta[1] ?? 0), 0, 1 - current.height),
     }));
+  }
+
+  function wheelZoom(event: WheelEvent<HTMLElement>): void {
+    event.preventDefault();
+    zoomTo(crop.zoom * (event.deltaY > 0 ? 0.9 : 1.1));
   }
 
   function displayName(asset: AssetItem): string {
@@ -330,49 +379,93 @@ export function ProgramAssetPicker({
         </div>
       ) : null}
 
-      <Modal open={Boolean(file)} title={copy.cropSafely} onClose={() => setFile(null)}>
+      <Modal
+        open={Boolean(file)}
+        title={copy.cropSafely}
+        className="studio-crop-dialog"
+        description={copy.cropHelp}
+        onClose={() => setFile(null)}
+      >
         {previewUrl ? (
           <div className="studio-crop-layout">
-            <button
-              type="button"
-              className="studio-crop-preview"
-              aria-label={copy.cropArea}
-              onPointerDown={beginPan}
-              onPointerMove={pan}
-              onPointerUp={endPan}
-              onPointerCancel={endPan}
-              onLostPointerCapture={() => {
-                dragOrigin.current = null;
-              }}
-              onKeyDown={keyboardPan}
-              onWheel={(event) => {
-                event.preventDefault();
-                zoomTo(crop.zoom + (event.deltaY > 0 ? -0.1 : 0.1));
-              }}
-            >
-              <Image
-                src={previewUrl}
-                alt={copy.cropPreview}
-                width={520}
-                height={360}
-                unoptimized
-                draggable={false}
-                onDragStart={(event) => event.preventDefault()}
-                onLoad={(event) =>
-                  setNaturalSize({
-                    width: event.currentTarget.naturalWidth,
-                    height: event.currentTarget.naturalHeight,
-                  })
+            <div ref={cropWorkspace} className="studio-crop-workspace">
+              <button
+                type="button"
+                className="studio-crop-preview"
+                aria-label={copy.cropArea}
+                aria-describedby="studio-crop-instruction"
+                style={
+                  naturalSize.width && naturalSize.height
+                    ? { aspectRatio: `${naturalSize.width} / ${naturalSize.height}` }
+                    : undefined
                 }
+                onPointerDown={(event) => beginCropInteraction(event, "PAN")}
+                onPointerMove={moveCropInteraction}
+                onPointerUp={endCropInteraction}
+                onPointerCancel={endCropInteraction}
+                onLostPointerCapture={() => {
+                  dragOrigin.current = null;
+                  activePointers.current.clear();
+                  pinchOrigin.current = null;
+                }}
+                onKeyDown={keyboardPan}
+                onWheel={wheelZoom}
+              >
+                <Image
+                  src={previewUrl}
+                  alt=""
+                  width={520}
+                  height={360}
+                  unoptimized
+                  draggable={false}
+                  onDragStart={(event) => event.preventDefault()}
+                  onLoad={(event) =>
+                    setNaturalSize({
+                      width: event.currentTarget.naturalWidth,
+                      height: event.currentTarget.naturalHeight,
+                    })
+                  }
+                />
+                <span
+                  className="studio-crop-safe-area"
+                  aria-hidden="true"
+                  style={{
+                    left: `${crop.x * 100}%`,
+                    top: `${crop.y * 100}%`,
+                    width: `${crop.width * 100}%`,
+                    height: `${crop.height * 100}%`,
+                  }}
+                />
+                <span
+                  id="studio-crop-instruction"
+                  className="studio-crop-instruction"
+                  aria-hidden="true"
+                >
+                  {copy.dragToReposition}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="studio-crop-handle"
+                aria-label={`${copy.cropArea}: resize`}
                 style={{
-                  transform: `scale(${crop.zoom}) translate(${-crop.x * 100}%, ${-crop.y * 100}%)`,
+                  left: `${(crop.x + crop.width) * 100}%`,
+                  top: `${(crop.y + crop.height) * 100}%`,
+                }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  beginCropInteraction(event, "RESIZE");
+                }}
+                onPointerMove={moveCropInteraction}
+                onPointerUp={endCropInteraction}
+                onPointerCancel={endCropInteraction}
+                onLostPointerCapture={() => {
+                  dragOrigin.current = null;
+                  activePointers.current.clear();
+                  pinchOrigin.current = null;
                 }}
               />
-              <span className="studio-crop-safe-area" aria-hidden="true" />
-              <span className="studio-crop-instruction" aria-hidden="true">
-                {copy.dragToReposition}
-              </span>
-            </button>
+            </div>
             <div className="studio-crop-controls">
               <p className="field-help">
                 <Crop size={15} />
@@ -421,6 +514,32 @@ export function ProgramAssetPicker({
                 <Button type="button" variant="ghost" onClick={() => setCrop(fullImageCrop)}>
                   {copy.resetCrop}
                 </Button>
+              </div>
+              <div
+                className="studio-crop-result"
+                role="img"
+                aria-label={copy.cropPreview}
+                style={
+                  naturalSize.width && naturalSize.height
+                    ? { aspectRatio: `${naturalSize.width} / ${naturalSize.height}` }
+                    : undefined
+                }
+              >
+                <Image
+                  src={previewUrl}
+                  alt=""
+                  width={naturalSize.width || 520}
+                  height={naturalSize.height || 360}
+                  unoptimized
+                  draggable={false}
+                  style={{
+                    width: `${100 / crop.width}%`,
+                    height: `${100 / crop.height}%`,
+                    left: `${(-crop.x / crop.width) * 100}%`,
+                    top: `${(-crop.y / crop.height) * 100}%`,
+                  }}
+                />
+                <span>{copy.cropPreview}</span>
               </div>
               {error ? <p className="wf-form-error">{error}</p> : null}
             </div>

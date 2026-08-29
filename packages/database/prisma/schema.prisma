@@ -324,6 +324,12 @@ enum EmailCollectionMode {
   REQUIRED
 }
 
+enum PhoneCollectionMode {
+  HIDDEN
+  OPTIONAL
+  REQUIRED
+}
+
 enum CustomerStatus {
   ACTIVE
   SUSPENDED
@@ -332,6 +338,7 @@ enum CustomerStatus {
 
 enum CustomerContactType {
   EMAIL
+  PHONE
 }
 
 enum ContactVerificationStatus {
@@ -343,6 +350,7 @@ enum CustomerConsentType {
   WAFLO_PRIVACY
   PROGRAM_TERMS
   MARKETING_EMAIL
+  MARKETING_PHONE
   WALLET_PROMOTIONS
 }
 
@@ -2006,6 +2014,7 @@ model ProgramEnrollmentPolicy {
   organizationId              String                @map("organization_id") @db.Uuid
   programVersionId            String                @unique @map("program_version_id") @db.Uuid
   emailCollectionMode         EmailCollectionMode   @default(OPTIONAL) @map("email_collection_mode")
+  phoneCollectionMode         PhoneCollectionMode   @default(OPTIONAL) @map("phone_collection_mode")
   primaryCustomerLocale       Locale                @default(EN) @map("primary_customer_locale")
   allowLocaleSelection        Boolean               @default(true) @map("allow_locale_selection")
   marketingConsentVisible     Boolean               @default(false) @map("marketing_consent_visible")

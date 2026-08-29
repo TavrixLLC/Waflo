@@ -6,7 +6,6 @@ import {
   Button,
   Card,
   Checkbox,
-  EmailInput,
   FormField,
   SearchableSelect,
   TextInput,
@@ -46,7 +45,7 @@ export function EnrollmentForm({
 }) {
   const [cardLocale, setCardLocale] = useState(initialLocale);
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [terms, setTerms] = useState(false);
   const [privacy, setPrivacy] = useState(false);
   const [marketing, setMarketing] = useState(false);
@@ -73,7 +72,7 @@ export function EnrollmentForm({
   const stampPreview = program.stampPreviews[cardLocale] ?? program.stampPreview;
   const presentation = program.template?.presentation ?? defaultProgramTemplatePresentation;
   const identityArtworkDataUri = program.template?.identityArtworkDataUri ?? null;
-  const emailRequired = program.policy.emailCollectionMode === "REQUIRED";
+  const phoneRequired = program.policy.phoneCollectionMode === "REQUIRED";
   const enrollable = program.enrollmentStatus === "OPEN";
   const unavailableTitle =
     program.enrollmentStatus === "MERCHANT_UNAVAILABLE"
@@ -104,8 +103,8 @@ export function EnrollmentForm({
       displayName.trim().length > 0 &&
       terms &&
       privacy &&
-      (!emailRequired || email.trim().length > 0),
-    [displayName, email, emailRequired, privacy, terms],
+      (!phoneRequired || phone.trim().length > 0),
+    [displayName, phone, phoneRequired, privacy, terms],
   );
 
   useEffect(() => {
@@ -164,11 +163,11 @@ export function EnrollmentForm({
         headers: { "x-idempotency-key": idempotencyKey.current },
         body: JSON.stringify({
           displayName,
-          ...(program.policy.emailCollectionMode === "HIDDEN" ? {} : { email }),
+          ...(program.policy.phoneCollectionMode === "HIDDEN" ? {} : { phone }),
           preferredLocale: interfaceLocale,
           programTermsAccepted: true,
           wafloPrivacyAccepted: true,
-          marketingEmailConsent: marketing,
+          marketingPhoneConsent: marketing,
           formStartedAt: startedAt.current,
           website,
         }),
@@ -354,25 +353,29 @@ export function EnrollmentForm({
                 required
               />
             </FormField>
-            {program.policy.emailCollectionMode !== "HIDDEN" ? (
+            {program.policy.phoneCollectionMode !== "HIDDEN" ? (
               <FormField
-                label={ar ? "البريد الإلكتروني" : "Email"}
+                label={ar ? "رقم الهاتف" : "Phone number"}
                 hint={
-                  emailRequired
+                  phoneRequired
                     ? ar
-                      ? "مطلوب لنقل البطاقة بأمان"
-                      : "Required for secure card transfer"
+                      ? "مطلوب للتواصل بشأن بطاقتك"
+                      : "Required for your card contact"
                     : ar
-                      ? "اختياري · يساعدك في نقل البطاقة"
-                      : "Optional · helps with card transfer"
+                      ? "اختياري · أدخل رقمك بصيغة +964"
+                      : "Optional · use +964 7XX XXX XXXX"
                 }
-                required={emailRequired}
+                required={phoneRequired}
               >
-                <EmailInput
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required={emailRequired}
-                  maxLength={254}
+                <TextInput
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="+964 7XX XXX XXXX"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  required={phoneRequired}
+                  maxLength={30}
                 />
               </FormField>
             ) : null}
@@ -396,14 +399,14 @@ export function EnrollmentForm({
               label={ar ? "أوافق على إشعار خصوصية Waflo" : "I accept the Waflo privacy notice"}
               required
             />
-            {program.policy.marketingConsentVisible && email ? (
+            {program.policy.marketingConsentVisible && phone ? (
               <Checkbox
                 checked={marketing}
                 onChange={(event) => setMarketing(event.target.checked)}
                 label={
                   ar
                     ? "أرغب في تلقي رسائل تسويقية من التاجر"
-                    : "I want marketing email from the merchant"
+                    : "I want marketing messages from the merchant"
                 }
               />
             ) : null}
@@ -416,13 +419,13 @@ export function EnrollmentForm({
                 onChange={(event) => setWebsite(event.target.value)}
               />
             </label>
-            <Button type="submit" loading={busy} disabled={!canSubmit}>
+            <Button type="submit" loading={busy}>
               {ar ? "إنشاء بطاقتي" : "Create my card"}
             </Button>
             <p className="privacy-note">
               {ar
-                ? "تدير Tavrix LLC منصة Waflo، ويدير التاجر برنامج الولاء. لن تتضمن بيانات العضوية القابلة للمسح اسمك أو بريدك الإلكتروني."
-                : "Tavrix LLC operates Waflo; the merchant operates this loyalty program. Your scannable membership credential never contains your name or email."}
+                ? "تدير Tavrix LLC منصة Waflo، ويدير التاجر برنامج الولاء. لن تتضمن بيانات العضوية القابلة للمسح اسمك أو رقم هاتفك."
+                : "Tavrix LLC operates Waflo; the merchant operates this loyalty program. Your scannable membership credential never contains your name or phone number."}
             </p>
           </form>
         )}

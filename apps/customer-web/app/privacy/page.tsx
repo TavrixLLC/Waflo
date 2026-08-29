@@ -31,7 +31,7 @@ export default async function CustomerPrivacyPage({
         <p>
           {ar
             ? "تخزن Waflo الاسم الظاهر على بطاقتك ولغتك وموافقة التسجيل وتقدم البطاقة، وعنوان البريد الإلكتروني فقط عندما يطلبه البرنامج. يُشفّر البريد الإلكتروني ويُستخدم لنقل البطاقة بأمان وللاتصالات التي وافقت عليها بشكل منفصل. تحتوي رموز QR على بيانات اعتماد مبهمة وقابلة للإلغاء بدلاً من اسمك أو بريدك الإلكتروني أو تقدمك."
-            : "Waflo stores the name displayed on your card, your language, enrollment consent, card progress, and—only when the program requests it—an email address. Email is encrypted and used for secure card transfer and separately consented communications. QR codes contain opaque, revocable credentials rather than your name, email, or progress."}
+            : "Waflo stores the name displayed on your card, your language, enrollment consent, card progress, and—only when the program requests it—a phone number. Phone numbers are encrypted and used for separately consented communications. QR codes contain opaque, revocable credentials rather than your name, phone number, or progress."}
         </p>
         <h2>{ar ? "مزودو المحفظة ونقل البطاقة" : "Wallet providers and transfer"}</h2>
         <p>

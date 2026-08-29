@@ -583,7 +583,7 @@ export const environmentSchema = z
             MARKETING_WEB_URL: "https://staging.waflo.app",
             MERCHANT_DASHBOARD_URL: "https://app-staging.waflo.app",
             CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
-            ADMIN_DASHBOARD_URL: "https://admin.staging.waflo.app",
+            ADMIN_DASHBOARD_URL: "https://admin-staging.waflo.app",
             API_PUBLIC_URL: "https://api-staging.waflo.app",
             WALLET_PUBLIC_BASE_URL: "https://api-staging.waflo.app/v1/public/wallet-assets",
           }
@@ -841,7 +841,7 @@ export const platformDomains = {
     marketing: "staging.waflo.app",
     dashboard: "app-staging.waflo.app",
     customer: "card-staging.waflo.app",
-    admin: "admin.staging.waflo.app",
+    admin: "admin-staging.waflo.app",
     api: "api-staging.waflo.app",
   },
 } as const;

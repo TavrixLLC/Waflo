@@ -248,7 +248,7 @@ describe("renderer-backed template gallery previews", () => {
     }
   });
 
-  it("keeps template art direction on Customer while Wallet framing stays provider-truthful", () => {
+  it("keeps template art direction on Customer while Wallet previews use provider-native fields", () => {
     for (const template of latestProgramTemplates()) {
       const customer = renderTemplateGalleryPreview(template, "CUSTOMER_WEB", "EN");
       expect(customer.svg).toContain(`data-visual-role="${template.presentation?.visualRole}"`);
@@ -263,7 +263,13 @@ describe("renderer-backed template gallery previews", () => {
         expect(preview.svg).toContain(
           `data-wallet-provider="${profile === "APPLE_WALLET" ? "APPLE" : "GOOGLE"}"`,
         );
-        expect(preview.svg).toContain("PREVIEW ONLY");
+        expect(preview.svg).not.toContain("PREVIEW ONLY");
+        expect(preview.svg).toContain('data-provider-owned-geometry="true"');
+        expect(preview.svg).toContain(
+          profile === "APPLE_WALLET"
+            ? 'data-apple-native-fields="true"'
+            : 'data-google-below-fold-fields="true"',
+        );
       }
     }
   });

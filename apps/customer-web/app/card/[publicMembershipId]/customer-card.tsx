@@ -21,7 +21,7 @@ interface CardView {
   customer: {
     displayName: string;
     preferredLocale: "en" | "ar";
-    maskedEmail: string | null;
+    maskedPhone: string | null;
   };
   merchant: { name: string; slug: string; brandLogoDataUri?: string | null | undefined };
   program: {
@@ -296,7 +296,7 @@ export function CustomerCard({
         <div className="digital-card__member">
           <span>{ar ? "العضو" : "MEMBER"}</span>
           <strong>{card.customer.displayName}</strong>
-          {card.customer.maskedEmail ? <small>{card.customer.maskedEmail}</small> : null}
+          {card.customer.maskedPhone ? <small>{card.customer.maskedPhone}</small> : null}
         </div>
         <Image
           className="published-stamp-artwork"

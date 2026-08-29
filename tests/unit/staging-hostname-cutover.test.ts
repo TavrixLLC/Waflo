@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { PublicEnrollmentService } from "../../apps/api/src/enrollment/public-enrollment.service.js";
 import { CustomerCardService } from "../../apps/api/src/customer/customer-card.service.js";
+import { PublicEnrollmentService } from "../../apps/api/src/enrollment/public-enrollment.service.js";
 import { normalizeWalletCampaignDestination } from "../../apps/api/src/wallet-engagement/wallet-engagement.service.js";
 import { parseEnvironment, platformDomains } from "../../packages/config/src/index.js";
+import { canonicalJoinUrl } from "../../packages/qr-core/src/index.js";
 import { createNextContentSecurityPolicy } from "../../packages/security/src/index.js";
 import { mapAppleStoreCard } from "../../packages/wallet-apple/src/index.js";
 import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
-import { canonicalJoinUrl } from "../../packages/qr-core/src/index.js";
 
 const key = (label: string) => `${label}-`.repeat(16).slice(0, 64);
 
@@ -28,12 +28,12 @@ function stagingEnvironment(overrides: NodeJS.ProcessEnv = {}) {
     CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
     API_PUBLIC_URL: "https://api-staging.waflo.app",
     ALLOWED_ORIGINS:
-      "https://staging.waflo.app,https://app-staging.waflo.app,https://card-staging.waflo.app,https://admin.staging.waflo.app",
+      "https://staging.waflo.app,https://app-staging.waflo.app,https://card-staging.waflo.app,https://admin-staging.waflo.app",
     COOKIE_SECURE: "true",
     COOKIE_NAME: "__Host-waflo_session",
     CUSTOMER_COOKIE_NAME: "__Host-waflo_customer",
     ADMIN_COOKIE_NAME: "__Host-waflo_admin_session",
-    ADMIN_DASHBOARD_URL: "https://admin.staging.waflo.app",
+    ADMIN_DASHBOARD_URL: "https://admin-staging.waflo.app",
     OBJECT_STORAGE_ENDPOINT: "http://minio:9000",
     OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: "true",
     OBJECT_STORAGE_ACCESS_KEY_ID: "staging-access-key",
@@ -187,7 +187,7 @@ describe("staging public hostname cutover", () => {
       MERCHANT_DASHBOARD_URL: "https://app-staging.waflo.app",
       CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
       API_PUBLIC_URL: "https://api-staging.waflo.app",
-      ADMIN_DASHBOARD_URL: "https://admin.staging.waflo.app",
+      ADMIN_DASHBOARD_URL: "https://admin-staging.waflo.app",
     });
     expect(platformDomains).toEqual({
       marketing: "waflo.app",
@@ -200,7 +200,7 @@ describe("staging public hostname cutover", () => {
         dashboard: "app-staging.waflo.app",
         customer: "card-staging.waflo.app",
         api: "api-staging.waflo.app",
-        admin: "admin.staging.waflo.app",
+        admin: "admin-staging.waflo.app",
       },
     });
     expect(() => stagingEnvironment({ API_PUBLIC_URL: "https://api.staging.waflo.app" })).toThrow(
@@ -220,7 +220,7 @@ describe("staging public hostname cutover", () => {
       "https://staging.waflo.app",
       "https://app-staging.waflo.app",
       "https://card-staging.waflo.app",
-      "https://admin.staging.waflo.app",
+      "https://admin-staging.waflo.app",
     ]);
     const policy = createNextContentSecurityPolicy("production", {
       apiUrl: "https://api-staging.waflo.app/v1",

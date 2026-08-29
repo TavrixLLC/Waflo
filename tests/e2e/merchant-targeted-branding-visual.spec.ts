@@ -153,16 +153,29 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
   await expect(page.getByText(/unpublished changes/u)).toBeVisible();
 
   await page.goto(`/en/dashboard/programs/${programId}/edit`);
-  await expect(page.locator(".builder-preview-desktop .builder-preview-canvas img")).toBeVisible({
+  const builderPreview = page.locator(".builder-preview-desktop");
+  await expect(builderPreview.locator("canvas[data-preview-ready='true']")).toBeVisible({
     timeout: 20_000,
   });
-  await capture(page, "merchant-logo-builder-preview-desktop-en.png");
+  for (const [tab, filename] of [
+    ["Apple Legacy", "apple-legacy-dashboard-preview.png"],
+    ["Apple iOS 27+", "apple-ios27-dashboard-preview.png"],
+    ["Google Wallet", "google-wallet-dashboard-preview.png"],
+  ] as const) {
+    await builderPreview.getByRole("tab", { name: tab }).click();
+    await expect(builderPreview.locator("canvas[data-preview-ready='true']")).toBeVisible({
+      timeout: 20_000,
+    });
+    await capture(page, filename);
+  }
 
   await page.goto(`/ar/dashboard/programs/${programId}/edit`);
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  await expect(page.locator(".builder-preview-desktop .builder-preview-canvas img")).toBeVisible({
-    timeout: 20_000,
-  });
+  await expect(page.locator(".builder-preview-desktop .builder-preview-canvas canvas")).toBeVisible(
+    {
+      timeout: 20_000,
+    },
+  );
   await capture(page, "merchant-logo-builder-preview-desktop-ar.png");
 
   await page.goto(`/en/dashboard/programs/${programId}`);
@@ -170,24 +183,72 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
   await expect(preview).toBeVisible();
   await expect(preview.locator(".studio-published-customer-preview__issuer-mark")).toHaveAttribute(
     "src",
-    /^blob:/u,
+    /^data:image\/png;base64,/u,
     { timeout: 20_000 },
   );
   await capture(page, "merchant-logo-studio-preview-desktop-en.png");
 
   await page.getByRole("tab", { name: "Saved changes" }).click();
   await page.getByRole("tab", { name: "Apple" }).click();
-  await expect(preview.locator("img")).toBeVisible({ timeout: 20_000 });
+  await expect(preview.locator("canvas[data-preview-ready='true']")).toBeVisible({
+    timeout: 20_000,
+  });
   await capture(page, "merchant-logo-apple-wallet-preview.png");
 
   await page.getByRole("tab", { name: "Google" }).click();
-  await expect(preview.locator("img")).toBeVisible({ timeout: 20_000 });
+  await expect(preview.locator("canvas[data-preview-ready='true']")).toBeVisible({
+    timeout: 20_000,
+  });
   await capture(page, "merchant-logo-google-wallet-preview.png");
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("http://today.localhost:3002/join/cookie-card");
+  const story = page.locator(".program-story");
+  const enrollment = page.locator(".enrollment-card");
+  await expect(story).toBeVisible();
+  await expect(enrollment).toBeVisible();
+  await expect(page.getByLabel("Phone number")).toBeVisible();
+  await expect(page.locator('input[type="email"]')).toHaveCount(0);
+  const desktopJoinGeometry = await page.evaluate(() => {
+    const storyRect = document.querySelector(".program-story")?.getBoundingClientRect();
+    const formRect = document.querySelector(".enrollment-card")?.getBoundingClientRect();
+    return storyRect && formRect
+      ? {
+          storyLeft: storyRect.left,
+          storyRight: storyRect.right,
+          storyWidth: storyRect.width,
+          formLeft: formRect.left,
+          formWidth: formRect.width,
+        }
+      : null;
+  });
+  if (!desktopJoinGeometry) throw new Error("Desktop enrollment geometry is unavailable.");
+  expect(desktopJoinGeometry.storyRight).toBeLessThan(desktopJoinGeometry.formLeft);
+  expect(desktopJoinGeometry.storyWidth).toBeGreaterThan(desktopJoinGeometry.formWidth);
+  await capture(page, "public-enrollment-desktop.png");
 
   await page.setViewportSize({ width: 430, height: 932 });
   await page.goto("http://today.localhost:3002/join/cookie-card");
   await expect(page.locator(".customer-merchant-identity__logo").first()).toBeVisible();
-  await capture(page, "merchant-logo-customer-card-mobile-en.png");
+  const mobileJoinGeometry = await page.evaluate(() => {
+    const storyRect = document.querySelector(".program-story")?.getBoundingClientRect();
+    const formRect = document.querySelector(".enrollment-card")?.getBoundingClientRect();
+    return storyRect && formRect
+      ? {
+          formLeft: formRect.left,
+          formTop: formRect.top,
+          scrollWidth: document.documentElement.scrollWidth,
+          storyLeft: storyRect.left,
+          storyTop: storyRect.top,
+          viewportWidth: window.innerWidth,
+        }
+      : null;
+  });
+  if (!mobileJoinGeometry) throw new Error("Mobile enrollment geometry is unavailable.");
+  expect(mobileJoinGeometry.formTop).toBeGreaterThan(mobileJoinGeometry.storyTop);
+  expect(Math.abs(mobileJoinGeometry.formLeft - mobileJoinGeometry.storyLeft)).toBeLessThan(2);
+  expect(mobileJoinGeometry.scrollWidth).toBeLessThanOrEqual(mobileJoinGeometry.viewportWidth);
+  await capture(page, "public-enrollment-mobile.png");
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/ar/dashboard/billing");

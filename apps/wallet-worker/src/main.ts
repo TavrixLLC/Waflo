@@ -2316,26 +2316,6 @@ export class WalletWorker {
     const requiredStampCount = version.stampRule?.requiredStampCount ?? 8;
     const currentStampCount = pass.membership.progress?.currentCycleStampCount ?? 0;
     const { locale, translation } = resolvePassLocalizedContent(pass);
-    const rawLayout =
-      theme.layoutConfiguration &&
-      typeof theme.layoutConfiguration === "object" &&
-      !Array.isArray(theme.layoutConfiguration)
-        ? theme.layoutConfiguration
-        : {};
-    const layoutConfiguration = {
-      ...("columns" in rawLayout && typeof rawLayout.columns === "number"
-        ? { columns: rawLayout.columns }
-        : {}),
-      ...("maxPerRow" in rawLayout && typeof rawLayout.maxPerRow === "number"
-        ? { maxPerRow: rawLayout.maxPerRow }
-        : {}),
-      ...("serpentine" in rawLayout && typeof rawLayout.serpentine === "boolean"
-        ? { serpentine: rawLayout.serpentine }
-        : {}),
-      ...("startAngle" in rawLayout && typeof rawLayout.startAngle === "number"
-        ? { startAngle: rawLayout.startAngle }
-        : {}),
-    };
     return {
       organizationId: pass.organizationId,
       programId: pass.membership.programId,
@@ -2347,9 +2327,9 @@ export class WalletWorker {
       requiredStampCount,
       currentStampCount,
       rewardReady: pass.membership.progress?.rewardReady ?? false,
-      layoutType: theme.layoutType,
+      // Published historical values are read for compatibility only.
+      layoutType: "GRID",
       layoutPolicy: "BALANCED_WALLET_ROWS_V1",
-      ...(Object.keys(layoutConfiguration).length > 0 ? { layoutConfiguration } : {}),
       visualTheme: {
         filledColor: theme.accentColor,
         emptyColor: theme.secondaryColor,

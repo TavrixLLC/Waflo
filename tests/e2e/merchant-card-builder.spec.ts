@@ -60,8 +60,8 @@ test("uses the organization brand as the unmirrored issuer mark in every Builder
   await enterBuilder(page);
 
   for (const [tab, profile] of [
-    ["Customer", "CUSTOMER_WEB"],
-    ["Apple Wallet", "APPLE_WALLET"],
+    ["Apple Legacy", "APPLE_WALLET"],
+    ["Apple iOS 27+", "APPLE_WALLET"],
     ["Google Wallet", "GOOGLE_WALLET"],
   ] as const) {
     await page.getByRole("tab", { name: tab }).click();
@@ -73,7 +73,7 @@ test("uses the organization brand as the unmirrored issuer mark in every Builder
   const previewCountBeforeArabicInterface = previews.length;
   await page.goto("/ar/dashboard/programs/created-program-id/edit");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  await page.getByRole("tab", { name: /Apple Wallet/u }).click();
+  await page.getByRole("tab", { name: /Apple Legacy/u }).click();
   await expect.poll(() => previews.length).toBeGreaterThan(previewCountBeforeArabicInterface);
   await expect
     .poll(
@@ -91,6 +91,24 @@ test("uses the organization brand as the unmirrored issuer mark in every Builder
     expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
   }
   await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
+});
+
+test("switches among the three explicit legacy Apple, iOS 27+, and Google previews", async ({
+  page,
+}) => {
+  await mockTemplateGalleryApi(page);
+  await enterBuilder(page);
+  const preview = page.locator(".builder-preview-desktop");
+
+  for (const label of ["Apple Legacy", "Apple iOS 27+", "Google Wallet"] as const) {
+    const tab = page.getByRole("tab", { name: label });
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    const media = await expectBuilderPreviewReady(preview);
+    await expect(media).toHaveAttribute("aria-label", `${label} Preview only`);
+  }
+  await expect(page.getByRole("tab", { name: "Customer" })).toHaveCount(0);
+  await expect(page.getByText("Stamp arrangement", { exact: true })).toHaveCount(0);
 });
 
 test("builds one continuously saved card with combined languages and lazy truthful previews", async ({
@@ -190,7 +208,7 @@ test("builds one continuously saved card with combined languages and lazy truthf
   );
   await expect(page.locator(".builder-language-panel")).toHaveAttribute("dir", "rtl");
 
-  await page.getByRole("tab", { name: "Apple Wallet" }).click();
+  await page.getByRole("tab", { name: "Apple Legacy" }).click();
   await expect
     .poll(() => previewRequests.some(([profile]) => profile === "APPLE_WALLET"))
     .toBe(true);
@@ -273,9 +291,7 @@ test("changes the starting design on the same Program while preserving merchant 
   });
 });
 
-test("renders truthful 0/8, 4/8, and 8/8 Customer, Apple, and Google Builder previews", async ({
-  page,
-}) => {
+test("renders truthful 0/8, 4/8, and 8/8 Grid-only Wallet Builder previews", async ({ page }) => {
   const responses: Array<{ profile: string; svg: string }> = [];
   await mockTemplateGalleryApi(page, {
     onBuilderPreview: (profile, _locale, preview) => responses.push({ profile, svg: preview.svg }),
@@ -292,8 +308,8 @@ test("renders truthful 0/8, 4/8, and 8/8 Customer, Apple, and Google Builder pre
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }, progress);
     for (const [label, profile] of [
-      ["Customer", "CUSTOMER_WEB"],
-      ["Apple Wallet", "APPLE_WALLET"],
+      ["Apple Legacy", "APPLE_WALLET"],
+      ["Apple iOS 27+", "APPLE_WALLET"],
       ["Google Wallet", "GOOGLE_WALLET"],
     ] as const) {
       await page.getByRole("tab", { name: label }).click();
@@ -316,8 +332,6 @@ test("renders truthful 0/8, 4/8, and 8/8 Customer, Apple, and Google Builder pre
     }
   }
 
-  const customer = responses.findLast((item) => item.profile === "CUSTOMER_WEB");
-  expect(customer?.svg).toContain('data-composition="SPLIT_HERO"');
   await expect(
     page.getByText(/CUSTOMER_WEB|APPLE_WALLET|GOOGLE_WALLET|ProgramVersion|Draft revision/u),
   ).toHaveCount(0);
@@ -333,8 +347,8 @@ test("uses an explicit Wallet loading state and preserves the last good preview"
   await expect(builderPreviewMedia(preview)).toHaveCount(0);
   await expectBuilderPreviewReady(preview);
 
-  await page.getByRole("tab", { name: "Apple Wallet" }).click();
-  await expect(preview.locator(".builder-preview-empty")).toContainText("Apple Wallet");
+  await page.getByRole("tab", { name: "Apple iOS 27+" }).click();
+  await expect(preview.locator(".builder-preview-empty")).toContainText("Apple iOS 27+");
   await expect(preview.locator(".builder-preview-empty")).toContainText("Preparing your preview");
   await expectBuilderPreviewReady(preview);
 
@@ -451,6 +465,7 @@ test("surfaces save failure and revision conflict without silently overwriting",
 
 test("turns review into automatic readiness and continues directly to Studio", async ({ page }) => {
   const observedApiPaths: string[] = [];
+  const observedPreviewProfiles: string[] = [];
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
     if (
@@ -458,6 +473,10 @@ test("turns review into automatic readiness and continues directly to Studio", a
       requestUrl.pathname.startsWith("/v1/")
     )
       observedApiPaths.push(requestUrl.pathname);
+    if (requestUrl.pathname.endsWith("/preview")) {
+      const profile = requestUrl.searchParams.get("profile");
+      if (profile) observedPreviewProfiles.push(profile);
+    }
   });
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);
@@ -469,6 +488,9 @@ test("turns review into automatic readiness and continues directly to Studio", a
   await page.getByRole("button", { name: "Continue to Studio" }).click();
   await expect(page).toHaveURL(/\/dashboard\/programs\/created-program-id$/u);
   expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(false);
+  expect(observedPreviewProfiles).toEqual(
+    expect.arrayContaining(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"]),
+  );
 });
 
 test("blocks a Starter merchant at the real card limit before creating an impossible draft", async ({
@@ -664,7 +686,7 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await expect.poll(() => previewRequests.length).toBe(1);
   expect(patchBodies).toHaveLength(1);
-  expect(previewRequests[0]?.[0]).toBe("CUSTOMER_WEB");
+  expect(previewRequests[0]?.[0]).toBe("APPLE_WALLET");
   expect(editingMs).toBeGreaterThanOrEqual(58_000);
   expect(editingMs).toBeLessThan(90_000);
   console.info(
@@ -750,14 +772,14 @@ test("captures the P3 builder journey and old-wizard comparison evidence", async
     animations: "disabled",
   });
 
-  await page.getByRole("tab", { name: "Customer" }).click();
+  await page.getByRole("tab", { name: "Apple Legacy" }).click();
   await page.locator(".builder-preview-desktop").screenshot({
-    path: `${evidenceDirectory}/12-customer-live-preview.png`,
+    path: `${evidenceDirectory}/12-apple-legacy-preview.png`,
     animations: "disabled",
   });
-  await page.getByRole("tab", { name: "Apple Wallet" }).click();
+  await page.getByRole("tab", { name: "Apple iOS 27+" }).click();
   await page.locator(".builder-preview-desktop").screenshot({
-    path: `${evidenceDirectory}/13-apple-preview.png`,
+    path: `${evidenceDirectory}/13-apple-ios27-preview.png`,
     animations: "disabled",
   });
   await page.getByRole("tab", { name: "Google Wallet" }).click();
@@ -958,11 +980,11 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
     animations: "disabled",
   });
 
-  await page.getByRole("tab", { name: "Customer" }).click();
+  await page.getByRole("tab", { name: "Apple Legacy" }).click();
   for (const [progress, filename] of [
-    [0, "02-customer-preview-0-of-8.png"],
-    [4, "03-customer-preview-4-of-8.png"],
-    [8, "04-customer-preview-8-of-8.png"],
+    [0, "02-apple-legacy-preview-0-of-8.png"],
+    [4, "03-apple-legacy-preview-4-of-8.png"],
+    [8, "04-apple-legacy-preview-8-of-8.png"],
   ] as const) {
     await setProgress(progress);
     await preview.screenshot({
@@ -972,11 +994,11 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
   }
 
   await setProgress(4);
-  await page.getByRole("tab", { name: "Apple Wallet" }).click();
+  await page.getByRole("tab", { name: "Apple iOS 27+" }).click();
   await expectBuilderPreviewReady(preview);
   await expect(preview.locator(".builder-preview-status")).toHaveCount(0);
   await preview.screenshot({
-    path: `${evidenceDirectory}/05-apple-preview.png`,
+    path: `${evidenceDirectory}/05-apple-ios27-preview.png`,
     animations: "disabled",
   });
   await page.getByRole("tab", { name: "Google Wallet" }).click();
@@ -1051,7 +1073,7 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
     animations: "disabled",
   });
 
-  const apple = await sharp(`${evidenceDirectory}/05-apple-preview.png`)
+  const apple = await sharp(`${evidenceDirectory}/03-apple-legacy-preview-4-of-8.png`)
     .resize({ width: 430 })
     .png()
     .toBuffer();
@@ -1081,7 +1103,7 @@ test("captures focused P3 repair-round-1 evidence", async ({ page }) => {
     .png()
     .toFile(`${evidenceDirectory}/13-wallet-mapping-evidence.png`);
 
-  const currentPreview = await sharp(`${evidenceDirectory}/02-customer-preview-0-of-8.png`)
+  const currentPreview = await sharp(`${evidenceDirectory}/02-apple-legacy-preview-0-of-8.png`)
     .resize({ width: 600 })
     .png()
     .toBuffer();

@@ -20,7 +20,7 @@ import {
 } from "./program-publication-presentation";
 
 export interface EnrollmentPolicy {
-  emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
+  phoneCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
   primaryCustomerLocale: "en" | "ar";
   allowLocaleSelection: boolean;
   marketingConsentVisible: boolean;
@@ -447,19 +447,19 @@ export function ProgramEnrollmentSettings({
           <h3>
             <ShieldCheck /> {ar ? "سياسة التسجيل" : "Enrollment policy"}
           </h3>
-          <FormField label={ar ? "جمع البريد" : "Email collection"}>
+          <FormField label={ar ? "رقم الهاتف" : "Phone number collection"}>
             <Select
-              value={policy.emailCollectionMode}
+              value={policy.phoneCollectionMode}
               disabled={!settings.editableVersion}
               onChange={(event) =>
                 setPolicy({
                   ...policy,
-                  emailCollectionMode: event.target
-                    .value as EnrollmentPolicy["emailCollectionMode"],
+                  phoneCollectionMode: event.target
+                    .value as EnrollmentPolicy["phoneCollectionMode"],
                 })
               }
             >
-              <option value="HIDDEN">{ar ? "بدون بريد إلكتروني" : "Do not ask"}</option>
+              <option value="HIDDEN">{ar ? "لا تسأل عن رقم هاتف" : "Do not ask"}</option>
               <option value="OPTIONAL">{ar ? "اختياري" : "Optional"}</option>
               <option value="REQUIRED">{ar ? "مطلوب" : "Required"}</option>
             </Select>
@@ -496,7 +496,7 @@ export function ProgramEnrollmentSettings({
           />
           <Checkbox
             checked={policy.marketingConsentVisible}
-            disabled={!settings.editableVersion || policy.emailCollectionMode === "HIDDEN"}
+            disabled={!settings.editableVersion || policy.phoneCollectionMode === "HIDDEN"}
             onChange={(event) =>
               setPolicy({ ...policy, marketingConsentVisible: event.target.checked })
             }
@@ -510,8 +510,8 @@ export function ProgramEnrollmentSettings({
             }
             label={
               ar
-                ? "السماح بالنقل الأقل أمانًا دون بريد"
-                : "Allow lower-security transfer without email"
+                ? "السماح بالنقل الأقل أمانًا دون بريد محفوظ"
+                : "Allow lower-security transfer without a stored email"
             }
           />
           {settings.editableVersion ? (

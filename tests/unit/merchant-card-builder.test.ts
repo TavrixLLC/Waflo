@@ -274,16 +274,16 @@ describe("merchant loyalty-card Builder state", () => {
       expect(preview.markup).toContain(`<path d="${runs.join("")}"/>`);
     });
     expect(walletPreviewQrOverlay("APPLE_WALLET")).toEqual({
-      left: "33.2609%",
-      top: "56.0377%",
-      width: "33.4783%",
-      height: "29.0566%",
+      left: "32.1739%",
+      top: "62.8571%",
+      width: "35.6522%",
+      height: "23.4286%",
     });
     expect(walletPreviewQrOverlay("GOOGLE_WALLET")).toEqual({
-      left: "33.2609%",
-      top: "21.0256%",
-      width: "33.4783%",
-      height: "19.7436%",
+      left: "32.1739%",
+      top: "68.5%",
+      width: "35.6522%",
+      height: "20.5%",
     });
   });
 });

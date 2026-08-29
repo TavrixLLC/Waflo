@@ -245,11 +245,12 @@ function selectedPolicy(
     : (access.editableVersion?.policy ?? null);
 }
 
-function emailPolicyLabel(policy: EnrollmentPolicy | null, ar: boolean): string {
+function phonePolicyLabel(policy: EnrollmentPolicy | null, ar: boolean): string {
   if (!policy) return ar ? "الحالة غير متاحة" : "Status unavailable";
-  if (policy.emailCollectionMode === "HIDDEN") return ar ? "لا يُجمع البريد" : "Email not collected";
-  if (policy.emailCollectionMode === "REQUIRED") return ar ? "البريد مطلوب" : "Email required";
-  return ar ? "البريد اختياري" : "Email optional";
+  if (policy.phoneCollectionMode === "HIDDEN")
+    return ar ? "لا يُجمع رقم الهاتف" : "Phone not collected";
+  if (policy.phoneCollectionMode === "REQUIRED") return ar ? "رقم الهاتف مطلوب" : "Phone required";
+  return ar ? "رقم الهاتف اختياري" : "Phone optional";
 }
 
 function planName(plan: "STARTER" | "GROWTH" | "SCALE") {
@@ -582,8 +583,8 @@ function LaunchReview({
               </dd>
             </div>
             <div>
-              <dt>{ar ? "جمع البريد" : "Email collection"}</dt>
-              <dd>{emailPolicyLabel(policy, ar)}</dd>
+              <dt>{ar ? "جمع رقم الهاتف" : "Phone number collection"}</dt>
+              <dd>{phonePolicyLabel(policy, ar)}</dd>
             </div>
             <div>
               <dt>{ar ? "اللغات" : "Languages"}</dt>

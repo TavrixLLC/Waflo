@@ -23,7 +23,9 @@ describe("release image smoke configuration", () => {
     (environment) => {
       const values = parseEnvironment(syntheticEnvironment(environment));
       expect(values.DEPLOYMENT_ENVIRONMENT).toBe(environment);
-      expect(values.ADMIN_DASHBOARD_URL).toMatch(/^https:\/\/admin(?:\.staging)?\.waflo\.app$/);
+      expect(values.ADMIN_DASHBOARD_URL).toBe(
+        environment === "staging" ? "https://admin-staging.waflo.app" : "https://admin.waflo.app",
+      );
       expect(values.GOOGLE_WALLET_ALLOWED_ORIGINS).toBe(new URL(values.CUSTOMER_WEB_URL).origin);
     },
   );

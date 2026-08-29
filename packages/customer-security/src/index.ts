@@ -163,6 +163,35 @@ export function maskEmail(value: string): string {
   return `${maskedLocal}@${maskedDomain}${suffix}`;
 }
 
+/**
+ * Accept the Iraqi local notation used by the public product as well as E.164.
+ * The database always receives a normalized E.164 value, never presentation text.
+ */
+export function normalizePhone(value: string): string {
+  let normalized = value
+    .trim()
+    .normalize("NFKC")
+    .replace(/[\s().-]/gu, "");
+  if (normalized.startsWith("00")) normalized = `+${normalized.slice(2)}`;
+  if (/^07\d{9}$/u.test(normalized)) normalized = `+964${normalized.slice(1)}`;
+  if (/^7\d{9}$/u.test(normalized)) normalized = `+964${normalized}`;
+  if (!/^\+[1-9]\d{7,14}$/u.test(normalized)) {
+    throw new Error("Enter a valid phone number.");
+  }
+  return normalized;
+}
+
+export function hashNormalizedPhone(normalizedPhone: string, hmacKey: Buffer | string): string {
+  return createHmac("sha256", hmacKey).update(`phone:${normalizedPhone}`, "utf8").digest("hex");
+}
+
+export function maskPhone(value: string): string {
+  const normalized = normalizePhone(value);
+  const visiblePrefix = normalized.slice(0, Math.min(4, normalized.length - 4));
+  const visibleSuffix = normalized.slice(-4);
+  return `${visiblePrefix}${"•".repeat(Math.max(3, normalized.length - visiblePrefix.length - 4))}${visibleSuffix}`;
+}
+
 export function createOpaqueCustomerToken(bytes = 32): string {
   if (!Number.isInteger(bytes) || bytes < 24) throw new Error("Opaque tokens require 24 bytes.");
   return base64Url(randomBytes(bytes));

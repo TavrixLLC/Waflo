@@ -636,11 +636,9 @@ export function programPublicationFeatureViolations(
     !programEntitlement(plan, "canUseMilestoneRewards")
   )
     violations.push("MILESTONE_REWARDS");
-  if (
-    (input.layoutType === "PATH" || input.layoutType === "RING") &&
-    !programEntitlement(plan, "canUseAdvancedLayouts")
-  )
-    violations.push("ADVANCED_LAYOUT");
+  // Grid is automatic for every plan. The compatibility input remains so old
+  // records can be inspected, but it can never create a billing restriction.
+  void input.layoutType;
   return violations;
 }
 

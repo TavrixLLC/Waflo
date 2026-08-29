@@ -24,11 +24,16 @@ describe("W2 stamp visual engine", () => {
     expect(first.height).toBeGreaterThan(0);
   });
 
-  it.each(["ROW", "GRID", "PATH", "RING"] as const)("supports %s layout", (layout) => {
-    const positions = layoutStampPositions(8, layout);
-    expect(positions).toHaveLength(8);
-    expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(8);
-  });
+  it.each(["ROW", "GRID", "PATH", "RING", "CIRCLE"] as const)(
+    "normalizes legacy %s input to Grid",
+    (layout) => {
+      const positions = layoutStampPositions(8, layout);
+      const gridPositions = layoutStampPositions(8, "GRID");
+      expect(positions).toHaveLength(8);
+      expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(8);
+      expect(positions).toEqual(gridPositions);
+    },
+  );
 
   it.each([
     [1, [1]],
@@ -45,7 +50,7 @@ describe("W2 stamp visual engine", () => {
     const distribution = balancedWalletStampDistribution(total);
     expect(distribution.rows).toEqual(expectedRows);
     expect(Math.max(...distribution.rows) - Math.min(...distribution.rows)).toBeLessThanOrEqual(1);
-    expect(distribution.layout).toBe(total <= 5 ? "ROW" : "GRID");
+    expect(distribution.layout).toBe("GRID");
   });
 
   it("makes only Wallet renderer backgrounds transparent for a single clean panel", () => {

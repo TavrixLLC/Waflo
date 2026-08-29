@@ -90,7 +90,7 @@ target "_staging-build" {
     NEXT_PUBLIC_DASHBOARD_URL       = "https://app-staging.waflo.app"
     NEXT_PUBLIC_MARKETING_URL       = "https://staging.waflo.app"
     NEXT_PUBLIC_CUSTOMER_URL        = "https://card-staging.waflo.app"
-    NEXT_PUBLIC_ADMIN_URL           = "https://admin.staging.waflo.app"
+    NEXT_PUBLIC_ADMIN_URL           = "https://admin-staging.waflo.app"
     NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN = MAPBOX_STAGING_PUBLIC_TOKEN
   }
 }

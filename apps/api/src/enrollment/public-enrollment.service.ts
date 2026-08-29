@@ -226,15 +226,15 @@ export class PublicEnrollmentService {
         HttpStatus.CONFLICT,
       );
     }
-    const email = input.email?.trim() ?? "";
+    const phone = input.phone?.trim() ?? "";
     const requestFingerprint = sha256({
       programSlug,
       displayName: input.displayName.normalize("NFKC").trim(),
-      emailHash: email ? this.security.emailRequestFingerprint(email) : null,
+      phoneHash: phone ? this.security.phoneRequestFingerprint(phone) : null,
       preferredLocale: input.preferredLocale,
       programTermsAccepted: input.programTermsAccepted,
       wafloPrivacyAccepted: input.wafloPrivacyAccepted,
-      marketingEmailConsent: input.marketingEmailConsent,
+      marketingPhoneConsent: input.marketingPhoneConsent,
     });
     const result = await withProgramLifecycleInvariantLock(
       this.prisma.client,
@@ -323,21 +323,21 @@ export class PublicEnrollmentService {
             { reason: billing.code },
           );
         }
-        if (policy.emailCollectionMode === "REQUIRED" && !email) {
+        if (policy.phoneCollectionMode === "REQUIRED" && !phone) {
           throw new AppError(
-            "ENROLLMENT_EMAIL_REQUIRED",
-            "Email is required for this program.",
+            "ENROLLMENT_PHONE_REQUIRED",
+            "Phone number is required for this program.",
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        if (policy.emailCollectionMode === "HIDDEN" && email) {
+        if (policy.phoneCollectionMode === "HIDDEN" && phone) {
           throw new AppError(
-            "ENROLLMENT_EMAIL_NOT_COLLECTED",
-            "This program does not collect email.",
+            "ENROLLMENT_PHONE_NOT_COLLECTED",
+            "This program does not collect phone numbers.",
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        if (input.marketingEmailConsent && (!policy.marketingConsentVisible || !email)) {
+        if (input.marketingPhoneConsent && (!policy.marketingConsentVisible || !phone)) {
           throw new AppError(
             "MARKETING_CONSENT_INVALID",
             "Marketing consent is not available for this enrollment.",
@@ -389,20 +389,20 @@ export class PublicEnrollmentService {
         const credentialId = randomUUID();
         const credential = this.security.createCredential(1);
         const rawSessionToken = this.security.deterministicEnrollmentSessionToken(commandId);
-        const preparedEmail = email ? this.security.prepareEmail(organizationId, email) : null;
+        const preparedPhone = phone ? this.security.preparePhone(organizationId, phone) : null;
         await transaction.customer.create({
           data: {
             id: customerId,
             organizationId,
             displayName: input.displayName.normalize("NFKC").trim(),
             preferredLocale: input.preferredLocale === "ar" ? "AR" : "EN",
-            ...(preparedEmail
+            ...(preparedPhone
               ? {
                   contacts: {
                     create: {
-                      ...preparedEmail,
+                      ...preparedPhone,
                       organizationId,
-                      type: "EMAIL",
+                      type: "PHONE",
                       verificationStatus: "UNVERIFIED",
                       isPrimary: true,
                     },
@@ -484,8 +484,8 @@ export class PublicEnrollmentService {
                     organizationId,
                     customerId,
                     membershipId,
-                    consentType: "MARKETING_EMAIL" as const,
-                    granted: input.marketingEmailConsent,
+                    consentType: "MARKETING_PHONE" as const,
+                    granted: input.marketingPhoneConsent,
                     documentFingerprint: consentFingerprint,
                     locale: input.preferredLocale === "ar" ? ("AR" as const) : ("EN" as const),
                   },
@@ -530,7 +530,7 @@ export class PublicEnrollmentService {
                 programId: program.id,
                 programVersionId: version.id,
                 ...(event[0] === "customer.enrolled"
-                  ? { contact: preparedEmail?.maskedDisplayValue ?? null }
+                  ? { contact: preparedPhone?.maskedDisplayValue ?? null }
                   : {}),
               },
             },
@@ -786,7 +786,7 @@ export class PublicEnrollmentService {
           emptyStampAsset: PreviewAsset;
         } | null;
         enrollmentPolicy: {
-          emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
+          phoneCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
           primaryCustomerLocale: "EN" | "AR";
           allowLocaleSelection: boolean;
           marketingConsentVisible: boolean;
@@ -967,10 +967,10 @@ export class PublicEnrollmentService {
         foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
         accentColor: version.visualTheme?.accentColor ?? "#E4572E",
         secondaryColor: version.visualTheme?.secondaryColor ?? "#F3A712",
-        layoutType: version.visualTheme?.layoutType ?? "GRID",
+        layoutType: "GRID",
       },
       policy: {
-        emailCollectionMode: policy?.emailCollectionMode ?? "OPTIONAL",
+        phoneCollectionMode: policy?.phoneCollectionMode ?? "OPTIONAL",
         primaryCustomerLocale: policy?.primaryCustomerLocale === "AR" ? "ar" : "en",
         allowLocaleSelection: policy?.allowLocaleSelection ?? true,
         marketingConsentVisible: policy?.marketingConsentVisible ?? false,

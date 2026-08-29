@@ -112,7 +112,7 @@ function downgradeViolationMessage(violation: PlanDowngradeViolation): string {
     PRO_MODE: "Move Pro Mode loyalty cards to supported settings before downgrading.",
     MULTIPLE_REWARDS: "Reduce loyalty cards to one reward before downgrading.",
     MILESTONE_REWARDS: "Remove milestone rewards before downgrading.",
-    ADVANCED_LAYOUT: "Change PATH or RING stamp layouts to a supported layout before downgrading.",
+    ADVANCED_LAYOUT: "Stamp layouts are automatically normalized to the supported Grid.",
     ACTIVE_ADVANCED_EXPORTS: "Wait for advanced exports to finish or expire before downgrading.",
   };
   return `${label[violation.code]} Current: ${violation.currentUsage}; allowed: ${violation.limit ?? "unlimited"}.`;

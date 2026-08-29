@@ -3,6 +3,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app.js";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
+import { CustomerSecurityService } from "../../apps/api/src/customer/customer-security.service.js";
 import { PrismaService } from "../../apps/api/src/database/prisma.service.js";
 import { NotificationService } from "../../apps/api/src/notifications/notification.service.js";
 
@@ -11,10 +12,11 @@ const merchantSlug = `w3-${runId}`.toLowerCase();
 const programSlug = `circle-${runId}`.toLowerCase();
 const merchantHost = `${merchantSlug}.lvh.me`;
 const formBase = {
+  phone: "0770 123 4567",
   preferredLocale: "en",
   programTermsAccepted: true,
   wafloPrivacyAccepted: true,
-  marketingEmailConsent: false,
+  marketingPhoneConsent: false,
   formStartedAt: Date.now() - 2_000,
   website: "",
 } as const;
@@ -22,6 +24,7 @@ const formBase = {
 let app: NestFastifyApplication;
 let prisma: PrismaService;
 let environment: EnvironmentService;
+let security: CustomerSecurityService;
 let organizationId = "";
 let programId = "";
 let versionId = "";
@@ -42,7 +45,7 @@ function cookie(
   return selected?.split(";")[0] ?? "";
 }
 
-async function enroll(input: { displayName: string; email?: string }, key: string) {
+async function enroll(input: { displayName: string; phone?: string }, key: string) {
   return app.inject({
     method: "POST",
     url: `/v1/public/programs/${programSlug}/enroll`,
@@ -65,6 +68,7 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);
+    security = app.get(CustomerSecurityService);
     const notifications = app.get(NotificationService) as unknown as {
       provider: { send(message: { to: string; subject: string; html: string }): Promise<void> };
     };
@@ -242,7 +246,7 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
         enrollmentPolicy: {
           create: {
             organizationId,
-            emailCollectionMode: "OPTIONAL",
+            phoneCollectionMode: "OPTIONAL",
             primaryCustomerLocale: "EN",
             allowLocaleSelection: true,
             marketingConsentVisible: true,
@@ -508,17 +512,22 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
 
   it("uses an encrypted email, fragment confirmation, and verifies contact on transfer", async () => {
     const email = `member-${runId}@customer.test`;
-    const enrollment = await enroll(
-      { displayName: "Email Member", email },
-      `enroll:${randomUUID()}`,
-    );
+    const enrollment = await enroll({ displayName: "Email Member" }, `enroll:${randomUUID()}`);
     const oldCookie = cookie(enrollment, environment.values.CUSTOMER_COOKIE_NAME);
     const enrollmentData = data<{ membership: { publicMembershipId: string } }>(enrollment);
     const membership = await prisma.client.membership.findUniqueOrThrow({
       where: { publicMembershipId: enrollmentData.membership.publicMembershipId },
-      include: { customer: { include: { contacts: true } }, credentials: true },
     });
-    const contact = membership.customer.contacts[0];
+    const contact = await prisma.client.customerContact.create({
+      data: {
+        ...security.prepareEmail(organizationId, email),
+        organizationId,
+        customerId: membership.customerId,
+        type: "EMAIL",
+        verificationStatus: "UNVERIFIED",
+        isPrimary: true,
+      },
+    });
     expect(contact?.encryptedValue).not.toContain(email);
     expect(contact?.maskedDisplayValue).not.toBe(email);
     const card = await app.inject({

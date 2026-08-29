@@ -18,6 +18,7 @@ export interface LoyaltyCardRealPreviewProps {
         foregroundColor?: string | undefined;
         accentColor?: string | undefined;
         secondaryColor?: string | undefined;
+        /** Historical values are normalized to Grid before display. */
         layoutType?: "ROW" | "GRID" | "PATH" | "RING" | undefined;
       }
     | null
@@ -41,7 +42,7 @@ export function LoyaltyCardRealPreview({
   const displayName = programName || internalName || (ar ? "بطاقة الولاء" : "Loyalty card");
   const initial = displayName.charAt(0).toLocaleUpperCase(ar ? "ar" : "en");
   const goal = Math.max(2, Math.min(30, Number(requiredStampCount) || 8));
-  const layout = visualTheme?.layoutType ?? "ROW";
+  const layout = "GRID" as const;
 
   const backgroundColor = visualTheme?.backgroundColor || "#f7f4ee";
   const foregroundColor = visualTheme?.foregroundColor || "#241916";

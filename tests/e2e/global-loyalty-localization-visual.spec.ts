@@ -228,7 +228,7 @@ test("captures dynamic worldwide card languages and provider previews", async ({
   await expect(page.getByRole("heading", { name: "Languages" })).toBeVisible();
   await capture(page, "review-language-completeness.png");
 
-  await selectPreviewProfile(page, "Apple Wallet");
+  await selectPreviewProfile(page, "Apple iOS 27+");
   await page.locator(".builder-preview-desktop").screenshot({
     path: path.join(evidenceDirectory, "apple-multilocale-preview.png"),
     animations: "disabled",

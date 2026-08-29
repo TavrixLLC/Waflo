@@ -103,7 +103,7 @@ function allFieldValues(fields: {
 }
 
 describe("Apple Pass Builder migration", () => {
-  it("puts legacy reward content in the front primary field", () => {
+  it("puts legacy reward content below the text-free stamp strip", () => {
     const rewardSummary = "A classic grooming service";
     const input = { ...baseMembership, rewardSummary };
     const legacy = mapAppleStoreCard(input, configuration, "a".repeat(43));
@@ -117,10 +117,12 @@ describe("Apple Pass Builder migration", () => {
       ].map((field) => field.value);
 
     expect(frontValues(legacy.storeCard)).toContain(rewardSummary);
-    expect(legacy.storeCard.primaryFields).toContainEqual(
+    expect(legacy.storeCard.primaryFields).toEqual([]);
+    expect(legacy.storeCard.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),
     );
-    expect(migrated.generic.primaryFields).toContainEqual(
+    expect(migrated.generic.primaryFields).toEqual([]);
+    expect(migrated.generic.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),
     );
     expect(migrated.posterGeneric.backFields).toContainEqual(
@@ -150,7 +152,8 @@ describe("Apple Pass Builder migration", () => {
       program: baseMembership.programName,
       status: "Active",
     });
-    expect(legacy.storeCard.primaryFields).toContainEqual(
+    expect(legacy.storeCard.primaryFields).toEqual([]);
+    expect(legacy.storeCard.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: baseMembership.rewardSummary }),
     );
     expect(allFieldValues(migrated.generic)).toMatchObject({

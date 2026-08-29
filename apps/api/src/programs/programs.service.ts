@@ -75,6 +75,7 @@ import {
   renderTemplateGalleryThumbnail,
 } from "./template-gallery-preview.js";
 import { validateProgramConfiguration } from "./validation-engine.js";
+import { composeDashboardWalletArtwork } from "./wallet-preview-artwork.js";
 
 const templates = conceptTemplates();
 
@@ -424,6 +425,7 @@ export class ProgramsService {
     outputProfile: StampOutputProfile,
     locale: string,
     request: WafloRequest,
+    appleWalletVariant: "LEGACY" | "POSTER" = "LEGACY",
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
     return withOrganizationCacheLock(this.prisma.client, organizationId, async (transaction) => {
@@ -545,7 +547,9 @@ export class ProgramsService {
         : undefined;
       const visual = version.visualTheme;
       const safeProgress = Math.max(0, Math.min(goal, progress));
-      const safeLayout = visual?.layoutType ?? "GRID";
+      // Historic persisted layouts are read for compatibility, but previews and Wallet renderers
+      // are deliberately fail-closed to the single supported arrangement.
+      const safeLayout = "GRID" as const;
       const previewType = previewTypeFor(outputProfile);
       const configurationFingerprint = digest({
         versionId: version.id,
@@ -563,6 +567,7 @@ export class ProgramsService {
         progress: safeProgress,
         locale: effectiveCardLocale,
         profile: outputProfile,
+        appleWalletVariant: outputProfile === "APPLE_WALLET" ? appleWalletVariant : null,
         goal,
         translations: (version.cardLocales.length ? version.cardLocales : version.translations)
           .toSorted((left, right) => left.locale.localeCompare(right.locale))
@@ -597,8 +602,8 @@ export class ProgramsService {
                 visual.secondaryColor,
                 visual.mutedColor,
               ],
-              layout: visual.layoutType,
-              layoutConfiguration: visual.layoutConfiguration,
+              layout: "GRID",
+              layoutConfiguration: {},
               stampSize: visual.stampSize,
               stampSpacing: visual.stampSpacing,
               progressLabelVisible: visual.progressLabelVisible,
@@ -731,12 +736,7 @@ export class ProgramsService {
         goal,
         progress: safeProgress,
         layout: safeLayout,
-        layoutConfiguration: visualInput.layoutConfiguration as {
-          columns?: number;
-          maxPerRow?: number;
-          serpentine?: boolean;
-          startAngle?: number;
-        },
+        layoutConfiguration: {},
         outputProfile,
         filledColor: visualInput.accentColor,
         emptyColor:
@@ -763,6 +763,29 @@ export class ProgramsService {
           outputProfile === "CUSTOMER_WEB" ? visualInput.rewardLabelVisible : false,
       } satisfies StampRenderInput;
       const rendered = renderStampSvg(stampRenderInput);
+      const walletPreviewProfile =
+        outputProfile === "APPLE_WALLET" || outputProfile === "GOOGLE_WALLET"
+          ? outputProfile
+          : undefined;
+      const walletArtwork =
+        walletPreviewProfile === undefined
+          ? undefined
+          : await composeDashboardWalletArtwork({
+              profile: walletPreviewProfile,
+              ...(outputProfile === "APPLE_WALLET" ? { appleWalletVariant } : {}),
+              locale: effectiveCardLocale,
+              renderedStamp: rendered,
+              stampSize: visualInput.stampSize,
+              organizationName: program.organization.name,
+              programName: translation.programName,
+              rewardSummary: translation.rewardSummary,
+              progress: safeProgress,
+              goal,
+              backgroundColor: visualInput.backgroundColor,
+              foregroundColor: visualInput.foregroundColor,
+              accentColor: visualInput.accentColor,
+              secondaryColor: visualInput.secondaryColor,
+            });
       const appleConfig = visualInput.applePreviewConfig as Partial<{
         headerLabel: string;
         headerValue: string;
@@ -787,7 +810,8 @@ export class ProgramsService {
         progress: safeProgress,
         goal,
         stampSvg: rendered.svg,
-        stampLayout: safeLayout as "ROW" | "GRID" | "PATH" | "RING",
+        stampLayout: "GRID",
+        ...(outputProfile === "APPLE_WALLET" ? { appleWalletVariant } : {}),
         backgroundColor: visualInput.backgroundColor,
         foregroundColor: visualInput.foregroundColor,
         accentColor: visualInput.accentColor,
@@ -799,6 +823,7 @@ export class ProgramsService {
         ...(filledAsset ? { identityDataUri: filledAsset.dataUri } : {}),
         ...(heroAsset ? { heroDataUri: heroAsset.dataUri } : {}),
         ...(backgroundAsset ? { backgroundDataUri: backgroundAsset.dataUri } : {}),
+        ...(walletArtwork ? { walletArtwork } : {}),
         customerWebVariant: visualInput.customerWebVariant as "CARD" | "MINIMAL" | "HERO",
         ...(baseTemplate?.presentation ? { presentation: baseTemplate.presentation } : {}),
         apple: {
@@ -815,7 +840,7 @@ export class ProgramsService {
           barcodeLabel: googleConfig.barcodeLabel ?? "Preview barcode",
         },
       });
-      const objectKey = `organizations/${organizationId}/previews/${version.id}/${outputProfile.toLowerCase()}-${effectiveCardLocale.toLowerCase()}-${previewCacheKey}.svg`;
+      const objectKey = `organizations/${organizationId}/previews/${version.id}/${outputProfile.toLowerCase()}-${outputProfile === "APPLE_WALLET" ? `${appleWalletVariant.toLowerCase()}-` : ""}${effectiveCardLocale.toLowerCase()}-${previewCacheKey}.svg`;
       await this.objectStorage.ensureReady();
       const previewBytes = Buffer.from(composed.svg);
       const storageResult = await this.objectStorage.putImmutable(
@@ -976,17 +1001,6 @@ export class ProgramsService {
             { recommendedPlan: "growth" },
           );
         }
-        if (
-          ["PATH", "RING"].includes(input.visualTheme.layoutType) &&
-          !programEntitlement(plan, "canUseAdvancedLayouts")
-        ) {
-          throw new AppError(
-            "PROGRAM_ADVANCED_LAYOUT_UNAVAILABLE",
-            "Advanced layouts require Growth or Scale.",
-            HttpStatus.FORBIDDEN,
-            { recommendedPlan: "growth" },
-          );
-        }
         const selectedTemplate = templateFor(input.templateCode, input.templateVersion);
         const themeAssets = await this.ensureBuiltInAssets(
           transaction,
@@ -1040,7 +1054,8 @@ export class ProgramsService {
           data: {
             organizationId,
             programVersionId: version.id,
-            emailCollectionMode: "OPTIONAL",
+            emailCollectionMode: "HIDDEN",
+            phoneCollectionMode: "OPTIONAL",
             primaryCustomerLocale: organization.defaultLocale,
             allowLocaleSelection: true,
             marketingConsentVisible: false,
@@ -1169,16 +1184,6 @@ export class ProgramsService {
           throw new AppError(
             "PROGRAM_MILESTONES_UNAVAILABLE",
             "Milestone rewards require Growth or Scale.",
-            HttpStatus.FORBIDDEN,
-            { recommendedPlan: "growth" },
-          );
-        if (
-          ["PATH", "RING"].includes(next.visualTheme.layoutType) &&
-          !programEntitlement(plan, "canUseAdvancedLayouts")
-        )
-          throw new AppError(
-            "PROGRAM_ADVANCED_LAYOUT_UNAVAILABLE",
-            "Advanced layouts require Growth or Scale.",
             HttpStatus.FORBIDDEN,
             { recommendedPlan: "growth" },
           );
@@ -3213,8 +3218,8 @@ export class ProgramsService {
             visual.defaultMilestoneAssetId === undefined
               ? assets.milestoneId
               : visual.defaultMilestoneAssetId,
-          layoutType: visual.layoutType,
-          layoutConfiguration: visual.layoutConfiguration,
+          layoutType: "GRID",
+          layoutConfiguration: {},
           stampSize: visual.stampSize,
           stampSpacing: visual.stampSpacing,
           borderRadius: visual.borderRadius,
@@ -3367,8 +3372,8 @@ export class ProgramsService {
             heroAssetId: version.visualTheme.heroAssetId,
             backgroundAssetId: version.visualTheme.backgroundAssetId,
             defaultMilestoneAssetId: version.visualTheme.defaultMilestoneAssetId,
-            layoutType: version.visualTheme.layoutType,
-            layoutConfiguration: version.visualTheme.layoutConfiguration as Record<string, unknown>,
+            layoutType: "GRID",
+            layoutConfiguration: {},
             stampSize: version.visualTheme.stampSize,
             stampSpacing: version.visualTheme.stampSpacing,
             borderRadius: version.visualTheme.borderRadius,
@@ -3695,8 +3700,8 @@ export class ProgramsService {
               filledStampAssetId: theme.filledStampAssetId,
               emptyStampAssetId: theme.emptyStampAssetId,
               defaultMilestoneAssetId: theme.defaultMilestoneAssetId,
-              layoutType: theme.layoutType,
-              layoutConfiguration: theme.layoutConfiguration as object,
+              layoutType: "GRID",
+              layoutConfiguration: {},
               stampSize: theme.stampSize,
               stampSpacing: theme.stampSpacing,
               borderRadius: theme.borderRadius,
@@ -3711,7 +3716,8 @@ export class ProgramsService {
       enrollmentPolicy: {
         create: {
           organizationId: source.organizationId,
-          emailCollectionMode: source.enrollmentPolicy?.emailCollectionMode ?? "OPTIONAL",
+          emailCollectionMode: "HIDDEN",
+          phoneCollectionMode: source.enrollmentPolicy?.phoneCollectionMode ?? "OPTIONAL",
           primaryCustomerLocale: source.enrollmentPolicy?.primaryCustomerLocale ?? "EN",
           allowLocaleSelection: source.enrollmentPolicy?.allowLocaleSelection ?? true,
           marketingConsentVisible: source.enrollmentPolicy?.marketingConsentVisible ?? false,

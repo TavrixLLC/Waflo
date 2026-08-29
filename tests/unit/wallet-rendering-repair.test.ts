@@ -54,7 +54,7 @@ describe("Wallet rendering repair completion", () => {
     const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
     expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(5);
-    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 9");
+    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 10");
     expect(enrollment).toContain("ensure-template:v");
     expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
     expect(worker).toContain("enqueuePresentationRepairs");
@@ -62,7 +62,7 @@ describe("Wallet rendering repair completion", () => {
     expect(worker).toContain("PRESENTATION_SCHEMA_UPGRADE");
   });
 
-  it("preserves authored stamp topology in the Google hero composition", () => {
+  it("normalizes historical stamp topology to Grid in the Google hero composition", () => {
     const renderInput = {
       goal: 6,
       progress: 2,
@@ -97,7 +97,7 @@ describe("Wallet rendering repair completion", () => {
     expect(GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION).toBe("google-progress-v5");
     expect(composition).toEqual({
       layout: "GRID",
-      layoutConfiguration: { columns: 4 },
+      layoutConfiguration: undefined,
       adapted: false,
     });
     expect(adapted.width).toBe(canonical.width);

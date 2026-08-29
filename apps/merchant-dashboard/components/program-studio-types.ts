@@ -6,7 +6,8 @@ import {
 } from "@waflo/contracts";
 
 export type EditingMode = "quick" | "pro";
-export type StampLayout = "ROW" | "GRID" | "PATH" | "RING";
+/** API records may contain historical values, but every editable draft is Grid. */
+export type StampLayout = "GRID";
 export type PreviewProfile = "CUSTOMER_WEB" | "APPLE_WALLET" | "GOOGLE_WALLET";
 export type AssetCategory =
   | "LOGO"
@@ -95,12 +96,7 @@ export interface ProgramDraftInput {
     backgroundAssetId?: string | null | undefined;
     defaultMilestoneAssetId?: string | null | undefined;
     layoutType: StampLayout;
-    layoutConfiguration: {
-      columns?: number | undefined;
-      maxPerRow?: number | undefined;
-      serpentine?: boolean | undefined;
-      startAngle?: number | undefined;
-    };
+    layoutConfiguration: Record<string, never>;
     stampSize: number;
     stampSpacing: number;
     borderRadius: number;
@@ -538,9 +534,9 @@ export function versionToDraft(program: ProgramDetail, version: ProgramVersion):
       heroAssetId: visual?.heroAssetId,
       backgroundAssetId: visual?.backgroundAssetId,
       defaultMilestoneAssetId: visual?.defaultMilestoneAssetId,
-      layoutType: visual?.layoutType ?? "GRID",
-      layoutConfiguration: (visual?.layoutConfiguration ??
-        {}) as ProgramDraftInput["visualTheme"]["layoutConfiguration"],
+      // A historic record can still contain a non-grid value; never offer it back to the editor.
+      layoutType: "GRID",
+      layoutConfiguration: {},
       stampSize: visual?.stampSize ?? 48,
       stampSpacing: visual?.stampSpacing ?? 8,
       borderRadius: visual?.borderRadius ?? 18,
@@ -626,8 +622,8 @@ export function createQuickDraft(
       accentColor: template.colors.accent,
       secondaryColor: template.colors.secondary,
       mutedColor: template.colors.muted,
-      layoutType: template.layout.type,
-      layoutConfiguration: structuredClone(template.layout.configuration),
+      layoutType: "GRID",
+      layoutConfiguration: {},
       stampSize: template.layout.stampSize,
       stampSpacing: template.layout.stampSpacing,
       borderRadius: 18,

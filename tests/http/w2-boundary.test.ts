@@ -231,11 +231,8 @@ function programPayload(
       accentColor: "#B63A18",
       secondaryColor: "#F3A712",
       mutedColor: "#6B7280",
-      layoutType: mode === "pro" ? "PATH" : "GRID",
-      layoutConfiguration:
-        mode === "pro"
-          ? { maxPerRow: 4, serpentine: true }
-          : { columns: 4, maxPerRow: 4, serpentine: false },
+      layoutType: "GRID",
+      layoutConfiguration: {},
       stampSize: 48,
       stampSpacing: 8,
       borderRadius: 18,
@@ -511,6 +508,36 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
     });
     expect(crossTenantProgram.statusCode).toBe(404);
     expect(crossTenantProgram.json().error.code).toBe("PROGRAM_NOT_FOUND");
+  });
+
+  it("accepts Grid visual input and rejects every retired layout mode", async () => {
+    const baseUrl = `/v1/organizations/${growth.organizationId}/programs`;
+    const csrfState = await csrf();
+    const grid = await app.inject({
+      method: "POST",
+      url: baseUrl,
+      headers: mutationHeaders(csrfState, owner),
+      payload: programPayload(growth.locationId, "quick", "grid-contract"),
+    });
+    expect(grid.statusCode, grid.body).toBe(201);
+
+    for (const layoutType of ["PATH", "ROW", "RING", "CIRCLE"] as const) {
+      const obsolete = programPayload(growth.locationId, "quick", `obsolete-${layoutType}`);
+      const rejected = await app.inject({
+        method: "POST",
+        url: baseUrl,
+        headers: mutationHeaders(csrfState, owner),
+        payload: {
+          ...obsolete,
+          visualTheme: {
+            ...obsolete.visualTheme,
+            layoutType,
+          },
+        },
+      });
+      expect(rejected.statusCode, rejected.body).toBe(422);
+      expect(rejected.json().error.code).toBe("VALIDATION_FAILED");
+    }
   });
 
   it("covers create, edit, preview, automatic validation, publication, versions, and lifecycle", async () => {
@@ -1255,15 +1282,11 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
         headers: getHeaders(owner),
       });
       expect(preview.statusCode, preview.body).toBe(200);
-      expect(
-        data<{ warnings: Array<{ code: string }> }>(preview).warnings.map(
-          (warning) => warning.code,
-        ),
-      ).toContain(
-        platform === "APPLE_WALLET"
-          ? "APPLE_BACKGROUND_ARTWORK_UNSUPPORTED"
-          : "GOOGLE_BACKGROUND_ARTWORK_UNSUPPORTED",
+      const warningCodes = data<{ warnings: Array<{ code: string }> }>(preview).warnings.map(
+        (warning) => warning.code,
       );
+      expect(warningCodes).not.toContain("APPLE_BACKGROUND_ARTWORK_UNSUPPORTED");
+      expect(warningCodes).not.toContain("GOOGLE_BACKGROUND_ARTWORK_UNSUPPORTED");
     }
 
     await objectStorage.delete(variant.objectKey);
@@ -1460,7 +1483,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
     expect(foreignReward.json().error.code).toBe("PROGRAM_ASSET_INVALID");
   });
 
-  it("enforces Starter limits and Pro, milestone, multi-reward, and advanced-layout restrictions", async () => {
+  it("enforces Starter limits and Pro, milestone, and multi-reward restrictions", async () => {
     const starter = await createOrganization(owner.userId, "STARTER");
     const csrfState = await csrf();
     const baseUrl = `/v1/organizations/${starter.organizationId}/programs`;

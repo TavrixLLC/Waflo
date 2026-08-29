@@ -16,10 +16,11 @@ export interface W3CustomerWalletFixture {
 }
 
 export const w3EnrollmentBase = {
+  phone: "0770 123 4567",
   preferredLocale: "en",
   programTermsAccepted: true,
   wafloPrivacyAccepted: true,
-  marketingEmailConsent: false,
+  marketingPhoneConsent: false,
   website: "",
 } as const;
 
@@ -236,7 +237,7 @@ export async function createPublishedProgramVersion(
       enrollmentPolicy: {
         create: {
           organizationId: input.organizationId,
-          emailCollectionMode: "OPTIONAL",
+          phoneCollectionMode: "OPTIONAL",
           primaryCustomerLocale: "EN",
           allowLocaleSelection: true,
           marketingConsentVisible: true,

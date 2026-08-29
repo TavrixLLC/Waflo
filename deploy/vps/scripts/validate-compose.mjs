@@ -44,7 +44,7 @@ function render(environment) {
   const apiOrigin = staging ? "https://api-staging.waflo.app" : "https://api.waflo.app";
   const customerOrigin = staging ? "https://card-staging.waflo.app" : "https://card.waflo.app";
   const marketingOrigin = staging ? "https://staging.waflo.app" : "https://waflo.app";
-  const adminOrigin = staging ? "https://admin.staging.waflo.app" : "https://admin.waflo.app";
+  const adminOrigin = staging ? "https://admin-staging.waflo.app" : "https://admin.waflo.app";
   const applicationEnvironment = join(scratch, `application-${environment}.env`);
   const secretEnvironment = join(scratch, `application-${environment}.secret.env`);
   writeFileSync(
@@ -185,7 +185,7 @@ for (const environment of ["staging", "production"]) {
     throw new Error("merchant-web did not receive a valid public Mapbox build token.");
   }
   const expectedAdminOrigin =
-    environment === "staging" ? "https://admin.staging.waflo.app" : "https://admin.waflo.app";
+    environment === "staging" ? "https://admin-staging.waflo.app" : "https://admin.waflo.app";
   if (
     model.services["admin-web"].build?.args?.NEXT_PUBLIC_ADMIN_URL !== expectedAdminOrigin ||
     model.services["admin-web"].environment?.ADMIN_DASHBOARD_URL !== expectedAdminOrigin

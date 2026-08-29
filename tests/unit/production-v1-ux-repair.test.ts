@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { walletPlatform } from "../../apps/customer-web/app/wallet-platform.js";
 import {
   billingFailurePolicy,
   billingGraceDeadline,
@@ -10,6 +12,7 @@ import {
   planDowngradeViolations,
   renderBillingEmail,
 } from "../../packages/billing/src/index.js";
+import { parseEnvironment } from "../../packages/config/src/index.js";
 import {
   countryCodeSchema,
   countryCodes,
@@ -20,11 +23,8 @@ import {
   timeZoneOptions,
   timezoneSchema,
 } from "../../packages/contracts/src/index.js";
-import { parseEnvironment } from "../../packages/config/src/index.js";
 import { messages } from "../../packages/i18n/src/index.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
-import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
-import { walletPlatform } from "../../apps/customer-web/app/wallet-platform.js";
 
 describe("production-v1 UX and billing repair", () => {
   it("projects every published template decision into the customer card renderer", () => {
@@ -341,15 +341,19 @@ describe("production-v1 UX and billing repair", () => {
       "utf8",
     );
     const styles = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
-    expect(source).toContain("onPointerDown={beginPan}");
+    expect(source).toContain('beginCropInteraction(event, "PAN")');
+    expect(source).toContain('beginCropInteraction(event, "RESIZE")');
     expect(source).toContain("setPointerCapture(event.pointerId)");
     expect(source).toContain("releasePointerCapture(event.pointerId)");
     expect(source).toContain("onLostPointerCapture");
     expect(source).toContain("onWheel=");
     expect(source).toContain("onKeyDown={keyboardPan}");
+    expect(source).toContain("activePointers");
+    expect(source).toContain("studio-crop-result");
     expect(source).toContain("copy.zoomOut");
     expect(source).toContain("copy.zoomIn");
-    expect(styles).toContain("transform-origin: top left");
+    expect(styles).toContain(".studio-crop-handle");
+    expect(styles).toContain(".studio-crop-workspace");
     expect(source).not.toContain("Horizontal position");
     expect(source).not.toContain("Vertical position");
   });
@@ -454,7 +458,7 @@ describe("production-v1 UX and billing repair", () => {
     const heroRegion = preview.svg.indexOf('data-google-hero-region="true"');
     const supportingFields = preview.svg.indexOf('data-google-below-fold-fields="true"');
     expect(qrRegion).toBeGreaterThan(-1);
-    expect(qrRegion).toBeLessThan(heroRegion);
+    expect(heroRegion).toBeLessThan(qrRegion);
     expect(heroRegion).toBeLessThan(supportingFields);
     expect(preview.svg).not.toContain('data-account-label="الحساب"');
     expect(preview.svg).toContain('data-reward-label="المكافأة"');

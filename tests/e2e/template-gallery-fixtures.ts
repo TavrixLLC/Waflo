@@ -1037,7 +1037,8 @@ export async function mockTemplateGalleryApi(
     if (path.endsWith("/programs/created-program-id/enrollment") && request.method() === "GET") {
       const detail = programDetail();
       const policy = {
-        emailCollectionMode: "OPTIONAL",
+        emailCollectionMode: "HIDDEN",
+        phoneCollectionMode: "OPTIONAL",
         primaryCustomerLocale: "en",
         allowLocaleSelection: true,
         marketingConsentVisible: true,

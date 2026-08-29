@@ -430,7 +430,10 @@ test("centers and locks publication and lifecycle dialogs across the required vi
       page,
       {
         studioState: "READY",
-        publishDelayMs: 700,
+        // Keep the execution state mounted long enough to verify every locked
+        // control at each viewport. A shorter mock can complete between
+        // sequential assertions on a busy browser worker.
+        publishDelayMs: 3_000,
         onPublish: () => {
           publicationRequests += 1;
         },
