@@ -1145,6 +1145,12 @@ test.describe
         "Round 4 Main Branch",
       );
       await page.goto(`/en/onboarding/business?organization=${createdRound4OrganizationId}`);
+      await expect(page.getByRole("heading", { name: "Billing details" })).toBeVisible();
+      await page.locator('input[name="billingName"]').fill(`Round 4 Coffee ${runId}`);
+      await page.locator('input[name="billingEmail"]').fill(round4Email);
+      await page.locator('input[name="addressLine1"]').fill("Round 4 Main Street");
+      await page.locator('input[name="billingCity"]').fill("Baghdad");
+      await page.getByRole("button", { name: "Continue to payment" }).click();
       await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
       const round4OrganizationId = new URL(page.url()).searchParams.get("organization");
       expect(round4OrganizationId).toBeTruthy();
