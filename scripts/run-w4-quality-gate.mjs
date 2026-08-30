@@ -31,6 +31,7 @@ const commands = [
   ["prisma-validate", ["db:validate"]],
   ["migration-deploy", ["db:migrate:deploy"]],
   ["migration-status", ["--filter", "@waflo/database", "exec", "prisma", "migrate", "status"]],
+  ["phone-grid-upgrade", ["db:rehearse-phone-grid-upgrade"]],
   ["production-build", ["build"]],
   ["provider-artifacts", ["w4:provider-artifacts"]],
   [

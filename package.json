@@ -66,6 +66,7 @@
     "db:seed": "pnpm --filter @waflo/database seed",
     "admin:provision": "tsx scripts/admin-provision.mts",
     "db:rehearse-brand-logo-upgrade": "node scripts/rehearse-merchant-logo-migration-upgrade.mjs",
+    "db:rehearse-phone-grid-upgrade": "node scripts/rehearse-phone-grid-migration-upgrade.mjs",
     "infra:up": "docker compose up -d postgres redis mailpit minio minio-init",
     "infra:down": "docker compose down",
     "infra:reset": "docker compose down -v",
