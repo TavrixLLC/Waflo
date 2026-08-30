@@ -2102,10 +2102,6 @@ export class BillingService {
     }
     const request = typeof cadenceOrRequest === "string" ? maybeRequest : cadenceOrRequest;
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
-    // Fail before persisting a UI selection unless the canonical billing market
-    // has a currently published, bound Waflo term for it. The subscription
-    // creation path resolves the same market again as its final authority.
-    await this.pricing.resolveForOrganization(organizationId, plan, cadenceToDb(cadence));
     const selectedPlan = planToDb(plan);
     await withOrganizationInvariantLock(this.prisma.client, organizationId, async (transaction) => {
       const [actor, organization] = await Promise.all([
@@ -2173,6 +2169,12 @@ export class BillingService {
           );
         }
       }
+      // A plan that is not eligible to be selected must retain its domain-specific
+      // rejection (for example, an active provider subscription or a downgrade
+      // limit) without consulting a future catalog term. Once it is eligible,
+      // validate the current Waflo catalog before persisting any selection. The
+      // subscription-creation path independently resolves this same market again.
+      await this.pricing.resolveForOrganization(organizationId, plan, cadenceToDb(cadence));
       await transaction.organization.update({
         where: { id: organizationId },
         data: { selectedPlan },

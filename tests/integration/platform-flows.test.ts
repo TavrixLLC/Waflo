@@ -171,6 +171,55 @@ describe.sequential("Waflo W1 service and database integration", () => {
     billing = new BillingService(prisma, environment, tenant, audit, notificationProvider);
     hosts = new HostResolutionService(prisma, environment);
     await prisma.client.$queryRaw`SELECT 1`;
+    const globalMarket = await prisma.client.pricingMarket.upsert({
+      where: { code: "GLOBAL" },
+      update: { active: true, configuredCurrency: "USD" },
+      create: {
+        code: "GLOBAL",
+        kind: "GLOBAL",
+        configuredCurrency: "USD",
+        active: true,
+      },
+    });
+    await Promise.all(
+      (
+        [
+          ["STARTER", 2900],
+          ["GROWTH", 6900],
+          ["SCALE", 12900],
+        ] as const
+      ).map(([planCode, amountMinor]) =>
+        prisma.client.pricingVersion.upsert({
+          where: {
+            marketId_planCode_cadence_version: {
+              marketId: globalMarket.id,
+              planCode,
+              cadence: "MONTHLY",
+              version: 1,
+            },
+          },
+          update: {
+            currency: "USD",
+            amountMinor,
+            status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+            stripePriceId: `price_integration_${planCode.toLowerCase()}_monthly`,
+          },
+          create: {
+            marketId: globalMarket.id,
+            planCode,
+            cadence: "MONTHLY",
+            version: 1,
+            currency: "USD",
+            amountMinor,
+            status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+            stripeProductId: `prod_integration_${planCode.toLowerCase()}`,
+            stripePriceId: `price_integration_${planCode.toLowerCase()}_monthly`,
+            stripeBindingKey: `integration:global:${planCode.toLowerCase()}:monthly:v1`,
+            publishedAt: new Date(),
+          },
+        }),
+      ),
+    );
   });
 
   afterAll(async () => {
