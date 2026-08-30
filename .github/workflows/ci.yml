@@ -244,6 +244,31 @@ jobs:
       - name: Check out the approved release SHA
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # The Pass Builder image smoke uses the built Wallet client to exercise
+      # the released service. This job runs in a fresh checkout, so prepare
+      # that existing workspace artifact explicitly before running the image
+      # publish/smoke script below.
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Prepare Pass Builder release smoke dependencies
+        env:
+          # Prisma generation validates that a URL exists but does not connect
+          # during package compilation. Keep the isolated image-publish job
+          # explicitly detached from every deployed database.
+          DATABASE_URL: postgresql://release_smoke:release_smoke@invalid.invalid:5432/release_smoke?schema=public
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test:prepare
+
       - name: Configure Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
