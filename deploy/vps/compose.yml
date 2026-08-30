@@ -194,6 +194,49 @@ services:
         condition: service_healthy
     logging: *bounded-logging
 
+  apple-pass-builder:
+    image: "${IMAGE_REGISTRY:-local}/waflo-apple-pass-builder:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      context: ../..
+      dockerfile: apps/apple-pass-builder-service/Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    environment:
+      NODE_ENV: production
+      PASS_BUILDER_AUTH_TOKEN_FILE: /run/waflo-provider-secrets/apple-pass-builder-auth-token
+      PASS_BUILDER_IDENTITIES_CONFIG_FILE: /run/waflo-provider-secrets/apple-pass-builder-identities.json
+      PASS_BUILDER_TEMP_ROOT: /tmp
+      PASS_BUILDER_DIAGNOSTIC_ERRORS: "false"
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
+        target: /run/waflo-provider-secrets
+        read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=128m"
+    networks: [backend]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    mem_limit: "${APPLE_PASS_BUILDER_MEMORY_LIMIT:-512m}"
+    cpus: "${APPLE_PASS_BUILDER_CPU_LIMIT:-0.75}"
+    logging: *bounded-logging
+    labels:
+      app.waflo.service: apple-pass-builder
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
   api:
     <<: *application-runtime
     image: "${IMAGE_REGISTRY:-local}/waflo-api:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"

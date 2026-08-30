@@ -25,6 +25,9 @@ trap rollback_failed ERR
 printf 'Rolling application images back to %s; no database rollback will run.\n' "${target_release_sha}"
 compose config --quiet
 compose pull --policy always "${APPLICATION_SERVICES[@]}"
+if pass_builder_enabled; then
+  compose up -d --no-build --wait --wait-timeout 120 apple-pass-builder
+fi
 compose up -d --no-build --wait --wait-timeout 240 \
   api merchant-web customer-web admin-web marketing-web operational-worker wallet-worker cloudflared
 compose exec -T api node -e \

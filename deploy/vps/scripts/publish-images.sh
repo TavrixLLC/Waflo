@@ -75,6 +75,7 @@ declare -a missing_targets=()
 declare -A target_references=(
   [migrate]="${registry}/waflo-migrate:${release_sha}-staging"
   [api]="${registry}/waflo-api:${release_sha}-staging"
+  [apple-pass-builder]="${registry}/waflo-apple-pass-builder:${release_sha}-staging"
   [operational-worker]="${registry}/waflo-operational-worker:${release_sha}-staging"
   [wallet-worker]="${registry}/waflo-wallet-worker:${release_sha}-staging"
   [merchant-staging]="${registry}/waflo-merchant:${release_sha}-staging"
@@ -89,12 +90,12 @@ declare -A target_references=(
 
 if [[ "${release_scope}" == "staging" ]]; then
   targets=(
-    migrate api operational-worker wallet-worker
+    migrate api apple-pass-builder operational-worker wallet-worker
     merchant-staging customer-staging admin-staging marketing-staging
   )
 else
   targets=(
-    migrate api operational-worker wallet-worker
+    migrate api apple-pass-builder operational-worker wallet-worker
     merchant-production customer-production admin-production marketing-production
   )
 fi

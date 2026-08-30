@@ -20,6 +20,31 @@ for (const environment of ["staging", "production"]) {
     mode: 0o440,
   });
   writeFileSync(join(providerDirectory, "apple-wwdr.pem"), "DUMMY-WWDR\n", { mode: 0o440 });
+  writeFileSync(join(providerDirectory, "apple-wallet-pass.password"), "dummy-password\n", {
+    mode: 0o440,
+  });
+  writeFileSync(
+    join(providerDirectory, "apple-pass-builder-auth-token"),
+    "compose-validation-pass-builder-token-0123456789\n",
+    { mode: 0o440 },
+  );
+  writeFileSync(
+    join(providerDirectory, "apple-pass-builder-identities.json"),
+    JSON.stringify({
+      identities: [
+        {
+          id: "waflo-default",
+          merchantIds: ["*"],
+          passTypeIdentifier: "pass.app.waflo.compose-validation",
+          teamIdentifier: "TEAM123456",
+          certificatePath: "/run/waflo-provider-secrets/apple-wallet-pass.p12",
+          certificatePasswordFile: "/run/waflo-provider-secrets/apple-wallet-pass.password",
+          wwdrCertificatePath: "/run/waflo-provider-secrets/apple-wwdr.pem",
+        },
+      ],
+    }),
+    { mode: 0o440 },
+  );
 }
 
 const secretNames = [
@@ -62,11 +87,18 @@ function render(environment) {
       `GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL=${apiOrigin}/v1/public/wallet-assets`,
       `GOOGLE_WALLET_PUBLISHING_MODE=${staging ? "DEMO" : "PUBLISHING"}`,
       "APPLE_WALLET_MODE=REAL",
+      `APPLE_WALLET_GENERATOR=${staging ? "passbuilder" : "legacy"}`,
       "APPLE_PASS_TYPE_IDENTIFIER=pass.app.waflo.compose-validation",
       "APPLE_TEAM_IDENTIFIER=TEAM123456",
       "APPLE_PASS_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wallet-pass.p12",
       "APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wwdr.pem",
       `APPLE_PASS_WEB_SERVICE_URL=${apiOrigin}/v1/apple-wallet`,
+      ...(staging
+        ? [
+            "APPLE_PASS_BUILDER_URL=http://apple-pass-builder:8080",
+            "APPLE_PASS_BUILDER_AUTH_TOKEN_FILE=/run/waflo-provider-secrets/apple-pass-builder-auth-token",
+          ]
+        : []),
       "APPLE_APNS_ENVIRONMENT=production",
       `STRIPE_PUBLISHABLE_KEY=${staging ? "pk_test_dummy" : "pk_live_dummy"}`,
       "STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID=bpc_dummy",
@@ -204,7 +236,17 @@ for (const environment of ["staging", "production"]) {
   if (cloudflareSecret?.mode !== "0440") {
     throw new Error("cloudflared token mount must remain group-readable and non-world-readable.");
   }
-  for (const serviceName of ["api", "wallet-worker"]) {
+  const passBuilder = model.services["apple-pass-builder"];
+  if (passBuilder?.user !== "10001:10001") {
+    throw new Error("Apple Pass Builder must run as its pinned non-root identity.");
+  }
+  if (Object.keys(passBuilder.networks ?? {}).some((network) => network.endsWith("edge"))) {
+    throw new Error("Apple Pass Builder must not join the edge network.");
+  }
+  if (passBuilder.environment?.PASS_BUILDER_DIAGNOSTIC_ERRORS !== "false") {
+    throw new Error("Apple Pass Builder diagnostic errors must remain disabled.");
+  }
+  for (const serviceName of ["api", "wallet-worker", "apple-pass-builder"]) {
     const providerMount = model.services[serviceName].volumes?.find(
       (volume) => volume.target === "/run/waflo-provider-secrets",
     );
@@ -212,9 +254,10 @@ for (const environment of ["staging", "production"]) {
       throw new Error(`${serviceName} is missing the read-only provider secret-file mount.`);
     }
     if (
-      model.services[serviceName].environment.GOOGLE_WALLET_MODE !== "REAL" ||
-      model.services[serviceName].environment.APPLE_WALLET_MODE !== "REAL" ||
-      model.services[serviceName].environment.APPLE_APNS_ENVIRONMENT !== "production"
+      serviceName !== "apple-pass-builder" &&
+      (model.services[serviceName].environment.GOOGLE_WALLET_MODE !== "REAL" ||
+        model.services[serviceName].environment.APPLE_WALLET_MODE !== "REAL" ||
+        model.services[serviceName].environment.APPLE_APNS_ENVIRONMENT !== "production")
     ) {
       throw new Error(`${serviceName} did not render the safe dummy Wallet provider contract.`);
     }

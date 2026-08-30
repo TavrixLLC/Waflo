@@ -30,6 +30,7 @@ group "release" {
   targets = [
     "migrate",
     "api",
+    "apple-pass-builder",
     "operational-worker",
     "wallet-worker",
     "merchant-staging",
@@ -112,6 +113,15 @@ target "api" {
   tags = [
     "${IMAGE_REGISTRY}/waflo-api:${RELEASE_SHA}-staging",
     "${IMAGE_REGISTRY}/waflo-api:${RELEASE_SHA}-production",
+  ]
+}
+
+target "apple-pass-builder" {
+  inherits   = ["_common"]
+  dockerfile = "apps/apple-pass-builder-service/Dockerfile"
+  tags = [
+    "${IMAGE_REGISTRY}/waflo-apple-pass-builder:${RELEASE_SHA}-staging",
+    "${IMAGE_REGISTRY}/waflo-apple-pass-builder:${RELEASE_SHA}-production",
   ]
 }
 

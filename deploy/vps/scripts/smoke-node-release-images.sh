@@ -68,11 +68,17 @@ if [[ ! -f "${smoke_environment}" ]]; then
   exit 2
 fi
 
-for service in api operational-worker wallet-worker admin; do
+for service in api operational-worker wallet-worker admin apple-pass-builder; do
   reference="${registry}/waflo-${service}:${release_sha}-${environment}"
   printf 'Smoke testing final image %s.\n' "${reference}"
   if ! docker image inspect "${reference}" >/dev/null 2>&1; then
     docker pull "${reference}" >/dev/null
+  fi
+
+  if [[ "${service}" == "apple-pass-builder" ]]; then
+    APPLE_PASS_BUILDER_SMOKE_IMAGE="${reference}" \
+      node "${script_directory}/../../../scripts/apple-pass-builder-smoke.mjs"
+    continue
   fi
 
   metadata="$(docker image inspect "${reference}" \

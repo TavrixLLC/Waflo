@@ -124,9 +124,9 @@ describe("production deployment platform", () => {
     expect(dockerfile).toContain("org.opencontainers.image.revision");
   });
 
-  it("mounts provider files read-only only into the API and Wallet worker", () => {
-    expect(compose.match(/target: \/run\/waflo-provider-secrets/g)).toHaveLength(2);
-    expect(compose.match(/read_only: true/g)?.length).toBeGreaterThanOrEqual(2);
+  it("mounts provider files read-only only into Wallet-capable services", () => {
+    expect(compose.match(/target: \/run\/waflo-provider-secrets/g)).toHaveLength(3);
+    expect(compose.match(/read_only: true/g)?.length).toBeGreaterThanOrEqual(3);
     expect(stagingApplication).toContain(
       "GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64=/run/waflo-provider-secrets/google-wallet-service-account.json",
     );
@@ -136,6 +136,8 @@ describe("production deployment platform", () => {
     expect(productionApplication).toContain(
       "APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wwdr.pem",
     );
+    expect(stagingApplication).toContain("APPLE_WALLET_GENERATOR=passbuilder");
+    expect(stagingApplication).toContain("APPLE_PASS_BUILDER_URL=http://apple-pass-builder:8080");
   });
 
   it("uses real provider modes with isolated staging and production boundaries", () => {
@@ -247,7 +249,7 @@ describe("production deployment platform", () => {
   it("keeps each hardened tmpfs mount in one Compose argument", () => {
     expect(compose).not.toMatch(/tmpfs:\s*\[/u);
     expect(compose).not.toMatch(/^\s*-\s*(?:noexec|nosuid|nodev)\s*$/mu);
-    expect(compose.match(/^\s+- "\/[^"]+:rw,noexec,nosuid,size=\d+m"$/gmu)).toHaveLength(12);
+    expect(compose.match(/^\s+- "\/[^"]+:rw,noexec,nosuid,size=\d+m"$/gmu)).toHaveLength(13);
     expect(compose).toContain('      - "/tmp:rw,noexec,nosuid,size=64m"');
     expect(deploy.match(/compose run --rm migrate/gmu)).toHaveLength(1);
   });
@@ -269,7 +271,13 @@ describe("production deployment platform", () => {
   });
 
   it("builds invariant services once and preserves distinct Web environment outputs", () => {
-    for (const target of ["migrate", "api", "operational-worker", "wallet-worker"]) {
+    for (const target of [
+      "migrate",
+      "api",
+      "apple-pass-builder",
+      "operational-worker",
+      "wallet-worker",
+    ]) {
       const section = bake.slice(bake.indexOf(`target "${target}"`));
       expect(section.slice(0, section.indexOf("\n}"))).toContain("-staging");
       expect(section.slice(0, section.indexOf("\n}"))).toContain("-production");
@@ -289,7 +297,13 @@ describe("production deployment platform", () => {
     expect(publishImages).toContain(
       `"${scriptDirectoryVariable}/smoke-node-release-images.sh" staging "${localReleaseShaVariable}"`,
     );
-    for (const service of ["api", "operational-worker", "wallet-worker", "admin"]) {
+    for (const service of [
+      "api",
+      "operational-worker",
+      "wallet-worker",
+      "admin",
+      "apple-pass-builder",
+    ]) {
       expect(smokeNodeReleaseImages).toContain(service);
     }
     expect(smokeNodeReleaseImages).toContain("docker image inspect");

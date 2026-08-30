@@ -34,6 +34,11 @@ compose up --no-build minio-init
 printf 'Executing exactly one forward migration job.\n'
 compose run --rm migrate
 
+if pass_builder_enabled; then
+  printf 'Starting the configured Apple Pass Builder before Wallet-capable services.\n'
+  compose up -d --no-build --wait --wait-timeout 120 apple-pass-builder
+fi
+
 compose up -d --no-build --wait --wait-timeout 240 \
   api merchant-web customer-web admin-web marketing-web operational-worker wallet-worker cloudflared
 

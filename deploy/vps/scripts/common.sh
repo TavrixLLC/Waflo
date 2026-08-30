@@ -179,6 +179,11 @@ application_config_value() {
   printf '%s' "${line#*=}" | tr -d '\r'
 }
 
+pass_builder_enabled() {
+  [[ "$(application_config_value APPLE_WALLET_GENERATOR)" == "passbuilder" ]] && \
+    grep -q '^  apple-pass-builder:' "${COMPOSE_FILE}"
+}
+
 is_iso_calendar_date() {
   local value="$1"
   local normalized
@@ -214,9 +219,13 @@ assert_legal_release_state() {
 }
 
 pull_release_images() {
+  local -a release_services=("${RELEASE_PULL_SERVICES[@]}")
+  if pass_builder_enabled; then
+    release_services+=(apple-pass-builder)
+  fi
   printf 'Pulling immutable release and pinned infrastructure images.\n'
   compose --profile tools pull --policy always \
-    "${INFRASTRUCTURE_SERVICES[@]}" "${RELEASE_PULL_SERVICES[@]}"
+    "${INFRASTRUCTURE_SERVICES[@]}" "${release_services[@]}"
 }
 
 capture_deployment_logs() {
@@ -224,11 +233,15 @@ capture_deployment_logs() {
   local release_sha="$2"
   local log_directory="${PLATFORM_ROOT}/deploy-logs/${environment}"
   local log_file="${log_directory}/${release_sha}.log"
+  local -a logged_services=("${APPLICATION_SERVICES[@]}")
+  if pass_builder_enabled; then
+    logged_services+=(apple-pass-builder)
+  fi
   install -d -m 0700 "${log_directory}"
   {
     printf 'Waflo deployment failure for %s at %s\n' "${release_sha}" "$(date --iso-8601=seconds)"
     compose ps
-    compose logs --no-color --tail 500 "${APPLICATION_SERVICES[@]}"
+    compose logs --no-color --tail 500 "${logged_services[@]}"
   } >"${log_file}" 2>&1 || true
   chmod 0600 "${log_file}"
   printf 'Failure diagnostics were preserved on the VPS at %s.\n' "${log_file}" >&2
@@ -298,6 +311,17 @@ assert_secret_permissions() {
     for required in apple-wallet-pass.p12 apple-wwdr.pem; do
       if [[ ! -f "${provider_directory}/${required}" ]]; then
         printf 'Real Apple Wallet requires %s.\n' "${required}" >&2
+        return 2
+      fi
+    done
+  fi
+  if grep -qx 'APPLE_WALLET_GENERATOR=passbuilder' "${WAFLO_ENV_FILE}"; then
+    for required in \
+      apple-pass-builder-auth-token \
+      apple-pass-builder-identities.json \
+      apple-wallet-pass.password; do
+      if [[ ! -f "${provider_directory}/${required}" ]]; then
+        printf 'Apple Pass Builder requires %s.\n' "${required}" >&2
         return 2
       fi
     done

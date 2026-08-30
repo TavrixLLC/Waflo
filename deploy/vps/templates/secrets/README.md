@@ -26,6 +26,19 @@ mode `0440` so the non-root application user can read it without making it host-
 - `apple-wwdr.pem` — Apple WWDR intermediate certificate in PEM form. This certificate is public,
   but it is installed beside the private signing material as an operational secret file.
 
+- `apple-wallet-pass.password` — the password for `apple-wallet-pass.p12`; it must contain the
+  same value as the non-file Apple signing-password secret and is readable only by provider
+  processes.
+- `apple-pass-builder-auth-token` — a distinct 32–256 character service token using only
+  letters, digits, `.`, `_`, `~`, or `-`; the API, Wallet worker, and Pass Builder use this only
+  for authenticated internal generation requests.
+- `apple-pass-builder-identities.json` — the restricted Pass Builder identity configuration. It
+  must point to `/run/waflo-provider-secrets/apple-wallet-pass.p12`,
+  `/run/waflo-provider-secrets/apple-wallet-pass.password`, and
+  `/run/waflo-provider-secrets/apple-wwdr.pem`, and its Pass Type ID and Team ID must match the
+  installed signing certificate. Use `apps/apple-pass-builder-service/config/signing-identities.example.json`
+  as the shape; do not store its contents in application environment files.
+
 Do not create or replace provider credentials in this repository. Google and Apple provider files
 must be different where the provider account or certificate lifecycle requires it; Stripe TEST and
 LIVE values must always be different.
