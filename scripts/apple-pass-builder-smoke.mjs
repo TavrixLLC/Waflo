@@ -20,6 +20,7 @@ const containerName = `waflo-pass-builder-smoke-${randomUUID()}`;
 const hostPort = randomInt(20_000, 30_000);
 const password = "waflo-smoke-certificate-password";
 const authToken = `waflo-smoke-${"x".repeat(32)}`;
+const hostUid = typeof process.getuid === "function" ? process.getuid() : undefined;
 
 async function docker(arguments_, options = {}) {
   return execute("docker", arguments_, {
@@ -243,7 +244,7 @@ try {
     "--entrypoint",
     "/usr/bin/chmod",
     image,
-    "0444",
+    "0440",
     "/work/auth-token",
     "/work/identities.json",
     "/work/expired.p12",
@@ -261,10 +262,50 @@ try {
     "--entrypoint",
     "/usr/bin/chmod",
     image,
-    "0644",
+    "0640",
     "/work/certificate-password",
     "/work/pass.p12",
   ]);
+  // On POSIX CI runners the bind source is initially owned by the runner and
+  // its temporary directory is not traversable by the non-root service. Keep
+  // the runner as owner for the deliberate mutation cases below, but expose
+  // the fixture through the service's restricted group exactly as staging
+  // provider-secret files are mounted. Docker Desktop's Windows bind mounts
+  // do not provide POSIX ownership semantics, so preserve their native path.
+  if (hostUid !== undefined) {
+    await docker([
+      "run",
+      "--rm",
+      "--user",
+      "0:0",
+      "--mount",
+      `type=bind,src=${temporaryDirectory},dst=/work`,
+      "--entrypoint",
+      "/usr/bin/chown",
+      image,
+      `${hostUid}:10001`,
+      "/work",
+      "/work/auth-token",
+      "/work/identities.json",
+      "/work/certificate-password",
+      "/work/pass.p12",
+      "/work/expired.p12",
+      "/work/wwdr.pem",
+    ]);
+    await docker([
+      "run",
+      "--rm",
+      "--user",
+      "0:0",
+      "--mount",
+      `type=bind,src=${temporaryDirectory},dst=/work`,
+      "--entrypoint",
+      "/usr/bin/chmod",
+      image,
+      "0750",
+      "/work",
+    ]);
+  }
   await docker([
     "run",
     "--detach",
