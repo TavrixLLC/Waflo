@@ -34,7 +34,11 @@ ENV NEXT_PUBLIC_CUSTOMER_URL=${NEXT_PUBLIC_CUSTOMER_URL}
 ENV NEXT_PUBLIC_ADMIN_URL=${NEXT_PUBLIC_ADMIN_URL}
 ENV NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
 ENV DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT}
-RUN DATABASE_URL=postgresql://build:build@invalid.invalid:5432/build?schema=public pnpm build
+# Four concurrent Next production builds exceed the bounded release-builder
+# memory envelope. Keep this explicit so image publication remains deterministic
+# on the staging runner as well as developer BuildKit instances.
+RUN DATABASE_URL=postgresql://build:build@invalid.invalid:5432/build?schema=public \
+    pnpm exec turbo run build --concurrency=2
 
 FROM build AS api-package
 RUN pnpm --config.auto-install-peers=false --filter @waflo/api deploy --prod --legacy /output/api

@@ -342,6 +342,16 @@ describe.sequential("production Stripe subscription reconciliation", () => {
     expect(local.reconciliationLeaseOwner).toBeNull();
     expect(retrieve).toHaveBeenCalledTimes(1);
     expect(
+      await prisma.client.stripeReconciliationRun.findFirstOrThrow({
+        orderBy: { startedAt: "desc" },
+      }),
+    ).toMatchObject({
+      status: "SUCCEEDED",
+      subscriptionsScanned: 1,
+      subscriptionsConverged: 1,
+      subscriptionsFailed: 0,
+    });
+    expect(
       await prisma.client.auditLog.count({
         where: { organizationId: item.organizationId, action: "stripe.scheduled_reconciled" },
       }),
@@ -401,6 +411,17 @@ describe.sequential("production Stripe subscription reconciliation", () => {
       orderBy: { createdAt: "desc" },
     });
     expect(JSON.stringify(auditEntry)).not.toContain(rawProviderMessage);
+    expect(
+      await prisma.client.stripeReconciliationRun.findFirstOrThrow({
+        orderBy: { startedAt: "desc" },
+      }),
+    ).toMatchObject({
+      status: "PARTIALLY_FAILED",
+      subscriptionsScanned: 1,
+      subscriptionsConverged: 0,
+      subscriptionsFailed: 1,
+      safeFailureCode: "PROVIDER_RETRIEVAL_FAILED",
+    });
   });
 
   it("serializes recovery and pays the same outstanding invoice with the replacement card", async () => {

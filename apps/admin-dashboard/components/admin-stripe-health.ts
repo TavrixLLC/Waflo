@@ -83,7 +83,17 @@ export interface StripeHealthOverview {
     failureCount: number;
     dueForSyncCount: number;
     activeLeases: number;
-    lastRunCoverage: "NOT_DURABLY_RECORDED";
+    lastRunCoverage: "DURABLY_RECORDED" | "NOT_YET_RECORDED";
+    latestRun: {
+      id: string;
+      status: "RUNNING" | "SUCCEEDED" | "PARTIALLY_FAILED" | "FAILED";
+      startedAt: string;
+      completedAt: string | null;
+      subscriptionsScanned: number;
+      subscriptionsConverged: number;
+      subscriptionsFailed: number;
+      safeFailureCode: string | null;
+    } | null;
   };
   catalog: {
     publishedWithoutBinding: number;
@@ -159,10 +169,12 @@ const copy = {
     lastReceived: "Last webhook received",
     lastProcessed: "Last processed",
     lastSync: "Last provider sync",
+    lastRun: "Last reconciliation run",
     dueForSync: "Due for sync",
     activeLeases: "Active leases",
-    noRunRecord:
-      "Run timestamp is not durably recorded; per-subscription sync evidence is shown instead.",
+    noRunRecord: "No durable reconciliation run has been recorded yet.",
+    runEvidence:
+      "Latest durable run: {status}. Scanned {scanned}; converged {converged}; failed {failed}.",
     expectedEvents: "Expected event coverage",
     recentEvents: "Recent webhook evidence",
     event: "Event",
@@ -240,10 +252,12 @@ const copy = {
     lastReceived: "آخر Webhook مستلم",
     lastProcessed: "آخر حدث معالج",
     lastSync: "آخر مزامنة مع المزوّد",
+    lastRun: "آخر تشغيل للمطابقة",
     dueForSync: "مستحق للمزامنة",
     activeLeases: "تأجيرات نشطة",
-    noRunRecord:
-      "لا يتم حفظ وقت تشغيل العامل بشكل دائم؛ يتم عرض دليل المزامنة لكل اشتراك بدلاً من ذلك.",
+    noRunRecord: "لم يتم تسجيل أي تشغيل دائم للمطابقة بعد.",
+    runEvidence:
+      "أحدث تشغيل دائم: {status}. تم فحص {scanned}؛ تمت المطابقة {converged}؛ فشل {failed}.",
     expectedEvents: "تغطية الأحداث المتوقعة",
     recentEvents: "أدلة Webhook الحديثة",
     event: "الحدث",

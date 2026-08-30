@@ -1,41 +1,7 @@
-import {
-  hashOpaqueToken,
-  hashPassword,
-  isSessionActive,
-  normalizeEmail,
-  sessionExpiresAt,
-  verifyPassword,
-} from "../../packages/auth/src/index";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  calculateTrialState,
-  canCreateLocation,
-  canInviteTeamMember,
-  hasMerchantOperationalBillingAccess,
-  planCatalog,
-} from "../../packages/billing/src/index";
-import { createErrorEnvelope } from "../../packages/contracts/src/index";
-import { parseEnvironment } from "../../packages/config/src/index";
-import { merchantPublicOrigin } from "../../packages/qr-core/src/index";
-import {
-  contentLocaleForInterface,
-  directionFor,
-  directionForInterface,
-  formatUsd,
-  isInterfaceLocale,
-  isLocale,
-  interfaceTextLocaleFor,
-  localePath,
-  localeRegistry,
-} from "../../packages/i18n/src/index";
-import {
-  allowedInvitationRoles,
-  assertRoleAssignment,
-  canManageMember,
-  hasPermission,
-} from "../../packages/permissions/src/index";
 import { describe, expect, it, vi } from "vitest";
+import { resolveMerchantOrganizationAccess } from "../../apps/api/src/account/account-access.service";
 import {
   HostResolutionService,
   parseMerchantHostname,
@@ -46,7 +12,40 @@ import {
   oldSlugReservedUntil,
   validateSlug,
 } from "../../apps/api/src/tenancy/slug";
-import { resolveMerchantOrganizationAccess } from "../../apps/api/src/account/account-access.service";
+import {
+  hashOpaqueToken,
+  hashPassword,
+  isSessionActive,
+  normalizeEmail,
+  sessionExpiresAt,
+  verifyPassword,
+} from "../../packages/auth/src/index";
+import {
+  calculateTrialState,
+  canCreateLocation,
+  canInviteTeamMember,
+  hasMerchantOperationalBillingAccess,
+  planCatalog,
+} from "../../packages/billing/src/index";
+import { parseEnvironment } from "../../packages/config/src/index";
+import { createErrorEnvelope } from "../../packages/contracts/src/index";
+import {
+  contentLocaleForInterface,
+  directionFor,
+  directionForInterface,
+  interfaceTextLocaleFor,
+  isInterfaceLocale,
+  isLocale,
+  localePath,
+  localeRegistry,
+} from "../../packages/i18n/src/index";
+import {
+  allowedInvitationRoles,
+  assertRoleAssignment,
+  canManageMember,
+  hasPermission,
+} from "../../packages/permissions/src/index";
+import { merchantPublicOrigin } from "../../packages/qr-core/src/index";
 
 describe("identity primitives", () => {
   it("normalizes email with Unicode normalization, trimming, and lowercase", () => {
@@ -223,6 +222,38 @@ describe("merchant account access authority", () => {
       }),
     ).toMatchObject({ onboarding: "location_required", access: "onboarding_only" });
   });
+
+  it("requires a canonical plan selection after billing country is established", () => {
+    const pendingBilling = {
+      ...base,
+      onboardingState: "LOCATION" as const,
+      billingProfile: {
+        ...base.billingProfile,
+        subscriptionStatus: "PENDING_ACTIVATION" as const,
+        billingName: "Merchant",
+        billingEmail: "merchant@example.test",
+        billingCountryCode: "SA",
+        billingAddressLine1: "1 Market Street",
+        billingCity: "Riyadh",
+      },
+    };
+    expect(resolveMerchantOrganizationAccess(pendingBilling)).toMatchObject({
+      onboarding: "plan_selection_required",
+      access: "onboarding_only",
+    });
+    expect(
+      resolveMerchantOrganizationAccess({
+        ...pendingBilling,
+        latestBillingCommandStatus: "SETUP_PENDING",
+      }).onboarding,
+    ).toBe("payment_method_required");
+    expect(
+      resolveMerchantOrganizationAccess({
+        ...pendingBilling,
+        latestBillingCommandStatus: "SETUP_SUCCEEDED",
+      }).onboarding,
+    ).toBe("trial_confirmation_required");
+  });
 });
 
 describe("worker-safe merchant billing entitlement policy", () => {
@@ -289,11 +320,10 @@ describe("permissions", () => {
 });
 
 describe("plans, entitlements, and trial state", () => {
-  it("uses the single authoritative plan price catalog", () => {
-    expect(planCatalog.starter.monthlyPriceUsd).toBe(29);
-    expect(planCatalog.growth.monthlyPriceUsd).toBe(69);
-    expect(planCatalog.scale.monthlyPriceUsd).toBe(129);
-    expect(formatUsd(planCatalog.growth.monthlyPriceUsd)).toBe("$69");
+  it("keeps commercial prices out of entitlement definitions", () => {
+    expect(planCatalog.starter).not.toHaveProperty("monthlyPriceUsd");
+    expect(planCatalog.growth).not.toHaveProperty("monthlyPriceUsd");
+    expect(planCatalog.scale).not.toHaveProperty("monthlyPriceUsd");
   });
 
   it("enforces Starter location entitlement and recommends Growth", () => {

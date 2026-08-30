@@ -11,6 +11,7 @@ Configure ingress in the Cloudflare dashboard for the environment's tunnel. Orig
 | `staging.waflo.app` | `http://marketing-web:3000` |
 | `app-staging.waflo.app` | `http://merchant-web:3001` |
 | `card-staging.waflo.app` | `http://customer-web:3002` |
+| `admin-staging.waflo.app` | `http://admin-web:3003` |
 | `api-staging.waflo.app` | `http://api:4000` |
 | fallback | HTTP 404 |
 

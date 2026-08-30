@@ -1,5 +1,12 @@
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
-import { billingCadences, type PlanCode, planCodes } from "@waflo/contracts";
+import {
+  billingCadences,
+  isCountryCode,
+  isSupportedPricingCurrency,
+  pricingCurrencyMinorUnit,
+  type PlanCode,
+  planCodes,
+} from "@waflo/contracts";
 import { Prisma } from "@waflo/database";
 import Stripe from "stripe";
 import { AppError } from "../common/app-error.js";
@@ -55,18 +62,15 @@ export interface PricingStripeCatalogProvider {
 }
 
 export function currencyMinorDigits(currency: string): number {
-  try {
-    return (
-      new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions()
-        .maximumFractionDigits ?? 2
-    );
-  } catch {
+  const minorUnit = pricingCurrencyMinorUnit(currency);
+  if (minorUnit === null) {
     throw new AppError(
-      "PRICING_CURRENCY_INVALID",
-      "The selected currency is not recognized.",
+      "PRICING_CURRENCY_UNSUPPORTED",
+      "The selected currency is not supported for Waflo recurring billing.",
       HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }
+  return minorUnit;
 }
 
 export function isSupportedPricingPlan(value: string): value is PlanCode {
@@ -295,6 +299,51 @@ export class PricingCatalogService {
     };
   }
 
+  /**
+   * Safe, read-only catalog projection for public acquisition surfaces. The
+   * caller supplies only a trusted edge country hint; it never changes billing
+   * authority and deliberately exposes no Stripe identifiers or provider data.
+   */
+  async publicCatalogTermsForCountry(edgeCountryCode: string | null | undefined) {
+    const country = edgeCountryCode && isCountryCode(edgeCountryCode) ? edgeCountryCode : null;
+    const override = country
+      ? await this.prisma.client.pricingMarket.findFirst({
+          where: { kind: "COUNTRY_OVERRIDE", countryCode: country, active: true },
+          select: { id: true, code: true, configuredCurrency: true },
+        })
+      : null;
+    const market =
+      override ??
+      (await this.prisma.client.pricingMarket.findUniqueOrThrow({
+        where: { code: "GLOBAL" },
+        select: { id: true, code: true, configuredCurrency: true },
+      }));
+    const terms = await this.prisma.client.pricingVersion.findMany({
+      where: {
+        marketId: market.id,
+        status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+        stripePriceId: { not: null },
+      },
+      select: { planCode: true, cadence: true, amountMinor: true, currency: true, version: true },
+      orderBy: [{ planCode: "asc" }, { cadence: "asc" }, { version: "desc" }],
+    });
+    const current = new Map<string, (typeof terms)[number]>();
+    for (const term of terms) {
+      const key = `${term.planCode}:${term.cadence}`;
+      if (!current.has(key)) current.set(key, term);
+    }
+    return {
+      marketCode: market.code,
+      currency: market.configuredCurrency,
+      terms: [...current.values()].map((term) => ({
+        plan: term.planCode.toLocaleLowerCase("en-US") as PlanCode,
+        cadence: term.cadence.toLocaleLowerCase("en-US") as (typeof billingCadences)[number],
+        amountMinor: term.amountMinor.toString(),
+        currency: term.currency,
+      })),
+    };
+  }
+
   async inspect() {
     const markets = await this.prisma.client.pricingMarket.findMany({
       include: {
@@ -318,7 +367,7 @@ export class PricingCatalogService {
   async createMarket(input: { countryCode: string; currency: string }) {
     const countryCode = input.countryCode.toUpperCase();
     const currency = input.currency.toUpperCase();
-    if (!this.isIsoCountry(countryCode)) {
+    if (!isCountryCode(countryCode)) {
       throw new AppError(
         "PRICING_COUNTRY_INVALID",
         "Select a valid ISO country code for a regional market.",
@@ -417,6 +466,7 @@ export class PricingCatalogService {
         "Currency and a positive minor amount are required.",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
+    await this.assertSupportedCurrency(currency);
     const market = await this.prisma.client.pricingMarket.findUniqueOrThrow({
       where: { code: input.marketCode.toUpperCase() },
     });
@@ -835,23 +885,19 @@ export class PricingCatalogService {
   }
 
   private async assertSupportedCurrency(currency: string): Promise<void> {
-    currencyMinorDigits(currency);
+    if (!isSupportedPricingCurrency(currency)) {
+      throw new AppError(
+        "PRICING_CURRENCY_UNSUPPORTED",
+        "The selected currency is not supported by Waflo recurring billing.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
     if (!(await this.catalogProvider().validateCurrency(currency))) {
       throw new AppError(
         "PRICING_CURRENCY_UNSUPPORTED",
         "The selected currency is not supported by the configured Stripe billing route.",
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
-    }
-  }
-
-  private isIsoCountry(countryCode: string): boolean {
-    if (!/^[A-Z]{2}$/u.test(countryCode)) return false;
-    try {
-      const display = new Intl.DisplayNames(["en"], { type: "region" }).of(countryCode);
-      return Boolean(display && display !== countryCode && display !== "Unknown Region");
-    } catch {
-      return false;
     }
   }
 
@@ -884,12 +930,7 @@ export class PricingCatalogService {
     const stripe = this.requireStripe();
     return {
       validateCurrency: async (currency) => {
-        try {
-          currencyMinorDigits(currency);
-          return true;
-        } catch {
-          return false;
-        }
+        return isSupportedPricingCurrency(currency);
       },
       ensureProduct: async ({ plan, requestedProductId, environment }) => {
         if (requestedProductId) {

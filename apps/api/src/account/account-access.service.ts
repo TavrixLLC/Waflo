@@ -8,6 +8,7 @@ export type MerchantOnboardingState =
   | "business_required"
   | "location_required"
   | "billing_identity_required"
+  | "plan_selection_required"
   | "payment_method_required"
   | "trial_confirmation_required"
   | "complete";
@@ -143,7 +144,9 @@ export function resolveMerchantOrganizationAccess(
       organization.latestBillingCommandStatus === "SETUP_SUCCEEDED" ||
       organization.latestBillingCommandStatus === "SUBSCRIPTION_CREATED"
         ? "trial_confirmation_required"
-        : "payment_method_required";
+        : organization.latestBillingCommandStatus === "SETUP_PENDING"
+          ? "payment_method_required"
+          : "plan_selection_required";
   } else {
     onboarding = "trial_confirmation_required";
   }

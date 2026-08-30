@@ -109,18 +109,18 @@ describe("Stripe SetupIntent confirmation recovery", () => {
 });
 
 describe("onboarding payment integration", () => {
-  it("always releases the submit loading state after the bounded payment flow", () => {
+  it("uses Checkout Sessions' embedded Payment Element and releases submit loading state", () => {
     const source = readFileSync(
       resolve(process.cwd(), "apps/merchant-dashboard/components/onboarding.tsx"),
       "utf8",
     );
 
-    expect(source).toContain("confirmSetupWithRecovery({");
-    expect(source).toContain("retrieve: () => stripe.retrieveSetupIntent(clientSecret)");
-    expect(source).toContain("await elements.submit()");
-    expect(source.indexOf("await elements.submit()")).toBeLessThan(
-      source.indexOf("confirmSetupWithRecovery({"),
-    );
+    expect(source).toContain("CheckoutElementsProvider");
+    expect(source).toContain("useCheckoutElements");
+    expect(source).toContain("checkoutState.checkout.confirm({");
+    expect(source).toContain("checkoutSessionId");
+    expect(source).not.toContain("stripe.confirmSetup(");
+    expect(source).not.toContain("stripe.retrieveSetupIntent(");
     expect(source).toMatch(/finally\s*\{\s*setLoading\(false\);\s*\}/);
   });
 });

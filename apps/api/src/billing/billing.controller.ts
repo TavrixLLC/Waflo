@@ -21,6 +21,7 @@ import {
   subscriptionChangeConfirmSchema,
   subscriptionChangePreviewSchema,
 } from "@waflo/contracts";
+import { AppError } from "../common/app-error.js";
 import { CurrentUser, Public, RateLimit, SkipCsrf } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import {
@@ -30,7 +31,6 @@ import {
   parseUuid,
 } from "../common/validation.js";
 import { BillingService } from "./billing.service.js";
-import { AppError } from "../common/app-error.js";
 
 @Controller("v1/organizations/:organizationId/billing")
 export class BillingController {

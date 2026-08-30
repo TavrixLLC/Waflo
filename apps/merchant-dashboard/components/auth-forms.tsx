@@ -59,6 +59,7 @@ interface MeResponse {
       | "business_required"
       | "location_required"
       | "billing_identity_required"
+      | "plan_selection_required"
       | "payment_method_required"
       | "trial_confirmation_required"
       | "complete";

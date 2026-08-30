@@ -1,6 +1,11 @@
 "use client";
 
-import { billingCadenceCatalog, cadencePrice } from "@waflo/billing";
+import {
+  billingCadenceCatalog,
+  catalogSavingsPercentage,
+  formatMoney,
+  type CatalogPricePresentationTerm,
+} from "@waflo/billing";
 import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
 import { PlanCard } from "@waflo/ui";
 import { CreditCard } from "lucide-react";
@@ -9,27 +14,47 @@ import { useState } from "react";
 const cadences: readonly BillingCadence[] = ["monthly", "quarterly", "yearly"];
 const plans: readonly PlanCode[] = ["starter", "growth", "scale"];
 
+export interface PublicPricingCatalog {
+  readonly marketCode: string;
+  readonly currency: string | null;
+  readonly terms: readonly CatalogPricePresentationTerm[];
+}
+
 function localizedCadence(cadence: BillingCadence, ar: boolean): string {
   if (!ar) return billingCadenceCatalog[cadence].label;
   return cadence === "monthly" ? "شهري" : cadence === "quarterly" ? "كل 3 أشهر" : "سنوي";
 }
 
-function cadenceValue(cadence: BillingCadence, ar: boolean): string {
-  if (cadence === "monthly") return ar ? "دون خصم" : "No discount";
-  if (cadence === "quarterly") return ar ? "وفّر 8.33%" : "Save 8.33%";
-  return ar ? "شهران مجاناً · وفّر 16.67%" : "2 months free · Save 16.67%";
+function cadenceValue(discount: string | null, ar: boolean): string {
+  if (!discount) return ar ? "السعر من الكتالوج المنشور" : "Published catalog price";
+  return ar ? `وفّر ${discount}` : `Save ${discount}`;
+}
+
+function catalogTerm(
+  catalog: PublicPricingCatalog,
+  plan: PlanCode,
+  cadence: BillingCadence,
+): CatalogPricePresentationTerm | null {
+  const term = catalog.terms.find(
+    (candidate) => candidate.plan === plan && candidate.cadence === cadence,
+  );
+  return term ? { ...term, marketCode: catalog.marketCode } : null;
 }
 
 export function PricingExplorer({
   locale,
   dashboardUrl,
+  catalog,
 }: {
   locale: Locale;
   dashboardUrl: string;
+  catalog: PublicPricingCatalog | null;
 }) {
   const ar = locale === "ar";
   const [cadence, setCadence] = useState<BillingCadence>("yearly");
-  const sample = cadencePrice("growth", cadence);
+  const growthMonthly = catalog ? catalogTerm(catalog, "growth", "monthly") : null;
+  const growthPrice = catalog ? catalogTerm(catalog, "growth", cadence) : null;
+  const growthDiscount = catalogSavingsPercentage(growthMonthly, growthPrice);
 
   function choosePlan(plan: PlanCode) {
     const target = new URL(`/${locale}/signup`, dashboardUrl);
@@ -54,29 +79,34 @@ export function PricingExplorer({
           role="radiogroup"
           aria-label={ar ? "دورة الفوترة" : "Billing cadence"}
         >
-          {cadences.map((option) => (
-            <label
-              key={option}
-              className={cadence === option ? "marketing-cadence-selector__option--active" : ""}
-            >
-              <input
-                className="wf-sr-only"
-                type="radio"
-                name="marketing-billing-cadence"
-                value={option}
-                checked={cadence === option}
-                onChange={() => setCadence(option)}
-              />
-              <strong>{localizedCadence(option, ar)}</strong>
-              <small>{cadenceValue(option, ar)}</small>
-            </label>
-          ))}
+          {cadences.map((option) => {
+            const monthly = catalog ? catalogTerm(catalog, "growth", "monthly") : null;
+            const term = catalog ? catalogTerm(catalog, "growth", option) : null;
+            const discount = catalogSavingsPercentage(monthly, term);
+            return (
+              <label
+                key={option}
+                className={cadence === option ? "marketing-cadence-selector__option--active" : ""}
+              >
+                <input
+                  className="wf-sr-only"
+                  type="radio"
+                  name="marketing-billing-cadence"
+                  value={option}
+                  checked={cadence === option}
+                  onChange={() => setCadence(option)}
+                />
+                <strong>{localizedCadence(option, ar)}</strong>
+                <small>{cadenceValue(discount, ar)}</small>
+              </label>
+            );
+          })}
         </div>
       </div>
 
       <div className="marketing-pricing-explorer__context" aria-live="polite">
-        <span>{cadenceValue(cadence, ar)}</span>
-        {cadence !== "monthly" ? (
+        <span>{cadenceValue(growthDiscount, ar)}</span>
+        {growthPrice ? (
           <p>
             {ar ? (
               <>
@@ -85,12 +115,17 @@ export function PricingExplorer({
             ) : (
               "Growth example:"
             )}{" "}
-            <bdi dir="ltr">${sample.billedAmountUsd.toFixed(2)}</bdi>{" "}
-            {ar ? "إجمالاً، أي" : "total, equal to"}{" "}
-            <bdi dir="ltr">${sample.monthlyEquivalentUsd.toFixed(2)}</bdi>/{ar ? "شهر" : "month"}.
+            <bdi dir="ltr">
+              {formatMoney(BigInt(growthPrice.amountMinor), growthPrice.currency, locale)}
+            </bdi>{" "}
+            {ar ? "يُحصّل" : "billed"} {localizedCadence(cadence, ar)}.
           </p>
         ) : (
-          <p>{ar ? "تُحصّل قيمة شهر واحد من دون خصم." : "One month is charged with no discount."}</p>
+          <p>
+            {ar
+              ? "لا يتوفر سعر منشور لهذه الوتيرة حالياً."
+              : "A published catalog price is not currently available for this cadence."}
+          </p>
         )}
       </div>
 
@@ -102,6 +137,8 @@ export function PricingExplorer({
               selected={false}
               locale={locale}
               cadence={cadence}
+              price={catalog ? catalogTerm(catalog, plan, cadence) : null}
+              monthlyPrice={catalog ? catalogTerm(catalog, plan, "monthly") : null}
               onSelect={choosePlan}
             />
           </div>
@@ -115,8 +152,8 @@ export function PricingExplorer({
             <strong>{ar ? "15 يوماً مجاناً" : "15 days free"}</strong>
             <span>
               {ar
-                ? "أضف معلومات الفوترة والبطاقة بأمان. تبدأ التجربة بفاتورة قيمتها $0 ولن يُخصم منك شيء اليوم."
-                : "Add billing details and a card securely. Your trial starts with a $0 invoice, and nothing is charged today."}
+                ? "أضف معلومات الفوترة والبطاقة بأمان. لا يتم تحصيل رسوم مقابل حفظ البطاقة اليوم."
+                : "Add billing details and a card securely. Saving a card does not charge you today."}
             </span>
           </p>
         </div>

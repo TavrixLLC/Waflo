@@ -1,19 +1,16 @@
 import { HttpStatus } from "@nestjs/common";
-import { billingCadenceSchema, planCodeSchema } from "@waflo/contracts";
+import {
+  billingCadenceSchema,
+  countryCodeSchema,
+  planCodeSchema,
+  pricingCurrencySchema,
+} from "@waflo/contracts";
 import { z } from "zod";
 import { currencyMinorDigits } from "../billing/pricing-catalog.service.js";
 import { AppError } from "../common/app-error.js";
 
-const currencySchema = z
-  .string()
-  .trim()
-  .regex(/^[A-Za-z]{3}$/u)
-  .transform((value) => value.toUpperCase());
-const countrySchema = z
-  .string()
-  .trim()
-  .regex(/^[A-Za-z]{2}$/u)
-  .transform((value) => value.toUpperCase());
+const currencySchema = pricingCurrencySchema;
+const countrySchema = countryCodeSchema;
 
 export const adminPricingMarketCreateSchema = z
   .object({ countryCode: countrySchema, currency: currencySchema })

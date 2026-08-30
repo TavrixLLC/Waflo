@@ -7,10 +7,11 @@ import {
 import { canonicalTimeZoneSchema, countryCodeSchema } from "./geography.js";
 import { programOperationalStatuses } from "./program-publication-state.js";
 
-export * from "./geography.js";
 export * from "./card-locales.js";
+export * from "./geography.js";
 export * from "./m2.js";
 export * from "./platform-capabilities.js";
+export * from "./pricing-currencies.js";
 export * from "./program-publication-state.js";
 export * from "./program-template-catalog.js";
 export * from "./semantic-version.js";
@@ -292,6 +293,7 @@ export const billingTrialSetupSchema = z
   .object({
     plan: planCodeSchema,
     cadence: billingCadenceSchema,
+    returnLocale: z.enum(["en", "ar"]).default("en"),
     billingIdentity: billingIdentitySchema.extend({
       countryCode: countryCodeSchema,
       addressLine1: z.string().trim().min(1).max(200),
@@ -302,10 +304,10 @@ export const billingTrialSetupSchema = z
 
 export const billingTrialCompleteSchema = z
   .object({
-    setupIntentId: z
+    checkoutSessionId: z
       .string()
       .trim()
-      .regex(/^seti_[A-Za-z0-9_]+$/)
+      .regex(/^cs_[A-Za-z0-9_]+$/)
       .max(255),
   })
   .strict();

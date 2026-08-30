@@ -686,6 +686,8 @@ body {
 .marketing-plan-choice {
   display: grid;
   align-content: start;
+  min-width: 0;
+  height: 100%;
 }
 .marketing-plan-choice .wf-plan-card {
   height: 100%;

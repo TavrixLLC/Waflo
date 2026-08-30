@@ -42,31 +42,42 @@ interface SetupIntentFixture {
   metadata: Record<string, string>;
 }
 
+interface CheckoutSessionFixture {
+  id: string;
+  client_secret: string;
+  status: "open" | "complete";
+  customer: string;
+  setup_intent: string;
+  metadata: Record<string, string>;
+}
+
 interface StripeFixture {
   namespace: string;
-  setupByIdempotencyKey: Map<string, SetupIntentFixture>;
+  checkoutByIdempotencyKey: Map<string, CheckoutSessionFixture>;
+  checkoutById: Map<string, CheckoutSessionFixture>;
   setupById: Map<string, SetupIntentFixture>;
   subscriptionByIdempotencyKey: Map<string, Stripe.Subscription>;
   customerCreateKeys: string[];
-  setupCreateKeys: string[];
+  checkoutCreateKeys: string[];
   subscriptionCreateKeys: string[];
   subscriptionCreateParams: Stripe.SubscriptionCreateParams[];
   customerUpdates: Array<{ id: string; params: Stripe.CustomerUpdateParams }>;
-  timeoutNextSetupAfterProviderCommit: boolean;
+  timeoutNextCheckoutAfterProviderCommit: boolean;
   priceMismatch: boolean;
 }
 
 const fixture = (): StripeFixture => ({
   namespace: randomUUID().slice(0, 8),
-  setupByIdempotencyKey: new Map(),
+  checkoutByIdempotencyKey: new Map(),
+  checkoutById: new Map(),
   setupById: new Map(),
   subscriptionByIdempotencyKey: new Map(),
   customerCreateKeys: [],
-  setupCreateKeys: [],
+  checkoutCreateKeys: [],
   subscriptionCreateKeys: [],
   subscriptionCreateParams: [],
   customerUpdates: [],
-  timeoutNextSetupAfterProviderCommit: false,
+  timeoutNextCheckoutAfterProviderCommit: false,
   priceMismatch: false,
 });
 
@@ -149,33 +160,71 @@ function buildStripeMock(state: StripeFixture) {
         return { id, object: "customer" } as Stripe.Customer;
       },
     },
-    setupIntents: {
-      create: async (params: Stripe.SetupIntentCreateParams, options?: Stripe.RequestOptions) => {
-        const key = options?.idempotencyKey ?? "missing";
-        state.setupCreateKeys.push(key);
-        let setup = state.setupByIdempotencyKey.get(key);
-        if (!setup) {
-          setup = {
-            id: `seti_${state.namespace}_${state.setupByIdempotencyKey.size + 1}`,
-            client_secret: `seti_secret_${state.namespace}_${state.setupByIdempotencyKey.size + 1}`,
-            status: "requires_payment_method",
-            customer: String(params.customer),
-            payment_method: null,
-            metadata: Object.fromEntries(
-              Object.entries(params.metadata ?? {}).map(([name, value]) => [name, String(value)]),
-            ),
-          };
-          state.setupByIdempotencyKey.set(key, setup);
-          state.setupById.set(setup.id, setup);
-        }
-        if (state.timeoutNextSetupAfterProviderCommit) {
-          state.timeoutNextSetupAfterProviderCommit = false;
-          throw Object.assign(new Error("Provider response timed out"), {
-            type: "StripeConnectionError",
-          });
-        }
-        return setup as unknown as Stripe.SetupIntent;
+    checkout: {
+      sessions: {
+        create: async (
+          params: Stripe.Checkout.SessionCreateParams,
+          options?: Stripe.RequestOptions,
+        ) => {
+          const key = options?.idempotencyKey ?? "missing";
+          state.checkoutCreateKeys.push(key);
+          let session = state.checkoutByIdempotencyKey.get(key);
+          if (!session) {
+            const sequence = state.checkoutByIdempotencyKey.size + 1;
+            const customer = String(params.customer);
+            const setup = {
+              id: `seti_${state.namespace}_${sequence}`,
+              client_secret: `seti_secret_${state.namespace}_${sequence}`,
+              status: "requires_payment_method" as Stripe.SetupIntent.Status,
+              customer,
+              payment_method: null,
+              metadata: Object.fromEntries(
+                Object.entries(params.setup_intent_data?.metadata ?? {}).map(([name, value]) => [
+                  name,
+                  String(value),
+                ]),
+              ),
+            };
+            state.setupById.set(setup.id, setup);
+            session = {
+              id: `cs_${state.namespace}_${sequence}`,
+              client_secret: `cs_secret_${state.namespace}_${sequence}`,
+              status: "open",
+              customer,
+              setup_intent: setup.id,
+              metadata: Object.fromEntries(
+                Object.entries(params.metadata ?? {}).map(([name, value]) => [name, String(value)]),
+              ),
+            };
+            state.checkoutByIdempotencyKey.set(key, session);
+            state.checkoutById.set(session.id, session);
+          }
+          if (state.timeoutNextCheckoutAfterProviderCommit) {
+            state.timeoutNextCheckoutAfterProviderCommit = false;
+            throw Object.assign(new Error("Provider response timed out"), {
+              type: "StripeConnectionError",
+            });
+          }
+          return {
+            ...session,
+            object: "checkout.session",
+            mode: "setup",
+            ui_mode: "elements",
+          } as unknown as Stripe.Checkout.Session;
+        },
+        retrieve: async (id: string) => {
+          const session = state.checkoutById.get(id);
+          if (!session) throw new Error(`Unknown Checkout Session ${id}`);
+          return {
+            ...session,
+            object: "checkout.session",
+            mode: "setup",
+            ui_mode: "elements",
+          } as unknown as Stripe.Checkout.Session;
+        },
       },
+    },
+    setupIntents: {
       retrieve: async (id: string) => {
         const setup = state.setupById.get(id);
         if (!setup) throw new Error(`Unknown SetupIntent ${id}`);
@@ -294,7 +343,11 @@ async function merchant(label: string) {
       selectedPlan: "GROWTH",
       members: { create: { userId: user.id, role: "OWNER" } },
       billingProfile: {
-        create: { selectedPlan: "GROWTH", subscriptionStatus: "PENDING_ACTIVATION" },
+        create: {
+          selectedPlan: "GROWTH",
+          subscriptionStatus: "PENDING_ACTIVATION",
+          billingCountryCode: "AQ",
+        },
       },
     },
   });
@@ -305,6 +358,7 @@ function trialInput(email = "billing@example.test") {
   return {
     plan: "growth" as const,
     cadence: "monthly" as const,
+    returnLocale: "en" as const,
     billingIdentity: {
       name: "Waflo Trial Merchant",
       email,
@@ -318,11 +372,14 @@ function trialInput(email = "billing@example.test") {
   };
 }
 
-function markSetupSucceeded(state: StripeFixture, setupIntentId: string) {
-  const setup = state.setupById.get(setupIntentId);
+function markCheckoutSucceeded(state: StripeFixture, checkoutSessionId: string) {
+  const session = state.checkoutById.get(checkoutSessionId);
+  if (!session) throw new Error("Checkout Session fixture missing.");
+  const setup = state.setupById.get(session.setup_intent);
   if (!setup) throw new Error("SetupIntent fixture missing.");
+  session.status = "complete";
   setup.status = "succeeded";
-  setup.payment_method = paymentMethod(`pm_${setupIntentId}`, setup.customer);
+  setup.payment_method = paymentMethod(`pm_${setup.id}`, setup.customer);
 }
 
 beforeAll(async () => {
@@ -377,7 +434,7 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     await expect(service.checkout()).rejects.toMatchObject({ code: "HOSTED_CHECKOUT_REMOVED" });
   });
 
-  it("creates a customer-bound off-session card SetupIntent without persisting its secret", async () => {
+  it("creates a customer-bound embedded Checkout setup session without persisting its secret", async () => {
     const account = await merchant("prepare");
     const { service, state } = buildBilling();
     const key = randomUUID();
@@ -398,10 +455,10 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     expect(prepared.expectedFirstChargeAt.getTime() - prepared.expectedTrialStart.getTime()).toBe(
       15 * 24 * 60 * 60 * 1000,
     );
-    const setup = state.setupById.get(String(prepared.setupIntentId));
-    expect(setup).toMatchObject({
+    const session = state.checkoutById.get(String(prepared.checkoutSessionId));
+    expect(session).toMatchObject({
       customer: expect.stringMatching(/^cus_/),
-      status: "requires_payment_method",
+      status: "open",
     });
     const stored = await prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
       where: {
@@ -411,20 +468,69 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
         },
       },
     });
-    expect(stored).toMatchObject({ status: "SETUP_PENDING", stripeSetupIntentId: setup?.id });
+    expect(stored).toMatchObject({ status: "SETUP_PENDING", stripeSessionId: session?.id });
     expect(JSON.stringify(stored)).not.toContain(String(prepared.clientSecret));
     expect(JSON.stringify(stored)).not.toMatch(/424242|\bCVC\b|\bPAN\b/i);
-    expect(state.setupCreateKeys[0]).toBe(`waflo:org:${account.organizationId}:trial-setup:${key}`);
+    expect(state.checkoutCreateKeys[0]).toBe(
+      `waflo:org:${account.organizationId}:trial-checkout:${key}`,
+    );
   });
 
-  it("replays parallel preparation with one command, customer, and SetupIntent", async () => {
+  it("invalidates a completed Checkout setup when billing country changes before confirmation", async () => {
+    const account = await merchant("country-change");
+    const { service, state } = buildBilling();
+    const key = randomUUID();
+    const prepared = await service.prepareTrialSetup(
+      account.userId,
+      account.organizationId,
+      trialInput(),
+      request,
+      key,
+    );
+    await expect(
+      service.updateBillingIdentity(
+        account.userId,
+        account.organizationId,
+        {
+          ...trialInput().billingIdentity,
+          countryCode: "US",
+        },
+        request,
+      ),
+    ).resolves.toMatchObject({ marketChanged: true, invalidatedCommands: 1 });
+    expect(
+      await prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
+        where: {
+          organizationId_idempotencyKey: {
+            organizationId: account.organizationId,
+            idempotencyKey: key,
+          },
+        },
+      }),
+    ).toMatchObject({ status: "MARKET_INVALIDATED" });
+    markCheckoutSucceeded(state, String(prepared.checkoutSessionId));
+    await expect(
+      service.completeTrialSetup(
+        account.userId,
+        account.organizationId,
+        { checkoutSessionId: String(prepared.checkoutSessionId) },
+        request,
+        key,
+      ),
+    ).rejects.toMatchObject({ code: "BILLING_SETUP_INVALID" });
+    expect(
+      await prisma.client.subscription.count({ where: { organizationId: account.organizationId } }),
+    ).toBe(0);
+  });
+
+  it("replays parallel preparation with one command, customer, and Checkout Session", async () => {
     const account = await merchant("parallel-prepare");
     const { service, state } = buildBilling();
     const key = randomUUID();
     const prepare = () =>
       service.prepareTrialSetup(account.userId, account.organizationId, trialInput(), request, key);
     const [first, second] = await Promise.all([prepare(), prepare()]);
-    expect(first.setupIntentId).toBe(second.setupIntentId);
+    expect(first.checkoutSessionId).toBe(second.checkoutSessionId);
     expect(first.clientSecret).toBe(second.clientSecret);
     expect(first.expectedTrialStart).toEqual(second.expectedTrialStart);
     expect(
@@ -435,7 +541,7 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     expect(new Set(state.customerCreateKeys)).toEqual(
       new Set([`waflo:organization:${account.organizationId}:create-customer:v1`]),
     );
-    expect(state.setupById.size).toBe(1);
+    expect(state.checkoutById.size).toBe(1);
   });
 
   it("rejects command replay with different billing choices", async () => {
@@ -460,11 +566,11 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     ).rejects.toMatchObject({ code: "BILLING_COMMAND_CONFLICT" });
   });
 
-  it("recovers after a provider timeout without creating a second SetupIntent", async () => {
+  it("recovers after a provider timeout without creating a second Checkout Session", async () => {
     const account = await merchant("timeout");
     const { service, state } = buildBilling();
     const key = randomUUID();
-    state.timeoutNextSetupAfterProviderCommit = true;
+    state.timeoutNextCheckoutAfterProviderCommit = true;
     await expect(
       service.prepareTrialSetup(account.userId, account.organizationId, trialInput(), request, key),
     ).rejects.toThrow("Provider response timed out");
@@ -475,8 +581,8 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
       request,
       key,
     );
-    expect(retry.setupIntentId).toBe([...state.setupById.keys()][0]);
-    expect(state.setupById.size).toBe(1);
+    expect(retry.checkoutSessionId).toBe([...state.checkoutById.keys()][0]);
+    expect(state.checkoutById.size).toBe(1);
     expect(
       await prisma.client.checkoutIdempotencyKey.count({
         where: { organizationId: account.organizationId, idempotencyKey: key },
@@ -499,7 +605,7 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
       service.completeTrialSetup(
         account.userId,
         account.organizationId,
-        { setupIntentId: String(prepared.setupIntentId) },
+        { checkoutSessionId: String(prepared.checkoutSessionId) },
         request,
         key,
       ),
@@ -525,11 +631,11 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
       request,
       key,
     );
-    markSetupSucceeded(state, String(prepared.setupIntentId));
+    markCheckoutSucceeded(state, String(prepared.checkoutSessionId));
     const completed = await service.completeTrialSetup(
       account.userId,
       account.organizationId,
-      { setupIntentId: String(prepared.setupIntentId) },
+      { checkoutSessionId: String(prepared.checkoutSessionId) },
       request,
       key,
     );
@@ -588,12 +694,12 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
       request,
       key,
     );
-    markSetupSucceeded(state, String(prepared.setupIntentId));
+    markCheckoutSucceeded(state, String(prepared.checkoutSessionId));
     const complete = () =>
       service.completeTrialSetup(
         account.userId,
         account.organizationId,
-        { setupIntentId: String(prepared.setupIntentId) },
+        { checkoutSessionId: String(prepared.checkoutSessionId) },
         request,
         key,
       );

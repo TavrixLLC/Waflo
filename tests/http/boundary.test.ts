@@ -1,11 +1,11 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { createOpaqueToken, hashOpaqueToken, hashPassword } from "../../packages/auth/src/index";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiApplication } from "../../apps/api/src/app";
 import { BillingService } from "../../apps/api/src/billing/billing.service";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service";
 import { PrismaService } from "../../apps/api/src/database/prisma.service";
+import { createOpaqueToken, hashOpaqueToken, hashPassword } from "../../packages/auth/src/index";
 
 const runId = randomUUID().slice(0, 8);
 const password = "HTTP Boundary Waflo 2026!";
@@ -752,6 +752,10 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
   it("replays concurrent embedded payment setup through the HTTP boundary", async () => {
     const replayOwner = await createIdentity("replay-owner");
     const replayOrganizationId = await createOrganization(replayOwner.userId, "replay");
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: replayOrganizationId },
+      data: { billingCountryCode: "US" },
+    });
     const billing = app.get(BillingService);
     const stripe = (
       billing as unknown as {
@@ -764,8 +768,11 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
           prices: {
             retrieve: (...args: never[]) => Promise<unknown>;
           };
-          setupIntents: {
-            create: (...args: never[]) => Promise<{ id: string; client_secret: string }>;
+          checkout: {
+            sessions: {
+              create: (...args: never[]) => Promise<{ id: string; client_secret: string }>;
+              retrieve: (...args: never[]) => Promise<{ id: string; client_secret: string }>;
+            };
           };
           billingPortal: { sessions: { create: (...args: never[]) => Promise<{ url: string }> } };
         };
@@ -782,13 +789,15 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       currency: "usd",
       recurring: { interval: "month", interval_count: 1 },
     });
-    stripe.setupIntents.create = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      return {
-        id: `seti_http_${runId}`,
-        client_secret: `seti_http_${runId}_secret_test`,
-      };
+    const checkoutSession = {
+      id: `cs_http_${runId}`,
+      client_secret: `cs_http_${runId}_secret_test`,
     };
+    stripe.checkout.sessions.create = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return checkoutSession;
+    };
+    stripe.checkout.sessions.retrieve = async () => checkoutSession;
     const csrfState = await csrf();
     const key = randomUUID();
     const [first, second] = await Promise.all(
@@ -819,13 +828,13 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(second.statusCode).toBe(201);
     const firstResult = first.json().data;
     const secondResult = second.json().data;
-    expect(firstResult.setupIntentId).toBe(`seti_http_${runId}`);
-    expect(firstResult.clientSecret).toBe(`seti_http_${runId}_secret_test`);
+    expect(firstResult.checkoutSessionId).toBe(`cs_http_${runId}`);
+    expect(firstResult.clientSecret).toBe(`cs_http_${runId}_secret_test`);
     expect(firstResult.trialDays).toBe(15);
     expect(firstResult).not.toHaveProperty("url");
     expect(secondResult).toMatchObject({
       completed: false,
-      setupIntentId: firstResult.setupIntentId,
+      checkoutSessionId: firstResult.checkoutSessionId,
       clientSecret: firstResult.clientSecret,
       trialDays: 15,
       amount: firstResult.amount,

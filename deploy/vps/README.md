@@ -80,7 +80,7 @@ All replicas in one environment receive exactly the same active and legacy versi
    permissions.
 4. Configure the remotely managed `waflo-staging` tunnel routes from [CLOUDFLARE.md](CLOUDFLARE.md).
    The required public hosts are `staging.waflo.app`, `app-staging.waflo.app`,
-   `card-staging.waflo.app`, and `api-staging.waflo.app`.
+   `card-staging.waflo.app`, `admin-staging.waflo.app`, and `api-staging.waflo.app`.
 5. Run Compose validation and the production configuration readiness command.
 6. The release job pulls the immutable GHCR images; it never builds source on the VPS.
 7. `deploy.sh staging <sha>` starts state, initializes the private bucket/user, migrates once, waits

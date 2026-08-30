@@ -906,6 +906,7 @@ select {
 
 .wf-plan-card {
   display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 1rem;
   padding: 1.5rem;
   border-radius: 26px;
@@ -954,6 +955,10 @@ select {
   margin-top: -0.7rem;
   color: var(--waflo-muted);
   font-weight: 650;
+}
+
+.wf-plan-card__savings-slot {
+  min-height: 1.25rem;
 }
 
 .wf-plan-card ul {

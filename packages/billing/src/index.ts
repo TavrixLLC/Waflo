@@ -19,7 +19,6 @@ export interface PlanFeatures {
 export interface PlanDefinition {
   readonly code: PlanCode;
   readonly name: string;
-  readonly monthlyPriceUsd: number;
   readonly limits: PlanLimits;
   readonly features: PlanFeatures;
 }
@@ -28,7 +27,6 @@ export const planCatalog: Readonly<Record<PlanCode, PlanDefinition>> = {
   starter: {
     code: "starter",
     name: "Starter",
-    monthlyPriceUsd: 29,
     limits: { locations: 1, teamSeats: 3, programs: 1 },
     features: {
       advancedCustomization: false,
@@ -43,7 +41,6 @@ export const planCatalog: Readonly<Record<PlanCode, PlanDefinition>> = {
   growth: {
     code: "growth",
     name: "Growth",
-    monthlyPriceUsd: 69,
     limits: { locations: 3, teamSeats: 10, programs: null },
     features: {
       advancedCustomization: true,
@@ -58,7 +55,6 @@ export const planCatalog: Readonly<Record<PlanCode, PlanDefinition>> = {
   scale: {
     code: "scale",
     name: "Scale",
-    monthlyPriceUsd: 129,
     limits: { locations: null, teamSeats: null, programs: null },
     features: {
       advancedCustomization: true,
@@ -77,44 +73,66 @@ export const billingCadenceCatalog: Readonly<
     BillingCadence,
     {
       readonly months: 1 | 3 | 12;
-      readonly discountRate: number;
       readonly label: string;
     }
   >
 > = {
-  monthly: { months: 1, discountRate: 0, label: "Monthly" },
-  // Quarterly receives half of the yearly discount: one quarter of a month free.
-  quarterly: { months: 3, discountRate: 1 / 12, label: "Quarterly" },
-  // Yearly is billed as ten months instead of twelve: two months free.
-  yearly: { months: 12, discountRate: 1 / 6, label: "Yearly" },
+  monthly: { months: 1, label: "Monthly" },
+  quarterly: { months: 3, label: "Quarterly" },
+  yearly: { months: 12, label: "Yearly" },
 };
 
-export function cadencePrice(
-  plan: PlanCode,
-  cadence: BillingCadence,
-): {
-  monthlyEquivalentUsd: number;
-  billedAmountUsd: number;
-  undiscountedAmountUsd: number;
-} {
-  const monthly = planCatalog[plan].monthlyPriceUsd;
-  const definition = billingCadenceCatalog[cadence];
-  const undiscountedMinorUnits = monthly * 100 * definition.months;
-  // Keep the business rule explicit so Stripe validation and every UI surface
-  // agree exactly: quarterly is 2.75 months and yearly is 10 months.
-  const billedMinorUnits =
-    cadence === "monthly"
-      ? monthly * 100
-      : cadence === "quarterly"
-        ? Math.round((monthly * 100 * 11) / 4)
-        : monthly * 100 * 10;
-  const undiscountedAmountUsd = undiscountedMinorUnits / 100;
-  const billedAmountUsd = billedMinorUnits / 100;
-  return {
-    monthlyEquivalentUsd: Number((billedAmountUsd / definition.months).toFixed(2)),
-    billedAmountUsd,
-    undiscountedAmountUsd,
-  };
+/**
+ * Presentation-only catalog term. Waflo's API owns the terms; consumers pass
+ * the published values in rather than reconstructing prices from plan names.
+ */
+export interface CatalogPricePresentationTerm {
+  readonly plan: PlanCode;
+  readonly cadence: BillingCadence;
+  readonly amountMinor: string | bigint;
+  readonly currency: string;
+  readonly marketCode?: string | null;
+}
+
+function presentationMinorAmount(value: string | bigint): bigint | null {
+  try {
+    const amount = typeof value === "bigint" ? value : BigInt(value);
+    return amount >= 0n ? amount : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Derives a savings percentage from two published terms using integer minor
+ * units. It intentionally returns null when the terms are not commercially
+ * comparable rather than inventing a discount or applying FX.
+ */
+export function catalogSavingsPercentage(
+  monthly: CatalogPricePresentationTerm | null | undefined,
+  candidate: CatalogPricePresentationTerm | null | undefined,
+): string | null {
+  if (!monthly || !candidate || monthly.cadence !== "monthly") return null;
+  if (
+    monthly.plan !== candidate.plan ||
+    monthly.currency.toLocaleUpperCase("en-US") !== candidate.currency.toLocaleUpperCase("en-US") ||
+    (monthly.marketCode ?? null) !== (candidate.marketCode ?? null)
+  ) {
+    return null;
+  }
+  const months = BigInt(billingCadenceCatalog[candidate.cadence].months);
+  const monthlyAmount = presentationMinorAmount(monthly.amountMinor);
+  const candidateAmount = presentationMinorAmount(candidate.amountMinor);
+  if (!monthlyAmount || monthlyAmount <= 0n || candidateAmount === null) return null;
+  const baseline = monthlyAmount * months;
+  const savings = baseline - candidateAmount;
+  if (savings <= 0n) return null;
+  // Percentage in hundredths, rounded once with exact integer arithmetic.
+  const hundredths = (savings * 10_000n + baseline / 2n) / baseline;
+  const whole = hundredths / 100n;
+  const fraction = hundredths % 100n;
+  if (fraction === 0n) return `${whole}%`;
+  return `${whole}.${fraction.toString().padStart(2, "0").replace(/0$/u, "")}%`;
 }
 
 export const BILLING_GRACE_HOURS = 48;
@@ -719,14 +737,6 @@ function featureEntitlement(code: ProgramPublicationFeatureViolation): ProgramEn
   if (code === "MULTIPLE_REWARDS") return "canUseMultipleRewards";
   if (code === "MILESTONE_REWARDS") return "canUseMilestoneRewards";
   return "canUseAdvancedLayouts";
-}
-
-export function formatPlanPrice(plan: PlanCode): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(planCatalog[plan].monthlyPriceUsd);
 }
 
 /** Formats persisted minor units; never assumes currencies have two decimals. */

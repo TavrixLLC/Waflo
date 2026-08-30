@@ -7,7 +7,6 @@ import {
   billingFailurePolicy,
   billingGraceDeadline,
   billingRecoverySchedule,
-  cadencePrice,
   isExactlyTwoLocalCalendarDaysBefore,
   planDowngradeViolations,
   renderBillingEmail,
@@ -139,26 +138,6 @@ describe("production-v1 UX and billing repair", () => {
     expect(capabilities).toContain(
       "normalized merchant logo is packaged in the Apple pass logo slot",
     );
-  });
-
-  it("models quarterly and yearly prices with exact advertised discounts", () => {
-    expect(cadencePrice("starter", "monthly").billedAmountUsd).toBe(29);
-    expect(cadencePrice("growth", "monthly").billedAmountUsd).toBe(69);
-    expect(cadencePrice("scale", "monthly").billedAmountUsd).toBe(129);
-    expect(cadencePrice("starter", "quarterly").billedAmountUsd).toBe(79.75);
-    expect(cadencePrice("growth", "quarterly")).toEqual({
-      monthlyEquivalentUsd: 63.25,
-      billedAmountUsd: 189.75,
-      undiscountedAmountUsd: 207,
-    });
-    expect(cadencePrice("scale", "quarterly").billedAmountUsd).toBe(354.75);
-    expect(cadencePrice("starter", "yearly").billedAmountUsd).toBe(290);
-    expect(cadencePrice("growth", "yearly")).toEqual({
-      monthlyEquivalentUsd: 57.5,
-      billedAmountUsd: 690,
-      undiscountedAmountUsd: 828,
-    });
-    expect(cadencePrice("scale", "yearly").billedAmountUsd).toBe(1290);
   });
 
   it("keeps Stripe Price IDs out of environment pricing authority", () => {

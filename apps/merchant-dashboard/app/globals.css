@@ -10674,9 +10674,8 @@ html:lang(ckb-Arab-IQ) body {
   top: 1.25rem;
   display: grid;
   min-width: 0;
-  min-height: calc(100dvh - 2.5rem);
   max-height: calc(100dvh - 2.5rem);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   color: white;
   border-radius: 30px;
   background: var(--waflo-ink);
@@ -10719,7 +10718,6 @@ html:lang(ckb-Arab-IQ) body {
 .onboarding-progress {
   position: relative;
   display: grid;
-  min-height: 0;
   align-content: start;
   gap: 0.35rem;
   margin: 0;

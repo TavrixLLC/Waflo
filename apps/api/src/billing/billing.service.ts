@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
+import type { PlanDowngradeViolation } from "@waflo/billing";
 import {
   billingFailurePolicy,
   billingGraceDeadline,
@@ -8,14 +9,13 @@ import {
   planDowngradeViolations,
   programPublicationFeatureViolations,
 } from "@waflo/billing";
-import type { PlanDowngradeViolation } from "@waflo/billing";
 import type {
   BillingCadence,
   BillingIdentityInput,
+  BillingStatus,
   BillingSubscriptionCancellationInput,
   BillingSubscriptionChangeInput,
   BillingTrialSetupInput,
-  BillingStatus,
   PlanCode,
   RefundRequestInput,
   RefundReviewInput,
@@ -33,7 +33,7 @@ import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { NotificationService } from "../notifications/notification.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
-import { type ResolvedPrice, PricingCatalogService } from "./pricing-catalog.service.js";
+import { PricingCatalogService, type ResolvedPrice } from "./pricing-catalog.service.js";
 import {
   type StripeSubscriptionPreviewProvider,
   SUBSCRIPTION_CHANGE_PREVIEW_TTL_MS,
@@ -858,6 +858,13 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
+    if (command?.status === "MARKET_INVALIDATED") {
+      throw new AppError(
+        "BILLING_MARKET_RECONFIRMATION_REQUIRED",
+        "Billing country changed. Reload the published catalog and confirm a plan again.",
+        HttpStatus.CONFLICT,
+      );
+    }
     const resolvedPrice = await this.pricing.resolveForCountry(
       identity.countryCode,
       input.plan,
@@ -872,7 +879,7 @@ export class BillingService {
         return {
           completed: true,
           clientSecret: null,
-          setupIntentId: command.stripeSetupIntentId,
+          checkoutSessionId: command.stripeSessionId,
           publishableKey,
           trialDays: TRIAL_DAYS,
           amount: charge.amount,
@@ -888,13 +895,20 @@ export class BillingService {
           HttpStatus.GONE,
         );
       }
-      if (command.stripeSetupIntentId) {
-        const existingIntent = await stripe.setupIntents.retrieve(command.stripeSetupIntentId);
+      if (command.stripeSessionId) {
+        const existingSession = await stripe.checkout.sessions.retrieve(command.stripeSessionId);
+        if (!existingSession.client_secret) {
+          throw new AppError(
+            "STRIPE_CHECKOUT_SESSION_INVALID",
+            "Secure payment setup could not be resumed.",
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
+        }
         const expectedTrialStart = command.createdAt;
         return {
           completed: false,
-          clientSecret: existingIntent.client_secret,
-          setupIntentId: existingIntent.id,
+          clientSecret: existingSession.client_secret,
+          checkoutSessionId: existingSession.id,
           publishableKey,
           trialDays: TRIAL_DAYS,
           amount: charge.amount,
@@ -921,6 +935,17 @@ export class BillingService {
       throw new AppError(
         "BILLING_PROFILE_MISSING",
         "Billing setup could not be started.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    // Billing country is the commercial authority. A stale browser request
+    // must not create a setup session for terms selected before the billing
+    // profile changed (for example TR displayed by marketing, then SA saved in
+    // Billing Details).
+    if (profile.billingCountryCode !== identity.countryCode) {
+      throw new AppError(
+        "BILLING_MARKET_RECONFIRMATION_REQUIRED",
+        "Billing country changed. Reload the published catalog and confirm a plan again.",
         HttpStatus.CONFLICT,
       );
     }
@@ -974,30 +999,39 @@ export class BillingService {
       input.cadence,
       identity,
     );
-    const setupIntent = await stripe.setupIntents.create(
+    const checkoutSession = await stripe.checkout.sessions.create(
       {
+        ui_mode: "elements",
+        mode: "setup",
         customer: customerId,
-        usage: "off_session",
         payment_method_types: ["card"],
+        return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${input.returnLocale}/onboarding/business?organization=${organizationId}&checkout_return=1`,
         metadata: {
           wafloOrganizationId: organizationId,
           wafloBillingCommandId: command.id,
           plan: input.plan,
           cadence: input.cadence,
         },
+        setup_intent_data: {
+          metadata: {
+            wafloOrganizationId: organizationId,
+            wafloBillingCommandId: command.id,
+            purpose: "trial_payment_setup",
+          },
+        },
       },
-      { idempotencyKey: `waflo:org:${organizationId}:trial-setup:${idempotencyKey}` },
+      { idempotencyKey: `waflo:org:${organizationId}:trial-checkout:${idempotencyKey}` },
     );
-    if (!setupIntent.client_secret) {
+    if (!checkoutSession.client_secret) {
       throw new AppError(
-        "STRIPE_SETUP_INTENT_INVALID",
+        "STRIPE_CHECKOUT_SESSION_INVALID",
         "Secure payment setup could not be initialized.",
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
     await this.prisma.client.checkoutIdempotencyKey.update({
       where: { id: command.id },
-      data: { stripeCustomerId: customerId, stripeSetupIntentId: setupIntent.id },
+      data: { stripeCustomerId: customerId, stripeSessionId: checkoutSession.id },
     });
     await this.audit.record(
       {
@@ -1013,8 +1047,8 @@ export class BillingService {
     const expectedTrialStart = command.createdAt;
     return {
       completed: false,
-      clientSecret: setupIntent.client_secret,
-      setupIntentId: setupIntent.id,
+      clientSecret: checkoutSession.client_secret,
+      checkoutSessionId: checkoutSession.id,
       publishableKey,
       trialDays: TRIAL_DAYS,
       amount: charge.amount,
@@ -1024,10 +1058,101 @@ export class BillingService {
     };
   }
 
+  private async completedCheckoutSessionPaymentMethod(
+    checkoutSessionId: string,
+    expected: {
+      organizationId: string;
+      customerId: string;
+      billingCommandId?: string;
+      purpose?: string;
+      idempotencyKeyHash?: string;
+    },
+  ): Promise<{ setupIntentId: string; paymentMethod: Stripe.PaymentMethod }> {
+    const stripe = this.requireStripe();
+    const session = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+    const customerId =
+      typeof session.customer === "string"
+        ? session.customer
+        : session.customer && !session.customer.deleted
+          ? session.customer.id
+          : null;
+    if (
+      session.mode !== "setup" ||
+      session.ui_mode !== "elements" ||
+      session.status !== "complete" ||
+      !customerId ||
+      customerId !== expected.customerId ||
+      session.metadata?.wafloOrganizationId !== expected.organizationId ||
+      (expected.billingCommandId &&
+        session.metadata?.wafloBillingCommandId !== expected.billingCommandId) ||
+      (expected.purpose && session.metadata?.purpose !== expected.purpose) ||
+      (expected.idempotencyKeyHash &&
+        session.metadata?.wafloCommandKeyHash !== expected.idempotencyKeyHash)
+    ) {
+      throw new AppError(
+        "PAYMENT_METHOD_REQUIRED",
+        "Complete the secure card form before continuing.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    const setupIntentId =
+      typeof session.setup_intent === "string" ? session.setup_intent : session.setup_intent?.id;
+    if (!setupIntentId) {
+      throw new AppError(
+        "STRIPE_CHECKOUT_SESSION_INVALID",
+        "The secure payment setup did not create a payment method.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    const setupIntent = await stripe.setupIntents.retrieve(setupIntentId, {
+      expand: ["payment_method"],
+    });
+    const paymentMethod =
+      typeof setupIntent.payment_method === "string"
+        ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
+        : setupIntent.payment_method;
+    const paymentMethodCustomerId =
+      typeof paymentMethod?.customer === "string"
+        ? paymentMethod.customer
+        : paymentMethod?.customer && !paymentMethod.customer.deleted
+          ? paymentMethod.customer.id
+          : null;
+    if (
+      setupIntent.status !== "succeeded" ||
+      !paymentMethod ||
+      paymentMethod.type !== "card" ||
+      !paymentMethod.card ||
+      paymentMethodCustomerId !== customerId
+    ) {
+      throw new AppError(
+        "PAYMENT_METHOD_REQUIRED",
+        "A valid card is required before continuing.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    return { setupIntentId, paymentMethod };
+  }
+
+  private cardPresentation(paymentMethod: Stripe.PaymentMethod) {
+    if (paymentMethod.type !== "card" || !paymentMethod.card) {
+      throw new AppError(
+        "PAYMENT_METHOD_REQUIRED",
+        "A valid card is required before continuing.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    return {
+      brand: paymentMethod.card.brand,
+      last4: paymentMethod.card.last4,
+      expMonth: paymentMethod.card.exp_month,
+      expYear: paymentMethod.card.exp_year,
+    };
+  }
+
   async completeTrialSetup(
     userId: string,
     organizationId: string,
-    input: { setupIntentId: string },
+    input: { checkoutSessionId: string },
     request: WafloRequest,
     idempotencyKey: string,
   ) {
@@ -1036,7 +1161,12 @@ export class BillingService {
     const command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
       where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
     });
-    if (!command || command.stripeSetupIntentId !== input.setupIntentId) {
+    if (
+      !command ||
+      command.stripeSessionId !== input.checkoutSessionId ||
+      !command.stripeCustomerId ||
+      !["SETUP_PENDING", "SETUP_SUCCEEDED", "SUBSCRIPTION_CREATED"].includes(command.status)
+    ) {
       throw new AppError(
         "BILLING_SETUP_INVALID",
         "This payment setup is invalid or has expired.",
@@ -1057,45 +1187,15 @@ export class BillingService {
     const price = await stripe.prices.retrieve(priceId);
     const charge = this.assertCatalogPrice(price, resolvedPrice);
 
-    const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId, {
-      expand: ["payment_method"],
-    });
-    if (setupIntent.status !== "succeeded") {
-      throw new AppError(
-        "PAYMENT_METHOD_REQUIRED",
-        "Complete the secure card form before starting your trial.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-        { setupStatus: setupIntent.status },
-      );
-    }
-    const customerId =
-      typeof setupIntent.customer === "string"
-        ? setupIntent.customer
-        : setupIntent.customer && !setupIntent.customer.deleted
-          ? setupIntent.customer.id
-          : null;
-    if (!customerId || customerId !== command.stripeCustomerId) {
-      throw new AppError(
-        "STRIPE_CUSTOMER_ORGANIZATION_MISMATCH",
-        "The payment method does not belong to this organization.",
-        HttpStatus.CONFLICT,
-      );
-    }
-    const paymentMethod =
-      typeof setupIntent.payment_method === "string"
-        ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
-        : setupIntent.payment_method;
-    if (
-      paymentMethod?.type !== "card" ||
-      !paymentMethod.card ||
-      (typeof paymentMethod.customer === "string" && paymentMethod.customer !== customerId)
-    ) {
-      throw new AppError(
-        "PAYMENT_METHOD_REQUIRED",
-        "A valid card is required before starting your trial.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
+    const { setupIntentId, paymentMethod } = await this.completedCheckoutSessionPaymentMethod(
+      input.checkoutSessionId,
+      {
+        organizationId,
+        customerId: command.stripeCustomerId,
+        billingCommandId: command.id,
+      },
+    );
+    const customerId = command.stripeCustomerId;
 
     await stripe.customers.update(customerId, {
       invoice_settings: { default_payment_method: paymentMethod.id },
@@ -1248,6 +1348,7 @@ export class BillingService {
       await transaction.checkoutIdempotencyKey.update({
         where: { id: command.id },
         data: {
+          stripeSetupIntentId: setupIntentId,
           stripePaymentMethodId: paymentMethod.id,
           stripeSubscriptionId: subscription.id,
           status: "SUBSCRIPTION_CREATED",
@@ -1317,19 +1418,14 @@ export class BillingService {
       amount: charge.amount,
       currency: charge.currency,
       initialInvoiceAmount: invoice.amount_due,
-      paymentMethod: {
-        brand: paymentMethod.card.brand,
-        last4: paymentMethod.card.last4,
-        expMonth: paymentMethod.card.exp_month,
-        expYear: paymentMethod.card.exp_year,
-      },
+      paymentMethod: this.cardPresentation(paymentMethod),
     };
   }
 
   async previewTrialSetup(
     userId: string,
     organizationId: string,
-    input: { setupIntentId: string },
+    input: { checkoutSessionId: string },
     idempotencyKey: string,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
@@ -1337,39 +1433,26 @@ export class BillingService {
     const command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
       where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
     });
-    if (!command || command.stripeSetupIntentId !== input.setupIntentId) {
+    if (
+      !command ||
+      command.stripeSessionId !== input.checkoutSessionId ||
+      !command.stripeCustomerId ||
+      !["SETUP_PENDING", "SETUP_SUCCEEDED", "SUBSCRIPTION_CREATED"].includes(command.status)
+    ) {
       throw new AppError(
         "BILLING_SETUP_INVALID",
         "This payment setup is invalid or has expired.",
         HttpStatus.GONE,
       );
     }
-    const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId, {
-      expand: ["payment_method"],
-    });
-    const customerId =
-      typeof setupIntent.customer === "string"
-        ? setupIntent.customer
-        : setupIntent.customer && !setupIntent.customer.deleted
-          ? setupIntent.customer.id
-          : null;
-    const paymentMethod =
-      typeof setupIntent.payment_method === "string"
-        ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
-        : setupIntent.payment_method;
-    if (
-      setupIntent.status !== "succeeded" ||
-      !customerId ||
-      customerId !== command.stripeCustomerId ||
-      !paymentMethod?.card ||
-      paymentMethod.type !== "card"
-    ) {
-      throw new AppError(
-        "PAYMENT_METHOD_REQUIRED",
-        "Complete the secure card form before reviewing your trial.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
+    const { paymentMethod } = await this.completedCheckoutSessionPaymentMethod(
+      input.checkoutSessionId,
+      {
+        organizationId,
+        customerId: command.stripeCustomerId,
+        billingCommandId: command.id,
+      },
+    );
     const plan = command.planCode.split(":")[0]?.toLocaleLowerCase("en-US") as PlanCode;
     const cadence = dbToCadence(command.selectedCadence);
     if (!(["starter", "growth", "scale"] as string[]).includes(plan)) {
@@ -1391,12 +1474,7 @@ export class BillingService {
       currency: charge.currency,
       expectedTrialStart,
       expectedFirstChargeAt: new Date(expectedTrialStart.getTime() + TRIAL_SECONDS * 1000),
-      paymentMethod: {
-        brand: paymentMethod.card.brand,
-        last4: paymentMethod.card.last4,
-        expMonth: paymentMethod.card.exp_month,
-        expYear: paymentMethod.card.exp_year,
-      },
+      paymentMethod: this.cardPresentation(paymentMethod),
     };
   }
 
@@ -1426,22 +1504,31 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
-    const setupIntent = await stripe.setupIntents.create(
+    const checkoutSession = await stripe.checkout.sessions.create(
       {
+        ui_mode: "elements",
+        mode: "setup",
         customer: profile.stripeCustomerId,
-        usage: "off_session",
         payment_method_types: ["card"],
+        return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing?checkout_return=1`,
         metadata: {
           wafloOrganizationId: organizationId,
           purpose: "payment_method_replacement",
           wafloCommandKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
         },
+        setup_intent_data: {
+          metadata: {
+            wafloOrganizationId: organizationId,
+            purpose: "payment_method_replacement",
+            wafloCommandKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
+          },
+        },
       },
-      { idempotencyKey: `waflo:org:${organizationId}:replace-payment:${idempotencyKey}` },
+      { idempotencyKey: `waflo:org:${organizationId}:replace-payment-checkout:${idempotencyKey}` },
     );
-    if (!setupIntent.client_secret) {
+    if (!checkoutSession.client_secret) {
       throw new AppError(
-        "STRIPE_SETUP_INTENT_INVALID",
+        "STRIPE_CHECKOUT_SESSION_INVALID",
         "Secure payment setup could not be initialized.",
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -1458,8 +1545,8 @@ export class BillingService {
       request,
     );
     return {
-      clientSecret: setupIntent.client_secret,
-      setupIntentId: setupIntent.id,
+      clientSecret: checkoutSession.client_secret,
+      checkoutSessionId: checkoutSession.id,
       publishableKey,
     };
   }
@@ -1467,7 +1554,7 @@ export class BillingService {
   async completePaymentMethodReplacement(
     userId: string,
     organizationId: string,
-    input: { setupIntentId: string },
+    input: { checkoutSessionId: string },
     request: WafloRequest,
     idempotencyKey: string,
   ) {
@@ -1476,36 +1563,24 @@ export class BillingService {
     const profile = await this.prisma.client.organizationBillingProfile.findUniqueOrThrow({
       where: { organizationId },
     });
-    const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId, {
-      expand: ["payment_method"],
-    });
-    const customerId =
-      typeof setupIntent.customer === "string"
-        ? setupIntent.customer
-        : setupIntent.customer && !setupIntent.customer.deleted
-          ? setupIntent.customer.id
-          : null;
-    const paymentMethod =
-      typeof setupIntent.payment_method === "string"
-        ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
-        : setupIntent.payment_method;
-    if (
-      setupIntent.status !== "succeeded" ||
-      setupIntent.metadata?.wafloOrganizationId !== organizationId ||
-      setupIntent.metadata?.purpose !== "payment_method_replacement" ||
-      setupIntent.metadata?.wafloCommandKeyHash !==
-        createHash("sha256").update(idempotencyKey).digest("hex") ||
-      !customerId ||
-      customerId !== profile.stripeCustomerId ||
-      !paymentMethod?.card ||
-      paymentMethod.type !== "card"
-    ) {
+    if (!profile.stripeCustomerId) {
       throw new AppError(
-        "PAYMENT_METHOD_REQUIRED",
-        "Complete the secure card form before saving.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
+        "PAYMENT_PROFILE_NOT_READY",
+        "Start subscription setup before adding a payment method.",
+        HttpStatus.CONFLICT,
       );
     }
+    const { paymentMethod } = await this.completedCheckoutSessionPaymentMethod(
+      input.checkoutSessionId,
+      {
+        organizationId,
+        customerId: profile.stripeCustomerId,
+        purpose: "payment_method_replacement",
+        idempotencyKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
+      },
+    );
+    const customerId = profile.stripeCustomerId;
+    const card = this.cardPresentation(paymentMethod);
     const subscriptions = await this.prisma.client.subscription.findMany({
       where: { organizationId, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } },
       select: { stripeSubscriptionId: true },
@@ -1527,17 +1602,12 @@ export class BillingService {
         action: "billing.payment_method_replaced",
         targetType: "organization_billing_profile",
         targetId: organizationId,
-        metadata: { brand: paymentMethod.card.brand, last4: paymentMethod.card.last4 },
+        metadata: { brand: card.brand, last4: card.last4 },
       },
       request,
     );
     return {
-      paymentMethod: {
-        brand: paymentMethod.card.brand,
-        last4: paymentMethod.card.last4,
-        expMonth: paymentMethod.card.exp_month,
-        expYear: paymentMethod.card.exp_year,
-      },
+      paymentMethod: card,
     };
   }
 
@@ -1572,35 +1642,65 @@ export class BillingService {
         metadata: { wafloOrganizationId: organizationId },
       });
     }
-    const profile = await this.prisma.client.organizationBillingProfile.update({
-      where: { organizationId },
-      data: {
-        billingName: input.name,
-        billingEmail: input.email,
-        billingCountryCode: input.countryCode ?? null,
-        billingAddressLine1: clean(input.addressLine1),
-        billingAddressLine2: clean(input.addressLine2),
-        billingCity: clean(input.city),
-        billingRegion: clean(input.region),
-        billingPostalCode: clean(input.postalCode),
-        stripeIdentitySyncedAt: stripeCustomerId ? new Date() : null,
-      },
-    });
-    await this.audit.record(
-      {
-        organizationId,
-        actorUserId: userId,
-        action: "billing.identity_updated",
-        targetType: "organization_billing_profile",
-        targetId: profile.id,
-        metadata: {
-          countryCode: input.countryCode ?? null,
-          stripeSynchronized: Boolean(stripeCustomerId),
-        },
-      },
-      request,
+    const countryCode = input.countryCode?.toUpperCase() ?? null;
+    const countryChanged = Boolean(
+      current.billingProfile?.billingCountryCode &&
+        countryCode &&
+        current.billingProfile.billingCountryCode !== countryCode,
     );
-    return { updated: true, stripeSynchronized: Boolean(stripeCustomerId) };
+    const result = await withOrganizationInvariantLock(
+      this.prisma.client,
+      organizationId,
+      async (transaction) => {
+        const profile = await transaction.organizationBillingProfile.update({
+          where: { organizationId },
+          data: {
+            billingName: input.name,
+            billingEmail: input.email,
+            billingCountryCode: countryCode,
+            billingAddressLine1: clean(input.addressLine1),
+            billingAddressLine2: clean(input.addressLine2),
+            billingCity: clean(input.city),
+            billingRegion: clean(input.region),
+            billingPostalCode: clean(input.postalCode),
+            stripeIdentitySyncedAt: stripeCustomerId ? new Date() : null,
+          },
+        });
+        const invalidatedCommands = countryChanged
+          ? await transaction.checkoutIdempotencyKey.updateMany({
+              where: {
+                organizationId,
+                status: { in: ["SETUP_PENDING", "SETUP_SUCCEEDED"] },
+              },
+              data: { status: "MARKET_INVALIDATED", completedAt: new Date() },
+            })
+          : { count: 0 };
+        await this.audit.recordInTransaction(
+          transaction,
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "billing.identity_updated",
+            targetType: "organization_billing_profile",
+            targetId: profile.id,
+            metadata: {
+              countryCode,
+              countryChanged,
+              invalidatedCommands: invalidatedCommands.count,
+              stripeSynchronized: Boolean(stripeCustomerId),
+            },
+          },
+          request,
+        );
+        return { invalidatedCommands: invalidatedCommands.count };
+      },
+    );
+    return {
+      updated: true,
+      marketChanged: countryChanged,
+      invalidatedCommands: result.invalidatedCommands,
+      stripeSynchronized: Boolean(stripeCustomerId),
+    };
   }
 
   /**
@@ -2002,6 +2102,10 @@ export class BillingService {
     }
     const request = typeof cadenceOrRequest === "string" ? maybeRequest : cadenceOrRequest;
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
+    // Fail before persisting a UI selection unless the canonical billing market
+    // has a currently published, bound Waflo term for it. The subscription
+    // creation path resolves the same market again as its final authority.
+    await this.pricing.resolveForOrganization(organizationId, plan, cadenceToDb(cadence));
     const selectedPlan = planToDb(plan);
     await withOrganizationInvariantLock(this.prisma.client, organizationId, async (transaction) => {
       const [actor, organization] = await Promise.all([
@@ -2743,6 +2847,7 @@ export class BillingService {
       const subscriptionId = this.subscriptionIdFromEvent(event);
       const invoiceId = this.invoiceIdFromEvent(event);
       const refundId = this.refundIdFromEvent(event);
+      const checkoutSessionId = this.checkoutSessionIdFromEvent(event);
       const currentSubscription = subscriptionId
         ? await this.retrieveCurrentSubscription(subscriptionId)
         : undefined;
@@ -2755,9 +2860,11 @@ export class BillingService {
           ? `stripe-invoice:${invoiceId}`
           : subscriptionId
             ? `stripe-subscription:${subscriptionId}`
-            : customerChangeId
-              ? `stripe-customer:${customerChangeId}`
-              : `stripe-event:${event.id}`;
+            : checkoutSessionId
+              ? `stripe-checkout:${checkoutSessionId}`
+              : customerChangeId
+                ? `stripe-customer:${customerChangeId}`
+                : `stripe-event:${event.id}`;
       await withInvariantLock(this.prisma.client, businessLockKey, async (transaction) => {
         const ownership = await transaction.processedWebhookEvent.findUniqueOrThrow({
           where: { id: claim.id },
@@ -2929,6 +3036,12 @@ export class BillingService {
     return typeof id === "string" && id.length > 0 ? id : null;
   }
 
+  private checkoutSessionIdFromEvent(event: Stripe.Event): string | null {
+    if (event.type !== "checkout.session.completed") return null;
+    const id = (event.data.object as { id?: unknown }).id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  }
+
   private customerIdFromPaymentMethodEvent(event: Stripe.Event): string | null {
     if (event.type === "customer.updated") {
       const previous = event.data.previous_attributes;
@@ -2992,6 +3105,90 @@ export class BillingService {
     }
   }
 
+  /**
+   * A completed embedded Checkout setup is durable evidence that Stripe saved
+   * a payment method for this exact command. It deliberately does not create
+   * a subscription: the merchant still reviews and explicitly confirms the
+   * trial in the next onboarding step.
+   */
+  private async applyCheckoutSessionCompleted(
+    event: Stripe.Event,
+    transaction: Prisma.TransactionClient,
+    request: WafloRequest,
+  ): Promise<{
+    organizationId: string | null;
+    staleness: "applied" | "ignored_stale";
+    notification: null;
+  }> {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const organizationId = session.metadata?.wafloOrganizationId;
+    const commandId = session.metadata?.wafloBillingCommandId;
+    const customerId =
+      typeof session.customer === "string"
+        ? session.customer
+        : session.customer && !session.customer.deleted
+          ? session.customer.id
+          : null;
+    const setupIntentId =
+      typeof session.setup_intent === "string" ? session.setup_intent : session.setup_intent?.id;
+    if (
+      session.mode !== "setup" ||
+      session.status !== "complete" ||
+      !organizationId ||
+      !commandId ||
+      !customerId ||
+      !setupIntentId
+    ) {
+      await transaction.auditLog.create({
+        data: {
+          action: "stripe.checkout_session_ignored",
+          targetType: "stripe_event",
+          targetId: event.id,
+          requestId: request.requestId,
+          metadata: { eventType: event.type },
+          userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
+        },
+      });
+      return { organizationId: null, staleness: "applied", notification: null };
+    }
+    const updated = await transaction.checkoutIdempotencyKey.updateMany({
+      where: {
+        id: commandId,
+        organizationId,
+        stripeSessionId: session.id,
+        stripeCustomerId: customerId,
+        status: { in: ["SETUP_PENDING", "SETUP_SUCCEEDED"] },
+      },
+      data: { stripeSetupIntentId: setupIntentId, status: "SETUP_SUCCEEDED" },
+    });
+    if (updated.count !== 1) {
+      await transaction.auditLog.create({
+        data: {
+          organizationId,
+          action: "stripe.checkout_session_ignored",
+          targetType: "stripe_event",
+          targetId: event.id,
+          requestId: request.requestId,
+          metadata: { eventType: event.type, reason: "command_not_pending" },
+          userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
+        },
+      });
+      return { organizationId, staleness: "ignored_stale", notification: null };
+    }
+    await transaction.auditLog.create({
+      data: {
+        organizationId,
+        action: "billing.checkout_session_completed",
+        targetType: "checkout_idempotency_key",
+        targetId: commandId,
+        requestId: request.requestId,
+        metadata: { provider: "stripe", mode: "setup" },
+        userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
+      },
+    });
+    return { organizationId, staleness: "applied", notification: null };
+  }
+
   // ---------------------------------------------------------------------------
   // applyStripeEvent – event ordering via current-state retrieval
   // ---------------------------------------------------------------------------
@@ -3016,6 +3213,9 @@ export class BillingService {
     }
     if (currentInvoice) {
       return this.applyStripeInvoiceEvent(event, transaction, request, currentInvoice);
+    }
+    if (event.type === "checkout.session.completed") {
+      return this.applyCheckoutSessionCompleted(event, transaction, request);
     }
     const changedCustomerId = this.customerIdFromPaymentMethodEvent(event);
     if (changedCustomerId) {

@@ -473,6 +473,10 @@ function Reconciliation({ overview, locale }: { overview: StripeHealthOverview; 
       </header>
       <dl className="admin-stripe-health-facts">
         <div>
+          <dt>{text.lastRun}</dt>
+          <dd>{stripeHealthDate(overview.reconciliation.lastRunAt, locale)}</dd>
+        </div>
+        <div>
           <dt>{text.lastSync}</dt>
           <dd>{stripeHealthDate(overview.reconciliation.lastSuccessfulProviderSyncAt, locale)}</dd>
         </div>
@@ -491,7 +495,16 @@ function Reconciliation({ overview, locale }: { overview: StripeHealthOverview; 
       </dl>
       <p className="admin-stripe-health-disclosure">
         <Clock3 size={15} aria-hidden="true" />
-        {text.noRunRecord}
+        {overview.reconciliation.latestRun
+          ? text.runEvidence
+              .replace("{status}", overview.reconciliation.latestRun.status)
+              .replace("{scanned}", String(overview.reconciliation.latestRun.subscriptionsScanned))
+              .replace(
+                "{converged}",
+                String(overview.reconciliation.latestRun.subscriptionsConverged),
+              )
+              .replace("{failed}", String(overview.reconciliation.latestRun.subscriptionsFailed))
+          : text.noRunRecord}
       </p>
     </section>
   );

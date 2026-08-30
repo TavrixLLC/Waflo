@@ -1,7 +1,7 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
-import { Alert, Button, Modal, Skeleton, Toast } from "@waflo/ui";
+import { countryOptions, pricingCurrencyOptions, type Locale } from "@waflo/contracts";
+import { Alert, Button, Modal, SearchableSelect, Skeleton, Toast } from "@waflo/ui";
 import { Globe2, Landmark, Plus, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
@@ -411,6 +411,9 @@ function GlobalPricing({
 
 function RegionalMarkets({ markets, locale }: { markets: AdminPricingMarket[]; locale: Locale }) {
   const text = adminPricingCopy(locale);
+  const countryNames = new Map(
+    countryOptions(locale).map((country) => [country.code, country.name]),
+  );
   if (!markets.length) return <p className="admin-pricing-empty">{text.empty}</p>;
   return (
     <div className="admin-pricing-table-scroll">
@@ -435,7 +438,9 @@ function RegionalMarkets({ markets, locale }: { markets: AdminPricingMarket[]; l
               <tr key={market.id}>
                 <th data-label={text.country}>
                   <Link href={pricingMarketPath(locale, market.id)}>
-                    {market.countryCode ?? market.code}
+                    {market.countryCode
+                      ? `${countryNames.get(market.countryCode) ?? market.countryCode} — ${market.countryCode}`
+                      : market.code}
                   </Link>
                 </th>
                 <td data-label={text.market}>{market.code}</td>
@@ -502,6 +507,16 @@ function NewMarketDialog({
       setSaving(false);
     }
   }
+  const countries = countryOptions(locale).map((country) => ({
+    value: country.code,
+    label: `${country.name} — ${country.code}`,
+    searchText: `${country.name} ${country.code}`,
+  }));
+  const currencies = pricingCurrencyOptions(locale).map((option) => ({
+    value: option.code,
+    label: option.label,
+    searchText: `${option.name} ${option.arabicName} ${option.code}`,
+  }));
   return (
     <Modal
       open={open}
@@ -512,24 +527,30 @@ function NewMarketDialog({
       locked={saving}
     >
       <form className="admin-pricing-form" onSubmit={(event) => void submit(event)}>
-        <label>
+        <label htmlFor="regional-market-country">
           <span>{text.country}</span>
-          <input
+          <SearchableSelect
+            name="countryCode"
+            options={countries}
             value={countryCode}
-            onChange={(event) => setCountryCode(event.target.value)}
-            maxLength={2}
+            onValueChange={setCountryCode}
+            placeholder={text.country}
+            ariaLabel={text.country}
+            id="regional-market-country"
             required
-            autoComplete="off"
           />
         </label>
-        <label>
+        <label htmlFor="regional-market-currency">
           <span>{text.currency}</span>
-          <input
+          <SearchableSelect
+            name="currency"
+            options={currencies}
             value={currency}
-            onChange={(event) => setCurrency(event.target.value)}
-            maxLength={3}
+            onValueChange={setCurrency}
+            placeholder={text.currency}
+            ariaLabel={text.currency}
+            id="regional-market-currency"
             required
-            autoComplete="off"
           />
         </label>
         {error ? <Alert tone="danger" title={error} /> : null}

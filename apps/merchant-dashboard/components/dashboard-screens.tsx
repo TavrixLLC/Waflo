@@ -1,8 +1,12 @@
 "use client";
 
-import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import {
+  CheckoutElementsProvider,
+  PaymentElement,
+  useCheckoutElements,
+} from "@stripe/react-stripe-js/checkout";
 import { loadStripe } from "@stripe/stripe-js";
-import { billingCadenceCatalog, planCatalog } from "@waflo/billing";
+import { billingCadenceCatalog, catalogSavingsPercentage, planCatalog } from "@waflo/billing";
 import {
   type BillingCadence,
   countryOptions,
@@ -10,7 +14,7 @@ import {
   type PlanCode,
   timeZoneOptions,
 } from "@waflo/contracts";
-import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
+import { type InterfaceLocale, localeRegistry } from "@waflo/i18n";
 import {
   Alert,
   Avatar,
@@ -53,23 +57,23 @@ import { merchantPublicUrl } from "../lib/merchant-public-url";
 import { beginGoogleReauthentication } from "../lib/oauth-reauthentication";
 import { canPersistCatalogSelection } from "./billing-presentation";
 import {
+  type SubscriptionChangePreview as DurableSubscriptionChangePreview,
   formatBillingAmount,
   formatBillingDate as formatSubscriptionChangeDate,
   isSubscriptionChangePreviewExpired,
   subscriptionChangeConfirmationRequest,
   subscriptionChangeErrorKind,
   subscriptionChangePreviewRequest,
-  type SubscriptionChangePreview as DurableSubscriptionChangePreview,
 } from "./billing-subscription-change";
 import type { DashboardSection, MembershipView } from "./dashboard";
-import { ProgramAssetPicker } from "./program-asset-uploader";
-import type { AssetItem, ProgramItem } from "./program-studio-types";
-import { deriveOverviewNextStep } from "./overview-next-step";
 import {
   LocationAddressFields,
   LocationMapPicker,
   type LocationMapSelection,
 } from "./location-map-picker";
+import { deriveOverviewNextStep } from "./overview-next-step";
+import { ProgramAssetPicker } from "./program-asset-uploader";
+import type { AssetItem, ProgramItem } from "./program-studio-types";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiClientError ? error.message : fallback;
@@ -1360,7 +1364,7 @@ interface BillingView {
 
 interface PaymentMethodSetup {
   clientSecret: string;
-  setupIntentId: string;
+  checkoutSessionId: string;
   publishableKey: string;
 }
 
@@ -1376,35 +1380,30 @@ function PaymentMethodReplacementForm({
   onSaved: () => Promise<void>;
 }) {
   const ar = locale === "ar";
-  const stripe = useStripe();
-  const elements = useElements();
+  const checkoutState = useCheckoutElements();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!stripe || !elements) return;
+    if (checkoutState.type !== "success" || saving) return;
     setSaving(true);
     setError("");
-    const result = await stripe.confirmSetup({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/${locale}/dashboard/billing`,
-      },
-      redirect: "if_required",
-    });
-    if (result.error || result.setupIntent?.status !== "succeeded") {
-      setError(
-        result.error?.message ??
-          (ar ? "أكمل التحقق من البطاقة للمتابعة." : "Complete card verification to continue."),
-      );
-      setSaving(false);
-      return;
-    }
     try {
+      const result = await checkoutState.checkout.confirm({
+        returnUrl: `${window.location.origin}/${locale}/dashboard/billing?checkout_return=1`,
+        redirect: "if_required",
+      });
+      if (result.type !== "success") {
+        setError(
+          result.error.message ||
+            (ar ? "أكمل التحقق من البطاقة للمتابعة." : "Complete card verification to continue."),
+        );
+        return;
+      }
       await apiFetch(`/v1/organizations/${organizationId}/billing/payment-method/complete`, {
         method: "POST",
         headers: { "x-idempotency-key": commandId },
-        body: JSON.stringify({ setupIntentId: result.setupIntent.id }),
+        body: JSON.stringify({ checkoutSessionId: checkoutState.checkout.id }),
       });
       await onSaved();
     } catch (caught) {
@@ -1422,7 +1421,7 @@ function PaymentMethodReplacementForm({
           : "Stripe securely handles the card details. Waflo never stores the card number or CVC."}
       </p>
       <PaymentElement options={{ layout: "tabs" }} />
-      <Button type="submit" loading={saving} disabled={!stripe || !elements}>
+      <Button type="submit" loading={saving} disabled={checkoutState.type !== "success"}>
         {ar ? "حفظ طريقة الدفع" : "Save payment method"}
       </Button>
     </form>
@@ -2048,8 +2047,15 @@ export function BillingScreen({
                     term.plan === (data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode) &&
                     term.cadence === option,
                 );
-                const definition = billingCadenceCatalog[option];
-                const discountLabel = option === "quarterly" ? "8.33%" : "16.67%";
+                const monthly = data.catalog.terms.find(
+                  (term) =>
+                    term.plan === (data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode) &&
+                    term.cadence === "monthly",
+                );
+                const discount = catalogSavingsPercentage(
+                  monthly ? { ...monthly, marketCode: data.catalog.marketCode } : null,
+                  pricing ? { ...pricing, marketCode: data.catalog.marketCode } : null,
+                );
                 return (
                   <label
                     className={`billing-cadence-option ${cadence === option ? "billing-cadence-option--selected" : ""}`}
@@ -2070,13 +2076,10 @@ export function BillingScreen({
                     />
                     <span>
                       <strong>{cadenceLabel(option)}</strong>
-                      {!pricing ? null : definition.discountRate ? (
+                      {discount ? (
                         <Badge tone="success">
-                          {option === "yearly"
-                            ? ar
-                              ? "شهران مجاناً"
-                              : "2 months free"
-                            : discountLabel}
+                          {ar ? "وفّر " : "Save "}
+                          <bdi dir="ltr">{discount}</bdi>
                         </Badge>
                       ) : null}
                     </span>
@@ -2140,6 +2143,11 @@ export function BillingScreen({
                   price={
                     data.catalog.terms.find(
                       (term) => term.plan === plan && term.cadence === cadence,
+                    ) ?? null
+                  }
+                  monthlyPrice={
+                    data.catalog.terms.find(
+                      (term) => term.plan === plan && term.cadence === "monthly",
                     ) ?? null
                   }
                   {...(data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION"
@@ -2627,23 +2635,24 @@ export function BillingScreen({
         onClose={() => setPaymentSetup(null)}
       >
         {paymentSetup && paymentStripe ? (
-          <Elements
+          <CheckoutElementsProvider
             stripe={paymentStripe}
             options={{
               clientSecret: paymentSetup.clientSecret,
-              locale: ar ? "ar" : "en",
-              appearance: {
-                theme: "stripe",
-                variables: {
-                  colorPrimary: "#AE3115",
-                  colorText: "#241916",
-                  colorBackground: "#FFFFFF",
-                  colorDanger: "#C93C2B",
-                  fontFamily: ar
-                    ? "Cairo, system-ui, sans-serif"
-                    : "Manrope, system-ui, sans-serif",
-                  borderRadius: "8px",
-                  spacingUnit: "4px",
+              elementsOptions: {
+                appearance: {
+                  theme: "stripe",
+                  variables: {
+                    colorPrimary: "#AE3115",
+                    colorText: "#241916",
+                    colorBackground: "#FFFFFF",
+                    colorDanger: "#C93C2B",
+                    fontFamily: ar
+                      ? "Cairo, system-ui, sans-serif"
+                      : "Manrope, system-ui, sans-serif",
+                    borderRadius: "8px",
+                    spacingUnit: "4px",
+                  },
                 },
               },
             }}
@@ -2657,7 +2666,7 @@ export function BillingScreen({
                 await load();
               }}
             />
-          </Elements>
+          </CheckoutElementsProvider>
         ) : null}
       </Modal>
       <Modal

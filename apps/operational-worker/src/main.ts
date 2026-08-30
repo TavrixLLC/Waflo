@@ -526,73 +526,113 @@ export class OperationalWorker {
       orderBy: [{ lastProviderSyncAt: "asc" }, { createdAt: "asc" }],
       take: this.environment.STRIPE_RECONCILIATION_BATCH_SIZE,
     });
+    // Do not create an unbounded heartbeat-style history for empty polls. A run
+    // exists only when this worker actually has a bounded provider batch to scan.
+    if (candidates.length === 0) return 0;
+    const run = await this.prisma.stripeReconciliationRun.create({
+      data: {
+        workerId: this.workerId,
+        subscriptionsScanned: 0,
+        subscriptionsConverged: 0,
+        subscriptionsFailed: 0,
+      },
+    });
     let reconciled = 0;
-    for (const candidate of candidates) {
-      const leaseExpiresAt = new Date(Date.now() + LEASE_SECONDS * 1000);
-      const claim = await this.prisma.subscription.updateMany({
-        where: {
-          id: candidate.id,
-          OR: [
-            { reconciliationLeaseExpiresAt: null },
-            { reconciliationLeaseExpiresAt: { lte: new Date() } },
-          ],
-        },
-        data: {
-          reconciliationLeaseOwner: this.workerId,
-          reconciliationLeaseExpiresAt: leaseExpiresAt,
-          reconciliationAttemptCount: { increment: 1 },
-          reconciliationFailureCode: null,
-        },
-      });
-      if (claim.count !== 1) continue;
-      try {
-        const canonical = await this.stripe.subscriptions.retrieve(candidate.stripeSubscriptionId, {
-          expand: ["items.data.price"],
+    let scanned = 0;
+    let failed = 0;
+    let batchFailed = false;
+    try {
+      for (const candidate of candidates) {
+        const leaseExpiresAt = new Date(Date.now() + LEASE_SECONDS * 1000);
+        const claim = await this.prisma.subscription.updateMany({
+          where: {
+            id: candidate.id,
+            OR: [
+              { reconciliationLeaseExpiresAt: null },
+              { reconciliationLeaseExpiresAt: { lte: new Date() } },
+            ],
+          },
+          data: {
+            reconciliationLeaseOwner: this.workerId,
+            reconciliationLeaseExpiresAt: leaseExpiresAt,
+            reconciliationAttemptCount: { increment: 1 },
+            reconciliationFailureCode: null,
+          },
         });
-        await this.applyStripeReconciliation(candidate.id, canonical, leaseExpiresAt);
-        reconciled += 1;
-      } catch (error) {
-        const missing =
-          (error instanceof Stripe.errors.StripeInvalidRequestError &&
-            error.code === "resource_missing") ||
-          (typeof error === "object" &&
-            error !== null &&
-            "code" in error &&
-            error.code === "resource_missing");
-        if (missing) {
-          await this.applyMissingStripeSubscription(candidate.id, leaseExpiresAt);
-          reconciled += 1;
-        } else {
-          const retryAt = new Date(
-            Date.now() +
-              Math.min(30, Math.max(5, candidate.reconciliationAttemptCount + 1) * 5) * 60 * 1000,
+        if (claim.count !== 1) continue;
+        scanned += 1;
+        try {
+          const canonical = await this.stripe.subscriptions.retrieve(
+            candidate.stripeSubscriptionId,
+            {
+              expand: ["items.data.price"],
+            },
           );
-          await this.prisma.$transaction(async (transaction) => {
-            await transaction.subscription.updateMany({
-              where: {
-                id: candidate.id,
-                reconciliationLeaseOwner: this.workerId,
-                reconciliationLeaseExpiresAt: leaseExpiresAt,
-              },
-              data: {
-                reconciliationLeaseOwner: null,
-                reconciliationLeaseExpiresAt: retryAt,
-                reconciliationFailureCode: "PROVIDER_RETRIEVAL_FAILED",
-              },
+          await this.applyStripeReconciliation(candidate.id, canonical, leaseExpiresAt);
+          reconciled += 1;
+        } catch (error) {
+          const missing =
+            (error instanceof Stripe.errors.StripeInvalidRequestError &&
+              error.code === "resource_missing") ||
+            (typeof error === "object" &&
+              error !== null &&
+              "code" in error &&
+              error.code === "resource_missing");
+          if (missing) {
+            await this.applyMissingStripeSubscription(candidate.id, leaseExpiresAt);
+            reconciled += 1;
+          } else {
+            failed += 1;
+            const retryAt = new Date(
+              Date.now() +
+                Math.min(30, Math.max(5, candidate.reconciliationAttemptCount + 1) * 5) * 60 * 1000,
+            );
+            await this.prisma.$transaction(async (transaction) => {
+              await transaction.subscription.updateMany({
+                where: {
+                  id: candidate.id,
+                  reconciliationLeaseOwner: this.workerId,
+                  reconciliationLeaseExpiresAt: leaseExpiresAt,
+                },
+                data: {
+                  reconciliationLeaseOwner: null,
+                  reconciliationLeaseExpiresAt: retryAt,
+                  reconciliationFailureCode: "PROVIDER_RETRIEVAL_FAILED",
+                },
+              });
+              await transaction.auditLog.create({
+                data: {
+                  organizationId: candidate.organizationId,
+                  action: "stripe.scheduled_reconciliation_failed",
+                  targetType: "subscription",
+                  targetId: candidate.stripeSubscriptionId,
+                  requestId: `stripe-reconcile:${candidate.id}`,
+                  metadata: { safeFailureCode: "PROVIDER_RETRIEVAL_FAILED", retryAt },
+                },
+              });
             });
-            await transaction.auditLog.create({
-              data: {
-                organizationId: candidate.organizationId,
-                action: "stripe.scheduled_reconciliation_failed",
-                targetType: "subscription",
-                targetId: candidate.stripeSubscriptionId,
-                requestId: `stripe-reconcile:${candidate.id}`,
-                metadata: { safeFailureCode: "PROVIDER_RETRIEVAL_FAILED", retryAt },
-              },
-            });
-          });
+          }
         }
       }
+    } catch {
+      batchFailed = true;
+      throw new Error("STRIPE_RECONCILIATION_BATCH_FAILED");
+    } finally {
+      await this.prisma.stripeReconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status: batchFailed ? "FAILED" : failed > 0 ? "PARTIALLY_FAILED" : "SUCCEEDED",
+          completedAt: new Date(),
+          subscriptionsScanned: scanned,
+          subscriptionsConverged: reconciled,
+          subscriptionsFailed: failed,
+          safeFailureCode: batchFailed
+            ? "STRIPE_RECONCILIATION_BATCH_FAILED"
+            : failed > 0
+              ? "PROVIDER_RETRIEVAL_FAILED"
+              : null,
+        },
+      });
     }
     return reconciled;
   }

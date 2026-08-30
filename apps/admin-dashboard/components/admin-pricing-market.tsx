@@ -1,7 +1,7 @@
 "use client";
 
-import { billingCadences, type Locale, planCodes } from "@waflo/contracts";
-import { Alert, Button, Modal, Skeleton, Toast } from "@waflo/ui";
+import { billingCadences, pricingCurrencyOptions, type Locale, planCodes } from "@waflo/contracts";
+import { Alert, Button, Modal, SearchableSelect, Skeleton, Toast } from "@waflo/ui";
 import { ArrowLeft, CircleDollarSign, ExternalLink, History, ShieldAlert, Tag } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
@@ -409,6 +409,11 @@ function DraftDialog({
     (version) =>
       version.status === "CURRENT" && version.plan === plan && version.cadence === cadence,
   );
+  const currencies = pricingCurrencyOptions(locale).map((option) => ({
+    value: option.code,
+    label: option.label,
+    searchText: `${option.name} ${option.arabicName} ${option.code}`,
+  }));
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -462,13 +467,17 @@ function DraftDialog({
             ))}
           </select>
         </label>
-        <label>
+        <label htmlFor="pricing-version-currency">
           <span>{text.currency}</span>
-          <input
+          <SearchableSelect
+            name="currency"
+            options={currencies}
             value={currency}
-            onChange={(event) => setCurrency(event.target.value)}
-            maxLength={3}
-            readOnly={Boolean(market.configuredCurrency)}
+            onValueChange={setCurrency}
+            placeholder={text.currency}
+            ariaLabel={text.currency}
+            id="pricing-version-currency"
+            disabled={Boolean(market.configuredCurrency)}
             required
           />
         </label>

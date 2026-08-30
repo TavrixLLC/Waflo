@@ -44,6 +44,13 @@ describe("Admin Pricing management UI", () => {
     expect(overviewSource).toContain("currency: currency.toUpperCase()");
     expect(overviewSource).not.toContain("stripePriceId:");
   });
+  it("uses searchable canonical country and supported-currency selectors", () => {
+    expect(overviewSource).toContain("countryOptions(locale)");
+    expect(overviewSource).toContain("pricingCurrencyOptions(locale)");
+    expect(overviewSource).toContain("SearchableSelect");
+    expect(overviewSource).toContain("country.name");
+    expect(overviewSource).toContain("country.code");
+  });
   it("renders the immutable plan by cadence matrix", () =>
     expect(overviewSource).toContain("overview.plans.flatMap"));
   it("renders subscriber and binding operational facts", () => {

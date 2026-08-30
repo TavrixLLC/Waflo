@@ -141,7 +141,7 @@ test("recovers an already completed trial after a browser retry", async ({ page 
   await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
 
   const organizationId = "review-recovered-organization";
-  const setupIntentId = "seti_review_recovered";
+  const checkoutSessionId = "cs_review_recovered";
   const commandId = "00000000-0000-4000-8000-000000000031";
   let setupRequests = 0;
   let completionRequests = 0;
@@ -156,7 +156,7 @@ test("recovers an already completed trial after a browser retry", async ({ page 
         data: {
           completed: true,
           clientSecret: null,
-          setupIntentId,
+          checkoutSessionId,
           publishableKey: "pk_test_not_loaded_for_completed_trial",
           trialDays: 15,
           amount: 2900,
@@ -173,7 +173,7 @@ test("recovers an already completed trial after a browser retry", async ({ page 
     async (route) => {
       completionRequests += 1;
       expect(route.request().headers()["x-idempotency-key"]).toBe(commandId);
-      expect(route.request().postDataJSON()).toEqual({ setupIntentId });
+      expect(route.request().postDataJSON()).toEqual({ checkoutSessionId });
       await route.fulfill({
         status: 200,
         contentType: "application/json",

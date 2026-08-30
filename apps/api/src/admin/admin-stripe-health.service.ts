@@ -67,7 +67,22 @@ export class AdminStripeHealthService {
   ) {}
 
   async overview(policy: FinancePolicy, now = new Date()) {
-    const snapshot = await this.snapshot(now);
+    const [snapshot, latestReconciliationRun] = await Promise.all([
+      this.snapshot(now),
+      this.prisma.client.stripeReconciliationRun.findFirst({
+        orderBy: { startedAt: "desc" },
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          subscriptionsScanned: true,
+          subscriptionsConverged: true,
+          subscriptionsFailed: true,
+          safeFailureCode: true,
+        },
+      }),
+    ]);
     const issues = deriveStripeHealthIssues(snapshot, now);
     const paymentFailures = snapshot.financialEvents
       .filter((event) => event.type === "PAYMENT_FAILED")
@@ -181,9 +196,7 @@ export class AdminStripeHealthService {
           })),
       },
       reconciliation: {
-        // A reconciliation run record/heartbeat is not currently durable. Report
-        // the actual per-subscription provider-sync evidence instead of inventing a run timestamp.
-        lastRunAt: null,
+        lastRunAt: latestReconciliationRun?.completedAt?.toISOString() ?? null,
         lastSuccessfulProviderSyncAt:
           latest(snapshot.subscriptions.map((entry) => entry.lastProviderSyncAt))?.toISOString() ??
           null,
@@ -192,7 +205,19 @@ export class AdminStripeHealthService {
         activeLeases: snapshot.subscriptions.filter(
           (entry) => entry.reconciliationLeaseExpiresAt && entry.reconciliationLeaseExpiresAt > now,
         ).length,
-        lastRunCoverage: "NOT_DURABLY_RECORDED",
+        lastRunCoverage: latestReconciliationRun ? "DURABLY_RECORDED" : "NOT_YET_RECORDED",
+        latestRun: latestReconciliationRun
+          ? {
+              id: latestReconciliationRun.id,
+              status: latestReconciliationRun.status,
+              startedAt: latestReconciliationRun.startedAt.toISOString(),
+              completedAt: latestReconciliationRun.completedAt?.toISOString() ?? null,
+              subscriptionsScanned: latestReconciliationRun.subscriptionsScanned,
+              subscriptionsConverged: latestReconciliationRun.subscriptionsConverged,
+              subscriptionsFailed: latestReconciliationRun.subscriptionsFailed,
+              safeFailureCode: latestReconciliationRun.safeFailureCode,
+            }
+          : null,
       },
       catalog: {
         publishedWithoutBinding: activeUnboundVersions,

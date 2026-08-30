@@ -95,6 +95,13 @@ enum BillingCadence {
   YEARLY
 }
 
+enum StripeReconciliationRunStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIALLY_FAILED
+  FAILED
+}
+
 enum RepricingStatus {
   SCHEDULED
   APPLIED
@@ -1265,6 +1272,24 @@ model Subscription {
   @@index([organizationId, createdAt])
   @@index([reconciliationLeaseExpiresAt, lastProviderSyncAt])
   @@map("subscriptions")
+}
+
+// A bounded operational-worker reconciliation batch. This stores only safe
+// aggregate evidence; per-subscription provider state remains on Subscription.
+model StripeReconciliationRun {
+  id                       String                        @id @default(uuid()) @db.Uuid
+  workerId                 String                        @map("worker_id") @db.VarChar(120)
+  status                   StripeReconciliationRunStatus @default(RUNNING)
+  startedAt                DateTime                      @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt              DateTime?                     @map("completed_at") @db.Timestamptz(6)
+  subscriptionsScanned     Int                           @default(0) @map("subscriptions_scanned")
+  subscriptionsConverged   Int                           @default(0) @map("subscriptions_converged")
+  subscriptionsFailed      Int                           @default(0) @map("subscriptions_failed")
+  safeFailureCode          String?                       @map("safe_failure_code") @db.VarChar(120)
+
+  @@index([startedAt(sort: Desc)])
+  @@index([status, completedAt(sort: Desc)])
+  @@map("stripe_reconciliation_runs")
 }
 
 model PricingMarket {

@@ -467,18 +467,19 @@ describe("Admin Pricing API and immutable catalog", () => {
       status: "VALIDATED",
     });
   });
-  it("fails validation for a provider-unsupported currency", async () => {
+  it("rejects an unsupported currency before a draft can be persisted", async () => {
     const { catalog, market } = catalogFixture();
     market.kind = "COUNTRY_OVERRIDE";
     market.configuredCurrency = "ZZZ";
-    const draft = await catalog.createDraft({
-      marketCode: "GLOBAL",
-      plan: "growth",
-      cadence: "MONTHLY",
-      currency: "ZZZ",
-      amountMinor: 100n,
-    });
-    await expect(catalog.validateDraft(draft.id as string)).rejects.toMatchObject({
+    await expect(
+      catalog.createDraft({
+        marketCode: "GLOBAL",
+        plan: "growth",
+        cadence: "MONTHLY",
+        currency: "ZZZ",
+        amountMinor: 100n,
+      }),
+    ).rejects.toMatchObject({
       code: "PRICING_CURRENCY_UNSUPPORTED",
     });
   });
