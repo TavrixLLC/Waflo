@@ -293,12 +293,6 @@ export const billingTrialSetupSchema = z
   .object({
     plan: planCodeSchema,
     cadence: billingCadenceSchema,
-    returnLocale: z.enum(["en", "ar"]).default("en"),
-    billingIdentity: billingIdentitySchema.extend({
-      countryCode: countryCodeSchema,
-      addressLine1: z.string().trim().min(1).max(200),
-      city: z.string().trim().min(1).max(120),
-    }),
   })
   .strict();
 

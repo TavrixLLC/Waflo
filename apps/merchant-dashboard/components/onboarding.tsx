@@ -339,7 +339,6 @@ function PlanStep({
               <strong>{cadenceLabel(value, copy)}</strong>
               {discount ? (
                 <small>
-                  {value === "yearly" ? `${copy.plan.twoMonthsFree} ` : null}
                   {copy.plan.save} <bdi dir="ltr">{discount}</bdi>
                 </small>
               ) : null}

@@ -2,10 +2,12 @@ import sharp from "../../apps/api/node_modules/sharp";
 import { describe, expect, it } from "vitest";
 import { processMerchantImage } from "../../apps/api/src/programs/image-processing.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import {
   contrastRatio,
   validateProgramConfiguration,
 } from "../../apps/api/src/programs/validation-engine.js";
+import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
 const crop = { x: 0, y: 0, width: 1, height: 1, zoom: 1 };
 const jpeg = Buffer.from(
@@ -60,9 +62,15 @@ describe("W2 Round 2 visual pipeline", () => {
     await expect(processMerchantImage(jpeg, "image/png", crop)).rejects.toThrow("does not match");
   });
 
-  it("produces deterministic, structurally distinct platform compositions", () => {
-    const stampSvg =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><circle cx="20" cy="20" r="15"/></svg>';
+  it("produces deterministic, structurally distinct platform compositions", async () => {
+    const renderedStamp = renderStampSvg({
+      goal: 8,
+      progress: 4,
+      layout: "GRID",
+      filledColor: "#e4572e",
+      emptyColor: "#f3a712",
+      accentColor: "#e4572e",
+    });
     const base = {
       locale: "AR" as const,
       organizationName: "Waflo Coffee",
@@ -72,7 +80,7 @@ describe("W2 Round 2 visual pipeline", () => {
       terms: "تطبق الشروط",
       progress: 4,
       goal: 8,
-      stampSvg,
+      stampSvg: renderedStamp.svg,
       backgroundColor: "#ffffff",
       foregroundColor: "#222222",
       accentColor: "#e4572e",
@@ -93,8 +101,46 @@ describe("W2 Round 2 visual pipeline", () => {
       },
     };
     const customer = composeProgramPreview({ ...base, profile: "CUSTOMER_WEB" });
-    const apple = composeProgramPreview({ ...base, profile: "APPLE_WALLET" });
-    const google = composeProgramPreview({ ...base, profile: "GOOGLE_WALLET" });
+    const appleArtwork = await composeDashboardWalletArtwork({
+      profile: "APPLE_WALLET",
+      locale: base.locale,
+      renderedStamp,
+      stampSize: 24,
+      organizationName: base.organizationName,
+      programName: base.programName,
+      rewardSummary: base.rewardSummary,
+      progress: base.progress,
+      goal: base.goal,
+      backgroundColor: base.backgroundColor,
+      foregroundColor: base.foregroundColor,
+      accentColor: base.accentColor,
+      secondaryColor: base.secondaryColor,
+    });
+    const googleArtwork = await composeDashboardWalletArtwork({
+      profile: "GOOGLE_WALLET",
+      locale: base.locale,
+      renderedStamp,
+      stampSize: 24,
+      organizationName: base.organizationName,
+      programName: base.programName,
+      rewardSummary: base.rewardSummary,
+      progress: base.progress,
+      goal: base.goal,
+      backgroundColor: base.backgroundColor,
+      foregroundColor: base.foregroundColor,
+      accentColor: base.accentColor,
+      secondaryColor: base.secondaryColor,
+    });
+    const apple = composeProgramPreview({
+      ...base,
+      profile: "APPLE_WALLET",
+      walletArtwork: appleArtwork,
+    });
+    const google = composeProgramPreview({
+      ...base,
+      profile: "GOOGLE_WALLET",
+      walletArtwork: googleArtwork,
+    });
 
     expect(new Set([customer.digest, apple.digest, google.digest]).size).toBe(3);
     expect(customer.svg).toContain("Customer Web preview");

@@ -46,7 +46,8 @@ describe("Admin Pricing management UI", () => {
   });
   it("uses searchable canonical country and supported-currency selectors", () => {
     expect(overviewSource).toContain("countryOptions(locale)");
-    expect(overviewSource).toContain("pricingCurrencyOptions(locale)");
+    expect(overviewSource).toContain('pricingCurrencyOptions } from "@waflo/billing"');
+    expect(overviewSource).toContain("pricingCurrencyOptions()");
     expect(overviewSource).toContain("SearchableSelect");
     expect(overviewSource).toContain("country.name");
     expect(overviewSource).toContain("country.code");

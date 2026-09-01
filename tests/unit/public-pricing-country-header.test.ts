@@ -1,12 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WafloRequest } from "../../apps/api/src/common/request-context.js";
 import { PublicController } from "../../apps/api/src/public/public.controller.js";
-
-function request(country?: string): WafloRequest {
-  return {
-    headers: country ? { "cf-ipcountry": country } : {},
-  } as unknown as WafloRequest;
-}
 
 describe("public pricing country boundary", () => {
   it("normalizes only the trusted server CF-IPCountry value before catalog resolution", async () => {
@@ -23,13 +16,13 @@ describe("public pricing country boundary", () => {
       { publicCatalogTermsForCountry } as never,
     );
 
-    await expect(controller.pricingForVisitor(request("tr"))).resolves.toMatchObject({
+    await expect(controller.pricingCatalog("tr")).resolves.toMatchObject({
       market: { code: "TR", currency: "TRY" },
     });
-    await expect(controller.pricingForVisitor(request("Turkey"))).resolves.toMatchObject({
+    await expect(controller.pricingCatalog("Turkey")).resolves.toMatchObject({
       market: { code: "GLOBAL", currency: "USD" },
     });
-    await expect(controller.pricingForVisitor(request())).resolves.toMatchObject({
+    await expect(controller.pricingCatalog()).resolves.toMatchObject({
       market: { code: "GLOBAL", currency: "USD" },
     });
     expect(publicCatalogTermsForCountry).toHaveBeenNthCalledWith(1, "TR");

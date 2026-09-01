@@ -61,7 +61,8 @@ describe("regional pricing presentation and trusted marketing reads", () => {
     expect(marketingPage).toContain('dynamic = "force-dynamic"');
     expect(marketingPage).toContain("trustedCloudflareCountry(await headers())");
     expect(marketingConfig).toContain("private, no-store, max-age=0");
-    expect(publicController).toContain('request.headers["cf-ipcountry"]');
+    expect(publicController).toContain('@Headers("cf-ipcountry")');
+    expect(publicController).toContain("normalizeCloudflareCountry(edgeCountry)");
     expect(publicController).not.toContain('@Query("country")');
   });
 

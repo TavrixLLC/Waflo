@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import { walletPlatform } from "../../apps/customer-web/app/wallet-platform.js";
 import {
   billingFailurePolicy,
@@ -385,7 +386,7 @@ describe("production-v1 UX and billing repair", () => {
     expect(builder).toContain('value="CUSTOM"');
   });
 
-  it("centers the stamp SVG canvas and emits coherent Arabic Wallet anchors", () => {
+  it("centers the stamp SVG canvas and emits coherent Arabic Wallet anchors", async () => {
     const stamp = renderStampSvg({
       goal: 8,
       progress: 3,
@@ -397,7 +398,7 @@ describe("production-v1 UX and billing repair", () => {
     const rightEdge = Math.max(...stamp.positions.map((position) => position.x + 24));
     expect(stamp.width).toBe(rightEdge);
 
-    const preview = composeProgramPreview({
+    const previewInput = {
       profile: "GOOGLE_WALLET",
       locale: "AR",
       organizationName: "مقهى وافلو",
@@ -427,24 +428,44 @@ describe("production-v1 UX and billing repair", () => {
         detailsLabel: "المكافأة",
         barcodeLabel: "العضوية",
       },
+    } as const;
+    const walletArtwork = await composeDashboardWalletArtwork({
+      profile: previewInput.profile,
+      locale: previewInput.locale,
+      renderedStamp: stamp,
+      stampSize: 24,
+      organizationName: previewInput.organizationName,
+      programName: previewInput.programName,
+      rewardSummary: previewInput.rewardSummary,
+      progress: previewInput.progress,
+      goal: previewInput.goal,
+      backgroundColor: previewInput.backgroundColor,
+      foregroundColor: previewInput.foregroundColor,
+      accentColor: previewInput.accentColor,
+      secondaryColor: previewInput.secondaryColor,
     });
+    const preview = composeProgramPreview({ ...previewInput, walletArtwork });
     expect(preview.svg).toContain('lang="ar" xml:lang="ar"');
     expect(preview.svg).toContain('direction="rtl"');
     expect(preview.svg).toContain('data-barcode-format="QR_CODE"');
     expect(preview.svg).not.toContain('data-google-core-field="points"');
     expect(preview.svg).not.toContain('data-stamp-counter="true"');
-    const qrRegion = preview.svg.indexOf('data-google-barcode-region="provider-managed"');
+    const nativeIdentity = preview.svg.indexOf('data-google-native-identity="true"');
+    const nativeTitle = preview.svg.indexOf('data-google-native-title="true"');
     const heroRegion = preview.svg.indexOf('data-google-hero-region="true"');
-    const supportingFields = preview.svg.indexOf('data-google-below-fold-fields="true"');
-    expect(qrRegion).toBeGreaterThan(-1);
-    expect(heroRegion).toBeLessThan(qrRegion);
-    expect(heroRegion).toBeLessThan(supportingFields);
+    expect(nativeIdentity).toBeGreaterThan(-1);
+    expect(nativeTitle).toBeGreaterThan(nativeIdentity);
+    expect(heroRegion).toBeGreaterThan(nativeTitle);
+    expect(preview.svg).toContain(
+      'data-google-hero-artwork-composition="full-production-compositor"',
+    );
+    expect(preview.svg).not.toContain('data-google-barcode-region="provider-managed"');
     expect(preview.svg).not.toContain('data-account-label="الحساب"');
-    expect(preview.svg).toContain('data-reward-label="المكافأة"');
+    expect(preview.svg).toContain('data-production-wallet-artwork="GOOGLE_HERO"');
     expect(preview.digest).toBe(createHash("sha256").update(preview.svg).digest("hex"));
   });
 
-  it("uses the organization logo as the visible issuer mark across every card preview", () => {
+  it("uses the organization logo as the visible issuer mark across every card preview", async () => {
     const stamp = renderStampSvg({
       goal: 8,
       progress: 0,
@@ -489,15 +510,56 @@ describe("production-v1 UX and billing repair", () => {
       },
     };
     for (const profile of ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const) {
-      const preview = composeProgramPreview({ ...base, profile });
+      const walletArtwork =
+        profile === "CUSTOMER_WEB"
+          ? undefined
+          : await composeDashboardWalletArtwork({
+              profile,
+              locale: base.locale,
+              renderedStamp: stamp,
+              stampSize: 24,
+              organizationName: base.organizationName,
+              programName: base.programName,
+              rewardSummary: base.rewardSummary,
+              progress: base.progress,
+              goal: base.goal,
+              backgroundColor: base.backgroundColor,
+              foregroundColor: base.foregroundColor,
+              accentColor: base.accentColor,
+              secondaryColor: base.secondaryColor,
+            });
+      const preview = composeProgramPreview({
+        ...base,
+        profile,
+        ...(walletArtwork ? { walletArtwork } : {}),
+      });
       expect(preview.svg).toContain(merchantBrandLogoDataUri);
       expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
       expect(preview.svg).toContain('data-issuer-brand="organization"');
     }
     const { merchantBrandLogoDataUri: _merchantBrandLogoDataUri, ...fallbackBase } = base;
-    const fallback = composeProgramPreview({ ...fallbackBase, profile: "APPLE_WALLET" });
+    const fallbackArtwork = await composeDashboardWalletArtwork({
+      profile: "APPLE_WALLET",
+      locale: fallbackBase.locale,
+      renderedStamp: stamp,
+      stampSize: 24,
+      organizationName: fallbackBase.organizationName,
+      programName: fallbackBase.programName,
+      rewardSummary: fallbackBase.rewardSummary,
+      progress: fallbackBase.progress,
+      goal: fallbackBase.goal,
+      backgroundColor: fallbackBase.backgroundColor,
+      foregroundColor: fallbackBase.foregroundColor,
+      accentColor: fallbackBase.accentColor,
+      secondaryColor: fallbackBase.secondaryColor,
+    });
+    const fallback = composeProgramPreview({
+      ...fallbackBase,
+      profile: "APPLE_WALLET",
+      walletArtwork: fallbackArtwork,
+    });
     expect(fallback.svg).not.toContain(merchantBrandLogoDataUri);
-    expect(fallback.svg).toContain('fill="#E4572E"');
+    expect(fallback.svg).toContain('fill="#D2603C"');
   });
 
   it("styles native selects and wraps the accessible color input", () => {

@@ -584,7 +584,6 @@ describe("API and localization utilities", () => {
       "Invitation unavailable.",
       "Set up your organization",
       "Choose your plan",
-      "Billing details",
       "Place the pin on the storefront",
       "This page could not be found",
     ] as const;
@@ -594,6 +593,12 @@ describe("API and localization utilities", () => {
         expect(source).not.toContain(retiredLiteral);
       }
     }
+    const onboarding = readFileSync(
+      resolve(root, "apps/merchant-dashboard/components/onboarding.tsx"),
+      "utf8",
+    );
+    expect(onboarding).toContain("copy.billing.title");
+    expect(onboarding).not.toContain(">Billing details<");
   });
 });
 

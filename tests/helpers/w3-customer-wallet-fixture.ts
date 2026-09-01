@@ -16,7 +16,6 @@ export interface W3CustomerWalletFixture {
 }
 
 export const w3EnrollmentBase = {
-  phone: "0770 123 4567",
   preferredLocale: "en",
   phone: "0770 123 4567",
   programTermsAccepted: true,
