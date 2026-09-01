@@ -946,6 +946,7 @@ export function BusinessOnboarding({
   if (step === 3) {
     return (
       <OnboardingShell locale={locale} step={3}>
+        {error ? <Alert tone="danger" title={error} /> : null}
         <section className="onboarding-logo-panel" aria-labelledby="onboarding-logo-title">
           <div className="onboarding-logo-panel__heading">
             <div>

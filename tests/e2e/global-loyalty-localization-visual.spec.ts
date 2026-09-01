@@ -454,14 +454,18 @@ test("captures organization branding, optional onboarding logo, and truthful Ove
 
   const onboarding = await context.newPage();
   await mockTemplateGalleryApi(onboarding, { merchantBrandLogoDataUri: merchantLogo });
-  await onboarding.goto(`/en/onboarding/business?organization=${templateGalleryOrganizationId}`);
+  await onboarding.goto(
+    `/en/onboarding/business?organization=${templateGalleryOrganizationId}&resume=payment_method_required`,
+  );
   await expect(onboarding.getByRole("heading", { level: 2, name: "Merchant logo" })).toBeVisible();
   await capture(onboarding, "onboarding-logo-upload-desktop-en.png");
   await onboarding.setViewportSize({ width: 390, height: 844 });
   await expect(onboarding.getByRole("button", { name: "Skip for now" })).toBeVisible();
   await capture(onboarding, "onboarding-logo-skip-mobile-en.png");
   await onboarding.setViewportSize({ width: 1280, height: 900 });
-  await onboarding.goto(`/ar/onboarding/business?organization=${templateGalleryOrganizationId}`);
+  await onboarding.goto(
+    `/ar/onboarding/business?organization=${templateGalleryOrganizationId}&resume=payment_method_required`,
+  );
   await expect(onboarding.locator("html")).toHaveAttribute("dir", "rtl");
   await capture(onboarding, "onboarding-logo-ar.png");
   await onboarding.close();

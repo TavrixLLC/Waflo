@@ -227,11 +227,11 @@ test("uses a neutral Library summary when renderer-ready data is unavailable", a
 });
 
 test("selects Arabic customer content for the Arabic editor and preview", async ({ page }) => {
-  const previewResponses: Array<{ locale: string; svg: string }> = [];
+  const previewResponses: Array<{ locale: string; profile: string; svg: string }> = [];
   await openBuilder(page, {
     locale: "ar",
-    onBuilderPreview: (_profile, previewLocale, svg) =>
-      previewResponses.push({ locale: previewLocale, svg }),
+    onBuilderPreview: (profile, previewLocale, svg) =>
+      previewResponses.push({ locale: previewLocale, profile, svg }),
   });
   await page.getByRole("button", { name: /اللغات/u }).click();
   await addBuilderLanguage(page, "Arabic");
@@ -243,7 +243,10 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
   await expect
     .poll(() =>
       previewResponses.some(
-        (response) => response.locale === "ar" && response.svg.includes(localizedName),
+        (response) =>
+          response.locale === "ar" &&
+          response.profile === "APPLE_WALLET" &&
+          response.svg.includes('data-production-wallet-artwork="APPLE_LEGACY_STRIP"'),
       ),
     )
     .toBe(true);

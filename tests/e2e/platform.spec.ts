@@ -16,6 +16,74 @@ const changedSlug = `flow-${runId}`;
 const apiOrigin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 let browserOrganizationId = "";
 
+const globalMarketingTerms = [
+  { planCode: "STARTER", amounts: [2900n, 8100n, 29000n] },
+  { planCode: "GROWTH", amounts: [6900n, 19200n, 69000n] },
+  { planCode: "SCALE", amounts: [12900n, 36000n, 129000n] },
+] as const;
+const pricingCadences = ["MONTHLY", "QUARTERLY", "YEARLY"] as const;
+
+/**
+ * Public Marketing reads only the Waflo-owned published catalog. The base
+ * migration deliberately creates GLOBAL without guessed amounts, so browser
+ * tests publish their explicit fixture terms before asserting the UI.
+ */
+async function publishGlobalMarketingCatalog(): Promise<void> {
+  const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
+  const database = createPrismaClient(
+    process.env.DATABASE_URL ??
+      "postgresql://waflo:waflo_dev_password@localhost:5432/waflo?schema=public",
+  );
+  try {
+    const global = await database.pricingMarket.upsert({
+      where: { code: "GLOBAL" },
+      update: { kind: "GLOBAL", active: true, configuredCurrency: "USD" },
+      create: { code: "GLOBAL", kind: "GLOBAL", active: true, configuredCurrency: "USD" },
+    });
+    await Promise.all(
+      globalMarketingTerms.flatMap(({ planCode, amounts }) =>
+        pricingCadences.map((cadence, index) =>
+          database.pricingVersion.upsert({
+            where: {
+              marketId_planCode_cadence_version: {
+                marketId: global.id,
+                planCode,
+                cadence,
+                version: 1,
+              },
+            },
+            update: {
+              currency: "USD",
+              amountMinor: amounts[index],
+              status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+              stripePriceId: `price_browser_public_${planCode.toLowerCase()}_${cadence.toLowerCase()}`,
+              publishedAt: new Date(),
+            },
+            create: {
+              marketId: global.id,
+              planCode,
+              cadence,
+              version: 1,
+              currency: "USD",
+              amountMinor: amounts[index],
+              status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+              stripeBindingKey: `browser-public-global:${planCode}:${cadence}`,
+              // The isolated browser environment never contacts Stripe. These
+              // deterministic bindings make the catalog usable by the Plan
+              // step; the next action still correctly stops at missing Stripe
+              // test credentials.
+              stripePriceId: `price_browser_public_${planCode.toLowerCase()}_${cadence.toLowerCase()}`,
+              publishedAt: new Date(),
+            },
+          }),
+        ),
+      ),
+    );
+  } finally {
+    await database.$disconnect();
+  }
+}
+
 interface MailpitAddress {
   Address: string;
 }
@@ -213,6 +281,10 @@ async function finishQuickWizard(page: Page, name: string): Promise<void> {
 
 test.describe
   .serial("Waflo W2 browser flows", () => {
+    test.beforeAll(async () => {
+      await publishGlobalMarketingCatalog();
+    });
+
     test("marketing pages render in English and Arabic with real RTL", async ({ page }) => {
       await page.goto("http://localhost:3000/en");
       await expect(page.getByRole("heading", { level: 1 })).toContainText(
@@ -227,9 +299,9 @@ test.describe
       await screenshot(page, "02-marketing-home-ar");
 
       await page.goto("http://localhost:3000/en/pricing");
-      await expect(page.locator(".wf-plan-card")).toHaveCount(3);
+      await expect(page.locator(".marketing-plan-choice")).toHaveCount(3);
       await expect(page.locator(".marketing-cadence-selector input")).toHaveCount(3);
-      await expect(page.locator(".wf-plan-card__price")).toHaveCount(3);
+      await expect(page.locator(".marketing-plan-choice__price")).toHaveCount(3);
       await screenshot(page, "03-pricing");
 
       await page.goto("http://localhost:3000/en/refunds");
@@ -337,7 +409,9 @@ test.describe
       await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
       await page.getByRole("button", { name: "Continue" }).click();
       await expect(
-        page.getByText("This plan is not connected to a Stripe price yet. Contact Waflo support."),
+        page.getByText(
+          "Billing setup is not configured right now. Try again or contact Waflo support.",
+        ),
       ).toBeVisible();
       const paymentGatedOrganizationResponse = await page.request.get(
         `${apiOrigin}/v1/organizations/${browserOrganizationId}`,

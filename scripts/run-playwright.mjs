@@ -192,6 +192,9 @@ async function buildBrowserFrontends() {
   const ui = pnpmCommand(["--filter", "@waflo/ui", "build"]);
   if ((await runCommand(ui.command, ui.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser UI build failed.");
+  const marketing = pnpmCommand(["--filter", "@waflo/marketing-web", "build"]);
+  if ((await runCommand(marketing.command, marketing.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser Marketing build failed.");
   const build = pnpmCommand(["--filter", "@waflo/merchant-dashboard", "build"]);
   if ((await runCommand(build.command, build.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser Merchant build failed.");

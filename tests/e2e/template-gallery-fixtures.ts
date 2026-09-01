@@ -439,7 +439,29 @@ export async function mockTemplateGalleryApi(
         : "LEGACY";
     const translations = storedDraft.translations as Record<string, Record<string, string>>;
     const defaultLocale = canonicalizeCardLocale(String(storedDraft.defaultLocale ?? "en")) ?? "en";
-    const content = translations[locale] ?? translations[defaultLocale] ?? translations.en;
+    const requestedContent = translations[locale];
+    const defaultContent = translations[defaultLocale] ?? translations.en;
+    // The persistence layer writes intentionally blank draft fields as null and
+    // the preview service then falls back field-by-field. The fixture keeps raw
+    // draft values, so mirror that boundary before invoking the production
+    // Wallet compositor; an incomplete new locale must not make its preview
+    // renderer throw while the merchant is still authoring it.
+    const content = {
+      programName:
+        requestedContent?.programName?.trim() ||
+        defaultContent?.programName?.trim() ||
+        String(storedDraft.internalName ?? "Gallery Coffee Rewards"),
+      shortDescription:
+        requestedContent?.shortDescription?.trim() ||
+        defaultContent?.shortDescription?.trim() ||
+        "",
+      rewardSummary:
+        requestedContent?.rewardSummary?.trim() || defaultContent?.rewardSummary?.trim() || "",
+      termsAndConditions:
+        requestedContent?.termsAndConditions?.trim() ||
+        defaultContent?.termsAndConditions?.trim() ||
+        "",
+    };
     const goal = Number(storedDraft.requiredStampCount ?? 8);
     const progress = Math.max(0, Math.min(goal, Number(url.searchParams.get("progress") ?? 0)));
     const template = findProgramTemplate(

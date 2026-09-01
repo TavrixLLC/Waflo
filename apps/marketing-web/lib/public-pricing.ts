@@ -15,5 +15,9 @@ export async function fetchMarketingPricing(
     cache: "no-store",
   });
   if (!response.ok) throw new Error("Published pricing is temporarily unavailable.");
-  return (await response.json()) as MarketingPricingReadModel;
+  const payload = (await response.json()) as { data?: MarketingPricingReadModel };
+  if (!payload.data || !Array.isArray(payload.data.terms)) {
+    throw new Error("Published pricing is temporarily unavailable.");
+  }
+  return payload.data;
 }
