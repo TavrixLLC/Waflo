@@ -1,4 +1,33 @@
 import type { BillingCadence, BillingStatus, PlanCode } from "@waflo/contracts";
+import { formatCurrencyMinor } from "./currency-catalog.js";
+
+export {
+  currencyDisplaySymbol,
+  currencyMinorInputValue,
+  currencyMinorUnitExponent,
+  formatCurrencyMinor,
+  formatCurrencyMinorRatio,
+  getPricingCurrency,
+  normalizeCloudflareCountry,
+  normalizePricingCurrency,
+  parseCurrencyMajorToMinor,
+  type PricingCurrency,
+  pricingCurrencyCatalog,
+  pricingCurrencyOptions,
+  requirePricingCurrency,
+  STRIPE_CARD_PRESENTMENT_CURRENCIES,
+  type StripeAmountRule,
+  type SupportedPricingCurrency,
+} from "./currency-catalog.js";
+export {
+  hasCompletePublishedPricingMarket,
+  type PricingMarketFallbackReason,
+  type PublishedPricingMarket,
+  type PublishedPricingTerm,
+  publishedCadenceDiscountPercent,
+  type ResolvedPublishedPricingMarket,
+  resolvePublishedPricingMarket,
+} from "./pricing-read-model.js";
 
 export interface PlanLimits {
   readonly locations: number | null;
@@ -228,10 +257,7 @@ export function formatBillingDate(date: Date, locale: "en" | "ar", timeZone: str
 }
 
 export function formatMinorUnits(amount: number, currency: string, locale: "en" | "ar"): string {
-  return new Intl.NumberFormat(locale === "ar" ? "ar-IQ-u-nu-latn" : "en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(amount / 100);
+  return formatCurrencyMinor(amount, currency, locale);
 }
 
 export interface BillingEmailPayload {
@@ -745,17 +771,7 @@ export function formatMoney(
   currency: string,
   locale: "en" | "ar" = "en",
 ): string {
-  const normalized = currency.toUpperCase();
-  const digits =
-    new Intl.NumberFormat(locale === "ar" ? "ar" : "en-US", {
-      style: "currency",
-      currency: normalized,
-    }).resolvedOptions().maximumFractionDigits ?? 2;
-  const amount = Number(amountMinor) / 10 ** digits;
-  return new Intl.NumberFormat(locale === "ar" ? "ar" : "en-US", {
-    style: "currency",
-    currency: normalized,
-  }).format(amount);
+  return formatCurrencyMinor(amountMinor, currency, locale);
 }
 
 export interface TrialState {

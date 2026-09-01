@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import {
   billingIdentitySchema,
+  billingSetupIntentCompleteSchema,
   billingSubscriptionCancellationSchema,
   billingSubscriptionChangeSchema,
   billingTrialCompleteSchema,
@@ -39,6 +40,11 @@ export class BillingController {
   @Get()
   get(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
     return this.billing.get(user.id, parseUuid(organizationId));
+  }
+
+  @Get("catalog")
+  catalog(@CurrentUser() user: AuthenticatedUser, @Param("organizationId") organizationId: string) {
+    return this.billing.catalogForOnboarding(user.id, parseUuid(organizationId));
   }
 
   @Patch("selected-plan")
@@ -260,7 +266,7 @@ export class BillingController {
     return this.billing.completePaymentMethodReplacement(
       user.id,
       parseUuid(organizationId),
-      parseInput(billingTrialCompleteSchema, body),
+      parseInput(billingSetupIntentCompleteSchema, body),
       request,
       parseCheckoutIdempotencyKey(idempotencyKey),
     );

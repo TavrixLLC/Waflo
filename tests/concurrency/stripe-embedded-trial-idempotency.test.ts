@@ -45,17 +45,19 @@ interface SetupIntentFixture {
 interface CheckoutSessionFixture {
   id: string;
   client_secret: string;
-  status: "open" | "complete";
+  status: "open" | "complete" | "expired";
+  mode: "setup";
+  ui_mode: "elements";
   customer: string;
-  setup_intent: string;
+  setup_intent: SetupIntentFixture | null;
   metadata: Record<string, string>;
 }
 
 interface StripeFixture {
   namespace: string;
+  setupById: Map<string, SetupIntentFixture>;
   checkoutByIdempotencyKey: Map<string, CheckoutSessionFixture>;
   checkoutById: Map<string, CheckoutSessionFixture>;
-  setupById: Map<string, SetupIntentFixture>;
   subscriptionByIdempotencyKey: Map<string, Stripe.Subscription>;
   customerCreateKeys: string[];
   checkoutCreateKeys: string[];
@@ -68,9 +70,9 @@ interface StripeFixture {
 
 const fixture = (): StripeFixture => ({
   namespace: randomUUID().slice(0, 8),
+  setupById: new Map(),
   checkoutByIdempotencyKey: new Map(),
   checkoutById: new Map(),
-  setupById: new Map(),
   subscriptionByIdempotencyKey: new Map(),
   customerCreateKeys: [],
   checkoutCreateKeys: [],
@@ -111,7 +113,11 @@ function priceFor(id: string, mismatch = false): Stripe.Price {
   } as unknown as Stripe.Price;
 }
 
-function paymentMethod(id: string, customer: string): Stripe.PaymentMethod {
+function paymentMethod(
+  id: string,
+  customer: string,
+  card: Partial<Pick<NonNullable<Stripe.PaymentMethod["card"]>, "brand" | "last4">> = {},
+): Stripe.PaymentMethod {
   return {
     id,
     object: "payment_method",
@@ -119,7 +125,7 @@ function paymentMethod(id: string, customer: string): Stripe.PaymentMethod {
     customer,
     billing_details: { address: null, email: null, name: null, phone: null, tax_id: null },
     card: {
-      brand: "visa",
+      brand: card.brand ?? "visa",
       checks: null,
       country: "US",
       display_brand: "visa",
@@ -128,7 +134,7 @@ function paymentMethod(id: string, customer: string): Stripe.PaymentMethod {
       fingerprint: "fixture-fingerprint",
       funding: "credit",
       generated_from: null,
-      last4: "4242",
+      last4: card.last4 ?? "4242",
       networks: null,
       regulated_status: "unregulated",
       three_d_secure_usage: null,
@@ -168,36 +174,22 @@ function buildStripeMock(state: StripeFixture) {
         ) => {
           const key = options?.idempotencyKey ?? "missing";
           state.checkoutCreateKeys.push(key);
-          let session = state.checkoutByIdempotencyKey.get(key);
-          if (!session) {
-            const sequence = state.checkoutByIdempotencyKey.size + 1;
-            const customer = String(params.customer);
-            const setup = {
-              id: `seti_${state.namespace}_${sequence}`,
-              client_secret: `seti_secret_${state.namespace}_${sequence}`,
-              status: "requires_payment_method" as Stripe.SetupIntent.Status,
-              customer,
-              payment_method: null,
-              metadata: Object.fromEntries(
-                Object.entries(params.setup_intent_data?.metadata ?? {}).map(([name, value]) => [
-                  name,
-                  String(value),
-                ]),
-              ),
-            };
-            state.setupById.set(setup.id, setup);
-            session = {
-              id: `cs_${state.namespace}_${sequence}`,
-              client_secret: `cs_secret_${state.namespace}_${sequence}`,
+          let checkout = state.checkoutByIdempotencyKey.get(key);
+          if (!checkout) {
+            checkout = {
+              id: `cs_test_${state.namespace}_${state.checkoutByIdempotencyKey.size + 1}`,
+              client_secret: `cs_test_secret_${state.namespace}_${state.checkoutByIdempotencyKey.size + 1}`,
               status: "open",
-              customer,
-              setup_intent: setup.id,
+              mode: "setup",
+              ui_mode: "elements",
+              customer: String(params.customer),
+              setup_intent: null,
               metadata: Object.fromEntries(
                 Object.entries(params.metadata ?? {}).map(([name, value]) => [name, String(value)]),
               ),
             };
-            state.checkoutByIdempotencyKey.set(key, session);
-            state.checkoutById.set(session.id, session);
+            state.checkoutByIdempotencyKey.set(key, checkout);
+            state.checkoutById.set(checkout.id, checkout);
           }
           if (state.timeoutNextCheckoutAfterProviderCommit) {
             state.timeoutNextCheckoutAfterProviderCommit = false;
@@ -205,22 +197,18 @@ function buildStripeMock(state: StripeFixture) {
               type: "StripeConnectionError",
             });
           }
-          return {
-            ...session,
-            object: "checkout.session",
-            mode: "setup",
-            ui_mode: "elements",
-          } as unknown as Stripe.Checkout.Session;
+          return checkout as unknown as Stripe.Checkout.Session;
         },
         retrieve: async (id: string) => {
-          const session = state.checkoutById.get(id);
-          if (!session) throw new Error(`Unknown Checkout Session ${id}`);
-          return {
-            ...session,
-            object: "checkout.session",
-            mode: "setup",
-            ui_mode: "elements",
-          } as unknown as Stripe.Checkout.Session;
+          const checkout = state.checkoutById.get(id);
+          if (!checkout) throw new Error(`Unknown Checkout Session ${id}`);
+          return checkout as unknown as Stripe.Checkout.Session;
+        },
+        expire: async (id: string) => {
+          const checkout = state.checkoutById.get(id);
+          if (!checkout) throw new Error(`Unknown Checkout Session ${id}`);
+          checkout.status = "expired";
+          return checkout as unknown as Stripe.Checkout.Session;
         },
       },
     },
@@ -319,8 +307,25 @@ function buildBilling(state = fixture()) {
   return { service, state };
 }
 
+function billingIdentity(
+  overrides: Partial<Record<"addressLine1" | "city" | "countryCode", string>> = {},
+) {
+  return {
+    name: "Waflo Trial Merchant",
+    email: "billing@example.test",
+    countryCode: "AQ",
+    addressLine1: "1 Market Street",
+    addressLine2: null,
+    city: "San Francisco",
+    region: "CA",
+    postalCode: "94105",
+    ...overrides,
+  };
+}
+
 async function merchant(label: string) {
   const email = `${label}-${runId}-${randomUUID().slice(0, 6)}@trial.waflo.local`;
+  const billing = billingIdentity();
   const user = await prisma.client.user.create({
     data: {
       email,
@@ -346,7 +351,14 @@ async function merchant(label: string) {
         create: {
           selectedPlan: "GROWTH",
           subscriptionStatus: "PENDING_ACTIVATION",
-          billingCountryCode: "AQ",
+          billingName: billing.name,
+          billingEmail: billing.email,
+          billingCountryCode: billing.countryCode,
+          billingAddressLine1: billing.addressLine1,
+          billingAddressLine2: billing.addressLine2,
+          billingCity: billing.city,
+          billingRegion: billing.region,
+          billingPostalCode: billing.postalCode,
         },
       },
     },
@@ -354,32 +366,32 @@ async function merchant(label: string) {
   return { userId: user.id, organizationId: organization.id };
 }
 
-function trialInput(email = "billing@example.test") {
+function trialInput() {
   return {
     plan: "growth" as const,
     cadence: "monthly" as const,
-    returnLocale: "en" as const,
-    billingIdentity: {
-      name: "Waflo Trial Merchant",
-      email,
-      countryCode: "AQ",
-      addressLine1: "1 Market Street",
-      addressLine2: null,
-      city: "San Francisco",
-      region: "CA",
-      postalCode: "94105",
-    },
   };
 }
 
-function markCheckoutSucceeded(state: StripeFixture, checkoutSessionId: string) {
-  const session = state.checkoutById.get(checkoutSessionId);
-  if (!session) throw new Error("Checkout Session fixture missing.");
-  const setup = state.setupById.get(session.setup_intent);
-  if (!setup) throw new Error("SetupIntent fixture missing.");
-  session.status = "complete";
-  setup.status = "succeeded";
-  setup.payment_method = paymentMethod(`pm_${setup.id}`, setup.customer);
+function markCheckoutSucceeded(
+  state: StripeFixture,
+  checkoutSessionId: string,
+  card?: Partial<Pick<NonNullable<Stripe.PaymentMethod["card"]>, "brand" | "last4">>,
+) {
+  const checkout = state.checkoutById.get(checkoutSessionId);
+  if (!checkout) throw new Error("Checkout Session fixture missing.");
+  const setupIntentId = `seti_${checkoutSessionId}`;
+  const setup: SetupIntentFixture = {
+    id: setupIntentId,
+    client_secret: `seti_secret_${checkoutSessionId}`,
+    status: "succeeded",
+    customer: checkout.customer,
+    payment_method: paymentMethod(`pm_${checkoutSessionId}`, checkout.customer, card),
+    metadata: checkout.metadata,
+  };
+  state.setupById.set(setup.id, setup);
+  checkout.setup_intent = setup;
+  checkout.status = "complete";
 }
 
 beforeAll(async () => {
@@ -434,7 +446,7 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     await expect(service.checkout()).rejects.toMatchObject({ code: "HOSTED_CHECKOUT_REMOVED" });
   });
 
-  it("creates a customer-bound embedded Checkout setup session without persisting its secret", async () => {
+  it("creates a customer-bound setup-mode Checkout Session without persisting its secret", async () => {
     const account = await merchant("prepare");
     const { service, state } = buildBilling();
     const key = randomUUID();
@@ -455,10 +467,12 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     expect(prepared.expectedFirstChargeAt.getTime() - prepared.expectedTrialStart.getTime()).toBe(
       15 * 24 * 60 * 60 * 1000,
     );
-    const session = state.checkoutById.get(String(prepared.checkoutSessionId));
-    expect(session).toMatchObject({
+    const checkout = state.checkoutById.get(String(prepared.checkoutSessionId));
+    expect(checkout).toMatchObject({
       customer: expect.stringMatching(/^cus_/),
       status: "open",
+      mode: "setup",
+      ui_mode: "elements",
     });
     const stored = await prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
       where: {
@@ -468,59 +482,51 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
         },
       },
     });
-    expect(stored).toMatchObject({ status: "SETUP_PENDING", stripeSessionId: session?.id });
+    expect(stored).toMatchObject({ status: "SETUP_PENDING", stripeSessionId: checkout?.id });
     expect(JSON.stringify(stored)).not.toContain(String(prepared.clientSecret));
     expect(JSON.stringify(stored)).not.toMatch(/424242|\bCVC\b|\bPAN\b/i);
     expect(state.checkoutCreateKeys[0]).toBe(
-      `waflo:org:${account.organizationId}:trial-checkout:${key}`,
+      `waflo:org:${account.organizationId}:trial-setup:${key}`,
     );
+    expect(state.subscriptionCreateKeys).toEqual([]);
   });
 
-  it("invalidates a completed Checkout setup when billing country changes before confirmation", async () => {
-    const account = await merchant("country-change");
-    const { service, state } = buildBilling();
+  it("permits Checkout setup terminal states and rejects unknown states at the database constraint", async () => {
+    const account = await merchant("status-check");
+    const { service } = buildBilling();
     const key = randomUUID();
-    const prepared = await service.prepareTrialSetup(
+    await service.prepareTrialSetup(
       account.userId,
       account.organizationId,
       trialInput(),
       request,
       key,
     );
+    const where = {
+      organizationId_idempotencyKey: {
+        organizationId: account.organizationId,
+        idempotencyKey: key,
+      },
+    };
+
     await expect(
-      service.updateBillingIdentity(
-        account.userId,
-        account.organizationId,
-        {
-          ...trialInput().billingIdentity,
-          countryCode: "US",
-        },
-        request,
-      ),
-    ).resolves.toMatchObject({ marketChanged: true, invalidatedCommands: 1 });
-    expect(
-      await prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
-        where: {
-          organizationId_idempotencyKey: {
-            organizationId: account.organizationId,
-            idempotencyKey: key,
-          },
-        },
+      prisma.client.checkoutIdempotencyKey.update({
+        where,
+        data: { status: "SETUP_COMPLETED" },
       }),
-    ).toMatchObject({ status: "MARKET_INVALIDATED" });
-    markCheckoutSucceeded(state, String(prepared.checkoutSessionId));
+    ).resolves.toMatchObject({ status: "SETUP_COMPLETED" });
     await expect(
-      service.completeTrialSetup(
-        account.userId,
-        account.organizationId,
-        { checkoutSessionId: String(prepared.checkoutSessionId) },
-        request,
-        key,
-      ),
-    ).rejects.toMatchObject({ code: "BILLING_SETUP_INVALID" });
-    expect(
-      await prisma.client.subscription.count({ where: { organizationId: account.organizationId } }),
-    ).toBe(0);
+      prisma.client.checkoutIdempotencyKey.update({
+        where,
+        data: { status: "INVALIDATED" },
+      }),
+    ).resolves.toMatchObject({ status: "INVALIDATED" });
+    await expect(
+      prisma.client.checkoutIdempotencyKey.update({
+        where,
+        data: { status: "UNKNOWN_CHECKOUT_STATUS" },
+      }),
+    ).rejects.toThrow(/checkout_onboarding_status_allowed|check constraint|constraint/i);
   });
 
   it("replays parallel preparation with one command, customer, and Checkout Session", async () => {
@@ -618,6 +624,207 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     expect(
       await prisma.client.subscription.count({ where: { organizationId: account.organizationId } }),
     ).toBe(0);
+  });
+
+  it("invalidates an open Checkout Session when canonical billing details change", async () => {
+    const account = await merchant("billing-details-change");
+    const { service, state } = buildBilling();
+    const key = randomUUID();
+    const prepared = await service.prepareTrialSetup(
+      account.userId,
+      account.organizationId,
+      trialInput(),
+      request,
+      key,
+    );
+    await service.updateBillingIdentity(
+      account.userId,
+      account.organizationId,
+      billingIdentity({ addressLine1: "2 New Market Street" }),
+      request,
+    );
+    expect(state.checkoutById.get(String(prepared.checkoutSessionId))).toMatchObject({
+      status: "expired",
+    });
+    await expect(
+      service.completeTrialSetup(
+        account.userId,
+        account.organizationId,
+        { checkoutSessionId: String(prepared.checkoutSessionId) },
+        request,
+        key,
+      ),
+    ).rejects.toMatchObject({ code: "BILLING_SETUP_EXPIRED" });
+    await expect(
+      prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
+        where: {
+          organizationId_idempotencyKey: {
+            organizationId: account.organizationId,
+            idempotencyKey: key,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ status: "INVALIDATED" });
+    expect(state.subscriptionCreateKeys).toEqual([]);
+  });
+
+  it("accepts a redisplayed saved Mastercard without charging, invoicing, or subscribing", async () => {
+    const account = await merchant("saved-mastercard");
+    const { service, state } = buildBilling();
+    const key = randomUUID();
+    const prepared = await service.prepareTrialSetup(
+      account.userId,
+      account.organizationId,
+      trialInput(),
+      request,
+      key,
+    );
+    markCheckoutSucceeded(state, String(prepared.checkoutSessionId), {
+      brand: "mastercard",
+      last4: "4444",
+    });
+
+    await expect(
+      service.previewTrialSetup(
+        account.userId,
+        account.organizationId,
+        { checkoutSessionId: String(prepared.checkoutSessionId) },
+        key,
+      ),
+    ).resolves.toMatchObject({ paymentMethod: { brand: "mastercard", last4: "4444" } });
+    await expect(
+      prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
+        where: {
+          organizationId_idempotencyKey: {
+            organizationId: account.organizationId,
+            idempotencyKey: key,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ status: "SETUP_COMPLETED" });
+    expect(state.subscriptionCreateKeys).toEqual([]);
+    await expect(
+      prisma.client.subscription.count({ where: { organizationId: account.organizationId } }),
+    ).resolves.toBe(0);
+    await expect(
+      prisma.client.billingInvoice.count({ where: { organizationId: account.organizationId } }),
+    ).resolves.toBe(0);
+  });
+
+  it("converges Checkout completion when the webhook or browser arrives first", async () => {
+    const { service, state } = buildBilling();
+    let nextEvent: Stripe.Event | null = null;
+    (
+      service as unknown as {
+        stripe: { webhooks: { constructEvent: () => Stripe.Event } };
+      }
+    ).stripe.webhooks.constructEvent = () => {
+      if (!nextEvent) throw new Error("Checkout event fixture missing.");
+      return nextEvent;
+    };
+    const checkoutEvent = (id: string, checkout: CheckoutSessionFixture): Stripe.Event =>
+      ({
+        id,
+        object: "event",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: checkout.id,
+            object: "checkout.session",
+            mode: checkout.mode,
+            status: "complete",
+            customer: checkout.customer,
+            metadata: checkout.metadata,
+          },
+        },
+      }) as unknown as Stripe.Event;
+
+    const webhookFirst = await merchant("webhook-first");
+    const webhookFirstKey = randomUUID();
+    const webhookFirstPrepared = await service.prepareTrialSetup(
+      webhookFirst.userId,
+      webhookFirst.organizationId,
+      trialInput(),
+      request,
+      webhookFirstKey,
+    );
+    markCheckoutSucceeded(state, String(webhookFirstPrepared.checkoutSessionId));
+    const webhookFirstCheckout = state.checkoutById.get(
+      String(webhookFirstPrepared.checkoutSessionId),
+    );
+    if (!webhookFirstCheckout) throw new Error("Checkout Session fixture missing.");
+    nextEvent = checkoutEvent(`evt_webhook_first_${runId}`, webhookFirstCheckout);
+    await expect(
+      service.processWebhook(Buffer.from("webhook-first"), "signature", request),
+    ).resolves.toEqual({
+      received: true,
+      duplicate: false,
+    });
+    await expect(
+      service.processWebhook(Buffer.from("webhook-first"), "signature", request),
+    ).resolves.toEqual({
+      received: true,
+      duplicate: true,
+    });
+    await expect(
+      service.previewTrialSetup(
+        webhookFirst.userId,
+        webhookFirst.organizationId,
+        { checkoutSessionId: webhookFirstCheckout.id },
+        webhookFirstKey,
+      ),
+    ).resolves.toMatchObject({ paymentMethod: { last4: "4242" } });
+
+    const browserFirst = await merchant("browser-first");
+    const browserFirstKey = randomUUID();
+    const browserFirstPrepared = await service.prepareTrialSetup(
+      browserFirst.userId,
+      browserFirst.organizationId,
+      trialInput(),
+      request,
+      browserFirstKey,
+    );
+    markCheckoutSucceeded(state, String(browserFirstPrepared.checkoutSessionId));
+    const browserFirstCheckout = state.checkoutById.get(
+      String(browserFirstPrepared.checkoutSessionId),
+    );
+    if (!browserFirstCheckout) throw new Error("Checkout Session fixture missing.");
+    await expect(
+      service.previewTrialSetup(
+        browserFirst.userId,
+        browserFirst.organizationId,
+        { checkoutSessionId: browserFirstCheckout.id },
+        browserFirstKey,
+      ),
+    ).resolves.toMatchObject({ paymentMethod: { last4: "4242" } });
+    nextEvent = checkoutEvent(`evt_browser_first_${runId}`, browserFirstCheckout);
+    await expect(
+      service.processWebhook(Buffer.from("browser-first"), "signature", request),
+    ).resolves.toEqual({
+      received: true,
+      duplicate: false,
+    });
+    const [webhookFirstCommand, browserFirstCommand] = await Promise.all([
+      prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
+        where: {
+          organizationId_idempotencyKey: {
+            organizationId: webhookFirst.organizationId,
+            idempotencyKey: webhookFirstKey,
+          },
+        },
+      }),
+      prisma.client.checkoutIdempotencyKey.findUniqueOrThrow({
+        where: {
+          organizationId_idempotencyKey: {
+            organizationId: browserFirst.organizationId,
+            idempotencyKey: browserFirstKey,
+          },
+        },
+      }),
+    ]);
+    expect(webhookFirstCommand.status).toBe("SETUP_COMPLETED");
+    expect(browserFirstCommand.status).toBe("SETUP_COMPLETED");
+    expect(state.subscriptionCreateKeys).toEqual([]);
   });
 
   it("creates exactly one authoritative 15-day trial and a zero-dollar invoice", async () => {

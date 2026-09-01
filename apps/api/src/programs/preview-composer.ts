@@ -4,7 +4,6 @@ import {
   directionForCardLocale,
   fontStackForCardLocale,
   type ProgramTemplatePresentation,
-  programPlatformCapabilities,
 } from "@waflo/contracts";
 import { createQrPreviewMarkup } from "@waflo/qr-core";
 import type { StampOutputProfile } from "@waflo/stamp-engine";
@@ -183,6 +182,17 @@ function safeDataImage(value: string | undefined): string {
     : "";
 }
 
+function googleWalletSurfaceColor(hex: string): string {
+  const match = /^#([0-9a-f]{6})$/iu.exec(hex);
+  if (!match?.[1]) return hex;
+  const color = match[1];
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16));
+  const [red = 0, green = 0, blue = 0] = channels;
+  return `#${[red, green + 1, blue + 2]
+    .map((channel) => Math.min(255, Math.max(0, channel)).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 function imageTag(
   value: string | undefined,
   x: number,
@@ -190,12 +200,13 @@ function imageTag(
   width: number,
   height: number,
   radius = 12,
-  fit: "slice" | "meet" = "slice",
+  fit: "slice" | "meet" | "none" = "slice",
 ): string {
   const href = safeDataImage(value);
   if (!href) return "";
   const clipId = `clip-${x}-${y}-${width}-${height}`;
-  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid ${fit}" clip-path="url(#${clipId})"/>`;
+  const preserveAspectRatio = fit === "none" ? "none" : `xMidYMid ${fit}`;
+  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="${preserveAspectRatio}" clip-path="url(#${clipId})"/>`;
 }
 
 function wafloIssuerMark(
@@ -204,11 +215,12 @@ function wafloIssuerMark(
   width: number,
   height: number,
   radius: number,
+  fill = "#E4572E",
 ): string {
   const scale = Math.min(width, height) / 26;
   const insetX = x + (width - 26 * scale) / 2;
   const insetY = y + (height - 26 * scale) / 2;
-  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="#E4572E"/><path d="M${insetX + 5.5 * scale} ${insetY + 6 * scale}l4.5 ${13 * scale} 3.6 ${-6.5 * scale} 3.6 ${6.5 * scale} 4.5 ${-13 * scale}" fill="none" stroke="#fff" stroke-width="${2.3 * scale}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="${fill}"/><path d="M${insetX + 5.5 * scale} ${insetY + 6 * scale}l4.5 ${13 * scale} 3.6 ${-6.5 * scale} 3.6 ${6.5 * scale} 4.5 ${-13 * scale}" fill="none" stroke="#fff" stroke-width="${2.3 * scale}" stroke-linecap="round" stroke-linejoin="round"/>`;
 }
 
 function issuerBrandMark(
@@ -218,10 +230,33 @@ function issuerBrandMark(
   width: number,
   height: number,
   radius: number,
+  fallbackColor = "#E4572E",
 ): string {
   return value
     ? imageTag(value, x, y, width, height, radius, "meet")
-    : wafloIssuerMark(x, y, width, height, radius);
+    : wafloIssuerMark(x, y, width, height, radius, fallbackColor);
+}
+
+/**
+ * Google Wallet presents a supplied mark on a small white native logo plate.
+ * Keep this treatment outside the production hero: the class logo remains the
+ * semantic source, while the plate belongs to the Android card frame.
+ */
+function googleIssuerBrandMark(
+  value: string | undefined,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): string {
+  if (value) return issuerBrandMark(value, x, y, width, height, Math.min(width, height) / 2);
+  // Android's native logo plate holds this issuer mark on its leading optical
+  // edge rather than geometrically centering its compact rectangular asset.
+  const innerWidth = width * 0.7;
+  const innerHeight = height * 0.52;
+  const innerX = x;
+  const innerY = y + height * 0.22;
+  return `<circle cx="${x + width / 2}" cy="${y + height / 2}" r="${Math.min(width, height) / 2}" fill="#FFFFFF"/>${wafloIssuerMark(innerX, innerY, innerWidth, innerHeight, Math.min(innerWidth, innerHeight) * 0.18, "#A03A21")}`;
 }
 
 function qrCode(x: number, y: number, size: number): string {
@@ -246,29 +281,14 @@ function productionArtworkImage(
   width: number,
   height: number,
   radius: number,
+  fit: "meet" | "none" = "meet",
 ): string {
   return artwork?.target === target
-    ? imageTag(artwork.dataUri, x, y, width, height, radius).replace(
+    ? imageTag(artwork.dataUri, x, y, width, height, radius, fit).replace(
         "<image ",
         `<image data-production-wallet-artwork="${target}" `,
       )
     : "";
-}
-
-function croppedProductionArtwork(
-  artwork: DashboardWalletArtwork | undefined,
-  target: DashboardWalletArtwork["target"],
-  source: { x: number; y: number; width: number; height: number },
-  destination: { x: number; y: number; width: number; height: number },
-  radius = 18,
-): string {
-  if (artwork?.target !== target) return "";
-  const href = safeDataImage(artwork.dataUri);
-  if (!href) return "";
-  const clipId = `wallet-artwork-${target.toLowerCase()}-${destination.x}-${destination.y}`;
-  const scale = destination.width / source.width;
-  const expectedHeight = source.height * scale;
-  return `<defs><clipPath id="${clipId}"><rect x="${destination.x}" y="${destination.y}" width="${destination.width}" height="${destination.height}" rx="${radius}"/></clipPath></defs><image data-production-wallet-artwork="${target}" href="${href}" x="${destination.x - source.x * scale}" y="${destination.y - source.y * scale + (destination.height - expectedHeight) / 2}" width="${artwork.width * scale}" height="${artwork.height * scale}" preserveAspectRatio="none" clip-path="url(#${clipId})"/>`;
 }
 
 function composeLegacyCustomer(
@@ -522,258 +542,94 @@ function composeAppleLegacyWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 700;
+  const height = 621;
   const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
   const rtl = directionForCardLocale(canonicalLocale) === "rtl";
   const copy = walletPreviewCopy(canonicalLocale);
-  const textX = rtl ? 392 : 68;
-  const identityX = rtl ? 366 : 96;
-  const countX = rtl ? 62 : 398;
-  const markX = rtl ? 378 : 48;
-  const rewardLines = previewTextLines(input.rewardSummary, rtl ? 25 : 34, 2);
+  const textX = rtl ? 420 : 40;
+  const identityX = rtl ? 374 : 86;
+  const countX = rtl ? 40 : 420;
+  const markX = rtl ? 382 : 38;
+  const rewardLines = previewTextLines(input.rewardSummary, rtl ? 32 : 42, 2);
   const strip = productionArtworkImage(
     input.walletArtwork,
     "APPLE_LEGACY_STRIP",
-    42,
-    136,
-    376,
-    123,
-    16,
+    24,
+    87,
+    412,
+    158.41509433962264,
+    0,
+    // Apple's legacy strip is projected into the full native field; applying
+    // SVG's default `meet` here letterboxes a valid 375×123 production PNG
+    // and makes every stamp vertically too small on the preview.
+    "none",
   );
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple legacy Wallet preview" direction="${rtl ? "rtl" : "ltr"}" data-wallet-provider="APPLE" data-apple-preview-variant="LEGACY" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="legacy-native-fields" data-provider-owned-geometry="true" data-apple-strip-aspect="375:123"><rect width="100%" height="100%" fill="#15171B"/><rect data-apple-front-surface="true" x="24" y="24" width="412" height="652" rx="34" fill="#F9FAFB"/><g data-apple-identity="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, markX, 48, 34, 34, 9)}<text x="${identityX}" y="67" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="800" fill="#202124">${escapeXml(truncate(input.organizationName, 28))}</text><text x="${identityX}" y="86" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="11" font-weight="650" fill="#5F6368">${escapeXml(truncate(input.programName, 36))}</text></g><g data-apple-header-field="stamps"><text x="${countX}" y="59" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" letter-spacing=".8" fill="#5F6368">${copy.stamps}</text><text x="${countX}" y="82" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="850" fill="#202124">${input.progress} / ${input.goal}</text></g><path d="M48 108H412" stroke="#DADCE0"/><g data-apple-progress-strip="true" data-apple-progress-artwork="production-compositor">${strip}</g><g data-apple-secondary-field="reward"><text x="${textX}" y="310" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="10.5" font-weight="850" letter-spacing=".85" fill="#5F6368">${copy.reward.toUpperCase()}</text>${rewardLines.map((line, index) => `<text x="${textX}" y="${337 + index * 22}" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="${index === 0 ? 18 : 16}" font-weight="760" fill="#202124">${escapeXml(line)}</text>`).join("")}<path d="M48 385H412" stroke="#DADCE0"/></g><g data-apple-barcode-region="provider-managed"><rect x="148" y="432" width="164" height="164" rx="16" fill="#FFFFFF" stroke="#E1E4E8"/>${qrCode(148, 432, 164)}</g><metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;secondary:reward;back:member,status,program" data-reward-value="${escapeXml(input.rewardSummary)}">The image uses the production Apple legacy strip compositor. Reward, header count, and QR retain their native Wallet positions.</metadata></svg>`;
-  return { svg, width, height, warnings: [] };
-}
-
-function composeAppleLegacy(
-  input: ProgramPreviewCompositionInput,
-): Omit<ProgramPreviewComposition, "digest"> {
-  if (input.walletArtwork?.target === "APPLE_LEGACY_STRIP") {
-    return composeAppleLegacyWithProductionArtwork(input);
-  }
-  const width = 460;
-  const height = 700;
-  const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
-  const rtl = directionForCardLocale(canonicalLocale) === "rtl";
-  const copy = walletPreviewCopy(canonicalLocale);
-  const direction = rtl ? "rtl" : "ltr";
-  const anchor = "start";
-  const contentX = rtl ? 396 : 62;
-  const topRightX = rtl ? 62 : 398;
-  const rewardLines = previewTextLines(input.rewardSummary, rtl ? 25 : 34, 2);
-  const warnings: ProgramPreviewComposition["warnings"] = [];
-  if (input.programName.length > 32 || input.rewardSummary.length > 64)
-    warnings.push({
-      code: "APPLE_TEXT_LIMIT",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: "Some fields may truncate in an actual Apple Wallet pass.",
-    });
-  if (input.backgroundDataUri)
-    warnings.push({
-      code: "APPLE_BACKGROUND_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: programPlatformCapabilities.APPLE_WALLET.backgroundArtwork.explanation,
-    });
-  if (input.heroDataUri)
-    warnings.push({
-      code: "APPLE_HERO_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: programPlatformCapabilities.APPLE_WALLET.heroArtwork.explanation,
-    });
-  const markX = rtl ? 376 : 48;
-  const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple legacy Wallet preview" direction="${direction}" data-wallet-provider="APPLE" data-apple-preview-variant="LEGACY" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="organization" data-preview-fidelity="legacy-native-fields" data-provider-owned-geometry="true" data-apple-strip-aspect="375:144">`,
-    '<rect width="100%" height="100%" fill="#EEF1F5"/>',
-    `<rect data-apple-front-surface="true" x="24" y="28" width="412" height="644" rx="34" fill="${input.backgroundColor}" stroke="#D7DBE1" stroke-width="1.5"/>`,
-    `<g data-apple-identity="true">${issuerBrandMark(input.merchantBrandLogoDataUri, markX, 52, 34, 34, 9)}<text x="${rtl ? 364 : 94}" y="73" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 28))}</text><text x="${rtl ? 364 : 94}" y="91" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="11" font-weight="600" fill="${input.foregroundColor}" opacity=".58">${escapeXml(truncate(input.programName, 36))}</text></g>`,
-    `<g data-apple-header-field="stamps"><text x="${topRightX}" y="65" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="10.5" font-weight="800" letter-spacing=".8" fill="${input.foregroundColor}" opacity=".62">${copy.stamps}</text><text x="${topRightX}" y="87" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress} / ${input.goal}</text></g>`,
-    `<g data-apple-progress-strip="true" data-apple-progress-artwork="stamps-only"><defs><linearGradient id="legacy-strip-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${input.secondaryColor}" stop-opacity=".12"/><stop offset=".18" stop-color="${input.secondaryColor}" stop-opacity=".035"/><stop offset=".82" stop-color="${input.accentColor}" stop-opacity=".035"/><stop offset="1" stop-color="${input.accentColor}" stop-opacity=".12"/></linearGradient></defs><rect data-apple-strip-safe-area="true" x="38" y="120" width="384" height="152" rx="24" fill="url(#legacy-strip-fade)"/>${stampImage(input.stampSvg, 62, 139, 336, 112)}</g>`,
-    `<g data-apple-secondary-field="reward"><text x="${contentX}" y="315" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10.5" font-weight="800" letter-spacing=".9" fill="${input.foregroundColor}" opacity=".6">${copy.reward.toUpperCase()}</text>${rewardLines.map((line, index) => `<text x="${contentX}" y="${341 + index * 21}" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="${index === 0 ? 18 : 16}" font-weight="750" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g>`,
-    `<path d="M62 388H398" stroke="${input.foregroundColor}" stroke-opacity=".10"/>`,
-    `<g data-apple-barcode-region="provider-managed"><rect x="148" y="440" width="164" height="164" rx="16" fill="#FFFFFF"/>${qrCode(148, 440, 164)}</g>`,
-    `<metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;secondary:reward;back:member,status,program" data-reward-value="${escapeXml(input.rewardSummary)}">The strip contains no text. Reward and stamp progress are native Apple fields; QR is provider-native.</metadata>`,
-    "</svg>",
-  ].join("");
-  return { svg, width, height, warnings };
+  const nativeQr = { x: 151, y: 425, size: 159 };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple legacy Wallet preview" direction="${rtl ? "rtl" : "ltr"}" data-wallet-provider="APPLE" data-apple-preview-variant="LEGACY" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="legacy-production-strip" data-provider-managed-layout="true" data-apple-strip-aspect="375:123"><rect width="100%" height="100%" fill="#15171B"/><rect data-apple-front-surface="true" x="24" y="20" width="412" height="581" rx="16" fill="${input.backgroundColor}"/><g data-apple-identity="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, markX, 31, 40, 40, 10, "#D2603C")}<text x="${identityX}" y="57" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="17" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 48))}</text></g><g data-apple-header-field="stamps"><text x="${countX}" y="41" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="11" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.stamps}</text><text x="${countX}" y="63" text-anchor="${rtl ? "start" : "end"}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="760" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g><g data-apple-progress-strip="true" data-apple-progress-artwork="production-compositor">${strip}</g><g data-apple-secondary-field="reward"><text x="${textX}" y="263" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.reward.toUpperCase()}</text>${rewardLines.map((line, index) => `<text x="${textX}" y="${289 + index * 22}" text-anchor="${rtl ? "end" : "start"}" font-family="Cairo,Arial,sans-serif" font-size="${index === 0 ? 18 : 16}" font-weight="720" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g><g data-apple-barcode-region="provider-managed" data-apple-barcode-source="qr-core"><rect x="${nativeQr.x}" y="${nativeQr.y}" width="${nativeQr.size}" height="${nativeQr.size}" rx="0" fill="#FFFFFF"/>${qrCode(nativeQr.x, nativeQr.y, nativeQr.size)}</g><metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;primary:empty;secondary:reward;back:member,status,program" data-reward-value="${escapeXml(input.rewardSummary)}">The strip is the exact production APPLE_LEGACY_STRIP PNG. Progress and reward use the same Apple field tiers as the issued pass; the native QR uses the shared QR renderer.</metadata></svg>`;
+  return {
+    svg: svg.replace("<svg ", '<svg data-provider-owned-geometry="true" '),
+    width,
+    height,
+    warnings: [],
+  };
 }
 
 function composeApplePosterWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 660;
-  const poster = productionArtworkImage(input.walletArtwork, "APPLE_POSTER", 51, 44, 358, 448, 26);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" data-wallet-provider="APPLE" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-production-compositor" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#15171B"/><rect x="24" y="20" width="412" height="620" rx="34" fill="${input.backgroundColor}" stroke="#32353B" stroke-width="1.5"/><g data-poster-artwork="production-compositor">${poster}</g><g data-poster-native-reserve="true"><path d="M51 516H409" stroke="#FFFFFF" stroke-opacity=".16"/><rect x="51" y="540" width="358" height="72" rx="22" fill="#FFFFFF" fill-opacity=".09"/><path d="M72 575H258" stroke="#FFFFFF" stroke-opacity=".5" stroke-width="5" stroke-linecap="round"/><path d="M72 591H202" stroke="#FFFFFF" stroke-opacity=".24" stroke-width="4" stroke-linecap="round"/></g><metadata data-apple-poster-preview="true">Poster artwork is the exact production Apple Poster compositor output. The lower native reserve remains intentionally visible.</metadata></svg>`;
+  const height = 532;
+  const cardX = 51;
+  const cardY = 20;
+  const cardWidth = 358;
+  const posterHeight = 448;
+  const posterY = 42;
+  const cardHeight = 492;
+  const nativeReserveHeight = cardY + cardHeight - (posterY + posterHeight);
+  const poster = productionArtworkImage(
+    input.walletArtwork,
+    "APPLE_POSTER",
+    cardX,
+    posterY,
+    cardWidth,
+    posterHeight,
+    14,
+  );
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" data-wallet-provider="APPLE" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-production-artwork" data-provider-owned-geometry="true" data-apple-poster-aspect="358:448"><defs><clipPath id="apple-poster-card-clip"><rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="14"/></clipPath><linearGradient id="apple-poster-native-top-material" gradientUnits="userSpaceOnUse" x1="0" y1="${cardY}" x2="0" y2="161"><stop offset="0" stop-color="#000000" stop-opacity=".425"/><stop offset="6%" stop-color="#000000" stop-opacity=".29"/><stop offset="30%" stop-color="#000000" stop-opacity=".23"/><stop offset="90%" stop-color="#000000" stop-opacity=".07"/><stop offset="100%" stop-color="#000000" stop-opacity="0"/></linearGradient></defs><rect width="100%" height="100%" fill="#15171B"/><g clip-path="url(#apple-poster-card-clip)"><rect data-apple-poster-surface="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${input.backgroundColor}"/><g data-poster-artwork="production-compositor">${poster}</g><rect data-apple-native-top-material="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="141" fill="url(#apple-poster-native-top-material)"/><rect data-apple-native-reserve="true" x="${cardX}" y="${posterY + posterHeight}" width="${cardWidth}" height="${nativeReserveHeight}" fill="${input.backgroundColor}"/></g><g data-apple-native-primary-logo="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, 64, 38, 29, 29, 7)}<text x="102" y="58" font-family="Cairo,Arial,sans-serif" font-size="14" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 24))}</text></g><metadata data-apple-poster-preview="true">The complete production APPLE_POSTER PNG is displayed at its native 358 by 448 aspect ratio. The empty lower reserve is Apple-owned continuation only; no dashboard placeholder content is drawn.</metadata></svg>`;
   return { svg, width, height, warnings: [] };
-}
-
-function composeApplePoster(
-  input: ProgramPreviewCompositionInput,
-): Omit<ProgramPreviewComposition, "digest"> {
-  if (input.walletArtwork?.target === "APPLE_POSTER") {
-    return composeApplePosterWithProductionArtwork(input);
-  }
-  const width = 460;
-  const height = 760;
-  const copy = walletPreviewCopy(input.locale);
-  const reward = previewTextLines(input.rewardSummary, 29, 2);
-  const issuer = input.logoDataUri ?? input.merchantBrandLogoDataUri;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" data-wallet-provider="APPLE" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-composition" data-provider-owned-geometry="true"><defs><linearGradient id="poster-surface" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${input.backgroundColor}"/><stop offset="1" stop-color="${input.secondaryColor}" stop-opacity=".38"/></linearGradient><linearGradient id="poster-panel" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#FFFFFF" stop-opacity=".34"/><stop offset="1" stop-color="${input.accentColor}" stop-opacity=".12"/></linearGradient></defs><rect width="100%" height="100%" fill="#E9EDF2"/><rect x="24" y="26" width="412" height="708" rx="34" fill="url(#poster-surface)" stroke="#D4D8DE" stroke-width="1.5"/><g data-poster-identity="true">${issuerBrandMark(issuer, 50, 53, 28, 28, 8)}<text x="88" y="72" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="900" letter-spacing="1.4" fill="${input.foregroundColor}">WAFLO</text><text x="50" y="116" font-family="Cairo,Arial,sans-serif" font-size="24" font-weight="850" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 25))}</text><text x="50" y="139" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="650" fill="${input.foregroundColor}" opacity=".72">${copy.reward} · مكافآت</text></g><g data-poster-counter="true"><rect x="354" y="52" width="56" height="56" rx="18" fill="${input.foregroundColor}"/><text x="382" y="76" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" letter-spacing=".6" fill="#FFFFFF">${copy.stamps}</text><text x="382" y="95" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="17" font-weight="850" fill="#FFFFFF">${input.progress}/${input.goal}</text></g><g data-poster-stamp-panel="true"><rect x="45" y="171" width="370" height="235" rx="28" fill="url(#poster-panel)" stroke="#FFFFFF" stroke-opacity=".35"/>${stampImage(input.stampSvg, 67, 202, 326, 171)}</g><g data-poster-reward-pill="true"><rect x="50" y="432" width="360" height="82" rx="24" fill="#FFFFFF" fill-opacity=".78"/><text x="70" y="458" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="850" letter-spacing=".9" fill="${input.accentColor}">${copy.reward.toUpperCase()}</text>${reward.map((line, index) => `<text x="70" y="${483 + index * 19}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="780" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g><path d="M24 612C112 570 176 690 262 645S379 602 436 642V734H24Z" fill="${input.accentColor}" opacity=".13"/><g data-apple-barcode-region="provider-managed"><rect x="148" y="544" width="164" height="164" rx="16" fill="#FFFFFF"/>${qrCode(148, 544, 164)}</g><metadata data-apple-poster-preview="true">Poster preview shares the production Grid artwork and provider-native QR behavior.</metadata></svg>`;
-  return { svg, width, height, warnings: [] };
-}
-
-function googleProviderTextColor(backgroundColor: string): "#202124" | "#FFFFFF" {
-  const match = /^#([0-9a-f]{6})$/iu.exec(backgroundColor);
-  if (!match?.[1]) return "#202124";
-  const hex = match[1];
-  const channels = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
-  const [red = 255, green = 255, blue = 255] = channels.map((channel) => {
-    const normalized = channel / 255;
-    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
-  return luminance > 0.42 ? "#202124" : "#FFFFFF";
-}
-
-export function composeLegacyGoogleDeprecated(
-  input: ProgramPreviewCompositionInput,
-): Omit<ProgramPreviewComposition, "digest"> {
-  const width = 460;
-  const height = 780;
-  const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
-  const rtl = directionForCardLocale(canonicalLocale) === "rtl";
-  const copy = walletPreviewCopy(canonicalLocale);
-  const direction = rtl ? "rtl" : "ltr";
-  const anchor = "start";
-  const logoX = rtl ? 350 : 48;
-  const previewBadgeX = rtl ? 24 : 316;
-  const previewBadgeCenter = previewBadgeX + 60;
-  const previewOnly = copy.preview;
-  const statusLabel = copy.status;
-  const statusValue = input.progress >= input.goal ? copy.rewardReady : copy.active;
-  const rewardLabel = copy.reward;
-  const barcodeLabel = copy.barcode.replace(/ · .+$/u, "");
-  const warnings: ProgramPreviewComposition["warnings"] = [];
-  if (input.google.title.length > 48 || input.google.subtitle.length > 64)
-    warnings.push({
-      code: "GOOGLE_TEXT_LIMIT",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: "Some fields may truncate in an actual Google Wallet object.",
-    });
-  if (input.backgroundDataUri)
-    warnings.push({
-      code: "GOOGLE_BACKGROUND_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: programPlatformCapabilities.GOOGLE_WALLET.backgroundArtwork.explanation,
-    });
-  if (input.heroDataUri)
-    warnings.push({
-      code: "GOOGLE_HERO_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: programPlatformCapabilities.GOOGLE_WALLET.heroArtwork.explanation,
-    });
-  const logo = issuerBrandMark(input.merchantBrandLogoDataUri, logoX, 70, 60, 60, 30);
-  const issuerX = rtl ? 340 : 118;
-  const providerTextColor = googleProviderTextColor(input.backgroundColor);
-  const titleLines = previewTextLines(input.programName, rtl ? 18 : 27);
-  const titleMarkup = titleLines
-    .map(
-      (line, index) =>
-        `<tspan x="${issuerX}" dy="${index === 0 ? 0 : 22}">${escapeXml(line)}</tspan>`,
-    )
-    .join("");
-  const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812" data-preview-fidelity="provider-approximation" data-provider-owned-geometry="true">`,
-    '<rect width="100%" height="100%" fill="#EEF3FA"/>',
-    `<rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/>`,
-    `<text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text>`,
-    `<rect data-google-card-surface="true" x="24" y="40" width="412" height="716" rx="28" fill="${input.backgroundColor}" stroke="#D2DAE5" stroke-width="2"/>`,
-    `<g data-google-native-title="true">${logo}<text x="${issuerX}" y="89" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="12" font-weight="700" fill="${providerTextColor}" opacity=".72">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="116" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="800" fill="${providerTextColor}">${titleMarkup}</text></g>`,
-    `<g data-google-barcode-region="provider-managed"><rect x="132" y="154" width="196" height="194" rx="18" fill="#FFFFFF" opacity=".98"/>${qrCode(153, 164, 154)}<text x="230" y="336" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text></g>`,
-    `<g data-google-hero-region="true" data-google-hero-artwork-composition="stamps-only">${stampImage(input.stampSvg, 44, 366, 372, 293)}</g>`,
-    `<g data-google-reward-row="true"><text x="${issuerX}" y="690" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="11" font-weight="700" fill="${providerTextColor}" opacity=".72">${escapeXml(rewardLabel)}</text><text x="${issuerX}" y="716" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="15" font-weight="700" fill="${providerTextColor}">${escapeXml(truncate(input.rewardSummary, 44))}</text></g>`,
-    `<metadata data-google-below-fold-fields="true" data-status-label="${escapeXml(statusLabel)}" data-status-value="${escapeXml(statusValue)}" data-reward-label="${escapeXml(rewardLabel)}" data-reward-value="${escapeXml(input.rewardSummary)}">Google Wallet renders the concise localized reward through the class card-row override; status remains in pass details.</metadata>`,
-    "</svg>",
-  ].join("");
-  return { svg, width, height, warnings };
 }
 
 function composeGoogleWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 650;
+  const height = 564;
   const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
   const rtl = directionForCardLocale(canonicalLocale) === "rtl";
-  const logoX = rtl ? 372 : 56;
-  const textX = rtl ? 352 : 108;
+  const logoX = rtl ? 380 : 48;
+  const textX = rtl ? 364 : 96;
   const anchor = rtl ? "end" : "start";
-  // The crop is the compositor's Grid panel only. It deliberately excludes
-  // source-space labels and QR pixels that would be unreadably small here.
-  const gridPanel = croppedProductionArtwork(
+  // Google Wallet displays the complete hero image below its native issuer and
+  // program fields. The compositor owns every pixel inside this image.
+  const hero = productionArtworkImage(
     input.walletArtwork,
     "GOOGLE_HERO",
-    { x: 32, y: 214, width: 968, height: 320 },
-    { x: 55, y: 218, width: 350, height: 116 },
-    20,
+    25.5,
+    220,
+    409,
+    321.7286821705426,
+    0,
   );
-  const title = previewTextLines(input.google.title || input.programName, rtl ? 20 : 30, 2)
+  const titleTextX = rtl ? 418 : 42;
+  const nativeTitleLineGap = 46.5;
+  const title = previewTextLines(truncate(input.programName, 60), rtl ? 18 : 16, 2)
     .map(
       (line, index) =>
-        `<tspan x="${textX}" dy="${index === 0 ? 0 : 28}">${escapeXml(line)}</tspan>`,
+        `<tspan x="${titleTextX}" dy="${index === 0 ? 0 : nativeTitleLineGap}">${escapeXml(line)}</tspan>`,
     )
     .join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" direction="${rtl ? "rtl" : "ltr"}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-production-artwork" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#E9EEF6"/><rect x="30" y="20" width="400" height="610" rx="30" fill="#FFFFFF" stroke="#DADCE0"/><g data-google-native-identity="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, logoX, 51, 36, 36, 10)}<text x="${textX}" y="68" text-anchor="${anchor}" font-family="Google Sans,Arial,sans-serif" font-size="14" font-weight="650" fill="#202124">${escapeXml(truncate(input.organizationName, 30))}</text><path d="M55 108H405" stroke="#E4E7EB"/></g><g data-google-native-title="true"><text x="${textX}" y="151" text-anchor="${anchor}" font-family="Google Sans,Arial,sans-serif" font-size="28" font-weight="750" fill="#202124">${title}</text></g><g data-google-hero-region="true" data-google-hero-artwork-composition="production-compositor-grid-panel">${gridPanel}</g><metadata data-google-below-fold-fields="true" data-reward-value="${escapeXml(input.rewardSummary)}">The dashboard frame uses native Google hierarchy; its image is cropped directly from the production Google Wallet compositor's Grid panel.</metadata></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" direction="${rtl ? "rtl" : "ltr"}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="organization" data-provider-managed-layout="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-full-production-hero" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="24" y="20" width="412" height="524" rx="32" fill="${input.backgroundColor}" stroke="#DADCE0"/><g data-google-native-identity="true">${googleIssuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, logoX, 45, 34, 34)}<text x="${textX}" y="67" text-anchor="${anchor}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="15" font-weight="600" fill="#202124">${escapeXml(truncate(input.organizationName, 60))}</text><path d="M48 98H412" stroke="#E4E7EB"/></g><g data-google-native-title="true"><text x="${titleTextX}" y="143" text-anchor="${anchor}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="35" font-weight="700" fill="#202124">${title}</text></g><g data-google-hero-region="true" data-google-hero-artwork-composition="full-production-compositor">${hero}</g><metadata data-google-provider-payload="true">Native issuer and program fields use the Google class values. The full production GOOGLE_HERO PNG retains its 1032 by 812 aspect ratio without a dashboard crop.</metadata></svg>`;
   return { svg, width, height, warnings: [] };
-}
-
-function composeGoogle(
-  input: ProgramPreviewCompositionInput,
-): Omit<ProgramPreviewComposition, "digest"> {
-  if (input.walletArtwork?.target === "GOOGLE_HERO") {
-    return composeGoogleWithProductionArtwork(input);
-  }
-  const width = 460;
-  const height = 800;
-  const canonicalLocale = canonicalizeCardLocale(input.locale) ?? "en";
-  const rtl = directionForCardLocale(canonicalLocale) === "rtl";
-  const copy = walletPreviewCopy(canonicalLocale);
-  const direction = rtl ? "rtl" : "ltr";
-  const anchor = "start";
-  const logoX = rtl ? 350 : 48;
-  const issuerX = rtl ? 340 : 108;
-  const providerTextColor = googleProviderTextColor(input.backgroundColor);
-  const titleLines = previewTextLines(input.google.title || input.programName, rtl ? 18 : 27);
-  const titleMarkup = titleLines
-    .map(
-      (line, index) =>
-        `<tspan x="${issuerX}" dy="${index === 0 ? 0 : 22}">${escapeXml(line)}</tspan>`,
-    )
-    .join("");
-  const rewardLabel = copy.reward.toUpperCase();
-  const warnings: ProgramPreviewComposition["warnings"] = [];
-  if (input.google.title.length > 48 || input.google.subtitle.length > 64)
-    warnings.push({
-      code: "GOOGLE_TEXT_LIMIT",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: "Some fields may truncate in an actual Google Wallet object.",
-    });
-  const logo = issuerBrandMark(
-    input.logoDataUri ?? input.merchantBrandLogoDataUri,
-    logoX,
-    60,
-    46,
-    46,
-    14,
-  );
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}" data-issuer-brand="organization" data-card-surface-color="${input.backgroundColor}" data-provider-managed-layout="true" data-provider-managed-text-color="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-card" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="33" y="20" width="394" height="748" rx="38" fill="#FFFFFF" stroke="#DADCE0"/><g data-google-card-surface="true"><rect x="45" y="42" width="370" height="696" rx="28" fill="${input.backgroundColor}"/><path d="M45 626C126 570 178 706 272 650S362 590 415 623V738H45Z" fill="${input.secondaryColor}" opacity=".24"/></g><g data-google-native-title="true">${logo}<text x="${issuerX}" y="78" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="11" font-weight="700" fill="${providerTextColor}" opacity=".66">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${issuerX}" y="103" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="19" font-weight="850" fill="${providerTextColor}">${titleMarkup}</text></g><g data-google-counter="true"><rect x="350" y="59" width="45" height="45" rx="14" fill="${input.accentColor}"/><text x="372.5" y="77" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="9" font-weight="800" fill="#FFFFFF">${copy.stamps}</text><text x="372.5" y="94" text-anchor="middle" font-family="Cairo,Arial,sans-serif" font-size="13" font-weight="850" fill="#FFFFFF">${input.progress}/${input.goal}</text></g><g data-google-hero-region="true" data-google-hero-artwork-composition="stamps-only"><rect x="62" y="150" width="336" height="250" rx="24" fill="#FFFFFF" fill-opacity=".48" stroke="#FFFFFF" stroke-opacity=".48"/>${stampImage(input.stampSvg, 83, 186, 294, 178)}</g><g data-google-reward-row="true"><rect x="62" y="426" width="336" height="84" rx="20" fill="#FFFFFF" fill-opacity=".86"/><text x="82" y="453" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="10" font-weight="800" letter-spacing=".85" fill="${input.accentColor}">${escapeXml(rewardLabel)}</text><text x="82" y="480" text-anchor="${anchor}" font-family="Cairo,Arial,sans-serif" font-size="16" font-weight="780" fill="${providerTextColor}">${escapeXml(truncate(input.rewardSummary, 38))}</text></g><g data-google-barcode-region="provider-managed"><rect x="148" y="548" width="164" height="164" rx="16" fill="#FFFFFF"/>${qrCode(148, 548, 164)}</g><metadata data-google-below-fold-fields="true" data-reward-label="${escapeXml(rewardLabel)}" data-reward-value="${escapeXml(input.rewardSummary)}">Google preview uses the same grid artwork and provider-native QR position as the loyalty card.</metadata></svg>`;
-  return { svg, width, height, warnings };
 }
 
 export function composeProgramPreview(
@@ -783,20 +639,42 @@ export function composeProgramPreview(
     input.profile !== "CUSTOMER_WEB" && input.logoDataUri
       ? { ...input, merchantBrandLogoDataUri: input.logoDataUri }
       : input;
+  const requiredArtworkTarget =
+    input.profile === "GOOGLE_WALLET"
+      ? "GOOGLE_HERO"
+      : input.profile === "APPLE_WALLET"
+        ? input.appleWalletVariant === "POSTER"
+          ? "APPLE_POSTER"
+          : "APPLE_LEGACY_STRIP"
+        : undefined;
+  if (requiredArtworkTarget && input.walletArtwork?.target !== requiredArtworkTarget) {
+    throw new Error(
+      `Dashboard ${input.profile} preview requires the production ${requiredArtworkTarget} PNG.`,
+    );
+  }
+  const calibratedProviderInput =
+    providerInput.profile === "GOOGLE_WALLET"
+      ? {
+          ...providerInput,
+          // Google applies the Hero's lifted material color to the entire
+          // native card surface, not only to the generated image.
+          backgroundColor: googleWalletSurfaceColor(providerInput.backgroundColor),
+        }
+      : providerInput;
   const result =
     input.profile === "APPLE_WALLET"
       ? input.appleWalletVariant === "POSTER"
-        ? composeApplePoster(providerInput)
-        : composeAppleLegacy(providerInput)
+        ? composeApplePosterWithProductionArtwork(calibratedProviderInput)
+        : composeAppleLegacyWithProductionArtwork(calibratedProviderInput)
       : input.profile === "GOOGLE_WALLET"
-        ? composeGoogle(providerInput)
-        : composeCustomer(providerInput);
+        ? composeGoogleWithProductionArtwork(calibratedProviderInput)
+        : composeCustomer(calibratedProviderInput);
   let svg = localizeSvgRoot(result.svg, input.locale);
   if (input.profile === "APPLE_WALLET") {
     svg = svg
       .replace(
         'data-wallet-provider="APPLE"',
-        'data-wallet-provider="APPLE" data-barcode-format="QR"',
+        `data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${input.logoDataUri ? "program" : "organization"}"`,
       )
       .replace(
         'data-issuer-brand="organization"',

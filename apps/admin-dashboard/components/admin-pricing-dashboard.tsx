@@ -1,6 +1,7 @@
 "use client";
 
-import { countryOptions, pricingCurrencyOptions, type Locale } from "@waflo/contracts";
+import { pricingCurrencyOptions } from "@waflo/billing";
+import { countryOptions, type Locale } from "@waflo/contracts";
 import { Alert, Button, Modal, SearchableSelect, Skeleton, Toast } from "@waflo/ui";
 import { Globe2, Landmark, Plus, ShieldCheck } from "lucide-react";
 import Link from "next/link";
@@ -512,11 +513,7 @@ function NewMarketDialog({
     label: `${country.name} — ${country.code}`,
     searchText: `${country.name} ${country.code}`,
   }));
-  const currencies = pricingCurrencyOptions(locale).map((option) => ({
-    value: option.code,
-    label: option.label,
-    searchText: `${option.name} ${option.arabicName} ${option.code}`,
-  }));
+  const currencies = pricingCurrencyOptions();
   return (
     <Modal
       open={open}

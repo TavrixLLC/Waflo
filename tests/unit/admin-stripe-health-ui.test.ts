@@ -78,7 +78,7 @@ describe("Admin Stripe Health UI", () => {
   it("formats a zero-decimal currency correctly", () =>
     expect(stripeHealthMoney("1200", "JPY", "en")).toMatch(/1,200/));
   it("formats Arabic money through the shared formatter", () =>
-    expect(stripeHealthMoney("9900", "SAR", "ar")).toContain("ر.س."));
+    expect(stripeHealthMoney("9900", "SAR", "ar")).toContain("⃁"));
   it("does not hard-code USD decimals", () =>
     expect(dashboard).not.toMatch(/toFixed\(2\)|\$\{.*amount/));
   it("renders English copy", () => expect(stripeHealthCopy("en").title).toBe("Stripe health"));

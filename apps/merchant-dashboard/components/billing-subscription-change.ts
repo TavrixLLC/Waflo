@@ -1,3 +1,4 @@
+import { formatCurrencyMinor } from "@waflo/billing";
 import { billingCadences, type BillingCadence, type Locale, type PlanCode } from "@waflo/contracts";
 
 export const subscriptionChangeCadences = billingCadences;
@@ -125,13 +126,7 @@ export function isSubscriptionChangePreviewExpired(
 }
 
 export function formatBillingAmount(minor: string | number, currency: string, locale: Locale) {
-  const language = locale === "ar" ? "ar" : "en-US";
-  const digits =
-    new Intl.NumberFormat(language, { style: "currency", currency }).resolvedOptions()
-      .maximumFractionDigits ?? 2;
-  return new Intl.NumberFormat(language, { style: "currency", currency }).format(
-    Number(minor) / 10 ** digits,
-  );
+  return formatCurrencyMinor(minor, currency, locale === "ar" ? "ar" : "en-US");
 }
 
 export function formatBillingDate(value: string, locale: Locale) {

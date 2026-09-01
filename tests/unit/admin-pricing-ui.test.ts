@@ -72,7 +72,7 @@ describe("Admin Pricing management UI", () => {
   it("formats a zero-decimal currency correctly", () =>
     expect(adminPricingMoney("1200", "JPY", "en")).toMatch(/1,200/));
   it("formats Arabic money through the shared formatter", () =>
-    expect(adminPricingMoney("9900", "SAR", "ar")).toContain("ر.س."));
+    expect(adminPricingMoney("9900", "SAR", "ar")).toContain("⃁"));
   it("does not use hard-coded USD formatting", () =>
     expect(overviewSource + marketSource).not.toMatch(/\$\{.*amount|toFixed\(2\)/));
   it("shows draft state distinctly", () =>

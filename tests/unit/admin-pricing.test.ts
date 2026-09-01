@@ -467,7 +467,7 @@ describe("Admin Pricing API and immutable catalog", () => {
       status: "VALIDATED",
     });
   });
-  it("rejects an unsupported currency before a draft can be persisted", async () => {
+  it("rejects a provider-unsupported currency before it can be persisted as a draft", async () => {
     const { catalog, market } = catalogFixture();
     market.kind = "COUNTRY_OVERRIDE";
     market.configuredCurrency = "ZZZ";

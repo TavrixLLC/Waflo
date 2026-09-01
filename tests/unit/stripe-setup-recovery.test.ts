@@ -108,19 +108,40 @@ describe("Stripe SetupIntent confirmation recovery", () => {
   });
 });
 
-describe("onboarding payment integration", () => {
-  it("uses Checkout Sessions' embedded Payment Element and releases submit loading state", () => {
+describe("onboarding Checkout Session payment integration", () => {
+  it("uses the Checkout Elements state machine and never combines hidden billing fields with defaults", () => {
     const source = readFileSync(
       resolve(process.cwd(), "apps/merchant-dashboard/components/onboarding.tsx"),
       "utf8",
     );
 
     expect(source).toContain("CheckoutElementsProvider");
-    expect(source).toContain("useCheckoutElements");
+    expect(source).toContain("useCheckoutElements()");
     expect(source).toContain("checkoutState.checkout.confirm({");
-    expect(source).toContain("checkoutSessionId");
-    expect(source).not.toContain("stripe.confirmSetup(");
-    expect(source).not.toContain("stripe.retrieveSetupIntent(");
+    expect(source).toContain("!checkoutState.checkout.canConfirm");
+    expect(source).toContain("defaultValues:");
+    expect(source).not.toContain('fields: { billingDetails: "never" }');
+    expect(source).not.toContain("confirmSetup(");
+    expect(source).not.toContain("retrieveSetupIntent(");
     expect(source).toMatch(/finally\s*\{\s*setLoading\(false\);\s*\}/);
+  });
+
+  it("creates a setup-only Checkout Session without line items, invoices, or subscriptions", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "apps/api/src/billing/billing.service.ts"),
+      "utf8",
+    );
+    const prepare = source.slice(
+      source.indexOf("async prepareTrialSetup"),
+      source.indexOf("private async completedTrialCheckoutSession"),
+    );
+    expect(prepare).toContain("stripe.checkout.sessions.create(");
+    expect(prepare).toContain('mode: "setup"');
+    expect(prepare).toContain('ui_mode: "elements"');
+    expect(prepare).toContain('payment_method_types: ["card"]');
+    expect(prepare).not.toContain("line_items:");
+    expect(prepare).not.toContain("invoices.create");
+    expect(prepare).not.toContain("subscriptions.create");
+    expect(prepare).toContain("stripeSessionId: checkoutSession.id");
   });
 });

@@ -726,16 +726,6 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     const payload = {
       plan: "growth",
       cadence: "monthly",
-      billingIdentity: {
-        name: "HTTP Merchant",
-        email: "billing-http@example.test",
-        countryCode: "US",
-        addressLine1: "1 Test Street",
-        addressLine2: null,
-        city: "Austin",
-        region: "TX",
-        postalCode: "78701",
-      },
     };
     for (const item of cases) {
       const response = await app.inject({
@@ -752,10 +742,6 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
   it("replays concurrent embedded payment setup through the HTTP boundary", async () => {
     const replayOwner = await createIdentity("replay-owner");
     const replayOrganizationId = await createOrganization(replayOwner.userId, "replay");
-    await prisma.client.organizationBillingProfile.update({
-      where: { organizationId: replayOrganizationId },
-      data: { billingCountryCode: "US" },
-    });
     const billing = app.get(BillingService);
     const stripe = (
       billing as unknown as {
@@ -770,8 +756,11 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
           };
           checkout: {
             sessions: {
-              create: (...args: never[]) => Promise<{ id: string; client_secret: string }>;
-              retrieve: (...args: never[]) => Promise<{ id: string; client_secret: string }>;
+              create: (...args: never[]) => Promise<{
+                id: string;
+                client_secret: string;
+                status: "open";
+              }>;
             };
           };
           billingPortal: { sessions: { create: (...args: never[]) => Promise<{ url: string }> } };
@@ -789,16 +778,31 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
       currency: "usd",
       recurring: { interval: "month", interval_count: 1 },
     });
-    const checkoutSession = {
-      id: `cs_http_${runId}`,
-      client_secret: `cs_http_${runId}_secret_test`,
-    };
     stripe.checkout.sessions.create = async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
-      return checkoutSession;
+      return {
+        id: `cs_test_http_${runId}`,
+        client_secret: `cs_test_http_${runId}_secret_test`,
+        status: "open" as const,
+      };
     };
-    stripe.checkout.sessions.retrieve = async () => checkoutSession;
     const csrfState = await csrf();
+    const identity = await app.inject({
+      method: "PATCH",
+      url: `/v1/organizations/${replayOrganizationId}/billing/identity`,
+      headers: mutationHeaders(csrfState, replayOwner),
+      payload: {
+        name: "Replay Merchant",
+        email: "replay-billing@example.test",
+        countryCode: "US",
+        addressLine1: "1 Replay Street",
+        addressLine2: null,
+        city: "Austin",
+        region: "TX",
+        postalCode: "78701",
+      },
+    });
+    expect(identity.statusCode).toBe(200);
     const key = randomUUID();
     const [first, second] = await Promise.all(
       [1, 2].map(() =>
@@ -809,16 +813,6 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
           payload: {
             plan: "growth",
             cadence: "monthly",
-            billingIdentity: {
-              name: "Replay Merchant",
-              email: "replay-billing@example.test",
-              countryCode: "US",
-              addressLine1: "1 Replay Street",
-              addressLine2: null,
-              city: "Austin",
-              region: "TX",
-              postalCode: "78701",
-            },
           },
           remoteAddress: "127.0.0.2",
         }),
@@ -828,8 +822,8 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(second.statusCode).toBe(201);
     const firstResult = first.json().data;
     const secondResult = second.json().data;
-    expect(firstResult.checkoutSessionId).toBe(`cs_http_${runId}`);
-    expect(firstResult.clientSecret).toBe(`cs_http_${runId}_secret_test`);
+    expect(firstResult.checkoutSessionId).toBe(`cs_test_http_${runId}`);
+    expect(firstResult.clientSecret).toBe(`cs_test_http_${runId}_secret_test`);
     expect(firstResult.trialDays).toBe(15);
     expect(firstResult).not.toHaveProperty("url");
     expect(secondResult).toMatchObject({

@@ -342,6 +342,11 @@ function motif(
   return `<path d="M${width * 0.7} ${height * 0.045}V${height * 0.17}M${width * 0.8} ${height * 0.045}V${height * 0.2}M${width * 0.9} ${height * 0.045}V${height * 0.16}M${width * 0.67} ${height * 0.08}H${width * 0.96}M${width * 0.69} ${height * 0.15}H${width * 0.96}" fill="none" stroke="${accent}" stroke-width="${Math.max(2, width * 0.005)}" opacity="0.1"/>${includeLowerAccent ? `<rect x="${width * 0.025}" y="${height * 0.77}" width="${width * 0.19}" height="${height * 0.18}" rx="${width * 0.03}" fill="${secondary}" opacity="0.1" transform="rotate(-7 ${width * 0.11} ${height * 0.86})"/>` : ""}`;
 }
 
+/** Approved Google Hero-only ambient geometry; it never changes Grid semantics. */
+function googleHeroMotif(width: number, height: number, accent: string, secondary: string): string {
+  return `<circle cx="${width * 0.84}" cy="${height * 0.2}" r="${width * 0.153}" fill="none" stroke="${accent}" stroke-width="${Math.max(3, width * 0.008)}" opacity="0.12"/><circle cx="${width * 0.123}" cy="${height * 0.845}" r="${width * 0.105}" fill="none" stroke="${secondary}" stroke-width="${Math.max(3, width * 0.008)}" opacity="0.16"/>`;
+}
+
 /** Full-bleed Apple Poster header atmosphere, placed on the final canvas. */
 function applePosterTopAmbientSvg(
   width: number,
@@ -361,6 +366,28 @@ function relativeLuminance(hex: string): number {
     return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
   });
   return 0.2126 * (channels[0] ?? 0) + 0.7152 * (channels[1] ?? 0) + 0.0722 * (channels[2] ?? 0);
+}
+
+/** Matches the slightly warmer native compositing of legacy Store Card strips. */
+function legacyAppleSurfaceColor(hex: string): string {
+  const channels = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)].map((part) =>
+    Number.parseInt(part, 16),
+  );
+  const [red = 0, green = 0, blue = 0] = channels;
+  return `#${[red - 2, green + 1, blue + 2]
+    .map((channel) => Math.min(255, Math.max(0, channel)).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+/** Mirrors the slightly lifted surface created by Google Wallet's Hero image compositor. */
+function googleHeroSurfaceColor(hex: string): string {
+  const channels = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)].map((part) =>
+    Number.parseInt(part, 16),
+  );
+  const [red = 0, green = 0, blue = 0] = channels;
+  return `#${[red, green + 1, blue + 2]
+    .map((channel) => Math.min(255, Math.max(0, channel)).toString(16).padStart(2, "0"))
+    .join("")}`;
 }
 
 function contrastRatio(foreground: string, background: string): number {
@@ -436,16 +463,59 @@ function counterBadgeSvg(
   typeface: string,
 ): string {
   const { accentColor, backgroundColor } = input.theme;
+  const visualRegion = calibratedGoogleHeroCounterRegion(input, region);
   const textColor = input.counterForegroundColor ?? readableTextColor(backgroundColor, accentColor);
   const label = input.locale === "ar" ? "الأختام" : "STAMPS";
   const isArabic = input.locale === "ar";
-  const cx = region.left + region.width / 2;
-  const cy = region.top + region.height / 2;
-  const radius = Math.min(region.width, region.height) / 2;
+  const cx = visualRegion.left + visualRegion.width / 2;
+  const cy = visualRegion.top + visualRegion.height / 2;
+  const radius = Math.min(visualRegion.width, visualRegion.height) / 2;
   const headerScale = input.headerScale ?? 1;
-  const labelSize = (region.width > 150 ? 18 : 10) * headerScale;
-  const valueSize = (region.width > 150 ? 36 : 22) * headerScale;
-  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${region.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (region.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (region.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext" xml:lang="en">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
+  const labelSize = (visualRegion.width > 150 ? 18 : 10) * headerScale;
+  const valueSize = (visualRegion.width > 150 ? 36 : 22) * headerScale;
+  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${visualRegion.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (visualRegion.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (visualRegion.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext" xml:lang="en">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
+}
+
+function calibratedGoogleHeroCounterRegion(
+  input: WalletArtworkCompositionInput,
+  region: WalletArtworkPlacement,
+): WalletArtworkPlacement {
+  return region.width > 150 && !input.applePosterRefinement
+    ? { ...region, left: region.left + 2, top: region.top - 1 }
+    : region;
+}
+
+function calibratedGoogleHeroStampPanelRegion(
+  input: WalletArtworkCompositionInput,
+  region: WalletArtworkPlacement,
+): WalletArtworkPlacement {
+  // Reference registration places the Grid tiles exactly; only the enclosing
+  // Google-owned panel begins four source pixels too low. Keep the tile grid
+  // and its historical artwork untouched while extending the panel upward.
+  return region.width > 500 && !input.applePosterRefinement
+    ? { ...region, top: region.top - 4, height: region.height + 4 }
+    : region;
+}
+
+function calibratedGoogleHeroRewardRegion(
+  input: WalletArtworkCompositionInput,
+  region: WalletArtworkPlacement,
+): WalletArtworkPlacement {
+  return region.width > 500 && !input.applePosterRefinement
+    ? { ...region, top: region.top + 2 }
+    : region;
+}
+
+function calibratedGoogleHeroQrRegion(
+  input: WalletArtworkCompositionInput,
+  region: WalletArtworkPlacement,
+): WalletArtworkPlacement {
+  // Screenshot registration places the full QR plate one source pixel down
+  // and two source pixels right. The credential bytes and QR module geometry
+  // are unchanged.
+  return region.width > 150 && !input.applePosterRefinement
+    ? { ...region, left: region.left + 2, top: region.top + 1 }
+    : region;
 }
 
 function identitySvg(
@@ -455,7 +525,8 @@ function identitySvg(
 ): string {
   const isArabic = input.locale === "ar";
   const isGoogle = region.width > 400;
-  const inset = isGoogle ? 18 : 8;
+  const approvedGoogleHero = isGoogle && !input.applePosterRefinement;
+  const inset = isGoogle ? (approvedGoogleHero ? 15 : 18) : 8;
   const textX = isArabic ? region.left + region.width - inset : region.left + inset;
   // SVG `start` follows the active direction, so it is the visual right edge
   // for Arabic and the visual left edge for English.
@@ -485,7 +556,7 @@ function identitySvg(
         ...titleLines.map((line) =>
           fittedFontSize(
             line,
-            27 * headerScale,
+            (approvedGoogleHero ? 35 : 27) * headerScale,
             16 * headerScale,
             availableWidth,
             containsArabic(line),
@@ -505,16 +576,18 @@ function identitySvg(
       );
   const memberSize = fittedFontSize(
     member,
-    (isGoogle ? 21 : 10.5) * headerScale,
+    (isGoogle ? (approvedGoogleHero ? 22 : 21) : 10.5) * headerScale,
     (isGoogle ? 14 : 7.5) * headerScale,
     availableWidth,
     isArabic,
   );
-  const organizationY = region.top + (isGoogle ? 18 : 11);
-  const titleY = region.top + (isGoogle ? 52 : 33);
+  const organizationY = region.top + (isGoogle ? (approvedGoogleHero ? 17 : 18) : 11);
+  const titleY = region.top + (isGoogle ? (approvedGoogleHero ? 59 : 52) : 33);
   const titleLineGap = isGoogle ? 28 : 18;
-  const memberY = region.top + (isGoogle ? 103 : 70);
-  const markerX = isArabic ? region.left + region.width - 4 : region.left;
+  const memberY = region.top + (isGoogle ? (approvedGoogleHero ? 97 : 103) : 70);
+  const markerX = isArabic
+    ? region.left + region.width - 4
+    : region.left - (approvedGoogleHero ? 4 : 0);
   const clipId = `identity-${region.left}-${region.top}`;
   const title = titleLines
     .map((line, index) => {
@@ -563,6 +636,10 @@ function rewardPanelSvg(
   typeface: string,
 ): string {
   const { accentColor, backgroundColor, foregroundColor, secondaryColor } = input.theme;
+  // Google’s native Hero plate is fractionally wider than its semantic region.
+  // Keep the Poster master untouched; its compact projection already accounts
+  // for that presentation difference.
+  const visualRegion = calibratedGoogleHeroRewardRegion(input, region);
   const eyebrow =
     input.locale === "ar"
       ? input.rewardReady
@@ -572,7 +649,7 @@ function rewardPanelSvg(
         ? "REWARD READY"
         : "REWARD";
   const fallback = input.locale === "ar" ? "مكافأتك القادمة" : "Your next reward";
-  const isGoogle = region.width > 500;
+  const isGoogle = visualRegion.width > 500;
   const isArabic = input.locale === "ar";
   // A slash divides translated reward phrases; it must never create an
   // ellipsized partial English word on the compact calibrated Poster.
@@ -584,23 +661,29 @@ function rewardPanelSvg(
     input.rewardReady ? accentColor : backgroundColor,
   );
   const stroke = input.rewardReady ? backgroundColor : accentColor;
-  const compactApple = !isGoogle && region.height <= 70;
+  const compactApple = !isGoogle && visualRegion.height <= 70;
   const iconSize = isGoogle ? 62 : compactApple ? 22 : 28;
   const horizontalPadding = isGoogle ? 34 : compactApple ? 10 : 14;
-  const iconX = isArabic
+  const defaultIconX = isArabic
     ? region.left + region.width - horizontalPadding - iconSize
     : region.left + horizontalPadding;
-  const iconY = region.top + (region.height - iconSize) / 2;
+  const iconX =
+    visualRegion.left === region.left && visualRegion.width === region.width
+      ? defaultIconX
+      : isArabic
+        ? visualRegion.left + visualRegion.width - horizontalPadding - iconSize
+        : visualRegion.left + horizontalPadding;
+  const iconY = visualRegion.top + (visualRegion.height - iconSize) / 2;
   const textGap = isGoogle ? 30 : compactApple ? 6 : 10;
   const textX = isArabic ? iconX - textGap : iconX + iconSize + textGap;
   // In SVG, `start` follows the active writing direction: it is the right edge
   // for RTL and the left edge for LTR. This keeps Arabic text left of the
   // mirrored right-side gift icon instead of allowing it to grow into the icon.
   const textAnchor = "start";
-  const eyebrowY = region.top + (isGoogle ? 43 : compactApple ? 17 : 26);
-  const bodyY = region.top + (isGoogle ? 82 : compactApple ? 36 : 49);
+  const eyebrowY = visualRegion.top + (isGoogle ? 43 : compactApple ? 17 : 26);
+  const bodyY = visualRegion.top + (isGoogle ? 82 : compactApple ? 36 : 49);
   const availableTextWidth =
-    region.width - horizontalPadding * 2 - iconSize - textGap - (compactApple ? 8 : 18);
+    visualRegion.width - horizontalPadding * 2 - iconSize - textGap - (compactApple ? 8 : 18);
   const bodySize = Math.min(
     ...lines.map((line) =>
       fittedFontSize(
@@ -613,16 +696,16 @@ function rewardPanelSvg(
     ),
   );
   const lineGap = isGoogle ? 34 : compactApple ? 14 : 18;
-  const clipId = `reward-${region.left}-${region.top}`;
+  const clipId = `reward-${visualRegion.left}-${visualRegion.top}`;
   const clipInset = compactApple ? 4 : 8;
-  return `<rect x="${region.left}" y="${region.top + 6}" width="${region.width}" height="${region.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${region.left}" y="${region.top}" width="${region.width}" height="${region.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${region.left + 10}" y="${region.top + clipInset}" width="${region.width - 20}" height="${region.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(eyebrow)}</text>${lines
+  return `<rect x="${visualRegion.left}" y="${visualRegion.top + 6}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${visualRegion.left}" y="${visualRegion.top}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${visualRegion.left + 10}" y="${visualRegion.top + clipInset}" width="${visualRegion.width - 20}" height="${visualRegion.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(eyebrow)}</text>${lines
     .map(
       (line, index) =>
         `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(line)}</text>`,
     )
     .join(
       "",
-    )}</g><circle cx="${isArabic ? region.left + (isGoogle ? 32 : 16) : region.left + region.width - (isGoogle ? 32 : 16)}" cy="${region.top + region.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
+    )}</g><circle cx="${isArabic ? visualRegion.left + (isGoogle ? 32 : 16) : visualRegion.left + visualRegion.width - (isGoogle ? 32 : 16)}" cy="${visualRegion.top + visualRegion.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
 }
 
 function diagonalCornerPanelPath(
@@ -671,6 +754,10 @@ function canvasSvg(
   const logical = walletArtworkDimensions[target];
   const layout = walletArtworkLayouts[target];
   const { backgroundColor, accentColor, secondaryColor } = input.theme;
+  const surfaceBackgroundColor =
+    target === "GOOGLE_HERO" && !input.applePosterRefinement
+      ? googleHeroSurfaceColor(backgroundColor)
+      : backgroundColor;
   const masterPanel =
     target === "GOOGLE_HERO" && input.appleStampPanelInset
       ? {
@@ -678,15 +765,11 @@ function canvasSvg(
           left: layout.stampPanelRegion.left + input.appleStampPanelInset,
           width: layout.stampPanelRegion.width - input.appleStampPanelInset * 2,
         }
-      : layout.stampPanelRegion;
-  const artworkMotif = motif(
-    input.layoutType,
-    logical.width,
-    logical.height,
-    accentColor,
-    secondaryColor,
-    true,
-  );
+      : calibratedGoogleHeroStampPanelRegion(input, layout.stampPanelRegion);
+  const artworkMotif =
+    target === "GOOGLE_HERO" && !input.applePosterRefinement
+      ? googleHeroMotif(logical.width, logical.height, accentColor, secondaryColor)
+      : motif(input.layoutType, logical.width, logical.height, accentColor, secondaryColor, true);
 
   let foreground = "";
   if (target === "APPLE_POSTER") {
@@ -698,9 +781,12 @@ function canvasSvg(
     foreground = `<rect x="5" y="4" width="365" height="115" rx="23" fill="#000000" opacity="0.07" transform="translate(0 2)"/><rect x="5" y="4" width="365" height="115" rx="23" fill="#FFFFFF" opacity="0.5" stroke="${input.rewardReady ? secondaryColor : accentColor}" stroke-width="${input.rewardReady ? 4 : 1.5}" stroke-opacity="${input.rewardReady ? 0.72 : 0.18}"/>`;
   } else {
     const regions = requiredImageFirstRegions(layout);
-    const qrRegion = input.lowerGroupOffsetY
-      ? { ...regions.qrRegion, top: regions.qrRegion.top + input.lowerGroupOffsetY }
-      : regions.qrRegion;
+    const qrRegion = calibratedGoogleHeroQrRegion(
+      input,
+      input.lowerGroupOffsetY
+        ? { ...regions.qrRegion, top: regions.qrRegion.top + input.lowerGroupOffsetY }
+        : regions.qrRegion,
+    );
     foreground = `${imageFirstStampPanelSvg(masterPanel, accentColor, backgroundColor, input.theme.foregroundColor, true)}${qrFrameSvg(qrRegion, accentColor, backgroundColor, true)}`;
   }
 
@@ -716,7 +802,7 @@ function canvasSvg(
   // the same base background at its calibrated cutoff rather than an
   // Apple-only decorative layer.
   const safeReserve = "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><radialGradient id="${ambientId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.18"/><stop offset="100%" stop-color="${secondaryColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${backgroundColor}"/><ellipse cx="${logical.width * 0.79}" cy="${logical.height * 0.18}" rx="${logical.width * 0.23}" ry="${logical.height * 0.19}" fill="url(#${ambientId})" opacity="${baseAmbientOpacity}"/>${refinedCounterAmbient}<path d="M${logical.width * 0.06} ${logical.height * 0.075}C${logical.width * 0.3} ${logical.height * 0.025},${logical.width * 0.56} ${logical.height * 0.13},${logical.width * 0.9} ${logical.height * 0.065}" fill="none" stroke="${secondaryColor}" stroke-width="${Math.max(4, logical.width * 0.012)}" stroke-linecap="round" opacity="${headerCurveOpacity}"/>${artworkMotif}${safeReserve}${foreground}<metadata data-composer="waflo-wallet-artwork-v5" data-target="${target}" data-scale="${scale}" data-source-stamp-digest="${input.stampArtwork.contentDigest}"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><radialGradient id="${ambientId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.18"/><stop offset="100%" stop-color="${secondaryColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${surfaceBackgroundColor}"/><ellipse cx="${logical.width * 0.79}" cy="${logical.height * 0.18}" rx="${logical.width * 0.23}" ry="${logical.height * 0.19}" fill="url(#${ambientId})" opacity="${baseAmbientOpacity}"/>${refinedCounterAmbient}<path d="M${logical.width * 0.06} ${logical.height * 0.075}C${logical.width * 0.3} ${logical.height * 0.025},${logical.width * 0.56} ${logical.height * 0.13},${logical.width * 0.9} ${logical.height * 0.065}" fill="none" stroke="${secondaryColor}" stroke-width="${Math.max(4, logical.width * 0.012)}" stroke-linecap="round" opacity="${headerCurveOpacity}"/>${artworkMotif}${safeReserve}${foreground}<metadata data-composer="waflo-wallet-artwork-v5" data-target="${target}" data-scale="${scale}" data-source-stamp-digest="${input.stampArtwork.contentDigest}"/></svg>`;
 }
 
 function canvasOverlaySvg(
@@ -744,10 +830,10 @@ function canvasOverlaySvg(
     width: region.width * headerScale,
     height: region.height * headerScale,
   });
-  const rewardRegion = input.lowerGroupOffsetY
+  const baseRewardRegion = input.lowerGroupOffsetY
     ? { ...regions.rewardRegion, top: regions.rewardRegion.top + input.lowerGroupOffsetY }
     : regions.rewardRegion;
-  const overlay = `${identitySvg(input, scaleIdentityHeader(regions.identityRegion), typeface)}${counterBadgeSvg(input, scaleHeader(regions.counterBadgeRegion), typeface)}${rewardPanelSvg(input, rewardRegion, typeface)}`;
+  const overlay = `${identitySvg(input, scaleIdentityHeader(regions.identityRegion), typeface)}${counterBadgeSvg(input, scaleHeader(regions.counterBadgeRegion), typeface)}${rewardPanelSvg(input, baseRewardRegion, typeface)}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}">${overlay}</svg>`;
 }
 
@@ -878,10 +964,11 @@ function legacyAppleSurfaceSvg(
 ): string {
   const logical = walletArtworkDimensions.APPLE_LEGACY_STRIP;
   const { backgroundColor, accentColor, secondaryColor } = input.theme;
+  const surfaceBackgroundColor = legacyAppleSurfaceColor(backgroundColor);
   const id = `legacy-surface-${scale}`;
   // This is deliberately a continuous field, not a framed image card: the
   // top/bottom fades let the strip settle into the native Wallet background.
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><linearGradient id="${id}-top" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.16"/><stop offset="42%" stop-color="${secondaryColor}" stop-opacity="0.045"/><stop offset="100%" stop-color="${backgroundColor}" stop-opacity="0"/></linearGradient><linearGradient id="${id}-bottom" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.11"/><stop offset="42%" stop-color="${accentColor}" stop-opacity="0.025"/><stop offset="100%" stop-color="${backgroundColor}" stop-opacity="0"/></linearGradient><radialGradient id="${id}-glow" cx="86%" cy="20%" r="48%"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.13"/><stop offset="100%" stop-color="${accentColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${backgroundColor}"/><rect width="100%" height="100%" fill="url(#${id}-glow)"/><path d="M-8 18C81 3 160 17 243 8S351 4 385 16" fill="none" stroke="${secondaryColor}" stroke-width="1.2" stroke-linecap="round" opacity="0.14"/><path d="M-12 106C78 117 147 104 227 112S334 118 385 101" fill="none" stroke="${accentColor}" stroke-width="1" stroke-linecap="round" opacity="0.11"/><rect width="100%" height="42" fill="url(#${id}-top)"/><rect y="81" width="100%" height="42" fill="url(#${id}-bottom)"/><metadata data-composer="waflo-legacy-apple-strip-v1" data-text="none" data-layout="balanced-wallet-rows"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><linearGradient id="${id}-top" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.16"/><stop offset="42%" stop-color="${secondaryColor}" stop-opacity="0.045"/><stop offset="100%" stop-color="${surfaceBackgroundColor}" stop-opacity="0"/></linearGradient><linearGradient id="${id}-bottom" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.11"/><stop offset="42%" stop-color="${accentColor}" stop-opacity="0.025"/><stop offset="100%" stop-color="${surfaceBackgroundColor}" stop-opacity="0"/></linearGradient><radialGradient id="${id}-glow" cx="86%" cy="20%" r="48%"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.13"/><stop offset="100%" stop-color="${accentColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${surfaceBackgroundColor}"/><rect width="100%" height="100%" fill="url(#${id}-glow)"/><path d="M-8 12C81 0 160 12 243 5S351 2 385 12" fill="none" stroke="${secondaryColor}" stroke-width="1.2" stroke-linecap="round" opacity="0.14"/><path d="M-12 110C78 120 147 106 227 114S334 121 385 105" fill="none" stroke="${accentColor}" stroke-width="1" stroke-linecap="round" opacity="0.11"/><rect width="100%" height="42" fill="url(#${id}-top)"/><rect y="81" width="100%" height="42" fill="url(#${id}-bottom)"/><metadata data-composer="waflo-legacy-apple-strip-v1" data-text="none" data-layout="balanced-wallet-rows"/></svg>`;
 }
 
 async function composeLegacyAppleStripArtwork(
@@ -939,14 +1026,19 @@ async function composeLegacyAppleStripArtwork(
       ),
     ),
   );
+  // Wallet's Legacy strip uses a deliberately wide device projection of the
+  // same preserved square stamp tiles. The source asset remains byte-for-byte
+  // intact; only this final presentation viewport is calibrated.
+  const tileWidth = Math.max(1, Math.round(tileSize * 1.22));
+  const tileHeight = Math.max(1, Math.round(tileSize * 1.06));
   const resizedTiles = await Promise.all(
     tiles.map(async (tile) => ({
       index: tile.index,
       bytes: await sharp(tile.bytes)
         .resize({
-          width: tileSize,
-          height: tileSize,
-          fit: "contain",
+          width: tileWidth,
+          height: tileHeight,
+          fit: "fill",
           withoutEnlargement: false,
           kernel: sharp.kernel.lanczos3,
         })
@@ -954,12 +1046,16 @@ async function composeLegacyAppleStripArtwork(
         .toBuffer(),
     })),
   );
-  const gridHeight = rowCount * tileSize + (rowCount - 1) * gap;
+  // Apple's approved strip holds the row height while opening the horizontal
+  // rhythm. Reusing the same tiles preserves every historic stamp pixel.
+  const horizontalGap = gap + scale;
+  const verticalGap = Math.max(scale, gap - 2 * scale);
+  const gridHeight = rowCount * tileHeight + (rowCount - 1) * verticalGap;
   const top = Math.round(grid.top + (grid.height - gridHeight) / 2);
   const composites: Array<{ input: Buffer; left: number; top: number }> = [];
   let cursor = 0;
   for (const [rowIndex, count] of rows.entries()) {
-    const rowWidth = count * tileSize + (count - 1) * gap;
+    const rowWidth = count * tileWidth + (count - 1) * horizontalGap;
     const left = Math.round(grid.left + (grid.width - rowWidth) / 2);
     for (let column = 0; column < count; column += 1) {
       const tile = resizedTiles[cursor];
@@ -968,17 +1064,25 @@ async function composeLegacyAppleStripArtwork(
       }
       composites.push({
         input: tile.bytes,
-        left: left + column * (tileSize + gap),
-        top: top + rowIndex * (tileSize + gap),
+        left: left + column * (tileWidth + horizontalGap),
+        top: top + rowIndex * (tileHeight + verticalGap),
       });
       cursor += 1;
     }
   }
   const widestRow = Math.max(...rows);
-  const rawWidth = widestRow * tileSize + (widestRow - 1) * gap;
+  const rawWidth = widestRow * tileWidth + (widestRow - 1) * horizontalGap;
   const rawHeight = gridHeight;
-  const reportedHeight = Math.min(rawHeight, Math.round(rawWidth / source.aspectRatio));
-  const reportedWidth = Math.min(rawWidth, Math.round(reportedHeight * source.aspectRatio));
+  const reportedHeight = Math.min(
+    rawHeight,
+    grid.height,
+    Math.round(rawWidth / source.aspectRatio),
+  );
+  const reportedWidth = Math.min(
+    rawWidth,
+    grid.width,
+    Math.round(reportedHeight * source.aspectRatio),
+  );
   // `stampPlacement` reports the visible artwork group rather than transparent
   // stamp viewports. Some historical marks are intentionally tall or narrow,
   // so the source's visible aspect ratio remains the correct contract here.
@@ -1028,9 +1132,17 @@ async function premiumQrArtwork(
 }> {
   const logicalInset = target === "GOOGLE_HERO" ? 14 : 7;
   const inset = logicalInset * scale;
-  const width = frameRegion.width - inset * 2;
-  const left = frameRegion.left + inset;
-  const top = frameRegion.top + inset;
+  const width =
+    frameRegion.width -
+    inset * 2 +
+    (target === "GOOGLE_HERO" && !input.applePosterRefinement ? 5 : 0);
+  // The approved Android capture has an asymmetric physical quiet zone inside
+  // the symmetric visual plate. Keep the code's size and QR encoder exactly
+  // unchanged; only place its already-generated raster in that measured slot.
+  const googlePayloadOffset =
+    target === "GOOGLE_HERO" && !input.applePosterRefinement ? -3 * scale : 0;
+  const left = frameRegion.left + inset + googlePayloadOffset;
+  const top = frameRegion.top + inset + googlePayloadOffset;
   const plain = await createQrPng(input.credentialPayload, {
     width,
     // The surrounding white plate completes the quiet zone, so a one-module
@@ -1135,10 +1247,12 @@ export const googleMasterContentBounds: WalletArtworkPlacement = {
 
 /** One content-group-to-Poster transform; no Apple component has an independent bound. */
 export const applePosterGoogleMasterTransform = {
-  scale: 326 / googleMasterContentBounds.width,
-  translateX: 16,
+  // Affine calibration against the approved iOS 27 Poster: retain the
+  // master’s source-space panel inset, then project the full component group.
+  scale: 353 / googleMasterContentBounds.width,
+  translateX: 2,
   // Keeps the functional group above the empirical Apple safe cutoff.
-  translateY: 45,
+  translateY: 33,
 } as const;
 
 function transformGoogleMasterPlacement(
@@ -1190,7 +1304,7 @@ async function composeApplePosterFromGoogleMaster(
       ...input,
       organizationName: "\u200B",
       counterForegroundColor: "#FFFFFF",
-      headerScale: 1.4,
+      headerScale: 1.3,
       appleStampPanelInset: 18,
       headerOffsetY: -15,
       lowerGroupOffsetY: posterLowerGroupOffsetY,
@@ -1322,6 +1436,9 @@ export async function composeWalletArtwork(
     height: layout.stampRegion.height * scale,
   };
   const stampPanelRegion = {
+    // This contract reports the semantic stamp field. The visually calibrated
+    // Google panel extends upward around it, while the Grid itself remains
+    // centered in this unchanged provider field.
     left: layout.stampPanelRegion.left * scale,
     top: layout.stampPanelRegion.top * scale,
     width: layout.stampPanelRegion.width * scale,
@@ -1349,6 +1466,9 @@ export async function composeWalletArtwork(
   if (qrRegion && target === "GOOGLE_HERO" && input.lowerGroupOffsetY) {
     qrRegion = { ...qrRegion, top: qrRegion.top + input.lowerGroupOffsetY * scale };
   }
+  if (qrRegion && target === "GOOGLE_HERO") {
+    qrRegion = calibratedGoogleHeroQrRegion(input, qrRegion);
+  }
   const qr =
     qrRegion && target === "GOOGLE_HERO"
       ? await premiumQrArtwork(input, target, qrRegion, scale)
@@ -1365,6 +1485,12 @@ export async function composeWalletArtwork(
   await validateWalletArtworkPng({ bytes, target, scale });
   const counterBadgeRegion = scaledPlacement(layout.counterBadgeRegion, scale);
   const rewardRegion = scaledPlacement(layout.rewardRegion, scale);
+  const reportedCounterBadgeRegion = counterBadgeRegion
+    ? calibratedGoogleHeroCounterRegion(input, counterBadgeRegion)
+    : undefined;
+  const reportedRewardRegion = rewardRegion
+    ? calibratedGoogleHeroRewardRegion(input, rewardRegion)
+    : undefined;
   const identityRegion = scaledPlacement(layout.identityRegion, scale);
   return {
     bytes,
@@ -1380,8 +1506,8 @@ export async function composeWalletArtwork(
     stampPanelRegion,
     stampRegion,
     ...(identityRegion ? { identityRegion } : {}),
-    ...(counterBadgeRegion ? { counterBadgeRegion } : {}),
-    ...(rewardRegion ? { rewardRegion } : {}),
+    ...(reportedCounterBadgeRegion ? { counterBadgeRegion: reportedCounterBadgeRegion } : {}),
+    ...(reportedRewardRegion ? { rewardRegion: reportedRewardRegion } : {}),
     ...(qrRegion ? { qrRegion } : {}),
     ...(qr?.centerLogoApplied ? { qrCenterLogoApplied: true } : {}),
   };

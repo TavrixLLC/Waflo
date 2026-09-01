@@ -363,11 +363,15 @@ services:
       <<: *application-build
       target: marketing-web
     environment:
+      API_INTERNAL_URL: http://api:4000
       WAFLO_SERVICE: waflo-marketing
-    networks: [edge]
+    networks: [edge, backend]
     tmpfs:
       - "/tmp:rw,noexec,nosuid,size=64m"
       - "/app/apps/marketing-web/.next/cache:rw,noexec,nosuid,size=64m"
+    depends_on:
+      api:
+        condition: service_healthy
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/en').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 20s

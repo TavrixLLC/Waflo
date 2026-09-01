@@ -2,10 +2,10 @@
 
 import {
   billingCadenceCatalog,
-  catalogSavingsPercentage,
-  formatMoney,
+  formatCurrencyMinor,
+  formatCurrencyMinorRatio,
   planCatalog,
-  type CatalogPricePresentationTerm,
+  publishedCadenceDiscountPercent,
 } from "@waflo/billing";
 import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
 import {
@@ -1312,9 +1312,9 @@ export function PlanCard({
   locale: Locale;
   cadence?: BillingCadence;
   /** A server-authoritative catalog price for merchant billing surfaces. */
-  price?: CatalogPricePresentationTerm | null;
-  /** Published monthly baseline for the same Waflo market and plan. */
-  monthlyPrice?: CatalogPricePresentationTerm | null;
+  price?: { amountMinor: string; currency: string } | null;
+  /** The same plan's monthly term from that exact catalog market. */
+  monthlyPrice?: { amountMinor: string; currency: string } | null;
   /** Existing subscriptions must show the provider preview instead of a catalog estimate. */
   showCatalogPrice?: boolean;
   onSelect?: (plan: PlanCode) => void;
@@ -1329,10 +1329,20 @@ export function PlanCard({
         ? "كل ثلاثة أشهر"
         : "سنوي"
     : cadenceDefinition.label;
-  const billedAmount = price
-    ? formatMoney(BigInt(price.amountMinor), price.currency, locale)
+  const billingMonths = cadence === "monthly" ? 1 : cadence === "quarterly" ? 3 : 12;
+  const localizedLocale = locale === "ar" ? "ar" : "en-US";
+  const discountLabel = price
+    ? publishedCadenceDiscountPercent(
+        monthlyPrice ? { ...monthlyPrice, plan, cadence: "monthly" } : undefined,
+        { ...price, plan, cadence },
+      )
     : null;
-  const discount = catalogSavingsPercentage(monthlyPrice, price);
+  const billedAmount = price
+    ? formatCurrencyMinor(price.amountMinor, price.currency, localizedLocale)
+    : null;
+  const monthlyEquivalent = price
+    ? formatCurrencyMinorRatio(price.amountMinor, billingMonths, price.currency, localizedLocale)
+    : null;
   const count = (value: number | null, singular: string, plural: string, unboundedLabel: string) =>
     value === null ? unboundedLabel : `${value} ${value === 1 ? singular : plural}`;
   const benefits = [
@@ -1375,35 +1385,32 @@ export function PlanCard({
         {selected ? <Badge tone="brand">{copy ? "الخطة المختارة" : "Selected"}</Badge> : null}
       </div>
       {showCatalogPrice ? (
-        <>
-          <p className="wf-plan-card__price">
-            <bdi dir="ltr">{billedAmount ?? "—"}</bdi>
-          </p>
+        price && billedAmount && monthlyEquivalent ? (
+          <>
+            <p className="wf-plan-card__price">
+              <bdi dir="ltr">{monthlyEquivalent}</bdi>
+              <span>/{copy ? "شهر" : "month"}</span>
+            </p>
+            <small className="wf-plan-card__cadence">
+              <bdi dir="ltr">{billedAmount}</bdi> {copy ? "يُحصّل" : "billed"}{" "}
+              {copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}
+            </small>
+          </>
+        ) : (
           <small className="wf-plan-card__cadence">
-            {price ? (
-              <>
-                <bdi dir="ltr">{billedAmount}</bdi> {copy ? "يُحصّل" : "billed"}{" "}
-                {copy ? cadenceLabel : cadenceDefinition.label.toLocaleLowerCase("en-US")}
-              </>
-            ) : copy ? (
-              "التسعير غير متاح حالياً."
-            ) : (
-              "Pricing is currently unavailable."
-            )}
+            {copy ? "السعر الدقيق غير متاح حالياً." : "Exact catalog pricing is unavailable."}
           </small>
-        </>
+        )
       ) : (
         <small className="wf-plan-card__cadence">
           {copy ? "تظهر الأسعار الدقيقة في المعاينة." : "Exact pricing is shown in the preview."}
         </small>
       )}
-      <div className="wf-plan-card__savings-slot">
-        {showCatalogPrice && discount ? (
-          <small className="wf-plan-card__equivalent">
-            {copy ? "وفّر" : "Save"} <bdi dir="ltr">{discount}</bdi>
-          </small>
-        ) : null}
-      </div>
+      {showCatalogPrice && discountLabel ? (
+        <small className="wf-plan-card__equivalent">
+          {copy ? "وفّر" : "Save"} <bdi dir="ltr">{discountLabel}</bdi>
+        </small>
+      ) : null}
       <ul className="wf-plan-card__benefits">
         {benefits.map((benefit) => (
           <li key={benefit}>

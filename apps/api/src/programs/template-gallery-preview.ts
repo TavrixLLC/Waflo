@@ -6,6 +6,10 @@ import {
 } from "@waflo/stamp-engine";
 import { artworkFor } from "./library-artwork.js";
 import { composeProgramPreview, type ProgramPreviewComposition } from "./preview-composer.js";
+import {
+  composeDashboardWalletArtwork,
+  type DashboardWalletArtwork,
+} from "./wallet-preview-artwork.js";
 
 export type TemplateGalleryPreviewProfile = Exclude<StampOutputProfile, "JOIN_PREVIEW">;
 
@@ -25,6 +29,22 @@ const blankPresentation: NonNullable<ProgramTemplateDefinition["presentation"]> 
   titleTreatment: "QUIET",
 };
 
+// Gallery definitions are immutable within a running release. Reuse the same
+// real Wallet compositor result for repeated gallery reads instead of making a
+// second PNG for the same template/profile/locale/presentation. This is kept
+// intentionally local to gallery previews; issued pass artwork is never
+// cached here.
+const walletGalleryPreviewCache = new Map<string, Promise<TemplateGalleryPreview>>();
+
+function walletGalleryPreviewCacheKey(
+  template: ProgramTemplateDefinition,
+  profile: Exclude<TemplateGalleryPreviewProfile, "CUSTOMER_WEB">,
+  locale: "EN" | "AR",
+  presentation: "TEMPLATE" | "BLANK",
+): string {
+  return [template.code, template.version, profile, locale, presentation].join(":");
+}
+
 function requiredArtwork(template: ProgramTemplateDefinition, role: "filled" | "empty"): string {
   const reference = template.artwork[role];
   const artwork = artworkFor(reference);
@@ -38,10 +58,28 @@ function requiredArtwork(template: ProgramTemplateDefinition, role: "filled" | "
 
 export function renderTemplateGalleryPreview(
   template: ProgramTemplateDefinition,
+  profile: "CUSTOMER_WEB",
+  locale: "EN" | "AR",
+  presentation?: "TEMPLATE" | "BLANK",
+): TemplateGalleryPreview;
+export function renderTemplateGalleryPreview(
+  template: ProgramTemplateDefinition,
+  profile: Exclude<TemplateGalleryPreviewProfile, "CUSTOMER_WEB">,
+  locale: "EN" | "AR",
+  presentation?: "TEMPLATE" | "BLANK",
+): Promise<TemplateGalleryPreview>;
+export function renderTemplateGalleryPreview(
+  template: ProgramTemplateDefinition,
+  profile: TemplateGalleryPreviewProfile,
+  locale: "EN" | "AR",
+  presentation?: "TEMPLATE" | "BLANK",
+): TemplateGalleryPreview | Promise<TemplateGalleryPreview>;
+export function renderTemplateGalleryPreview(
+  template: ProgramTemplateDefinition,
   profile: TemplateGalleryPreviewProfile,
   locale: "EN" | "AR",
   presentation: "TEMPLATE" | "BLANK" = "TEMPLATE",
-): TemplateGalleryPreview {
+): TemplateGalleryPreview | Promise<TemplateGalleryPreview> {
   const blank = presentation === "BLANK";
   const translation = blank
     ? locale === "AR"
@@ -137,34 +175,59 @@ export function renderTemplateGalleryPreview(
     rewardLabelVisible: profile === "CUSTOMER_WEB",
   } satisfies StampRenderInput;
   const rendered = renderStampSvg(stampRenderInput);
-  const composed = composeProgramPreview({
+  const compose = (walletArtwork?: DashboardWalletArtwork): TemplateGalleryPreview => {
+    const composed = composeProgramPreview({
+      profile,
+      locale,
+      organizationName: locale === "AR" ? "Ù†Ø´Ø§Ø·Ùƒ Ø§Ù„ØªØ¬Ø§Ø±ÙŠ" : "Your business",
+      programName: translation.programName,
+      shortDescription: translation.shortDescription,
+      rewardSummary: translation.rewardSummary,
+      terms: translation.termsAndConditions,
+      progress,
+      goal,
+      stampSvg: rendered.svg,
+      stampLayout: blank ? "GRID" : template.layout.type,
+      backgroundColor,
+      foregroundColor,
+      accentColor,
+      secondaryColor,
+      identityDataUri: `data:image/svg+xml;base64,${Buffer.from(filledArtwork, "utf8").toString("base64")}`,
+      ...(walletArtwork ? { walletArtwork } : {}),
+      customerWebVariant: blank ? "MINIMAL" : template.customerWeb.variant,
+      ...(blank
+        ? { presentation: blankPresentation }
+        : template.presentation
+          ? { presentation: template.presentation }
+          : {}),
+      apple,
+      google,
+    });
+    return { ...composed, profile, locale, presentation };
+  };
+
+  if (profile === "CUSTOMER_WEB") return compose();
+  const cacheKey = walletGalleryPreviewCacheKey(template, profile, locale, presentation);
+  const cached = walletGalleryPreviewCache.get(cacheKey);
+  if (cached) return cached;
+  const renderedPreview = composeDashboardWalletArtwork({
     profile,
-    locale,
-    organizationName: locale === "AR" ? "نشاطك التجاري" : "Your business",
+    locale: locale === "AR" ? "ar" : "en",
+    renderedStamp: rendered,
+    stampSize: blank ? 44 : template.layout.stampSize,
+    organizationName: locale === "AR" ? "Ù†Ø´Ø§Ø·Ùƒ Ø§Ù„ØªØ¬Ø§Ø±ÙŠ" : "Your business",
     programName: translation.programName,
-    shortDescription: translation.shortDescription,
     rewardSummary: translation.rewardSummary,
-    terms: translation.termsAndConditions,
     progress,
     goal,
-    stampSvg: rendered.svg,
-    stampLayout: blank ? "GRID" : template.layout.type,
     backgroundColor,
     foregroundColor,
     accentColor,
     secondaryColor,
-    identityDataUri: `data:image/svg+xml;base64,${Buffer.from(filledArtwork, "utf8").toString("base64")}`,
-    customerWebVariant: blank ? "MINIMAL" : template.customerWeb.variant,
-    ...(blank
-      ? { presentation: blankPresentation }
-      : template.presentation
-        ? { presentation: template.presentation }
-        : {}),
-    apple,
-    google,
-  });
-
-  return { ...composed, profile, locale, presentation };
+  }).then(compose);
+  walletGalleryPreviewCache.set(cacheKey, renderedPreview);
+  void renderedPreview.catch(() => walletGalleryPreviewCache.delete(cacheKey));
+  return renderedPreview;
 }
 
 export function renderTemplateGalleryThumbnail(
@@ -175,14 +238,19 @@ export function renderTemplateGalleryThumbnail(
   return renderTemplateGalleryPreview(template, "CUSTOMER_WEB", locale, presentation);
 }
 
-export function renderTemplateGalleryPreviews(
+export async function renderTemplateGalleryPreviews(
   template: ProgramTemplateDefinition,
   locale: "EN" | "AR",
   presentation: "TEMPLATE" | "BLANK" = "TEMPLATE",
-): Record<TemplateGalleryPreviewProfile, TemplateGalleryPreview> {
+): Promise<Record<TemplateGalleryPreviewProfile, TemplateGalleryPreview>> {
+  const [customer, apple, google] = await Promise.all([
+    renderTemplateGalleryPreview(template, "CUSTOMER_WEB", locale, presentation),
+    renderTemplateGalleryPreview(template, "APPLE_WALLET", locale, presentation),
+    renderTemplateGalleryPreview(template, "GOOGLE_WALLET", locale, presentation),
+  ]);
   return {
-    CUSTOMER_WEB: renderTemplateGalleryPreview(template, "CUSTOMER_WEB", locale, presentation),
-    APPLE_WALLET: renderTemplateGalleryPreview(template, "APPLE_WALLET", locale, presentation),
-    GOOGLE_WALLET: renderTemplateGalleryPreview(template, "GOOGLE_WALLET", locale, presentation),
+    CUSTOMER_WEB: customer,
+    APPLE_WALLET: apple,
+    GOOGLE_WALLET: google,
   };
 }

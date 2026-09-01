@@ -1,5 +1,5 @@
-import { createNextContentSecurityPolicy } from "@waflo/security";
 import { join } from "node:path";
+import { createNextContentSecurityPolicy } from "@waflo/security";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   async headers() {
     return [
+      // Country-sensitive catalog output is rendered at request time. CDN and
+      // browser caches must not replay one market's prices to another country.
+      {
+        source: "/:locale/pricing",
+        headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }],
+      },
       {
         source: "/(.*)",
         headers: [

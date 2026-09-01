@@ -6,7 +6,7 @@ import {
   useCheckoutElements,
 } from "@stripe/react-stripe-js/checkout";
 import { loadStripe } from "@stripe/stripe-js";
-import { catalogSavingsPercentage, formatMoney } from "@waflo/billing";
+import { formatCurrencyMinor, publishedCadenceDiscountPercent } from "@waflo/billing";
 import { type BillingCadence, countryOptions, type PlanCode } from "@waflo/contracts";
 import {
   contentLocaleForInterface,
@@ -31,7 +31,6 @@ import {
 } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
-import { isOperationTimeoutError, withOperationTimeout } from "../lib/stripe-setup-recovery";
 import {
   LocationAddressFields,
   LocationMapPicker,
@@ -64,6 +63,18 @@ interface TrialSetupResponse {
   currency: string;
   expectedTrialStart: string;
   expectedFirstChargeAt: string;
+}
+
+interface OnboardingCatalogTerm {
+  plan: PlanCode;
+  cadence: BillingCadence;
+  amountMinor: string;
+  currency: string;
+}
+
+interface OnboardingCatalog {
+  marketCode: string;
+  terms: OnboardingCatalogTerm[];
 }
 
 interface TrialPreview {
@@ -99,34 +110,6 @@ interface WizardDraft {
   plan?: PlanCode;
   cadence?: BillingCadence;
   billingIdentity?: BillingIdentityDraft;
-}
-
-interface PublishedCatalogTerm {
-  plan: PlanCode;
-  cadence: BillingCadence;
-  amountMinor: string;
-  currency: string;
-}
-
-interface PublishedCatalog {
-  marketCode: string;
-  terms: PublishedCatalogTerm[];
-}
-
-interface BillingOnboardingSnapshot {
-  catalog: PublishedCatalog;
-  selectedPlan: string;
-  selectedCadence: string;
-  billingIdentity: {
-    name: string | null;
-    email: string | null;
-    countryCode: string | null;
-    addressLine1: string | null;
-    addressLine2: string | null;
-    city: string | null;
-    region: string | null;
-    postalCode: string | null;
-  };
 }
 
 const initialLocationSelection: LocationMapSelection = {
@@ -183,9 +166,6 @@ function localizedError(caught: unknown, copy: OnboardingCopy, fallback: string)
     if (caught.code === "STRIPE_PRICE_CONFIGURATION_MISMATCH") {
       return copy.payment.priceMismatch;
     }
-    if (caught.code === "BILLING_MARKET_RECONFIRMATION_REQUIRED") {
-      return copy.payment.priceMismatch;
-    }
     if (caught.code === "NETWORK_ERROR") {
       return copy.payment.networkError;
     }
@@ -193,8 +173,8 @@ function localizedError(caught: unknown, copy: OnboardingCopy, fallback: string)
   return fallback;
 }
 
-function money(amount: number, currency: string, locale: InterfaceLocale): string {
-  return formatMoney(BigInt(amount), currency, contentLocaleForInterface(locale));
+function money(amount: number, currency: string, locale: InterfaceLocale = "en"): string {
+  return formatCurrencyMinor(BigInt(amount), currency, locale === "ar" ? "ar" : "en");
 }
 
 function dateLabel(value: string, locale: InterfaceLocale): string {
@@ -219,46 +199,19 @@ function formatMessage(template: string, values: Readonly<Record<string, string>
   );
 }
 
+function cadenceDiscountLabel(
+  monthly: OnboardingCatalogTerm | undefined,
+  term: OnboardingCatalogTerm | undefined,
+): string | null {
+  return publishedCadenceDiscountPercent(monthly, term);
+}
+
 function planName(plan: PlanCode, copy: OnboardingCopy): string {
   return plan === "starter"
     ? copy.plan.starterName
     : plan === "growth"
       ? copy.plan.growthName
       : copy.plan.scaleName;
-}
-
-function billingIdentityFromSnapshot(
-  value: BillingOnboardingSnapshot["billingIdentity"],
-): BillingIdentityDraft | null {
-  if (!value.name || !value.email || !value.countryCode || !value.addressLine1 || !value.city) {
-    return null;
-  }
-  return {
-    name: value.name,
-    email: value.email,
-    countryCode: value.countryCode,
-    addressLine1: value.addressLine1,
-    addressLine2: value.addressLine2 ?? "",
-    city: value.city,
-    region: value.region ?? "",
-    postalCode: value.postalCode ?? "",
-  };
-}
-
-function canonicalPlan(value: string): PlanCode | null {
-  return (["starter", "growth", "scale"] as const).includes(
-    value.toLocaleLowerCase("en-US") as PlanCode,
-  )
-    ? (value.toLocaleLowerCase("en-US") as PlanCode)
-    : null;
-}
-
-function canonicalCadence(value: string): BillingCadence | null {
-  return (["monthly", "quarterly", "yearly"] as const).includes(
-    value.toLocaleLowerCase("en-US") as BillingCadence,
-  )
-    ? (value.toLocaleLowerCase("en-US") as BillingCadence)
-    : null;
 }
 
 function OnboardingShell({
@@ -334,7 +287,6 @@ function PlanStep({
   plan,
   cadence,
   catalog,
-  loading,
   onPlan,
   onCadence,
   onContinue,
@@ -342,11 +294,10 @@ function PlanStep({
   locale: InterfaceLocale;
   plan: PlanCode;
   cadence: BillingCadence;
-  catalog: PublishedCatalog | null;
-  loading: boolean;
+  catalog: OnboardingCatalog;
   onPlan: (value: PlanCode) => void;
   onCadence: (value: BillingCadence) => void;
-  onContinue: () => Promise<void>;
+  onContinue: () => void;
 }) {
   const copy = messages[locale].onboarding;
   const planBenefits: Record<PlanCode, string> = {
@@ -359,6 +310,9 @@ function PlanStep({
     growth: copy.plan.growthName,
     scale: copy.plan.scaleName,
   };
+  const terms = new Map(
+    catalog.terms.map((term) => [`${term.plan}:${term.cadence}`, term] as const),
+  );
   return (
     <>
       <div className="onboarding-heading">
@@ -368,8 +322,9 @@ function PlanStep({
       </div>
       <div className="onboarding-cadence" role="radiogroup" aria-label={copy.plan.billingCadence}>
         {(["monthly", "quarterly", "yearly"] as const).map((value) => {
-          const hasPublishedTerms = (["starter", "growth", "scale"] as const).some((candidate) =>
-            catalog?.terms.some((term) => term.plan === candidate && term.cadence === value),
+          const discount = cadenceDiscountLabel(
+            terms.get("growth:monthly"),
+            terms.get(`growth:${value}`),
           );
           return (
             <label key={value} className={cadence === value ? "is-selected" : ""}>
@@ -379,27 +334,25 @@ function PlanStep({
                 name="billingCadence"
                 value={value}
                 checked={cadence === value}
-                disabled={!hasPublishedTerms || loading}
                 onChange={() => onCadence(value)}
               />
               <strong>{cadenceLabel(value, copy)}</strong>
-              <small>{catalog ? catalog.marketCode : copy.payment.opening}</small>
+              {discount ? (
+                <small>
+                  {value === "yearly" ? `${copy.plan.twoMonthsFree} ` : null}
+                  {copy.plan.save} <bdi dir="ltr">{discount}</bdi>
+                </small>
+              ) : null}
             </label>
           );
         })}
       </div>
       <div className="onboarding-plan-grid" role="radiogroup" aria-label={copy.plan.planLabel}>
         {(["starter", "growth", "scale"] as const).map((value) => {
-          const price = catalog?.terms.find(
-            (term) => term.plan === value && term.cadence === cadence,
-          );
-          const monthly = catalog?.terms.find(
-            (term) => term.plan === value && term.cadence === "monthly",
-          );
-          const discount = catalogSavingsPercentage(
-            monthly ? { ...monthly, marketCode: catalog?.marketCode ?? null } : null,
-            price ? { ...price, marketCode: catalog?.marketCode ?? null } : null,
-          );
+          const pricing = terms.get(`${value}:${cadence}`);
+          const monthly = terms.get(`${value}:monthly`);
+          if (!pricing) return null;
+          const discount = cadenceDiscountLabel(monthly, pricing);
           return (
             <label
               key={value}
@@ -411,7 +364,6 @@ function PlanStep({
                 name="plan"
                 value={value}
                 checked={plan === value}
-                disabled={!price || loading}
                 onChange={() => onPlan(value)}
               />
               <span className="onboarding-plan-option__check" aria-hidden="true">
@@ -419,14 +371,12 @@ function PlanStep({
               </span>
               <strong>{planNames[value]}</strong>
               <span className="onboarding-plan-option__price">
-                <bdi dir="ltr">
-                  {price
-                    ? formatMoney(
-                        BigInt(price.amountMinor),
-                        price.currency,
-                        contentLocaleForInterface(locale),
-                      )
-                    : "—"}
+                <bdi>
+                  {formatCurrencyMinor(
+                    BigInt(pricing.amountMinor),
+                    pricing.currency,
+                    locale === "ar" ? "ar" : "en",
+                  )}
                 </bdi>
               </span>
               <small>
@@ -443,9 +393,7 @@ function PlanStep({
         })}
       </div>
       <div className="onboarding-actions">
-        <Button onClick={() => void onContinue()} loading={loading} disabled={!catalog}>
-          {copy.plan.continue}
-        </Button>
+        <Button onClick={onContinue}>{copy.plan.continue}</Button>
       </div>
     </>
   );
@@ -456,89 +404,71 @@ function SecurePaymentForm({
   organizationId,
   billingIdentity,
   billingCommand,
-  checkoutSessionId,
   onReady,
 }: {
   locale: InterfaceLocale;
   organizationId: string;
   billingIdentity: BillingIdentityDraft;
   billingCommand: string;
-  checkoutSessionId: string;
   onReady: (preview: TrialPreview) => void;
 }) {
   const copy = messages[locale].onboarding;
   const checkoutState = useCheckoutElements();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const returnedSessionChecked = useRef(false);
 
-  const loadPreview = useCallback(async () => {
-    const controller = new AbortController();
-    const preview = await withOperationTimeout(
-      apiFetch<TrialPreview>(`/v1/organizations/${organizationId}/billing/trial/preview`, {
-        method: "POST",
-        headers: { "x-idempotency-key": billingCommand },
-        body: JSON.stringify({ checkoutSessionId }),
-        signal: controller.signal,
-      }),
-      15_000,
-      "Trial preview",
-      () => controller.abort(),
-    );
-    onReady(preview);
-  }, [billingCommand, checkoutSessionId, onReady, organizationId]);
+  const loadPreview = useCallback(
+    async (checkoutSessionId: string) => {
+      const preview = await apiFetch<TrialPreview>(
+        `/v1/organizations/${organizationId}/billing/trial/preview`,
+        {
+          method: "POST",
+          headers: { "x-idempotency-key": billingCommand },
+          body: JSON.stringify({ checkoutSessionId }),
+        },
+      );
+      onReady(preview);
+    },
+    [billingCommand, onReady, organizationId],
+  );
 
   useEffect(() => {
-    if (
-      checkoutState.type !== "success" ||
-      returnedSessionChecked.current ||
-      new URLSearchParams(window.location.search).get("checkout_return") !== "1"
-    ) {
-      return;
-    }
-    returnedSessionChecked.current = true;
-    void loadPreview().catch((caught) =>
+    const returnedSessionId = new URLSearchParams(window.location.search).get("session_id");
+    if (!returnedSessionId) return;
+    void loadPreview(returnedSessionId).catch((caught) =>
       setError(localizedError(caught, copy, copy.payment.reviewTrialError)),
     );
-  }, [checkoutState.type, copy, loadPreview]);
+  }, [copy, loadPreview]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (checkoutState.type !== "success" || loading) return;
+    if (checkoutState.type !== "success" || !checkoutState.checkout.canConfirm) return;
     setLoading(true);
     setError("");
     try {
-      const outcome = await withOperationTimeout(
-        checkoutState.checkout.confirm({
-          returnUrl: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}&checkout_return=1`,
-          redirect: "if_required",
-          email: billingIdentity.email,
-          billingAddress: {
-            name: billingIdentity.name,
-            address: {
-              country: billingIdentity.countryCode,
-              line1: billingIdentity.addressLine1,
-              line2: billingIdentity.addressLine2 || null,
-              city: billingIdentity.city,
-              state: billingIdentity.region || null,
-              postal_code: billingIdentity.postalCode || null,
-            },
+      const outcome = await checkoutState.checkout.confirm({
+        returnUrl: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}&session_id=${checkoutState.checkout.id}`,
+        redirect: "if_required",
+        email: billingIdentity.email,
+        billingAddress: {
+          name: billingIdentity.name,
+          address: {
+            country: billingIdentity.countryCode,
+            line1: billingIdentity.addressLine1,
+            ...(billingIdentity.addressLine2 ? { line2: billingIdentity.addressLine2 } : {}),
+            city: billingIdentity.city,
+            ...(billingIdentity.region ? { state: billingIdentity.region } : {}),
+            ...(billingIdentity.postalCode ? { postal_code: billingIdentity.postalCode } : {}),
           },
-        }),
-        25_000,
-        "Stripe card confirmation",
-      );
-      if (outcome.type !== "success") {
+        },
+      });
+      if (outcome.type === "error") {
         setError(outcome.error.message || copy.payment.saveCardError);
         return;
       }
-      await loadPreview();
+      await loadPreview(outcome.session.id);
     } catch (caught) {
-      setError(
-        isOperationTimeoutError(caught)
-          ? copy.payment.networkError
-          : localizedError(caught, copy, copy.payment.reviewTrialError),
-      );
+      setError(localizedError(caught, copy, copy.payment.reviewTrialError));
     } finally {
       setLoading(false);
     }
@@ -552,14 +482,13 @@ function SecurePaymentForm({
         <span>{copy.payment.secureDescription}</span>
       </div>
       <div className="onboarding-payment__element">
-        <PaymentElement
-          options={{
-            layout: "tabs",
-            fields: { billingDetails: "never" },
-          }}
-        />
+        <PaymentElement options={{ layout: "tabs" }} />
       </div>
-      <Button type="submit" loading={loading} disabled={checkoutState.type !== "success"}>
+      <Button
+        type="submit"
+        loading={loading}
+        disabled={loading || checkoutState.type !== "success" || !checkoutState.checkout.canConfirm}
+      >
         {copy.payment.saveAndReview}
       </Button>
     </form>
@@ -583,7 +512,7 @@ export function BusinessOnboarding({
   const [plan, setPlan] = useState<PlanCode>("starter");
   const [cadence, setCadence] = useState<BillingCadence>("monthly");
   const [billingIdentity, setBillingIdentity] = useState<BillingIdentityDraft | null>(null);
-  const [catalog, setCatalog] = useState<PublishedCatalog | null>(null);
+  const [catalog, setCatalog] = useState<OnboardingCatalog | null>(null);
   const [setup, setSetup] = useState<TrialSetupResponse | null>(null);
   const [preview, setPreview] = useState<TrialPreview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -606,6 +535,16 @@ export function BusinessOnboarding({
       countryOptions(contentLocale).map((option) => ({ value: option.code, label: option.name })),
     [contentLocale],
   );
+
+  const loadCatalog = useCallback(async (currentOrganizationId: string) => {
+    const nextCatalog = await apiFetch<OnboardingCatalog>(
+      `/v1/organizations/${currentOrganizationId}/billing/catalog`,
+    );
+    if (!nextCatalog.terms.length) {
+      throw new ApiClientError("PRICING_NOT_PUBLISHED", "Published pricing is unavailable.");
+    }
+    setCatalog(nextCatalog);
+  }, []);
 
   const finishCompletedTrial = useCallback(
     async (currentOrganizationId: string, checkoutSessionId: string, billingCommand: string) => {
@@ -632,7 +571,6 @@ export function BusinessOnboarding({
       currentOrganizationId: string,
       currentPlan: PlanCode,
       currentCadence: BillingCadence,
-      identity: BillingIdentityDraft,
     ) => {
       const billingCommand = sessionCommand(BILLING_COMMAND_KEY);
       const response = await apiFetch<TrialSetupResponse>(
@@ -643,8 +581,6 @@ export function BusinessOnboarding({
           body: JSON.stringify({
             plan: currentPlan,
             cadence: currentCadence,
-            returnLocale: contentLocale,
-            billingIdentity: identity,
           }),
         },
       );
@@ -659,7 +595,7 @@ export function BusinessOnboarding({
         );
         return;
       }
-      if (!response.clientSecret || !response.checkoutSessionId) {
+      if (!response.clientSecret) {
         throw new ApiClientError("BILLING_SETUP_INVALID", copy.payment.setupUnavailable);
       }
       setSetup(response);
@@ -668,20 +604,11 @@ export function BusinessOnboarding({
         organizationId: currentOrganizationId,
         plan: currentPlan,
         cadence: currentCadence,
-        billingIdentity: identity,
         step: 4,
       });
     },
-    [contentLocale, copy.payment.setupUnavailable, finishCompletedTrial],
+    [copy.payment.setupUnavailable, finishCompletedTrial],
   );
-
-  const loadCatalog = useCallback(async (currentOrganizationId: string) => {
-    const billing = await apiFetch<BillingOnboardingSnapshot>(
-      `/v1/organizations/${currentOrganizationId}/billing`,
-    );
-    setCatalog(billing.catalog);
-    return billing;
-  }, []);
 
   useEffect(() => {
     if (resumed.current) return;
@@ -694,52 +621,26 @@ export function BusinessOnboarding({
     setPlan(currentPlan);
     setCadence(currentCadence);
     if (draft.billingIdentity) setBillingIdentity(draft.billingIdentity);
-    if (resumeState === "location_required") {
-      setStep(1);
-      return;
-    }
     if (currentOrganizationId && draft.billingIdentity && (draft.step ?? 2) >= 4) {
       setLoading(true);
-      void preparePayment(currentOrganizationId, currentPlan, currentCadence, draft.billingIdentity)
-        .catch((caught) => {
-          // A billing-country edit invalidates the server-side command on purpose.
-          // Discard the browser key as well so the next explicit plan confirmation
-          // creates a new command for the canonical billing market.
-          if (
-            caught instanceof ApiClientError &&
-            caught.code === "BILLING_MARKET_RECONFIRMATION_REQUIRED"
-          ) {
-            window.sessionStorage.removeItem(BILLING_COMMAND_KEY);
-          }
-          void loadCatalog(currentOrganizationId);
-          setStep(3);
-          setError(localizedError(caught, copy, copy.payment.resumeError));
-        })
-        .finally(() => setLoading(false));
-    } else if (currentOrganizationId) {
-      setLoading(true);
-      void loadCatalog(currentOrganizationId)
-        .then((billing) => {
-          const authoritativeIdentity = billingIdentityFromSnapshot(billing.billingIdentity);
-          if (!authoritativeIdentity || resumeState === "billing_identity_required") {
-            setStep(2);
-            return;
-          }
-          setBillingIdentity(authoritativeIdentity);
-          setPlan(canonicalPlan(billing.selectedPlan) ?? currentPlan);
-          setCadence(canonicalCadence(billing.selectedCadence) ?? currentCadence);
-          // The browser cannot skip billing authority. A saved identity always
-          // returns to the catalog step unless its in-session Checkout command
-          // can be safely resumed above.
-          setStep(3);
-        })
+      void preparePayment(currentOrganizationId, currentPlan, currentCadence)
         .catch((caught) => {
           setStep(2);
           setError(localizedError(caught, copy, copy.payment.resumeError));
         })
         .finally(() => setLoading(false));
+    } else if (currentOrganizationId) {
+      const authoritativeResumeStep =
+        resumeState === "location_required"
+          ? 1
+          : ["payment_method_required", "trial_confirmation_required"].includes(resumeState ?? "")
+            ? 3
+            : resumeState === "billing_identity_required"
+              ? 2
+              : 2;
+      setStep(authoritativeResumeStep as OnboardingStep);
     }
-  }, [copy, initialOrganizationId, loadCatalog, preparePayment, resumeState]);
+  }, [copy, initialOrganizationId, preparePayment, resumeState]);
 
   useEffect(() => {
     if (slug.length < 3) {
@@ -761,7 +662,7 @@ export function BusinessOnboarding({
   }, [copy.organization.urlAvailable, copy.organization.urlUnavailable, slug]);
 
   useEffect(() => {
-    if (!organizationId || step !== 2) return;
+    if (!organizationId || step !== 3) return;
     let active = true;
     void Promise.all([
       apiFetch<{ brandLogoAsset: AssetItem | null }>(`/v1/organizations/${organizationId}`),
@@ -782,6 +683,13 @@ export function BusinessOnboarding({
       active = false;
     };
   }, [copy.logo.loadError, organizationId, step]);
+
+  useEffect(() => {
+    if (!organizationId || step !== 3 || catalog) return;
+    void loadCatalog(organizationId).catch((caught) =>
+      setError(localizedError(caught, copy, copy.payment.priceMissing)),
+    );
+  }, [catalog, copy, loadCatalog, organizationId, step]);
 
   async function updateMerchantLogo(assetId: string | null): Promise<void> {
     if (!organizationId) return;
@@ -892,58 +800,21 @@ export function BusinessOnboarding({
       region: String(form.get("billingRegion") ?? ""),
       postalCode: String(form.get("postalCode") ?? ""),
     };
+    setBillingIdentity(identity);
+    setCatalog(null);
     try {
-      const saved = await apiFetch<{ marketChanged: boolean }>(
-        `/v1/organizations/${organizationId}/billing/identity`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(identity),
-        },
-      );
-      const countryChanged = saved.marketChanged;
-      setBillingIdentity(identity);
-      if (countryChanged) {
-        // The selected terms were for another commercial market. Never carry
-        // them forward silently when a business changes billing country.
-        window.sessionStorage.removeItem(BILLING_COMMAND_KEY);
-        setSetup(null);
-        setPreview(null);
-        setPlan("starter");
-        setCadence("monthly");
-      }
+      await apiFetch(`/v1/organizations/${organizationId}/billing/identity`, {
+        method: "PATCH",
+        body: JSON.stringify(identity),
+      });
+      // Billing details are part of the setup-session fingerprint. A later
+      // edit must not reuse a session prefilling a stale country or address.
+      window.sessionStorage.removeItem(BILLING_COMMAND_KEY);
       await loadCatalog(organizationId);
       setStep(3);
-      writeWizard({
-        organizationId,
-        billingIdentity: identity,
-        plan: countryChanged ? "starter" : plan,
-        cadence: countryChanged ? "monthly" : cadence,
-        step: 3,
-      });
+      writeWizard({ organizationId, plan, cadence, billingIdentity: identity, step: 3 });
     } catch (caught) {
-      setError(localizedError(caught, copy, copy.payment.startSetupError));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function continueFromPlan() {
-    if (!organizationId || !billingIdentity || !catalog) return;
-    const selected = catalog.terms.find((term) => term.plan === plan && term.cadence === cadence);
-    if (!selected) {
-      setError(copy.payment.priceMissing);
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      await apiFetch(`/v1/organizations/${organizationId}/billing/selected-plan`, {
-        method: "PATCH",
-        body: JSON.stringify({ plan, cadence }),
-      });
-      await preparePayment(organizationId, plan, cadence, billingIdentity);
-    } catch (caught) {
-      setError(localizedError(caught, copy, copy.payment.startSetupError));
+      setError(localizedError(caught, copy, copy.billing.continue));
     } finally {
       setLoading(false);
     }
@@ -1073,15 +944,9 @@ export function BusinessOnboarding({
     );
   }
 
-  if (step === 2) {
+  if (step === 3) {
     return (
-      <OnboardingShell locale={locale} step={2}>
-        <div className="onboarding-heading">
-          <span>{copy.billing.step}</span>
-          <h1>{copy.billing.title}</h1>
-          <p>{copy.billing.description}</p>
-        </div>
-        {error ? <Alert tone="danger" title={error} /> : null}
+      <OnboardingShell locale={locale} step={3}>
         <section className="onboarding-logo-panel" aria-labelledby="onboarding-logo-title">
           <div className="onboarding-logo-panel__heading">
             <div>
@@ -1113,7 +978,7 @@ export function BusinessOnboarding({
             type="button"
             variant="ghost"
             onClick={() =>
-              document.getElementById("onboarding-billing-form")?.scrollIntoView({
+              document.getElementById("onboarding-plan-section")?.scrollIntoView({
                 behavior: "smooth",
                 block: "start",
               })
@@ -1122,7 +987,45 @@ export function BusinessOnboarding({
             {copy.logo.skip}
           </Button>
         </section>
-        <form id="onboarding-billing-form" className="onboarding-form" onSubmit={saveBilling}>
+        <div id="onboarding-plan-section">
+          {catalog ? (
+            <PlanStep
+              locale={locale}
+              plan={plan}
+              cadence={cadence}
+              catalog={catalog}
+              onPlan={setPlan}
+              onCadence={setCadence}
+              onContinue={() => {
+                setLoading(true);
+                setError("");
+                void preparePayment(organizationId, plan, cadence)
+                  .catch((caught) =>
+                    setError(localizedError(caught, copy, copy.payment.startSetupError)),
+                  )
+                  .finally(() => setLoading(false));
+              }}
+            />
+          ) : (
+            <div className="onboarding-local-loading" role="status">
+              {copy.payment.opening}
+            </div>
+          )}
+        </div>
+      </OnboardingShell>
+    );
+  }
+
+  if (step === 2) {
+    return (
+      <OnboardingShell locale={locale} step={2}>
+        <div className="onboarding-heading">
+          <span>{copy.billing.step}</span>
+          <h1>{copy.billing.title}</h1>
+          <p>{copy.billing.description}</p>
+        </div>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        <form className="onboarding-form" onSubmit={saveBilling}>
           <div className="dashboard-form__row">
             <FormField label={copy.billing.customerName} required>
               <TextInput
@@ -1198,33 +1101,8 @@ export function BusinessOnboarding({
     );
   }
 
-  if (step === 3) {
-    return (
-      <OnboardingShell locale={locale} step={3}>
-        {error ? <Alert tone="danger" title={error} /> : null}
-        {catalog ? (
-          <PlanStep
-            locale={locale}
-            plan={plan}
-            cadence={cadence}
-            catalog={catalog}
-            loading={loading}
-            onPlan={setPlan}
-            onCadence={setCadence}
-            onContinue={continueFromPlan}
-          />
-        ) : (
-          <div className="onboarding-local-loading" role="status">
-            {copy.payment.opening}
-          </div>
-        )}
-      </OnboardingShell>
-    );
-  }
-
   if (step === 4) {
     const clientSecret = setup?.clientSecret ?? null;
-    const checkoutSessionId = setup?.checkoutSessionId ?? null;
     return (
       <OnboardingShell locale={locale} step={4}>
         <div className="onboarding-heading">
@@ -1233,12 +1111,7 @@ export function BusinessOnboarding({
           <p>{copy.payment.description}</p>
         </div>
         {error ? <Alert tone="danger" title={error} /> : null}
-        {loading ||
-        !setup ||
-        !billingIdentity ||
-        !stripePromise ||
-        !clientSecret ||
-        !checkoutSessionId ? (
+        {loading || !setup || !billingIdentity || !stripePromise || !clientSecret ? (
           <div className="onboarding-local-loading" role="status">
             {copy.payment.opening}
           </div>
@@ -1254,10 +1127,14 @@ export function BusinessOnboarding({
                   address: {
                     country: billingIdentity.countryCode,
                     line1: billingIdentity.addressLine1,
-                    line2: billingIdentity.addressLine2 || null,
+                    ...(billingIdentity.addressLine2
+                      ? { line2: billingIdentity.addressLine2 }
+                      : {}),
                     city: billingIdentity.city,
-                    state: billingIdentity.region || null,
-                    postal_code: billingIdentity.postalCode || null,
+                    ...(billingIdentity.region ? { state: billingIdentity.region } : {}),
+                    ...(billingIdentity.postalCode
+                      ? { postal_code: billingIdentity.postalCode }
+                      : {}),
                   },
                 },
               },
@@ -1292,7 +1169,6 @@ export function BusinessOnboarding({
               organizationId={organizationId}
               billingIdentity={billingIdentity}
               billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
-              checkoutSessionId={checkoutSessionId}
               onReady={(value) => {
                 setPreview(value);
                 setStep(5);

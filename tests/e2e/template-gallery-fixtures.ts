@@ -1,6 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 import { artworkFor } from "../../apps/api/src/programs/library-artwork.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import {
   renderTemplateGalleryPreviews,
   renderTemplateGalleryThumbnail,
@@ -424,7 +425,7 @@ export async function mockTemplateGalleryApi(
     };
   }
 
-  function builderPreview(url: URL) {
+  async function builderPreview(url: URL) {
     if (!storedDraft) return null;
     const locale = canonicalizeCardLocale(url.searchParams.get("locale") ?? "en") ?? "en";
     const requestedProfile = url.searchParams.get("profile");
@@ -432,6 +433,10 @@ export async function mockTemplateGalleryApi(
       requestedProfile === "APPLE_WALLET" || requestedProfile === "GOOGLE_WALLET"
         ? requestedProfile
         : "CUSTOMER_WEB";
+    const appleWalletVariant =
+      profile === "APPLE_WALLET" && url.searchParams.get("appleWalletVariant") === "poster"
+        ? "POSTER"
+        : "LEGACY";
     const translations = storedDraft.translations as Record<string, Record<string, string>>;
     const defaultLocale = canonicalizeCardLocale(String(storedDraft.defaultLocale ?? "en")) ?? "en";
     const content = translations[locale] ?? translations[defaultLocale] ?? translations.en;
@@ -487,6 +492,25 @@ export async function mockTemplateGalleryApi(
       progressLabelVisible: profile === "CUSTOMER_WEB" && Boolean(visual.progressLabelVisible),
       rewardLabelVisible: profile === "CUSTOMER_WEB" && Boolean(visual.rewardLabelVisible),
     });
+    const walletArtwork =
+      profile === "CUSTOMER_WEB"
+        ? undefined
+        : await composeDashboardWalletArtwork({
+            profile,
+            ...(profile === "APPLE_WALLET" ? { appleWalletVariant } : {}),
+            locale,
+            renderedStamp: stamp,
+            stampSize: Number(visual.stampSize),
+            organizationName: locale === "ar" ? "Ù…Ù‚Ù‡Ù‰ Ø§Ù„Ù…Ø¹Ø±Ø¶" : "Gallery Coffee",
+            programName: content.programName,
+            rewardSummary: content.rewardSummary,
+            progress,
+            goal,
+            backgroundColor,
+            foregroundColor,
+            accentColor,
+            secondaryColor,
+          });
     const result = composeProgramPreview({
       profile,
       locale,
@@ -505,6 +529,8 @@ export async function mockTemplateGalleryApi(
       secondaryColor,
       identityDataUri: artworkPreviewUrl(filled.content),
       ...(merchantBrandLogoDataUri ? { merchantBrandLogoDataUri } : {}),
+      ...(profile === "APPLE_WALLET" ? { appleWalletVariant } : {}),
+      ...(walletArtwork ? { walletArtwork } : {}),
       customerWebVariant: visual.customerWebVariant as "CARD" | "MINIMAL" | "HERO",
       ...(blank
         ? {
@@ -645,7 +671,7 @@ export async function mockTemplateGalleryApi(
       const locale = url.searchParams.get("locale") === "AR" ? "AR" : "EN";
       const presentation = url.searchParams.get("presentation") === "BLANK" ? "BLANK" : "TEMPLATE";
       onPreviewRequest?.(templateCode, presentation);
-      await fulfill(route, renderTemplateGalleryPreviews(template, locale, presentation));
+      await fulfill(route, await renderTemplateGalleryPreviews(template, locale, presentation));
       return;
     }
     if (path.endsWith("/programs") && request.method() === "GET") {
@@ -864,7 +890,7 @@ export async function mockTemplateGalleryApi(
         `/v1/organizations/${templateGalleryOrganizationId}/programs/created-program-id/preview` &&
       request.method() === "GET"
     ) {
-      const preview = builderPreview(url);
+      const preview = await builderPreview(url);
       if (!preview) {
         await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
         return;

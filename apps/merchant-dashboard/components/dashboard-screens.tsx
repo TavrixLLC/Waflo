@@ -1,12 +1,16 @@
 "use client";
 
-import {
-  CheckoutElementsProvider,
-  PaymentElement,
-  useCheckoutElements,
-} from "@stripe/react-stripe-js/checkout";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { billingCadenceCatalog, catalogSavingsPercentage, planCatalog } from "@waflo/billing";
+import {
+  billingCadenceCatalog,
+  currencyMinorInputValue,
+  currencyMinorUnitExponent,
+  formatCurrencyMinor,
+  planCatalog,
+  parseCurrencyMajorToMinor,
+  publishedCadenceDiscountPercent,
+} from "@waflo/billing";
 import {
   type BillingCadence,
   countryOptions,
@@ -14,7 +18,7 @@ import {
   type PlanCode,
   timeZoneOptions,
 } from "@waflo/contracts";
-import { type InterfaceLocale, localeRegistry } from "@waflo/i18n";
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import {
   Alert,
   Avatar,
@@ -57,23 +61,23 @@ import { merchantPublicUrl } from "../lib/merchant-public-url";
 import { beginGoogleReauthentication } from "../lib/oauth-reauthentication";
 import { canPersistCatalogSelection } from "./billing-presentation";
 import {
-  type SubscriptionChangePreview as DurableSubscriptionChangePreview,
   formatBillingAmount,
   formatBillingDate as formatSubscriptionChangeDate,
   isSubscriptionChangePreviewExpired,
   subscriptionChangeConfirmationRequest,
   subscriptionChangeErrorKind,
   subscriptionChangePreviewRequest,
+  type SubscriptionChangePreview as DurableSubscriptionChangePreview,
 } from "./billing-subscription-change";
 import type { DashboardSection, MembershipView } from "./dashboard";
+import { ProgramAssetPicker } from "./program-asset-uploader";
+import type { AssetItem, ProgramItem } from "./program-studio-types";
+import { deriveOverviewNextStep } from "./overview-next-step";
 import {
   LocationAddressFields,
   LocationMapPicker,
   type LocationMapSelection,
 } from "./location-map-picker";
-import { deriveOverviewNextStep } from "./overview-next-step";
-import { ProgramAssetPicker } from "./program-asset-uploader";
-import type { AssetItem, ProgramItem } from "./program-studio-types";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiClientError ? error.message : fallback;
@@ -1364,7 +1368,7 @@ interface BillingView {
 
 interface PaymentMethodSetup {
   clientSecret: string;
-  checkoutSessionId: string;
+  setupIntentId: string;
   publishableKey: string;
 }
 
@@ -1380,30 +1384,35 @@ function PaymentMethodReplacementForm({
   onSaved: () => Promise<void>;
 }) {
   const ar = locale === "ar";
-  const checkoutState = useCheckoutElements();
+  const stripe = useStripe();
+  const elements = useElements();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (checkoutState.type !== "success" || saving) return;
+    if (!stripe || !elements) return;
     setSaving(true);
     setError("");
+    const result = await stripe.confirmSetup({
+      elements,
+      confirmParams: {
+        return_url: `${window.location.origin}/${locale}/dashboard/billing`,
+      },
+      redirect: "if_required",
+    });
+    if (result.error || result.setupIntent?.status !== "succeeded") {
+      setError(
+        result.error?.message ??
+          (ar ? "أكمل التحقق من البطاقة للمتابعة." : "Complete card verification to continue."),
+      );
+      setSaving(false);
+      return;
+    }
     try {
-      const result = await checkoutState.checkout.confirm({
-        returnUrl: `${window.location.origin}/${locale}/dashboard/billing?checkout_return=1`,
-        redirect: "if_required",
-      });
-      if (result.type !== "success") {
-        setError(
-          result.error.message ||
-            (ar ? "أكمل التحقق من البطاقة للمتابعة." : "Complete card verification to continue."),
-        );
-        return;
-      }
       await apiFetch(`/v1/organizations/${organizationId}/billing/payment-method/complete`, {
         method: "POST",
         headers: { "x-idempotency-key": commandId },
-        body: JSON.stringify({ checkoutSessionId: checkoutState.checkout.id }),
+        body: JSON.stringify({ setupIntentId: result.setupIntent.id }),
       });
       await onSaved();
     } catch (caught) {
@@ -1421,7 +1430,7 @@ function PaymentMethodReplacementForm({
           : "Stripe securely handles the card details. Waflo never stores the card number or CVC."}
       </p>
       <PaymentElement options={{ layout: "tabs" }} />
-      <Button type="submit" loading={saving} disabled={checkoutState.type !== "success"}>
+      <Button type="submit" loading={saving} disabled={!stripe || !elements}>
         {ar ? "حفظ طريقة الدفع" : "Save payment method"}
       </Button>
     </form>
@@ -1493,10 +1502,7 @@ export function BillingScreen({
         ? ar
           ? "غير متوفر"
           : "Not available"
-        : new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency,
-          }).format(amount / 100),
+        : formatCurrencyMinor(amount, currency, ar ? "ar" : "en-US"),
     [ar],
   );
   const formatRefundReason = useCallback(
@@ -1801,7 +1807,15 @@ export function BillingScreen({
     setRefundSaving(true);
     setError("");
     const form = new FormData(event.currentTarget);
-    const amount = Number(form.get("amount"));
+    const amount = parseCurrencyMajorToMinor(
+      String(form.get("amount") ?? ""),
+      selectedRefundInvoice.currency,
+    );
+    if (!amount) {
+      setError(ar ? "أدخل مبلغاً صالحاً." : "Enter a valid refund amount.");
+      setRefundSaving(false);
+      return;
+    }
     const commandId = globalThis.crypto.randomUUID();
     try {
       await apiFetch(
@@ -1811,7 +1825,7 @@ export function BillingScreen({
           headers: { "x-idempotency-key": commandId },
           body: JSON.stringify({
             reason: String(form.get("reason") ?? "other"),
-            amount: Math.round(amount * 100),
+            amount,
             explanation: String(form.get("explanation") ?? "").trim() || null,
           }),
         },
@@ -2052,10 +2066,7 @@ export function BillingScreen({
                     term.plan === (data.selectedPlan.toLocaleLowerCase("en-US") as PlanCode) &&
                     term.cadence === "monthly",
                 );
-                const discount = catalogSavingsPercentage(
-                  monthly ? { ...monthly, marketCode: data.catalog.marketCode } : null,
-                  pricing ? { ...pricing, marketCode: data.catalog.marketCode } : null,
-                );
+                const discountLabel = publishedCadenceDiscountPercent(monthly, pricing);
                 return (
                   <label
                     className={`billing-cadence-option ${cadence === option ? "billing-cadence-option--selected" : ""}`}
@@ -2076,10 +2087,9 @@ export function BillingScreen({
                     />
                     <span>
                       <strong>{cadenceLabel(option)}</strong>
-                      {discount ? (
+                      {discountLabel ? (
                         <Badge tone="success">
-                          {ar ? "وفّر " : "Save "}
-                          <bdi dir="ltr">{discount}</bdi>
+                          {ar ? `وفّر ${discountLabel}` : `Save ${discountLabel}`}
                         </Badge>
                       ) : null}
                     </span>
@@ -2635,24 +2645,23 @@ export function BillingScreen({
         onClose={() => setPaymentSetup(null)}
       >
         {paymentSetup && paymentStripe ? (
-          <CheckoutElementsProvider
+          <Elements
             stripe={paymentStripe}
             options={{
               clientSecret: paymentSetup.clientSecret,
-              elementsOptions: {
-                appearance: {
-                  theme: "stripe",
-                  variables: {
-                    colorPrimary: "#AE3115",
-                    colorText: "#241916",
-                    colorBackground: "#FFFFFF",
-                    colorDanger: "#C93C2B",
-                    fontFamily: ar
-                      ? "Cairo, system-ui, sans-serif"
-                      : "Manrope, system-ui, sans-serif",
-                    borderRadius: "8px",
-                    spacingUnit: "4px",
-                  },
+              locale: ar ? "ar" : "en",
+              appearance: {
+                theme: "stripe",
+                variables: {
+                  colorPrimary: "#AE3115",
+                  colorText: "#241916",
+                  colorBackground: "#FFFFFF",
+                  colorDanger: "#C93C2B",
+                  fontFamily: ar
+                    ? "Cairo, system-ui, sans-serif"
+                    : "Manrope, system-ui, sans-serif",
+                  borderRadius: "8px",
+                  spacingUnit: "4px",
                 },
               },
             }}
@@ -2666,7 +2675,7 @@ export function BillingScreen({
                 await load();
               }}
             />
-          </CheckoutElementsProvider>
+          </Elements>
         ) : null}
       </Modal>
       <Modal
@@ -2738,10 +2747,18 @@ export function BillingScreen({
               <TextInput
                 name="amount"
                 type="number"
-                min="0.01"
-                max={(selectedRefundInvoice.remainingRefundableAmount / 100).toFixed(2)}
-                step="0.01"
-                defaultValue={(selectedRefundInvoice.remainingRefundableAmount / 100).toFixed(2)}
+                min={currencyMinorUnitExponent(selectedRefundInvoice.currency) === 0 ? "1" : "0.01"}
+                max={currencyMinorInputValue(
+                  selectedRefundInvoice.remainingRefundableAmount,
+                  selectedRefundInvoice.currency,
+                )}
+                step={
+                  currencyMinorUnitExponent(selectedRefundInvoice.currency) === 0 ? "1" : "0.01"
+                }
+                defaultValue={currencyMinorInputValue(
+                  selectedRefundInvoice.remainingRefundableAmount,
+                  selectedRefundInvoice.currency,
+                )}
                 inputMode="decimal"
                 required
               />

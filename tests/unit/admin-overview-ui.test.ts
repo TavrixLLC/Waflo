@@ -133,8 +133,8 @@ describe("Admin Overview analytics UI", () => {
 
   it("formats money with Arabic locale semantics", () => {
     const formatted = formatAdminAnalyticsMoney("9900", "SAR", "ar");
-    expect(formatted).toContain("99.00");
-    expect(formatted).toContain("ر.س.");
+    expect(formatted).toMatch(/[٠-٩]/u);
+    expect(formatted).toContain("⃁");
   });
 
   it("formats count metrics with Arabic locale semantics", () => {

@@ -1,60 +1,73 @@
 "use client";
 
-import {
-  billingCadenceCatalog,
-  catalogSavingsPercentage,
-  formatMoney,
-  type CatalogPricePresentationTerm,
-} from "@waflo/billing";
+import { formatCurrencyMinor, publishedCadenceDiscountPercent } from "@waflo/billing";
 import type { BillingCadence, Locale, PlanCode } from "@waflo/contracts";
-import { PlanCard } from "@waflo/ui";
-import { CreditCard } from "lucide-react";
-import { useState } from "react";
+import { Check, CreditCard } from "lucide-react";
+import { useMemo, useState } from "react";
 
 const cadences: readonly BillingCadence[] = ["monthly", "quarterly", "yearly"];
 const plans: readonly PlanCode[] = ["starter", "growth", "scale"];
 
-export interface PublicPricingCatalog {
-  readonly marketCode: string;
-  readonly currency: string | null;
-  readonly terms: readonly CatalogPricePresentationTerm[];
+export interface MarketingPricingTerm {
+  plan: PlanCode;
+  cadence: BillingCadence;
+  amountMinor: string;
+  currency: string;
 }
 
-function localizedCadence(cadence: BillingCadence, ar: boolean): string {
-  if (!ar) return billingCadenceCatalog[cadence].label;
+export interface MarketingPricingReadModel {
+  market: { code: string; country: string | null; currency: string | null };
+  terms: MarketingPricingTerm[];
+}
+
+function cadenceLabel(cadence: BillingCadence, ar: boolean) {
+  if (!ar)
+    return cadence === "monthly"
+      ? "Monthly"
+      : cadence === "quarterly"
+        ? "Every 3 months"
+        : "Yearly";
   return cadence === "monthly" ? "شهري" : cadence === "quarterly" ? "كل 3 أشهر" : "سنوي";
 }
 
-function cadenceValue(discount: string | null, ar: boolean): string {
-  if (!discount) return ar ? "السعر من الكتالوج المنشور" : "Published catalog price";
-  return ar ? `وفّر ${discount}` : `Save ${discount}`;
+function planLabel(plan: PlanCode) {
+  const labels: Record<PlanCode, string> = { starter: "Starter", growth: "Growth", scale: "Scale" };
+  return labels[plan];
 }
 
-function catalogTerm(
-  catalog: PublicPricingCatalog,
-  plan: PlanCode,
-  cadence: BillingCadence,
-): CatalogPricePresentationTerm | null {
-  const term = catalog.terms.find(
-    (candidate) => candidate.plan === plan && candidate.cadence === cadence,
-  );
-  return term ? { ...term, marketCode: catalog.marketCode } : null;
+function planBenefit(plan: PlanCode, ar: boolean) {
+  const en: Record<PlanCode, string> = {
+    starter: "Everything you need to launch.",
+    growth: "More capacity for a growing team.",
+    scale: "Advanced tools for larger operations.",
+  };
+  return ar ? "ميزات مناسبة لمرحلة نمو أعمالك." : en[plan];
+}
+
+export function cadenceDiscount(
+  monthly: MarketingPricingTerm | undefined,
+  term: MarketingPricingTerm | undefined,
+): string | null {
+  return publishedCadenceDiscountPercent(monthly, term);
 }
 
 export function PricingExplorer({
   locale,
   dashboardUrl,
-  catalog,
+  pricing,
 }: {
   locale: Locale;
   dashboardUrl: string;
-  catalog: PublicPricingCatalog | null;
+  pricing: MarketingPricingReadModel;
 }) {
   const ar = locale === "ar";
   const [cadence, setCadence] = useState<BillingCadence>("yearly");
-  const growthMonthly = catalog ? catalogTerm(catalog, "growth", "monthly") : null;
-  const growthPrice = catalog ? catalogTerm(catalog, "growth", cadence) : null;
-  const growthDiscount = catalogSavingsPercentage(growthMonthly, growthPrice);
+  const terms = useMemo(
+    () => new Map(pricing.terms.map((term) => [`${term.plan}:${term.cadence}`, term] as const)),
+    [pricing.terms],
+  );
+  const localizedAmount = (term: MarketingPricingTerm) =>
+    formatCurrencyMinor(BigInt(term.amountMinor), term.currency, ar ? "ar-SA" : "en-US");
 
   function choosePlan(plan: PlanCode) {
     const target = new URL(`/${locale}/signup`, dashboardUrl);
@@ -80,9 +93,10 @@ export function PricingExplorer({
           aria-label={ar ? "دورة الفوترة" : "Billing cadence"}
         >
           {cadences.map((option) => {
-            const monthly = catalog ? catalogTerm(catalog, "growth", "monthly") : null;
-            const term = catalog ? catalogTerm(catalog, "growth", option) : null;
-            const discount = catalogSavingsPercentage(monthly, term);
+            const discount = cadenceDiscount(
+              terms.get("growth:monthly"),
+              terms.get(`growth:${option}`),
+            );
             return (
               <label
                 key={option}
@@ -96,8 +110,8 @@ export function PricingExplorer({
                   checked={cadence === option}
                   onChange={() => setCadence(option)}
                 />
-                <strong>{localizedCadence(option, ar)}</strong>
-                <small>{cadenceValue(discount, ar)}</small>
+                <strong>{cadenceLabel(option, ar)}</strong>
+                {discount ? <small>{ar ? `وفّر ${discount}` : `Save ${discount}`}</small> : null}
               </label>
             );
           })}
@@ -105,44 +119,39 @@ export function PricingExplorer({
       </div>
 
       <div className="marketing-pricing-explorer__context" aria-live="polite">
-        <span>{cadenceValue(growthDiscount, ar)}</span>
-        {growthPrice ? (
-          <p>
-            {ar ? (
-              <>
-                مثال <bdi dir="ltr">Growth</bdi>:
-              </>
-            ) : (
-              "Growth example:"
-            )}{" "}
-            <bdi dir="ltr">
-              {formatMoney(BigInt(growthPrice.amountMinor), growthPrice.currency, locale)}
-            </bdi>{" "}
-            {ar ? "يُحصّل" : "billed"} {localizedCadence(cadence, ar)}.
-          </p>
-        ) : (
-          <p>
-            {ar
-              ? "لا يتوفر سعر منشور لهذه الوتيرة حالياً."
-              : "A published catalog price is not currently available for this cadence."}
-          </p>
-        )}
+        <span>{ar ? "الأسعار المنشورة لسوقك" : "Published prices for your market"}</span>
       </div>
 
       <div className="marketing-plans">
-        {plans.map((plan) => (
-          <div className="marketing-plan-choice" key={plan}>
-            <PlanCard
-              plan={plan}
-              selected={false}
-              locale={locale}
-              cadence={cadence}
-              price={catalog ? catalogTerm(catalog, plan, cadence) : null}
-              monthlyPrice={catalog ? catalogTerm(catalog, plan, "monthly") : null}
-              onSelect={choosePlan}
-            />
-          </div>
-        ))}
+        {plans.map((plan) => {
+          const term = terms.get(`${plan}:${cadence}`);
+          const monthly = terms.get(`${plan}:monthly`);
+          const discount = cadenceDiscount(monthly, term);
+          if (!term) return null;
+          return (
+            <button
+              className="marketing-plan-choice"
+              key={plan}
+              type="button"
+              onClick={() => choosePlan(plan)}
+            >
+              <span className="marketing-plan-choice__select" aria-hidden="true">
+                <Check size={16} />
+              </span>
+              <strong>{planLabel(plan)}</strong>
+              <span className="marketing-plan-choice__price">
+                <bdi>{localizedAmount(term)}</bdi>
+              </span>
+              <small>{cadenceLabel(cadence, ar)}</small>
+              {discount ? (
+                <small className="marketing-plan-choice__discount">
+                  {ar ? `وفّر ${discount}` : `Save ${discount}`}
+                </small>
+              ) : null}
+              <p>{planBenefit(plan, ar)}</p>
+            </button>
+          );
+        })}
       </div>
 
       <div className="marketing-pricing-cta">
@@ -152,8 +161,8 @@ export function PricingExplorer({
             <strong>{ar ? "15 يوماً مجاناً" : "15 days free"}</strong>
             <span>
               {ar
-                ? "أضف معلومات الفوترة والبطاقة بأمان. لا يتم تحصيل رسوم مقابل حفظ البطاقة اليوم."
-                : "Add billing details and a card securely. Saving a card does not charge you today."}
+                ? "أضف بيانات الفوترة والبطاقة بأمان. لن يتم تحصيل أي مبلغ اليوم."
+                : "Add billing details and a card securely. Nothing is charged today."}
             </span>
           </p>
         </div>

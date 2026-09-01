@@ -312,6 +312,17 @@ export const billingTrialCompleteSchema = z
   })
   .strict();
 
+/** Used only by the existing post-onboarding card replacement flow. */
+export const billingSetupIntentCompleteSchema = z
+  .object({
+    setupIntentId: z
+      .string()
+      .trim()
+      .regex(/^seti_[A-Za-z0-9_]+$/)
+      .max(255),
+  })
+  .strict();
+
 export type BillingIdentityInput = z.infer<typeof billingIdentitySchema>;
 export type BillingTrialSetupInput = z.infer<typeof billingTrialSetupSchema>;
 export type BillingSubscriptionChangeInput = z.infer<typeof billingSubscriptionChangeSchema>;

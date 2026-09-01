@@ -74,6 +74,48 @@ function cleanBillingIdentity(input: BillingIdentityInput) {
   };
 }
 
+function stripeAddress(identity: ReturnType<typeof cleanBillingIdentity>): Stripe.AddressParam {
+  return {
+    ...(identity.addressLine1 ? { line1: identity.addressLine1 } : {}),
+    ...(identity.addressLine2 ? { line2: identity.addressLine2 } : {}),
+    ...(identity.city ? { city: identity.city } : {}),
+    ...(identity.region ? { state: identity.region } : {}),
+    ...(identity.postalCode ? { postal_code: identity.postalCode } : {}),
+    ...(identity.countryCode ? { country: identity.countryCode } : {}),
+  };
+}
+
+function billingIdentityFromProfile(profile: {
+  billingName: string | null;
+  billingEmail: string | null;
+  billingCountryCode: string | null;
+  billingAddressLine1: string | null;
+  billingAddressLine2: string | null;
+  billingCity: string | null;
+  billingRegion: string | null;
+  billingPostalCode: string | null;
+}): ReturnType<typeof cleanBillingIdentity> | null {
+  if (
+    !profile.billingName ||
+    !profile.billingEmail ||
+    !profile.billingCountryCode ||
+    !profile.billingAddressLine1 ||
+    !profile.billingCity
+  ) {
+    return null;
+  }
+  return cleanBillingIdentity({
+    name: profile.billingName,
+    email: profile.billingEmail,
+    countryCode: profile.billingCountryCode,
+    addressLine1: profile.billingAddressLine1,
+    addressLine2: profile.billingAddressLine2,
+    city: profile.billingCity,
+    region: profile.billingRegion,
+    postalCode: profile.billingPostalCode,
+  });
+}
+
 function refundReasonToDb(reason: RefundRequestInput["reason"]) {
   return reason.toUpperCase() as
     | "DUPLICATE_CHARGE"
@@ -820,6 +862,11 @@ export class BillingService {
     };
   }
 
+  async catalogForOnboarding(userId: string, organizationId: string) {
+    await this.tenant.requireMembership(userId, organizationId, "billing.view");
+    return this.pricing.catalogTermsForOrganization(organizationId);
+  }
+
   async prepareTrialSetup(
     userId: string,
     organizationId: string,
@@ -838,7 +885,19 @@ export class BillingService {
       );
     }
 
-    const identity = cleanBillingIdentity(input.billingIdentity);
+    // The payment step is deliberately not an authority for billing identity.
+    // It must always come from the completed, persisted billing-details step.
+    const storedProfile = await this.prisma.client.organizationBillingProfile.findUniqueOrThrow({
+      where: { organizationId },
+    });
+    const identity = billingIdentityFromProfile(storedProfile);
+    if (!identity) {
+      throw new AppError(
+        "BILLING_IDENTITY_REQUIRED",
+        "Complete billing details before setting up a payment method.",
+        HttpStatus.CONFLICT,
+      );
+    }
     const planKey = `${input.plan.toUpperCase()}:${input.cadence.toUpperCase()}`;
     const requestFingerprint = createHash("sha256")
       .update(JSON.stringify({ plan: input.plan, cadence: input.cadence, identity }), "utf8")
@@ -855,13 +914,6 @@ export class BillingService {
       throw new AppError(
         "BILLING_COMMAND_CONFLICT",
         "This billing action was already used with different details.",
-        HttpStatus.CONFLICT,
-      );
-    }
-    if (command?.status === "MARKET_INVALIDATED") {
-      throw new AppError(
-        "BILLING_MARKET_RECONFIRMATION_REQUIRED",
-        "Billing country changed. Reload the published catalog and confirm a plan again.",
         HttpStatus.CONFLICT,
       );
     }
@@ -888,20 +940,20 @@ export class BillingService {
           expectedFirstChargeAt: new Date(expectedTrialStart.getTime() + TRIAL_SECONDS * 1000),
         };
       }
-      if (command.expiresAt && command.expiresAt <= now) {
+      if (command.status === "INVALIDATED" || (command.expiresAt && command.expiresAt <= now)) {
         throw new AppError(
           "BILLING_SETUP_EXPIRED",
-          "This payment setup expired. Start again to continue.",
+          "This payment setup expired because billing details changed. Start again to continue.",
           HttpStatus.GONE,
         );
       }
       if (command.stripeSessionId) {
         const existingSession = await stripe.checkout.sessions.retrieve(command.stripeSessionId);
-        if (!existingSession.client_secret) {
+        if (existingSession.status !== "open" || !existingSession.client_secret) {
           throw new AppError(
-            "STRIPE_CHECKOUT_SESSION_INVALID",
-            "Secure payment setup could not be resumed.",
-            HttpStatus.SERVICE_UNAVAILABLE,
+            "BILLING_SETUP_EXPIRED",
+            "This payment setup expired. Return to billing details and start again.",
+            HttpStatus.GONE,
           );
         }
         const expectedTrialStart = command.createdAt;
@@ -935,17 +987,6 @@ export class BillingService {
       throw new AppError(
         "BILLING_PROFILE_MISSING",
         "Billing setup could not be started.",
-        HttpStatus.CONFLICT,
-      );
-    }
-    // Billing country is the commercial authority. A stale browser request
-    // must not create a setup session for terms selected before the billing
-    // profile changed (for example TR displayed by marketing, then SA saved in
-    // Billing Details).
-    if (profile.billingCountryCode !== identity.countryCode) {
-      throw new AppError(
-        "BILLING_MARKET_RECONFIRMATION_REQUIRED",
-        "Billing country changed. Reload the published catalog and confirm a plan again.",
         HttpStatus.CONFLICT,
       );
     }
@@ -1001,26 +1042,29 @@ export class BillingService {
     );
     const checkoutSession = await stripe.checkout.sessions.create(
       {
-        ui_mode: "elements",
         mode: "setup",
+        ui_mode: "elements",
         customer: customerId,
+        currency: charge.currency.toLowerCase(),
         payment_method_types: ["card"],
-        return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/${input.returnLocale}/onboarding/business?organization=${organizationId}&checkout_return=1`,
+        return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/onboarding/business?organization=${organizationId}&session_id={CHECKOUT_SESSION_ID}`,
+        // Checkout pre-fills these values from the Customer. The browser also
+        // supplies the same canonical values to Checkout's confirm API; no
+        // payment-step data is trusted by Waflo.
+        setup_intent_data: {
+          metadata: {
+            wafloOrganizationId: organizationId,
+            wafloBillingCommandId: command.id,
+          },
+        },
         metadata: {
           wafloOrganizationId: organizationId,
           wafloBillingCommandId: command.id,
           plan: input.plan,
           cadence: input.cadence,
         },
-        setup_intent_data: {
-          metadata: {
-            wafloOrganizationId: organizationId,
-            wafloBillingCommandId: command.id,
-            purpose: "trial_payment_setup",
-          },
-        },
       },
-      { idempotencyKey: `waflo:org:${organizationId}:trial-checkout:${idempotencyKey}` },
+      { idempotencyKey: `waflo:org:${organizationId}:trial-setup:${idempotencyKey}` },
     );
     if (!checkoutSession.client_secret) {
       throw new AppError(
@@ -1058,36 +1102,70 @@ export class BillingService {
     };
   }
 
-  private async completedCheckoutSessionPaymentMethod(
-    checkoutSessionId: string,
-    expected: {
+  private async completedTrialCheckoutSession(
+    command: {
+      id: string;
       organizationId: string;
-      customerId: string;
-      billingCommandId?: string;
-      purpose?: string;
-      idempotencyKeyHash?: string;
+      stripeCustomerId: string | null;
+      stripeSessionId: string | null;
+      status: string;
+      expiresAt: Date | null;
     },
-  ): Promise<{ setupIntentId: string; paymentMethod: Stripe.PaymentMethod }> {
-    const stripe = this.requireStripe();
-    const session = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+    checkoutSessionId: string,
+  ): Promise<{
+    customerId: string;
+    paymentMethod: Stripe.PaymentMethod & {
+      card: NonNullable<Stripe.PaymentMethod["card"]>;
+    };
+  }> {
+    if (
+      command.status === "INVALIDATED" ||
+      (command.expiresAt !== null && command.expiresAt <= new Date())
+    ) {
+      throw new AppError(
+        "BILLING_SETUP_EXPIRED",
+        "This payment setup expired because billing details changed. Start again to continue.",
+        HttpStatus.GONE,
+      );
+    }
+    if (!command.stripeSessionId || command.stripeSessionId !== checkoutSessionId) {
+      throw new AppError(
+        "BILLING_SETUP_INVALID",
+        "This payment setup is invalid or has expired.",
+        HttpStatus.GONE,
+      );
+    }
+    const session = await this.requireStripe().checkout.sessions.retrieve(checkoutSessionId, {
+      expand: ["setup_intent.payment_method"],
+    });
+    const setupIntent =
+      typeof session.setup_intent === "string"
+        ? await this.requireStripe().setupIntents.retrieve(session.setup_intent, {
+            expand: ["payment_method"],
+          })
+        : session.setup_intent;
     const customerId =
       typeof session.customer === "string"
         ? session.customer
         : session.customer && !session.customer.deleted
           ? session.customer.id
           : null;
+    const paymentMethod =
+      typeof setupIntent?.payment_method === "string"
+        ? await this.requireStripe().paymentMethods.retrieve(setupIntent.payment_method)
+        : setupIntent?.payment_method;
     if (
       session.mode !== "setup" ||
       session.ui_mode !== "elements" ||
       session.status !== "complete" ||
+      session.metadata?.wafloOrganizationId !== command.organizationId ||
+      session.metadata?.wafloBillingCommandId !== command.id ||
       !customerId ||
-      customerId !== expected.customerId ||
-      session.metadata?.wafloOrganizationId !== expected.organizationId ||
-      (expected.billingCommandId &&
-        session.metadata?.wafloBillingCommandId !== expected.billingCommandId) ||
-      (expected.purpose && session.metadata?.purpose !== expected.purpose) ||
-      (expected.idempotencyKeyHash &&
-        session.metadata?.wafloCommandKeyHash !== expected.idempotencyKeyHash)
+      customerId !== command.stripeCustomerId ||
+      !paymentMethod ||
+      paymentMethod.type !== "card" ||
+      !paymentMethod.card ||
+      (typeof paymentMethod.customer === "string" && paymentMethod.customer !== customerId)
     ) {
       throw new AppError(
         "PAYMENT_METHOD_REQUIRED",
@@ -1095,57 +1173,11 @@ export class BillingService {
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
-    const setupIntentId =
-      typeof session.setup_intent === "string" ? session.setup_intent : session.setup_intent?.id;
-    if (!setupIntentId) {
-      throw new AppError(
-        "STRIPE_CHECKOUT_SESSION_INVALID",
-        "The secure payment setup did not create a payment method.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    const setupIntent = await stripe.setupIntents.retrieve(setupIntentId, {
-      expand: ["payment_method"],
-    });
-    const paymentMethod =
-      typeof setupIntent.payment_method === "string"
-        ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
-        : setupIntent.payment_method;
-    const paymentMethodCustomerId =
-      typeof paymentMethod?.customer === "string"
-        ? paymentMethod.customer
-        : paymentMethod?.customer && !paymentMethod.customer.deleted
-          ? paymentMethod.customer.id
-          : null;
-    if (
-      setupIntent.status !== "succeeded" ||
-      !paymentMethod ||
-      paymentMethod.type !== "card" ||
-      !paymentMethod.card ||
-      paymentMethodCustomerId !== customerId
-    ) {
-      throw new AppError(
-        "PAYMENT_METHOD_REQUIRED",
-        "A valid card is required before continuing.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-    return { setupIntentId, paymentMethod };
-  }
-
-  private cardPresentation(paymentMethod: Stripe.PaymentMethod) {
-    if (paymentMethod.type !== "card" || !paymentMethod.card) {
-      throw new AppError(
-        "PAYMENT_METHOD_REQUIRED",
-        "A valid card is required before continuing.",
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
     return {
-      brand: paymentMethod.card.brand,
-      last4: paymentMethod.card.last4,
-      expMonth: paymentMethod.card.exp_month,
-      expYear: paymentMethod.card.exp_year,
+      customerId,
+      paymentMethod: paymentMethod as Stripe.PaymentMethod & {
+        card: NonNullable<Stripe.PaymentMethod["card"]>;
+      },
     };
   }
 
@@ -1157,19 +1189,23 @@ export class BillingService {
     idempotencyKey: string,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
-    const stripe = this.requireStripe();
     const command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
       where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
     });
-    if (
-      !command ||
-      command.stripeSessionId !== input.checkoutSessionId ||
-      !command.stripeCustomerId ||
-      !["SETUP_PENDING", "SETUP_SUCCEEDED", "SUBSCRIPTION_CREATED"].includes(command.status)
-    ) {
+    if (!command) {
       throw new AppError(
         "BILLING_SETUP_INVALID",
         "This payment setup is invalid or has expired.",
+        HttpStatus.GONE,
+      );
+    }
+    if (
+      command.status === "INVALIDATED" ||
+      (command.expiresAt && command.expiresAt <= new Date())
+    ) {
+      throw new AppError(
+        "BILLING_SETUP_EXPIRED",
+        "This payment setup expired because billing details changed. Start again to continue.",
         HttpStatus.GONE,
       );
     }
@@ -1184,18 +1220,13 @@ export class BillingService {
     }
     const resolvedPrice = await this.catalogPriceForOrganization(organizationId, plan, cadence);
     const priceId = resolvedPrice.stripePriceId;
+    const stripe = this.requireStripe();
     const price = await stripe.prices.retrieve(priceId);
     const charge = this.assertCatalogPrice(price, resolvedPrice);
-
-    const { setupIntentId, paymentMethod } = await this.completedCheckoutSessionPaymentMethod(
+    const { customerId, paymentMethod } = await this.completedTrialCheckoutSession(
+      command,
       input.checkoutSessionId,
-      {
-        organizationId,
-        customerId: command.stripeCustomerId,
-        billingCommandId: command.id,
-      },
     );
-    const customerId = command.stripeCustomerId;
 
     await stripe.customers.update(customerId, {
       invoice_settings: { default_payment_method: paymentMethod.id },
@@ -1348,7 +1379,6 @@ export class BillingService {
       await transaction.checkoutIdempotencyKey.update({
         where: { id: command.id },
         data: {
-          stripeSetupIntentId: setupIntentId,
           stripePaymentMethodId: paymentMethod.id,
           stripeSubscriptionId: subscription.id,
           status: "SUBSCRIPTION_CREATED",
@@ -1418,7 +1448,12 @@ export class BillingService {
       amount: charge.amount,
       currency: charge.currency,
       initialInvoiceAmount: invoice.amount_due,
-      paymentMethod: this.cardPresentation(paymentMethod),
+      paymentMethod: {
+        brand: paymentMethod.card.brand,
+        last4: paymentMethod.card.last4,
+        expMonth: paymentMethod.card.exp_month,
+        expYear: paymentMethod.card.exp_year,
+      },
     };
   }
 
@@ -1433,26 +1468,21 @@ export class BillingService {
     const command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
       where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
     });
-    if (
-      !command ||
-      command.stripeSessionId !== input.checkoutSessionId ||
-      !command.stripeCustomerId ||
-      !["SETUP_PENDING", "SETUP_SUCCEEDED", "SUBSCRIPTION_CREATED"].includes(command.status)
-    ) {
+    if (!command) {
       throw new AppError(
         "BILLING_SETUP_INVALID",
         "This payment setup is invalid or has expired.",
         HttpStatus.GONE,
       );
     }
-    const { paymentMethod } = await this.completedCheckoutSessionPaymentMethod(
+    const { paymentMethod } = await this.completedTrialCheckoutSession(
+      command,
       input.checkoutSessionId,
-      {
-        organizationId,
-        customerId: command.stripeCustomerId,
-        billingCommandId: command.id,
-      },
     );
+    await this.prisma.client.checkoutIdempotencyKey.updateMany({
+      where: { id: command.id, status: { in: ["SETUP_PENDING", "SETUP_COMPLETED"] } },
+      data: { status: "SETUP_COMPLETED", stripePaymentMethodId: paymentMethod.id },
+    });
     const plan = command.planCode.split(":")[0]?.toLocaleLowerCase("en-US") as PlanCode;
     const cadence = dbToCadence(command.selectedCadence);
     if (!(["starter", "growth", "scale"] as string[]).includes(plan)) {
@@ -1474,7 +1504,12 @@ export class BillingService {
       currency: charge.currency,
       expectedTrialStart,
       expectedFirstChargeAt: new Date(expectedTrialStart.getTime() + TRIAL_SECONDS * 1000),
-      paymentMethod: this.cardPresentation(paymentMethod),
+      paymentMethod: {
+        brand: paymentMethod.card.brand,
+        last4: paymentMethod.card.last4,
+        expMonth: paymentMethod.card.exp_month,
+        expYear: paymentMethod.card.exp_year,
+      },
     };
   }
 
@@ -1504,31 +1539,22 @@ export class BillingService {
         HttpStatus.CONFLICT,
       );
     }
-    const checkoutSession = await stripe.checkout.sessions.create(
+    const setupIntent = await stripe.setupIntents.create(
       {
-        ui_mode: "elements",
-        mode: "setup",
         customer: profile.stripeCustomerId,
+        usage: "off_session",
         payment_method_types: ["card"],
-        return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/dashboard/billing?checkout_return=1`,
         metadata: {
           wafloOrganizationId: organizationId,
           purpose: "payment_method_replacement",
           wafloCommandKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
         },
-        setup_intent_data: {
-          metadata: {
-            wafloOrganizationId: organizationId,
-            purpose: "payment_method_replacement",
-            wafloCommandKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
-          },
-        },
       },
-      { idempotencyKey: `waflo:org:${organizationId}:replace-payment-checkout:${idempotencyKey}` },
+      { idempotencyKey: `waflo:org:${organizationId}:replace-payment:${idempotencyKey}` },
     );
-    if (!checkoutSession.client_secret) {
+    if (!setupIntent.client_secret) {
       throw new AppError(
-        "STRIPE_CHECKOUT_SESSION_INVALID",
+        "STRIPE_SETUP_INTENT_INVALID",
         "Secure payment setup could not be initialized.",
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -1545,8 +1571,8 @@ export class BillingService {
       request,
     );
     return {
-      clientSecret: checkoutSession.client_secret,
-      checkoutSessionId: checkoutSession.id,
+      clientSecret: setupIntent.client_secret,
+      setupIntentId: setupIntent.id,
       publishableKey,
     };
   }
@@ -1554,7 +1580,7 @@ export class BillingService {
   async completePaymentMethodReplacement(
     userId: string,
     organizationId: string,
-    input: { checkoutSessionId: string },
+    input: { setupIntentId: string },
     request: WafloRequest,
     idempotencyKey: string,
   ) {
@@ -1563,24 +1589,36 @@ export class BillingService {
     const profile = await this.prisma.client.organizationBillingProfile.findUniqueOrThrow({
       where: { organizationId },
     });
-    if (!profile.stripeCustomerId) {
+    const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId, {
+      expand: ["payment_method"],
+    });
+    const customerId =
+      typeof setupIntent.customer === "string"
+        ? setupIntent.customer
+        : setupIntent.customer && !setupIntent.customer.deleted
+          ? setupIntent.customer.id
+          : null;
+    const paymentMethod =
+      typeof setupIntent.payment_method === "string"
+        ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
+        : setupIntent.payment_method;
+    if (
+      setupIntent.status !== "succeeded" ||
+      setupIntent.metadata?.wafloOrganizationId !== organizationId ||
+      setupIntent.metadata?.purpose !== "payment_method_replacement" ||
+      setupIntent.metadata?.wafloCommandKeyHash !==
+        createHash("sha256").update(idempotencyKey).digest("hex") ||
+      !customerId ||
+      customerId !== profile.stripeCustomerId ||
+      !paymentMethod?.card ||
+      paymentMethod.type !== "card"
+    ) {
       throw new AppError(
-        "PAYMENT_PROFILE_NOT_READY",
-        "Start subscription setup before adding a payment method.",
-        HttpStatus.CONFLICT,
+        "PAYMENT_METHOD_REQUIRED",
+        "Complete the secure card form before saving.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
-    const { paymentMethod } = await this.completedCheckoutSessionPaymentMethod(
-      input.checkoutSessionId,
-      {
-        organizationId,
-        customerId: profile.stripeCustomerId,
-        purpose: "payment_method_replacement",
-        idempotencyKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
-      },
-    );
-    const customerId = profile.stripeCustomerId;
-    const card = this.cardPresentation(paymentMethod);
     const subscriptions = await this.prisma.client.subscription.findMany({
       where: { organizationId, status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] } },
       select: { stripeSubscriptionId: true },
@@ -1602,12 +1640,17 @@ export class BillingService {
         action: "billing.payment_method_replaced",
         targetType: "organization_billing_profile",
         targetId: organizationId,
-        metadata: { brand: card.brand, last4: card.last4 },
+        metadata: { brand: paymentMethod.card.brand, last4: paymentMethod.card.last4 },
       },
       request,
     );
     return {
-      paymentMethod: card,
+      paymentMethod: {
+        brand: paymentMethod.card.brand,
+        last4: paymentMethod.card.last4,
+        expMonth: paymentMethod.card.exp_month,
+        expYear: paymentMethod.card.exp_year,
+      },
     };
   }
 
@@ -1622,85 +1665,86 @@ export class BillingService {
       where: { id: organizationId },
       include: { billingProfile: true },
     });
-    const clean = (value: string | null | undefined) => value?.trim() || null;
-    const address = {
-      line1: clean(input.addressLine1) ?? "",
-      line2: clean(input.addressLine2) ?? "",
-      city: clean(input.city) ?? "",
-      state: clean(input.region) ?? "",
-      postal_code: clean(input.postalCode) ?? "",
-      country: input.countryCode ?? "",
-    };
+    const identity = cleanBillingIdentity(input);
+    const previousIdentity = current.billingProfile
+      ? billingIdentityFromProfile(current.billingProfile)
+      : null;
+    const identityChanged = JSON.stringify(previousIdentity) !== JSON.stringify(identity);
+    const address = stripeAddress(identity);
     const stripeCustomerId = current.billingProfile?.stripeCustomerId;
     if (stripeCustomerId) {
       const stripe = this.requireStripe();
       await stripe.customers.update(stripeCustomerId, {
-        name: input.name,
-        email: input.email,
+        name: identity.name,
+        email: identity.email,
         address,
         preferred_locales: [current.defaultLocale === "AR" ? "ar" : "en"],
         metadata: { wafloOrganizationId: organizationId },
       });
     }
-    const countryCode = input.countryCode?.toUpperCase() ?? null;
-    const countryChanged = Boolean(
-      current.billingProfile?.billingCountryCode &&
-        countryCode &&
-        current.billingProfile.billingCountryCode !== countryCode,
-    );
-    const result = await withOrganizationInvariantLock(
-      this.prisma.client,
-      organizationId,
-      async (transaction) => {
-        const profile = await transaction.organizationBillingProfile.update({
-          where: { organizationId },
-          data: {
-            billingName: input.name,
-            billingEmail: input.email,
-            billingCountryCode: countryCode,
-            billingAddressLine1: clean(input.addressLine1),
-            billingAddressLine2: clean(input.addressLine2),
-            billingCity: clean(input.city),
-            billingRegion: clean(input.region),
-            billingPostalCode: clean(input.postalCode),
-            stripeIdentitySyncedAt: stripeCustomerId ? new Date() : null,
-          },
-        });
-        const invalidatedCommands = countryChanged
-          ? await transaction.checkoutIdempotencyKey.updateMany({
-              where: {
-                organizationId,
-                status: { in: ["SETUP_PENDING", "SETUP_SUCCEEDED"] },
-              },
-              data: { status: "MARKET_INVALIDATED", completedAt: new Date() },
-            })
-          : { count: 0 };
-        await this.audit.recordInTransaction(
-          transaction,
-          {
-            organizationId,
-            actorUserId: userId,
-            action: "billing.identity_updated",
-            targetType: "organization_billing_profile",
-            targetId: profile.id,
-            metadata: {
-              countryCode,
-              countryChanged,
-              invalidatedCommands: invalidatedCommands.count,
-              stripeSynchronized: Boolean(stripeCustomerId),
-            },
-          },
-          request,
-        );
-        return { invalidatedCommands: invalidatedCommands.count };
+    const profile = await this.prisma.client.organizationBillingProfile.update({
+      where: { organizationId },
+      data: {
+        billingName: identity.name,
+        billingEmail: identity.email,
+        billingCountryCode: identity.countryCode,
+        billingAddressLine1: identity.addressLine1,
+        billingAddressLine2: identity.addressLine2,
+        billingCity: identity.city,
+        billingRegion: identity.region,
+        billingPostalCode: identity.postalCode,
+        stripeIdentitySyncedAt: stripeCustomerId ? new Date() : null,
       },
+    });
+    // A Checkout Session contains a snapshot of customer/billing details. Once
+    // those canonical details change, an older open or completed setup must
+    // never be eligible to finalize onboarding. Local invalidation is the
+    // authority; Stripe expiration is best effort because a completed session
+    // cannot be expired by Stripe but is still rejected by this service.
+    const staleSetupCommands = identityChanged
+      ? await this.prisma.client.checkoutIdempotencyKey.findMany({
+          where: {
+            organizationId,
+            status: { in: ["SETUP_PENDING", "SETUP_COMPLETED"] },
+            stripeSessionId: { not: null },
+          },
+          select: { id: true, stripeSessionId: true },
+        })
+      : [];
+    if (staleSetupCommands.length > 0) {
+      await this.prisma.client.checkoutIdempotencyKey.updateMany({
+        where: { id: { in: staleSetupCommands.map((command) => command.id) } },
+        data: { status: "INVALIDATED", expiresAt: new Date() },
+      });
+      const stripe = this.requireStripe();
+      await Promise.all(
+        staleSetupCommands.map(async (command) => {
+          if (!command.stripeSessionId) return;
+          try {
+            await stripe.checkout.sessions.expire(command.stripeSessionId);
+          } catch {
+            // A completed/expired session cannot be expired again. It has
+            // already been invalidated locally and cannot finalize onboarding.
+          }
+        }),
+      );
+    }
+    await this.audit.record(
+      {
+        organizationId,
+        actorUserId: userId,
+        action: "billing.identity_updated",
+        targetType: "organization_billing_profile",
+        targetId: profile.id,
+        metadata: {
+          countryCode: identity.countryCode,
+          stripeSynchronized: Boolean(stripeCustomerId),
+          invalidatedSetupSessionCount: staleSetupCommands.length,
+        },
+      },
+      request,
     );
-    return {
-      updated: true,
-      marketChanged: countryChanged,
-      invalidatedCommands: result.invalidatedCommands,
-      stripeSynchronized: Boolean(stripeCustomerId),
-    };
+    return { updated: true, stripeSynchronized: Boolean(stripeCustomerId) };
   }
 
   /**
@@ -2169,12 +2213,6 @@ export class BillingService {
           );
         }
       }
-      // A plan that is not eligible to be selected must retain its domain-specific
-      // rejection (for example, an active provider subscription or a downgrade
-      // limit) without consulting a future catalog term. Once it is eligible,
-      // validate the current Waflo catalog before persisting any selection. The
-      // subscription-creation path independently resolves this same market again.
-      await this.pricing.resolveForOrganization(organizationId, plan, cadenceToDb(cadence));
       await transaction.organization.update({
         where: { id: organizationId },
         data: { selectedPlan },
@@ -2849,7 +2887,6 @@ export class BillingService {
       const subscriptionId = this.subscriptionIdFromEvent(event);
       const invoiceId = this.invoiceIdFromEvent(event);
       const refundId = this.refundIdFromEvent(event);
-      const checkoutSessionId = this.checkoutSessionIdFromEvent(event);
       const currentSubscription = subscriptionId
         ? await this.retrieveCurrentSubscription(subscriptionId)
         : undefined;
@@ -2862,11 +2899,9 @@ export class BillingService {
           ? `stripe-invoice:${invoiceId}`
           : subscriptionId
             ? `stripe-subscription:${subscriptionId}`
-            : checkoutSessionId
-              ? `stripe-checkout:${checkoutSessionId}`
-              : customerChangeId
-                ? `stripe-customer:${customerChangeId}`
-                : `stripe-event:${event.id}`;
+            : customerChangeId
+              ? `stripe-customer:${customerChangeId}`
+              : `stripe-event:${event.id}`;
       await withInvariantLock(this.prisma.client, businessLockKey, async (transaction) => {
         const ownership = await transaction.processedWebhookEvent.findUniqueOrThrow({
           where: { id: claim.id },
@@ -3038,12 +3073,6 @@ export class BillingService {
     return typeof id === "string" && id.length > 0 ? id : null;
   }
 
-  private checkoutSessionIdFromEvent(event: Stripe.Event): string | null {
-    if (event.type !== "checkout.session.completed") return null;
-    const id = (event.data.object as { id?: unknown }).id;
-    return typeof id === "string" && id.length > 0 ? id : null;
-  }
-
   private customerIdFromPaymentMethodEvent(event: Stripe.Event): string | null {
     if (event.type === "customer.updated") {
       const previous = event.data.previous_attributes;
@@ -3107,90 +3136,6 @@ export class BillingService {
     }
   }
 
-  /**
-   * A completed embedded Checkout setup is durable evidence that Stripe saved
-   * a payment method for this exact command. It deliberately does not create
-   * a subscription: the merchant still reviews and explicitly confirms the
-   * trial in the next onboarding step.
-   */
-  private async applyCheckoutSessionCompleted(
-    event: Stripe.Event,
-    transaction: Prisma.TransactionClient,
-    request: WafloRequest,
-  ): Promise<{
-    organizationId: string | null;
-    staleness: "applied" | "ignored_stale";
-    notification: null;
-  }> {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const organizationId = session.metadata?.wafloOrganizationId;
-    const commandId = session.metadata?.wafloBillingCommandId;
-    const customerId =
-      typeof session.customer === "string"
-        ? session.customer
-        : session.customer && !session.customer.deleted
-          ? session.customer.id
-          : null;
-    const setupIntentId =
-      typeof session.setup_intent === "string" ? session.setup_intent : session.setup_intent?.id;
-    if (
-      session.mode !== "setup" ||
-      session.status !== "complete" ||
-      !organizationId ||
-      !commandId ||
-      !customerId ||
-      !setupIntentId
-    ) {
-      await transaction.auditLog.create({
-        data: {
-          action: "stripe.checkout_session_ignored",
-          targetType: "stripe_event",
-          targetId: event.id,
-          requestId: request.requestId,
-          metadata: { eventType: event.type },
-          userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
-        },
-      });
-      return { organizationId: null, staleness: "applied", notification: null };
-    }
-    const updated = await transaction.checkoutIdempotencyKey.updateMany({
-      where: {
-        id: commandId,
-        organizationId,
-        stripeSessionId: session.id,
-        stripeCustomerId: customerId,
-        status: { in: ["SETUP_PENDING", "SETUP_SUCCEEDED"] },
-      },
-      data: { stripeSetupIntentId: setupIntentId, status: "SETUP_SUCCEEDED" },
-    });
-    if (updated.count !== 1) {
-      await transaction.auditLog.create({
-        data: {
-          organizationId,
-          action: "stripe.checkout_session_ignored",
-          targetType: "stripe_event",
-          targetId: event.id,
-          requestId: request.requestId,
-          metadata: { eventType: event.type, reason: "command_not_pending" },
-          userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
-        },
-      });
-      return { organizationId, staleness: "ignored_stale", notification: null };
-    }
-    await transaction.auditLog.create({
-      data: {
-        organizationId,
-        action: "billing.checkout_session_completed",
-        targetType: "checkout_idempotency_key",
-        targetId: commandId,
-        requestId: request.requestId,
-        metadata: { provider: "stripe", mode: "setup" },
-        userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
-      },
-    });
-    return { organizationId, staleness: "applied", notification: null };
-  }
-
   // ---------------------------------------------------------------------------
   // applyStripeEvent – event ordering via current-state retrieval
   // ---------------------------------------------------------------------------
@@ -3210,14 +3155,75 @@ export class BillingService {
       recipients: Array<{ email: string; locale: "en" | "ar" }>;
     } | null;
   }> {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const organizationId = session.metadata?.wafloOrganizationId ?? null;
+      const commandId = session.metadata?.wafloBillingCommandId ?? null;
+      const customerId =
+        typeof session.customer === "string" ? session.customer : session.customer?.id;
+      if (!organizationId || !commandId || !customerId || session.mode !== "setup") {
+        await transaction.auditLog.create({
+          data: {
+            action: "stripe.checkout_session_ignored",
+            targetType: "stripe_event",
+            targetId: event.id,
+            requestId: request.requestId,
+            metadata: { eventType: event.type },
+          },
+        });
+        return { organizationId: null, staleness: "applied", notification: null };
+      }
+      const command = await transaction.checkoutIdempotencyKey.findUnique({
+        where: { id: commandId },
+      });
+      if (
+        !command ||
+        command.organizationId !== organizationId ||
+        command.stripeSessionId !== session.id ||
+        command.stripeCustomerId !== customerId
+      ) {
+        throw new AppError(
+          "STRIPE_CUSTOMER_ORGANIZATION_MISMATCH",
+          "The Checkout Session does not belong to this organization.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (command.status === "INVALIDATED") {
+        await transaction.auditLog.create({
+          data: {
+            organizationId,
+            action: "stripe.checkout_session_ignored",
+            targetType: "checkout_session",
+            targetId: session.id,
+            requestId: request.requestId,
+            metadata: { eventType: event.type, commandId, reason: "BILLING_IDENTITY_CHANGED" },
+          },
+        });
+        return { organizationId, staleness: "ignored_stale", notification: null };
+      }
+      if (command.status !== "SUBSCRIPTION_CREATED") {
+        await transaction.checkoutIdempotencyKey.update({
+          where: { id: command.id },
+          data: { status: "SETUP_COMPLETED" },
+        });
+      }
+      await transaction.auditLog.create({
+        data: {
+          organizationId,
+          action: "stripe.checkout_session_completed",
+          targetType: "checkout_session",
+          targetId: session.id,
+          requestId: request.requestId,
+          metadata: { eventType: event.type, commandId },
+        },
+      });
+      return { organizationId, staleness: "applied", notification: null };
+    }
     if (currentRefund) {
       return this.applyStripeRefundEvent(event, transaction, request, currentRefund);
     }
     if (currentInvoice) {
       return this.applyStripeInvoiceEvent(event, transaction, request, currentInvoice);
-    }
-    if (event.type === "checkout.session.completed") {
-      return this.applyCheckoutSessionCompleted(event, transaction, request);
     }
     const changedCustomerId = this.customerIdFromPaymentMethodEvent(event);
     if (changedCustomerId) {
@@ -4382,14 +4388,7 @@ export class BillingService {
         {
           email: identity.email || user.email,
           name: identity.name || organization.name,
-          address: {
-            line1: identity.addressLine1 ?? "",
-            line2: identity.addressLine2 ?? "",
-            city: identity.city ?? "",
-            state: identity.region ?? "",
-            postal_code: identity.postalCode ?? "",
-            country: identity.countryCode ?? "",
-          },
+          address: stripeAddress(identity),
           preferred_locales: [organization.defaultLocale === "AR" ? "ar" : "en"],
           metadata: { organizationId, wafloOrganizationId: organizationId },
         },
@@ -4401,14 +4400,7 @@ export class BillingService {
     await stripe.customers.update(authoritativeCustomerId, {
       email: identity.email,
       name: identity.name,
-      address: {
-        line1: identity.addressLine1 ?? "",
-        line2: identity.addressLine2 ?? "",
-        city: identity.city ?? "",
-        state: identity.region ?? "",
-        postal_code: identity.postalCode ?? "",
-        country: identity.countryCode ?? "",
-      },
+      address: stripeAddress(identity),
       preferred_locales: [organization.defaultLocale === "AR" ? "ar" : "en"],
       metadata: { organizationId, wafloOrganizationId: organizationId },
     });

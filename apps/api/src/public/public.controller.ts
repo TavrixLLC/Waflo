@@ -1,5 +1,5 @@
 import { Controller, Get, Header, Headers, Query } from "@nestjs/common";
-import { isCountryCode } from "@waflo/contracts";
+import { normalizeCloudflareCountry } from "@waflo/billing";
 import { PricingCatalogService } from "../billing/pricing-catalog.service.js";
 import { Public, RateLimit } from "../common/decorators.js";
 import { OrganizationsService } from "../organizations/organizations.service.js";
@@ -38,7 +38,6 @@ export class PublicController {
   @RateLimit(60)
   @Header("Cache-Control", "private, no-store")
   pricingCatalog(@Headers("cf-ipcountry") edgeCountry = "") {
-    const country = edgeCountry.trim().toLocaleUpperCase("en-US");
-    return this.pricing.publicCatalogTermsForCountry(isCountryCode(country) ? country : null);
+    return this.pricing.publicCatalogTermsForCountry(normalizeCloudflareCountry(edgeCountry));
   }
 }

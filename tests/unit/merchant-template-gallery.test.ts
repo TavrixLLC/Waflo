@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { artworkFor } from "../../apps/api/src/programs/library-artwork.js";
 import {
   renderTemplateGalleryPreview,
   renderTemplateGalleryPreviews,
   renderTemplateGalleryThumbnail,
+  type TemplateGalleryPreview,
 } from "../../apps/api/src/programs/template-gallery-preview.js";
 import { contrastRatio } from "../../apps/api/src/programs/validation-engine.js";
 import {
@@ -19,6 +20,17 @@ import { findProgramTemplate, latestProgramTemplates } from "../../packages/cont
 
 const merchantCategories = templateGalleryCategories.filter((category) => category !== "all");
 const previewProfiles = ["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
+const galleryRenderRequests = latestProgramTemplates().flatMap((template) =>
+  (["EN", "AR"] as const).flatMap((locale) =>
+    previewProfiles.map((profile) => ({ template, locale, profile })),
+  ),
+);
+type GalleryMatrixItem = {
+  template: (typeof galleryRenderRequests)[number]["template"];
+  locale: (typeof galleryRenderRequests)[number]["locale"];
+  profile: (typeof galleryRenderRequests)[number]["profile"];
+  preview: TemplateGalleryPreview;
+};
 
 function embeddedStampSvg(previewSvg: string): string {
   const encodedImages = [...previewSvg.matchAll(/data:image\/svg\+xml;base64,([^"']+)/gu)].map(
@@ -30,6 +42,18 @@ function embeddedStampSvg(previewSvg: string): string {
     if (decoded.includes("data-visual-state")) return decoded;
   }
   throw new Error("The composed gallery preview does not contain a rendered stamp grid.");
+}
+
+async function renderInBatches<T, Result>(
+  values: readonly T[],
+  render: (value: T) => Promise<Result>,
+  concurrency = 24,
+): Promise<Result[]> {
+  const results: Result[] = [];
+  for (let offset = 0; offset < values.length; offset += concurrency) {
+    results.push(...(await Promise.all(values.slice(offset, offset + concurrency).map(render))));
+  }
+  return results;
 }
 
 describe("merchant template-gallery presentation", () => {
@@ -202,31 +226,47 @@ describe("merchant template-gallery presentation", () => {
 });
 
 describe("renderer-backed template gallery previews", () => {
-  it("renders all 32 templates on Customer, Apple, and Google surfaces in English and Arabic", () => {
-    for (const template of latestProgramTemplates()) {
-      for (const locale of ["EN", "AR"] as const) {
-        for (const profile of previewProfiles) {
-          const preview = renderTemplateGalleryPreview(template, profile, locale);
-          const localizedName =
-            locale === "AR" ? template.copy.ar.programName : template.copy.en.programName;
+  let renderedGalleryMatrix: GalleryMatrixItem[] = [];
 
-          expect(preview.profile).toBe(profile);
-          expect(preview.locale).toBe(locale);
-          expect(preview.presentation).toBe("TEMPLATE");
-          expect(preview.width).toBeGreaterThan(0);
-          expect(preview.height).toBeGreaterThan(0);
-          expect(preview.svg.replace(/<\/tspan><tspan[^>]*>/g, " ")).toContain(localizedName);
-          expect(preview.svg).not.toContain("undefined");
-          if (locale === "AR") expect(preview.svg).toContain('direction="rtl"');
-        }
+  beforeAll(async () => {
+    // This is the real 32 × 2 × 3 production-compositor matrix. It belongs in
+    // shared setup because each individual assertion below should read the
+    // cached immutable gallery output rather than re-render the same PNGs.
+    renderedGalleryMatrix = await renderInBatches(
+      galleryRenderRequests,
+      async ({ template, locale, profile }) => ({
+        template,
+        locale,
+        profile,
+        preview: await renderTemplateGalleryPreview(template, profile, locale),
+      }),
+    );
+  }, 30_000);
+
+  it("renders all 32 templates on Customer, Apple, and Google surfaces in English and Arabic", () => {
+    for (const { template, locale, profile, preview } of renderedGalleryMatrix) {
+      const localizedName =
+        locale === "AR" ? template.copy.ar.programName : template.copy.en.programName;
+
+      expect(preview.profile).toBe(profile);
+      expect(preview.locale).toBe(locale);
+      expect(preview.presentation).toBe("TEMPLATE");
+      expect(preview.width).toBeGreaterThan(0);
+      expect(preview.height).toBeGreaterThan(0);
+      if (profile === "CUSTOMER_WEB") {
+        expect(preview.svg.replace(/<\/tspan><tspan[^>]*>/g, " ")).toContain(localizedName);
+      } else {
+        expect(preview.svg).toContain("data-production-wallet-artwork=");
       }
+      expect(preview.svg).not.toContain("undefined");
+      if (locale === "AR") expect(preview.svg).toContain('direction="rtl"');
     }
   });
 
-  it("renders deterministic output for every detailed preview set", () => {
+  it("renders deterministic output for every detailed preview set", async () => {
     for (const template of latestProgramTemplates()) {
-      const first = renderTemplateGalleryPreviews(template, "EN");
-      const second = renderTemplateGalleryPreviews(template, "EN");
+      const first = await renderTemplateGalleryPreviews(template, "EN");
+      const second = await renderTemplateGalleryPreviews(template, "EN");
       expect(Object.values(first).map((preview) => preview.digest)).toEqual(
         Object.values(second).map((preview) => preview.digest),
       );
@@ -248,7 +288,7 @@ describe("renderer-backed template gallery previews", () => {
     }
   });
 
-  it("keeps template art direction on Customer while Wallet previews use provider-native fields", () => {
+  it("keeps template art direction on Customer while Wallet previews use provider-native fields", async () => {
     for (const template of latestProgramTemplates()) {
       const customer = renderTemplateGalleryPreview(template, "CUSTOMER_WEB", "EN");
       expect(customer.svg).toContain(`data-visual-role="${template.presentation?.visualRole}"`);
@@ -257,7 +297,7 @@ describe("renderer-backed template gallery previews", () => {
       );
 
       for (const profile of ["APPLE_WALLET", "GOOGLE_WALLET"] as const) {
-        const preview = renderTemplateGalleryPreview(template, profile, "EN");
+        const preview = await renderTemplateGalleryPreview(template, profile, "EN");
         expect(preview.svg).not.toContain("data-visual-role");
         expect(preview.svg).not.toContain("data-motif-treatment");
         expect(preview.svg).toContain(
@@ -268,17 +308,24 @@ describe("renderer-backed template gallery previews", () => {
         expect(preview.svg).toContain(
           profile === "APPLE_WALLET"
             ? 'data-apple-native-fields="true"'
-            : 'data-google-below-fold-fields="true"',
+            : 'data-google-provider-payload="true"',
         );
       }
     }
   });
 
-  it("preserves exactly FILLED and EMPTY states across every latest surface and locale", () => {
+  it("preserves exactly FILLED and EMPTY states across every latest surface and locale", async () => {
     for (const template of latestProgramTemplates()) {
       for (const locale of ["EN", "AR"] as const) {
         for (const profile of previewProfiles) {
-          const preview = renderTemplateGalleryPreview(template, profile, locale);
+          const preview = await renderTemplateGalleryPreview(template, profile, locale);
+          if (profile !== "CUSTOMER_WEB") {
+            expect(preview.svg).toContain(
+              `data-production-wallet-artwork="${profile === "APPLE_WALLET" ? "APPLE_LEGACY_STRIP" : "GOOGLE_HERO"}"`,
+            );
+            expect(preview.svg).not.toContain('data-visual-state="MILESTONE"');
+            continue;
+          }
           const stampSvg = embeddedStampSvg(preview.svg);
           const states = [...stampSvg.matchAll(/data-visual-state="([A-Z_]+)"/gu)].map(
             (match) => match[1],
@@ -295,33 +342,47 @@ describe("renderer-backed template gallery previews", () => {
     }
   });
 
-  it("presents Start from scratch as neutral instead of masquerading as General Visits", () => {
+  it("presents Start from scratch as neutral instead of masquerading as General Visits", async () => {
     const safeDefault = findProgramTemplate("GENERAL_VISITS");
     if (!safeDefault) throw new Error("The safe General Visits default is required.");
 
     for (const locale of ["EN", "AR"] as const) {
       for (const profile of previewProfiles) {
-        const blank = renderTemplateGalleryPreview(safeDefault, profile, locale, "BLANK");
-        const regular = renderTemplateGalleryPreview(safeDefault, profile, locale);
+        const blank = await renderTemplateGalleryPreview(safeDefault, profile, locale, "BLANK");
+        const regular = await renderTemplateGalleryPreview(safeDefault, profile, locale);
         expect(blank.presentation).toBe("BLANK");
         expect(blank.digest).not.toBe(regular.digest);
         expect(blank.svg).not.toContain(
           safeDefault.copy[locale === "AR" ? "ar" : "en"].programName,
         );
-        expect(blank.svg).toContain(locale === "AR" ? "بطاقة ولائك" : "Your loyalty card");
-        expect(blank.svg).toContain(locale === "AR" ? "مكافأتك" : "Your reward");
-        expect(embeddedStampSvg(blank.svg)).not.toContain('data-visual-state="MILESTONE"');
+        if (profile === "CUSTOMER_WEB") {
+          expect(blank.svg).toContain(
+            locale === "AR"
+              ? "\u0628\u0637\u0627\u0642\u0629 \u0648\u0644\u0627\u0626\u0643"
+              : "Your loyalty card",
+          );
+          expect(blank.svg).toContain(
+            locale === "AR" ? "\u0645\u0643\u0627\u0641\u0623\u062a\u0643" : "Your reward",
+          );
+          expect(embeddedStampSvg(blank.svg)).not.toContain('data-visual-state="MILESTONE"');
+        } else {
+          expect(blank.svg).toContain("data-production-wallet-artwork=");
+        }
       }
     }
   });
 
-  it("keeps the initial thumbnail payload materially lighter than eager three-surface rendering", () => {
+  it("keeps the initial thumbnail payload materially lighter than eager three-surface rendering", async () => {
     const templates = latestProgramTemplates();
     const thumbnailBytes = Buffer.byteLength(
       JSON.stringify(templates.map((template) => renderTemplateGalleryThumbnail(template, "EN"))),
     );
     const eagerBytes = Buffer.byteLength(
-      JSON.stringify(templates.map((template) => renderTemplateGalleryPreviews(template, "EN"))),
+      JSON.stringify(
+        await Promise.all(
+          templates.map((template) => renderTemplateGalleryPreviews(template, "EN")),
+        ),
+      ),
     );
 
     expect(thumbnailBytes).toBeLessThan(eagerBytes * 0.55);

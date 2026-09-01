@@ -12,8 +12,8 @@ const merchantSlug = `w3-${runId}`.toLowerCase();
 const programSlug = `circle-${runId}`.toLowerCase();
 const merchantHost = `${merchantSlug}.lvh.me`;
 const formBase = {
-  phone: "0770 123 4567",
   preferredLocale: "en",
+  phone: "0770 123 4567",
   programTermsAccepted: true,
   wafloPrivacyAccepted: true,
   marketingPhoneConsent: false,
@@ -24,7 +24,7 @@ const formBase = {
 let app: NestFastifyApplication;
 let prisma: PrismaService;
 let environment: EnvironmentService;
-let security: CustomerSecurityService;
+let customerSecurity: CustomerSecurityService;
 let organizationId = "";
 let programId = "";
 let versionId = "";
@@ -45,7 +45,7 @@ function cookie(
   return selected?.split(";")[0] ?? "";
 }
 
-async function enroll(input: { displayName: string; phone?: string }, key: string) {
+async function enroll(input: { displayName: string }, key: string) {
   return app.inject({
     method: "POST",
     url: `/v1/public/programs/${programSlug}/enroll`,
@@ -68,7 +68,7 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     app = await createApiApplication({ logger: false });
     prisma = app.get(PrismaService);
     environment = app.get(EnvironmentService);
-    security = app.get(CustomerSecurityService);
+    customerSecurity = app.get(CustomerSecurityService);
     const notifications = app.get(NotificationService) as unknown as {
       provider: { send(message: { to: string; subject: string; html: string }): Promise<void> };
     };
@@ -246,7 +246,7 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
         enrollmentPolicy: {
           create: {
             organizationId,
-            phoneCollectionMode: "OPTIONAL",
+            emailCollectionMode: "OPTIONAL",
             primaryCustomerLocale: "EN",
             allowLocaleSelection: true,
             marketingConsentVisible: true,
@@ -513,14 +513,17 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
   it("uses an encrypted email, fragment confirmation, and verifies contact on transfer", async () => {
     const email = `member-${runId}@customer.test`;
     const enrollment = await enroll({ displayName: "Email Member" }, `enroll:${randomUUID()}`);
+    expect(enrollment.statusCode, enrollment.body).toBe(201);
     const oldCookie = cookie(enrollment, environment.values.CUSTOMER_COOKIE_NAME);
     const enrollmentData = data<{ membership: { publicMembershipId: string } }>(enrollment);
     const membership = await prisma.client.membership.findUniqueOrThrow({
       where: { publicMembershipId: enrollmentData.membership.publicMembershipId },
+      include: { customer: { include: { contacts: true } }, credentials: true },
     });
+    const preparedEmail = customerSecurity.prepareEmail(organizationId, email);
     const contact = await prisma.client.customerContact.create({
       data: {
-        ...security.prepareEmail(organizationId, email),
+        ...preparedEmail,
         organizationId,
         customerId: membership.customerId,
         type: "EMAIL",
@@ -528,8 +531,8 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
         isPrimary: true,
       },
     });
-    expect(contact?.encryptedValue).not.toContain(email);
-    expect(contact?.maskedDisplayValue).not.toBe(email);
+    expect(contact.encryptedValue).not.toContain(email);
+    expect(contact.maskedDisplayValue).not.toBe(email);
     const card = await app.inject({
       method: "GET",
       url: "/v1/customer/card",
@@ -565,7 +568,7 @@ describe.sequential("W3 customer enrollment, card, and transfer HTTP boundary", 
     });
     expect(confirmation.statusCode).toBe(201);
     const verified = await prisma.client.customerContact.findUniqueOrThrow({
-      where: { id: contact?.id },
+      where: { id: contact.id },
     });
     expect(verified.verificationStatus).toBe("VERIFIED");
     expect(verified.verifiedAt).toBeInstanceOf(Date);

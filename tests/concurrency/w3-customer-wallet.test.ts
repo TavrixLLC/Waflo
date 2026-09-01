@@ -302,13 +302,15 @@ async function prepareEmailTransferRace(displayName: string) {
     where: { publicMembershipId },
     include: { credentials: true, walletPassInstances: true },
   });
+  const preparedEmail = security.prepareEmail(fixture.organizationId, email);
   await prisma.client.customerContact.create({
     data: {
-      ...security.prepareEmail(fixture.organizationId, email),
+      ...preparedEmail,
       organizationId: fixture.organizationId,
       customerId: membership.customerId,
       type: "EMAIL",
-      verificationStatus: "UNVERIFIED",
+      verificationStatus: "VERIFIED",
+      verifiedAt: new Date(),
       isPrimary: true,
     },
   });

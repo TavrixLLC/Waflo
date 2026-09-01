@@ -267,8 +267,8 @@ describe("merchant Billing subscription-change UI contract", () => {
 
   it("uses Arabic locale-aware money formatting", () => {
     const formatted = formatBillingAmount("14900", "SAR", "ar");
-    expect(formatted).toContain("149.00");
-    expect(formatted).toContain("ر.س.");
+    expect(formatted).toMatch(/[٠-٩]/u);
+    expect(formatted).toContain("⃁");
   });
 
   it("uses RTL direction for Arabic", () => {

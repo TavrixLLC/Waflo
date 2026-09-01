@@ -103,20 +103,11 @@ function allFieldValues(fields: {
 }
 
 describe("Apple Pass Builder migration", () => {
-  it("puts legacy reward content below the text-free stamp strip", () => {
+  it("keeps legacy primary fields empty so strip artwork remains unobscured", () => {
     const rewardSummary = "A classic grooming service";
     const input = { ...baseMembership, rewardSummary };
     const legacy = mapAppleStoreCard(input, configuration, "a".repeat(43));
     const migrated = mapAppleGenericPass(input, configuration, "a".repeat(43));
-    const frontValues = (fields: typeof legacy.storeCard) =>
-      [
-        ...fields.headerFields,
-        ...fields.primaryFields,
-        ...fields.secondaryFields,
-        ...fields.auxiliaryFields,
-      ].map((field) => field.value);
-
-    expect(frontValues(legacy.storeCard)).toContain(rewardSummary);
     expect(legacy.storeCard.primaryFields).toEqual([]);
     expect(legacy.storeCard.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),

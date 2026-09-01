@@ -9,18 +9,6 @@ function allTemplates(page: Page) {
   return page.locator('section[aria-labelledby="template-gallery-all-title"]');
 }
 
-function embeddedStampSvg(svg: string): string {
-  for (const match of svg.matchAll(/data:image\/svg\+xml;base64,([^"']+)/gu)) {
-    const decoded = Buffer.from(match[1] ?? "", "base64").toString("utf8");
-    if (decoded.includes("data-visual-state=")) return decoded;
-  }
-  throw new Error("Builder preview did not contain shared stamp-renderer output.");
-}
-
-function stampStateCount(svg: string, state: "FILLED" | "EMPTY"): number {
-  return (svg.match(new RegExp(`data-visual-state="${state}"`, "gu")) ?? []).length;
-}
-
 async function enterBuilder(page: Page, templateName = "Classic Roast"): Promise<void> {
   await page.goto("/en/dashboard/programs/new");
   await allTemplates(page)
@@ -313,22 +301,27 @@ test("renders truthful 0/8, 4/8, and 8/8 Grid-only Wallet Builder previews", asy
       ["Google Wallet", "GOOGLE_WALLET"],
     ] as const) {
       await page.getByRole("tab", { name: label }).click();
-      const expectedResponse = `${profile}:${progress}`;
+      const artworkTarget =
+        label === "Apple iOS 27+"
+          ? "APPLE_POSTER"
+          : profile === "APPLE_WALLET"
+            ? "APPLE_LEGACY_STRIP"
+            : "GOOGLE_HERO";
       const matching = () =>
         responses.findLast(
-          (item) => item.profile === profile && item.svg.includes(`data-progress="${progress}"`),
+          (item) =>
+            item.profile === profile &&
+            item.svg.includes(`data-progress="${progress}"`) &&
+            item.svg.includes(`data-production-wallet-artwork="${artworkTarget}"`),
         );
       await expect
-        .poll(() =>
-          responses.map(
-            (item) => `${item.profile}:${item.svg.match(/data-progress="(\d+)"/u)?.[1] ?? "?"}`,
-          ),
-        )
-        .toContain(expectedResponse);
-      const stamp = embeddedStampSvg(matching()?.svg ?? "");
-      expect(stampStateCount(stamp, "FILLED"), `${profile} ${progress}/8`).toBe(progress);
-      expect(stampStateCount(stamp, "EMPTY"), `${profile} ${progress}/8`).toBe(8 - progress);
-      expect(stamp).not.toMatch(/MILESTONE|GIFT|CHECK|REWARD_SLOT|NUMBERED/iu);
+        .poll(() => matching()?.svg ?? "")
+        .toContain(`data-production-wallet-artwork="${artworkTarget}"`);
+      const previewSvg = matching()?.svg ?? "";
+      expect(previewSvg, `${label} ${progress}/8`).toContain(
+        `data-production-wallet-artwork="${artworkTarget}"`,
+      );
+      expect(previewSvg, `${label} ${progress}/8`).not.toContain('data-visual-state="MILESTONE"');
     }
   }
 

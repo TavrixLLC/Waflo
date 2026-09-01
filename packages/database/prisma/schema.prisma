@@ -1552,8 +1552,9 @@ model SecurityEvent {
   @@map("security_events")
 }
 
-// Persists caller-provided billing onboarding command IDs. Historical hosted Checkout
-// fields remain nullable so pre-v1 records stay readable while new signups use SetupIntents.
+// Persists caller-provided billing onboarding command IDs. Historical SetupIntent
+// fields remain nullable so pre-v1 records stay readable while new signups use
+// Checkout Sessions in setup mode.
 model CheckoutIdempotencyKey {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid

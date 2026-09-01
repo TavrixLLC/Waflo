@@ -54,6 +54,7 @@ export const WalletPreviewCanvas = memo(function WalletPreviewCanvas({
       height={height}
       ref={canvasRef}
       role="img"
+      style={{ aspectRatio: `${width} / ${height}`, height: "auto" }}
       width={width}
     />
   );

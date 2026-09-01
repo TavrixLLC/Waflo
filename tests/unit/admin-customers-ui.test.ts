@@ -59,7 +59,7 @@ describe("Admin Customers directory and Customer 360 UI", () => {
   it("formats zero-decimal currency without a hard-coded fractional part", () =>
     expect(formatCustomerMoney("1200", "JPY", "en")).toMatch(/1,200/));
   it("formats Arabic money through the currency-aware formatter", () =>
-    expect(formatCustomerMoney("9900", "SAR", "ar")).toContain("ر.س."));
+    expect(formatCustomerMoney("9900", "SAR", "ar")).toContain("⃁"));
   it("does not fabricate a price when server terms are absent", () =>
     expect(formatCustomerMoney(null, null, "en")).toBeNull());
   it("formats dates consistently in UTC", () =>

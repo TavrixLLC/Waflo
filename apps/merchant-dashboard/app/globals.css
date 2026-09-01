@@ -11490,6 +11490,39 @@ html:lang(ckb-Arab-IQ) body {
   max-width: min(100%, 24.5rem);
 }
 
+/* A Wallet preview is one native card, never a responsive reflow. The canvas
+   remains at its canonical 460px reference width or uniformly scales down. */
+.wallet-preview-image-stack {
+  width: min(100%, 460px);
+  max-width: 460px;
+  aspect-ratio: auto;
+}
+
+.wallet-preview-image-stack__canvas {
+  width: 100%;
+  height: auto;
+}
+
+/* Native Wallet reference frames: scale the complete card uniformly, without
+   allowing an earlier provider placeholder ratio to reserve extra space. */
+.wallet-preview-image-stack--apple_legacy {
+  width: min(100%, 460px);
+  max-width: 460px;
+  aspect-ratio: 460 / 621;
+}
+
+.wallet-preview-image-stack--apple_ios27 {
+  width: min(100%, 460px);
+  max-width: 460px;
+  aspect-ratio: 460 / 532;
+}
+
+.wallet-preview-image-stack--google_wallet {
+  width: min(100%, 460px);
+  max-width: 460px;
+  aspect-ratio: 460 / 564;
+}
+
 @media (max-width: 520px) {
   .builder-preview-canvas {
     min-height: min(66dvh, 35rem);

@@ -575,7 +575,8 @@ input {
   gap: 0.9rem;
 }
 
-.admin-pricing-form label {
+.admin-pricing-form label,
+.admin-pricing-form__field {
   display: grid;
   gap: 0.35rem;
   color: #4e5867;

@@ -79,7 +79,7 @@ describe("Admin annual repricing UI", () => {
   it("formats zero-decimal currency without hard-coded cents", () =>
     expect(repricingMoney("1200", "JPY", "en")).toMatch(/1,200/));
   it("formats Arabic money through the shared formatter", () =>
-    expect(repricingMoney("9900", "SAR", "ar")).toContain("ر.س"));
+    expect(repricingMoney("9900", "SAR", "ar")).toContain("⃁"));
   it("renders Arabic copy", () => expect(repricingCopy("ar").title).toBe("إعادة التسعير السنوية"));
   it("sets RTL direction", () => {
     expect(dashboard).toContain('dir={locale === "ar" ? "rtl" : "ltr"}');
