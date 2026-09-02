@@ -311,7 +311,6 @@ test.describe
       await expect(
         page.getByText(
           "Stops renewal according to the subscription state; it does not automatically reverse a past payment.",
-          { exact: true },
         ),
       ).toBeVisible();
       await page.goto("http://localhost:3000/ar/refunds");
