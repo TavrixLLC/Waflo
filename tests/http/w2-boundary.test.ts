@@ -447,7 +447,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
       templateItems.every(
         (template) =>
           template.galleryThumbnail.profile === "CUSTOMER_WEB" &&
-          template.galleryThumbnail.locale === "AR" &&
+          template.galleryThumbnail.locale === "ar" &&
           template.galleryThumbnail.svg.startsWith("<svg") &&
           template.galleryPreviews === undefined,
       ),
