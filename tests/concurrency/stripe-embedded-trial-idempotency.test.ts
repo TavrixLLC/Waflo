@@ -524,6 +524,12 @@ describe.sequential("embedded Stripe 15-day trial idempotency", () => {
     await expect(
       prisma.client.checkoutIdempotencyKey.update({
         where,
+        data: { status: "MARKET_INVALIDATED" },
+      }),
+    ).resolves.toMatchObject({ status: "MARKET_INVALIDATED" });
+    await expect(
+      prisma.client.checkoutIdempotencyKey.update({
+        where,
         data: { status: "UNKNOWN_CHECKOUT_STATUS" },
       }),
     ).rejects.toThrow(/checkout_onboarding_status_allowed|check constraint|constraint/i);

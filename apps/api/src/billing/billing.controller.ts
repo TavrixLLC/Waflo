@@ -218,7 +218,7 @@ export class BillingController {
       parseUuid(organizationId),
       parseInput(billingTrialCompleteSchema, body),
       request,
-      parseCheckoutIdempotencyKey(idempotencyKey),
+      idempotencyKey ? parseCheckoutIdempotencyKey(idempotencyKey) : undefined,
     );
   }
 
@@ -234,7 +234,7 @@ export class BillingController {
       user.id,
       parseUuid(organizationId),
       parseInput(billingTrialCompleteSchema, body),
-      parseCheckoutIdempotencyKey(idempotencyKey),
+      idempotencyKey ? parseCheckoutIdempotencyKey(idempotencyKey) : undefined,
     );
   }
 

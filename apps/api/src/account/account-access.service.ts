@@ -141,7 +141,10 @@ export function resolveMerchantOrganizationAccess(
     onboarding = "billing_identity_required";
   } else if (billing === "none") {
     onboarding =
+      // SETUP_SUCCEEDED is retained for older durable commands. New embedded
+      // Checkout Elements commands transition to SETUP_COMPLETED.
       organization.latestBillingCommandStatus === "SETUP_SUCCEEDED" ||
+      organization.latestBillingCommandStatus === "SETUP_COMPLETED" ||
       organization.latestBillingCommandStatus === "SUBSCRIPTION_CREATED"
         ? "trial_confirmation_required"
         : organization.latestBillingCommandStatus === "SETUP_PENDING"

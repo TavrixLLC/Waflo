@@ -147,6 +147,29 @@ test("recovers an already completed trial after a browser retry", async ({ page 
   let completionRequests = 0;
   let onboardingRequests = 0;
 
+  await page.route(`**/v1/organizations/${organizationId}/billing`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          billingIdentity: {
+            name: "Recovered Coffee",
+            email: "billing@recovered.example",
+            countryCode: "IQ",
+            addressLine1: "Al Karrada",
+            addressLine2: null,
+            city: "Baghdad",
+            region: "Baghdad",
+            postalCode: "10001",
+          },
+          onboardingSetup: null,
+        },
+        requestId: "trial-recovery-billing",
+      }),
+    });
+  });
+
   await page.route(`**/v1/organizations/${organizationId}/billing/trial/setup`, async (route) => {
     setupRequests += 1;
     await route.fulfill({
@@ -212,16 +235,6 @@ test("recovers an already completed trial after a browser retry", async ({ page 
           step: 4,
           plan: "starter",
           cadence: "monthly",
-          billingIdentity: {
-            name: "Recovered Coffee",
-            email: "billing@recovered.example",
-            countryCode: "IQ",
-            addressLine1: "Al Karrada",
-            addressLine2: "",
-            city: "Baghdad",
-            region: "Baghdad",
-            postalCode: "10001",
-          },
         }),
       );
     },

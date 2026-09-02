@@ -28,7 +28,8 @@ describe("secondary product corrections", () => {
     expect(onboarding).toContain("copy.logo.optional");
     expect(onboarding).toContain("copy.logo.skip");
     expect(onboarding).not.toMatch(/brandLogoAssetId[^\n]+required/u);
-    expect(onboarding).toContain("billingIdentity: identity");
+    expect(onboarding).toContain("await loadBillingIdentity(organizationId)");
+    expect(onboarding).toContain("clearWizardBillingIdentity()");
     expect(onboarding).toContain("step: 3");
   });
 

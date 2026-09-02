@@ -13,6 +13,11 @@ import type { FastifyRequest } from "fastify";
 import { AppModule } from "./app.module.js";
 import { EnvironmentService } from "./config/environment.service.js";
 
+const MAX_ASSET_FILE_BYTES = 2 * 1024 * 1024;
+// Multipart boundaries and the JSON metadata field count toward Fastify's
+// request body but not @fastify/multipart's file-size limit.
+const MAX_ASSET_MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+
 export interface CreateApiApplicationOptions {
   logger?: boolean;
   /**
@@ -81,7 +86,12 @@ export async function createApiApplication(
             },
           },
     trustProxy: trustedProxies.length > 0 ? [...trustedProxies] : false,
-    bodyLimit: 1024 * 1024,
+    // The multipart asset endpoint explicitly accepts one image up to 2 MiB.
+    // Fastify applies this adapter limit before Nest or the multipart plugin can
+    // validate the upload, so it must not reject a valid 1–2 MiB image first.
+    // Preserve a small envelope allowance; JSON endpoints remain protected by
+    // their schemas and route validation.
+    bodyLimit: MAX_ASSET_FILE_BYTES + MAX_ASSET_MULTIPART_OVERHEAD_BYTES,
     requestIdHeader: "x-request-id",
     genReqId: (request: IncomingMessage) => {
       const candidate = request.headers["x-request-id"];
@@ -102,7 +112,7 @@ export async function createApiApplication(
     limits: {
       files: 1,
       fields: 8,
-      fileSize: 2 * 1024 * 1024,
+      fileSize: MAX_ASSET_FILE_BYTES,
     },
   });
   await app.register(fastifyHelmet, {

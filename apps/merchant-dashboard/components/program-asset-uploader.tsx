@@ -29,6 +29,13 @@ type CropDrag = {
   crop: CropState;
 };
 
+function defaultCropForCategory(category: AssetCategory): CropState {
+  // A merchant logo is a reusable source asset. Do not silently remove its
+  // edges before the merchant has chosen to crop it. Other artwork retains its
+  // established visual-safe-area default.
+  return category === "LOGO" ? { ...fullImageCrop } : { ...initialCrop };
+}
+
 function AssetThumbnail({ asset, label }: { asset: AssetItem; label: string }) {
   const [source, setSource] = useState("");
 
@@ -98,7 +105,7 @@ export function ProgramAssetPicker({
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
-  const [crop, setCrop] = useState(initialCrop);
+  const [crop, setCrop] = useState<CropState>(() => defaultCropForCategory(category));
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -243,7 +250,7 @@ export function ProgramAssetPicker({
       setError(copy.fileTooLarge);
       return;
     }
-    setCrop(initialCrop);
+    setCrop(defaultCropForCategory(category));
     setFile(selected);
   }
 
@@ -282,16 +289,37 @@ export function ProgramAssetPicker({
               : copy.uploadedProcessed,
       );
       setFile(null);
-      setCrop(initialCrop);
+      setCrop(defaultCropForCategory(category));
     } catch (caught) {
+      const requestReference =
+        caught instanceof ApiClientError && caught.requestId
+          ? ` ${copy.requestReference.replace("{requestId}", caught.requestId)}`
+          : "";
       setError(
-        caught instanceof ApiClientError && caught.code === "ASSET_UPLOAD_INVALID"
+        caught instanceof ApiClientError &&
+          ["ASSET_UPLOAD_INVALID", "ASSET_MULTIPART_INVALID"].includes(caught.code)
           ? copy.invalidFile
-          : caught instanceof ApiClientError && caught.code === "ASSET_PROCESSING_FAILED"
-            ? copy.processingFailed
-            : caught instanceof ApiClientError && caught.code === "NETWORK_ERROR"
-              ? copy.networkError
-              : copy.uploadError,
+          : caught instanceof ApiClientError &&
+              ["ASSET_UPLOAD_TOO_LARGE", "PAYLOAD_TOO_LARGE"].includes(caught.code)
+            ? copy.fileTooLarge
+            : caught instanceof ApiClientError && caught.code === "ASSET_PROCESSING_FAILED"
+              ? copy.processingFailed
+              : caught instanceof ApiClientError && caught.code === "ASSET_STORAGE_UNAVAILABLE"
+                ? copy.storageUnavailable
+                : caught instanceof ApiClientError &&
+                    [
+                      "AUTH_REQUIRED",
+                      "SESSION_EXPIRED",
+                      "UNAUTHORIZED",
+                      "FORBIDDEN",
+                      "CSRF_REJECTED",
+                      "CSRF_INVALID",
+                      "CSRF_TOKEN_INVALID",
+                    ].includes(caught.code)
+                  ? copy.sessionExpired
+                  : caught instanceof ApiClientError && caught.code === "NETWORK_ERROR"
+                    ? copy.networkError
+                    : `${copy.uploadError}${requestReference}`,
       );
     } finally {
       setUploading(false);
@@ -391,7 +419,7 @@ export function ProgramAssetPicker({
             <div ref={cropWorkspace} className="studio-crop-workspace">
               <button
                 type="button"
-                className="studio-crop-preview"
+                className={`studio-crop-preview ${category === "LOGO" ? "studio-crop-preview--logo" : ""}`}
                 aria-label={copy.cropArea}
                 aria-describedby="studio-crop-instruction"
                 style={
@@ -469,7 +497,10 @@ export function ProgramAssetPicker({
             <div className="studio-crop-controls">
               <p className="field-help">
                 <Crop size={15} />
-                {naturalSize.width} × {naturalSize.height}px ·{" "}
+                {copy.sourceDimensions
+                  .replace("{width}", String(naturalSize.width))
+                  .replace("{height}", String(naturalSize.height))}{" "}
+                ·{" "}
                 {naturalSize.width < 256 || naturalSize.height < 256
                   ? copy.resolutionLow
                   : copy.resolutionGood}
@@ -521,7 +552,9 @@ export function ProgramAssetPicker({
                 aria-label={copy.cropPreview}
                 style={
                   naturalSize.width && naturalSize.height
-                    ? { aspectRatio: `${naturalSize.width} / ${naturalSize.height}` }
+                    ? {
+                        aspectRatio: `${naturalSize.width * crop.width} / ${naturalSize.height * crop.height}`,
+                      }
                     : undefined
                 }
               >

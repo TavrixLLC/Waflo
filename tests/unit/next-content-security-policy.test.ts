@@ -81,14 +81,18 @@ describe("Next.js Content-Security-Policy", () => {
     const policy = createNextContentSecurityPolicy("production", { stripeJs: true });
 
     expect(policy).toContain(
-      "frame-src 'self' https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com",
+      "frame-src 'self' https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com",
     );
     expect(policy).toContain(
-      "script-src 'self' 'unsafe-inline' https://*.js.stripe.com https://js.stripe.com",
+      "script-src 'self' 'unsafe-inline' https://*.js.stripe.com https://js.stripe.com https://checkout.stripe.com",
     );
-    expect(policy).toContain("connect-src 'self' https://api.stripe.com https://api.waflo.app");
-    expect(policy).not.toContain("https://*.stripe.com");
-    expect(policy).not.toContain("https://checkout.stripe.com");
+    expect(policy).toContain(
+      "connect-src 'self' https://api.stripe.com https://checkout.stripe.com https://api.waflo.app",
+    );
+    expect(policy).toContain(
+      "img-src 'self' data: blob: https://*.stripe.com https://api.waflo.app",
+    );
+    expect(policy).toContain("https://checkout.stripe.com");
     expectPreservedSecurityDirectives(policy);
   });
 
@@ -125,7 +129,9 @@ describe("Next.js Content-Security-Policy", () => {
 
     expect(policy).toContain("connect-src 'self'");
     expect(policy).toContain(" http://localhost:4000");
-    expect(policy).toContain("img-src 'self' data: blob: http://localhost:4000");
+    expect(policy).toContain(
+      "img-src 'self' data: blob: https://*.stripe.com http://localhost:4000",
+    );
     expect(policy).not.toContain("https://api.waflo.app");
     expect(policy).not.toContain("'unsafe-eval'");
   });
@@ -192,10 +198,13 @@ describe("Next.js Content-Security-Policy", () => {
         expect(productionPolicy).toContain("https://api.mapbox.com");
         expect(productionPolicy).toContain("worker-src 'self' blob:");
         expect(productionPolicy).toContain("https://api.stripe.com");
+        expect(productionPolicy).toContain("https://checkout.stripe.com");
+        expect(productionPolicy).toContain("https://*.stripe.com");
       } else {
         expect(productionPolicy).not.toContain("https://js.stripe.com");
         expect(productionPolicy).not.toContain("https://hooks.stripe.com");
         expect(productionPolicy).not.toContain("https://api.stripe.com");
+        expect(productionPolicy).not.toContain("https://checkout.stripe.com");
       }
     });
   }

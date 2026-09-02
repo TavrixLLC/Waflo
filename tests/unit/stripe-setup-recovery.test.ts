@@ -126,6 +126,25 @@ describe("onboarding Checkout Session payment integration", () => {
     expect(source).toMatch(/finally\s*\{\s*setLoading\(false\);\s*\}/);
   });
 
+  it("recovers canonical billing data and a completed trial review without browser session state", () => {
+    const onboarding = readFileSync(
+      resolve(process.cwd(), "apps/merchant-dashboard/components/onboarding.tsx"),
+      "utf8",
+    );
+    const billing = readFileSync(
+      resolve(process.cwd(), "apps/api/src/billing/billing.service.ts"),
+      "utf8",
+    );
+
+    expect(onboarding).toContain("billingIdentityFromServer(model)");
+    expect(onboarding).toContain("await loadBillingIdentity(currentOrganizationId)");
+    expect(onboarding).toContain("recoverCompletedTrialPreview");
+    expect(onboarding).not.toContain("draft.billingIdentity && (draft.step ?? 2) >= 4");
+    expect(billing).toContain("onboardingSetup:");
+    expect(billing).toContain("trialSetupCommandForSession");
+    expect(billing).toContain("command.stripeSessionId !== checkoutSessionId");
+  });
+
   it("creates a setup-only Checkout Session without line items, invoices, or subscriptions", () => {
     const source = readFileSync(
       resolve(process.cwd(), "apps/api/src/billing/billing.service.ts"),

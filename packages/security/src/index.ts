@@ -247,12 +247,18 @@ export function createNextContentSecurityPolicy(
     ? " https://fonts.googleapis.com https://fonts.gstatic.com"
     : "";
   const stripeScriptSource = options.stripeJs
-    ? " https://*.js.stripe.com https://js.stripe.com"
+    ? " https://*.js.stripe.com https://js.stripe.com https://checkout.stripe.com"
     : "";
   const stripeFrameSource = options.stripeJs
-    ? " https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com"
+    ? " https://*.js.stripe.com https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com"
     : "";
-  const stripeConnectSource = options.stripeJs ? " https://api.stripe.com" : "";
+  // Checkout Elements loads its authenticated iframe, supporting requests,
+  // and images from these documented Stripe origins. Keep this opt-in scoped
+  // to the merchant dashboard rather than relaxing the shared policy.
+  const stripeConnectSource = options.stripeJs
+    ? " https://api.stripe.com https://checkout.stripe.com"
+    : "";
+  const stripeImageSource = options.stripeJs ? " https://*.stripe.com" : "";
   const mapboxConnectSource = options.mapboxGl
     ? " https://api.mapbox.com https://events.mapbox.com"
     : "";
@@ -266,7 +272,7 @@ export function createNextContentSecurityPolicy(
   );
   const apiSource = configuredApiOrigin ?? "https://api.waflo.app";
 
-  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'self'${stripeFrameSource}; form-action 'self'; img-src 'self' data: blob: ${apiSource}; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}${stripeScriptSource}; worker-src 'self'${mapboxWorkerSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource}${stripeConnectSource}${mapboxConnectSource} ${apiSource}`;
+  return `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'self'${stripeFrameSource}; form-action 'self'; img-src 'self' data: blob:${stripeImageSource} ${apiSource}; font-src 'self' data:${externalFontSource}; script-src 'self' 'unsafe-inline'${developmentScriptSource}${stripeScriptSource}; worker-src 'self'${mapboxWorkerSource}; style-src 'self' 'unsafe-inline'${externalFontStyleSource}; connect-src 'self'${developmentConnectSource}${externalFontConnectSource}${stripeConnectSource}${mapboxConnectSource} ${apiSource}`;
 }
 
 export const securityHeaders = {

@@ -62,6 +62,34 @@ describe("W2 Round 2 visual pipeline", () => {
     await expect(processMerchantImage(jpeg, "image/png", crop)).rejects.toThrow("does not match");
   });
 
+  it("keeps a 1600 × 440 merchant-logo source rectangular while deriving safe square variants", async () => {
+    const logo = await sharp({
+      create: {
+        width: 1600,
+        height: 440,
+        channels: 4,
+        background: { r: 174, g: 49, b: 21, alpha: 0.8 },
+      },
+    })
+      .png()
+      .toBuffer();
+    const processed = await processMerchantImage(logo, "image/png", crop);
+
+    expect(processed.source).toMatchObject({ width: 1600, height: 440, format: "png" });
+    expect(processed.original).toMatchObject({
+      code: "ORIGINAL_SAFE",
+      width: 1600,
+      height: 440,
+      mimeType: "image/png",
+    });
+    expect(processed.variants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "STAMP_256", width: 256, height: 256 }),
+        expect.objectContaining({ code: "THUMBNAIL_96", width: 96, height: 96 }),
+      ]),
+    );
+  });
+
   it("produces deterministic, structurally distinct platform compositions", async () => {
     const renderedStamp = renderStampSvg({
       goal: 8,

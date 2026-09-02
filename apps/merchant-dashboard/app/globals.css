@@ -10146,7 +10146,7 @@ html:lang(ckb-Arab-IQ) body {
 }
 
 .studio-crop-preview img {
-  object-fit: fill;
+  object-fit: contain;
 }
 
 .studio-crop-safe-area {
@@ -10221,7 +10221,7 @@ html:lang(ckb-Arab-IQ) body {
 .studio-crop-result img {
   position: absolute;
   max-width: none;
-  object-fit: fill;
+  object-fit: contain;
   pointer-events: none;
 }
 
@@ -11538,5 +11538,245 @@ html:lang(ckb-Arab-IQ) body {
     padding-inline: 0.2rem;
     font-size: 0.71rem;
     line-height: 1.15;
+  }
+}
+
+/* Account setup is an application composition, not a stretched dashboard rail.
+   Keep the reading area generous on desktop and turn the rail into a compact
+   header before tablet widths. */
+.onboarding-shell {
+  width: min(100%, 80rem);
+  grid-template-columns: minmax(16.25rem, 18rem) minmax(0, 1fr);
+  gap: clamp(1.25rem, 2.4vw, 2rem);
+  margin-inline: auto;
+  padding: clamp(1rem, 2.5vw, 2rem);
+}
+
+.onboarding-shell > * {
+  min-inline-size: 0;
+}
+
+.onboarding-rail {
+  top: clamp(1rem, 2.5vw, 2rem);
+  max-height: calc(100dvh - clamp(2rem, 5vw, 4rem));
+  border-radius: 24px;
+}
+
+.onboarding-header {
+  padding: 1.35rem 1.4rem 1.1rem;
+  border-radius: 24px 24px 0 0;
+}
+
+.onboarding-progress {
+  padding: 1.15rem 1rem 1.35rem;
+  border-radius: 0 0 24px 24px;
+}
+
+.onboarding-progress__context {
+  display: none;
+}
+
+.onboarding-card {
+  width: 100%;
+  max-width: 52rem;
+  justify-self: stretch;
+  padding: clamp(2rem, 4vw, 3.5rem) clamp(1.25rem, 3.5vw, 3.25rem) 3.5rem;
+}
+
+.onboarding-logo-panel,
+.onboarding-plan-grid,
+.onboarding-payment,
+.onboarding-payment__element {
+  min-inline-size: 0;
+}
+
+.onboarding-payment-recovery {
+  display: grid;
+  justify-items: start;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.onboarding-payment-diagnostics {
+  margin-top: 1rem;
+  padding: 0.75rem 0.9rem;
+  color: var(--waflo-muted);
+  border: 1px dashed var(--waflo-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--waflo-soft) 68%, white);
+  font-size: 0.78rem;
+}
+
+.onboarding-payment-diagnostics summary {
+  color: var(--waflo-ink);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.onboarding-payment-diagnostics dl {
+  display: grid;
+  margin: 0.75rem 0 0;
+  gap: 0.35rem;
+}
+
+.onboarding-payment-diagnostics dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.onboarding-payment-diagnostics dd {
+  margin: 0;
+  color: var(--waflo-ink);
+  font-family: var(--waflo-font-latin);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Crop layout uses normalized source coordinates. The media box keeps that
+   exact geometry and never imports the natural pixel width into CSS layout. */
+.wf-dialog.studio-crop-dialog,
+.studio-crop-dialog .wf-dialog__body,
+.studio-crop-layout,
+.studio-crop-layout > * {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.studio-crop-dialog .wf-dialog__body {
+  overflow-x: clip;
+}
+
+.studio-crop-workspace,
+.studio-crop-preview,
+.studio-crop-result {
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+
+.studio-crop-preview img,
+.studio-crop-result img {
+  object-fit: contain;
+}
+
+.studio-crop-preview--logo {
+  background-color: #f4f1eb;
+}
+
+@media (max-width: 1023px) {
+  .onboarding-shell {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.875rem;
+    margin: 0;
+  }
+
+  .onboarding-rail {
+    position: relative;
+    top: auto;
+    display: grid;
+    max-height: none;
+    grid-template-rows: auto auto;
+    border-radius: 20px;
+  }
+
+  .onboarding-header {
+    min-height: 4.5rem;
+    padding: 0.9rem 1rem;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .onboarding-progress {
+    display: grid;
+    min-width: 0;
+    padding: 0.7rem 0.8rem 0.9rem;
+    grid-template-columns: repeat(5, minmax(2.65rem, 1fr));
+    gap: 0.35rem;
+    overflow: visible;
+    border-radius: 0 0 20px 20px;
+  }
+
+  .onboarding-progress::before,
+  .onboarding-progress__item:not(:last-child)::after {
+    display: none;
+  }
+
+  .onboarding-progress__context {
+    display: block;
+    grid-column: 1 / -1;
+    padding-inline: 0.2rem;
+    color: rgb(255 255 255 / 76%);
+    font-size: 0.75rem;
+    font-weight: 750;
+    line-height: 1.3;
+  }
+
+  .onboarding-progress__item {
+    display: grid;
+    min-height: 2.75rem;
+    padding: 0.3rem;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(2.25rem, auto);
+    place-items: center;
+    border-radius: 12px;
+  }
+
+  .onboarding-progress__item span {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .onboarding-progress__item small {
+    display: none;
+  }
+
+  .onboarding-card {
+    width: 100%;
+    max-width: 48rem;
+    padding: 1.5rem max(0.25rem, env(safe-area-inset-right)) 2.5rem
+      max(0.25rem, env(safe-area-inset-left));
+  }
+}
+
+@media (max-width: 47.5rem) {
+  .onboarding-plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+    border-block: 0;
+    gap: 0.75rem;
+  }
+
+  .onboarding-plan-option {
+    min-height: 0;
+    padding: 1.15rem;
+    border: 1px solid var(--waflo-border);
+    border-radius: 18px;
+  }
+
+  .onboarding-plan-option + .onboarding-plan-option {
+    border-inline-start: 1px solid var(--waflo-border);
+  }
+
+  .onboarding-plan-option > p {
+    margin-top: 0.6rem;
+  }
+}
+
+@media (max-width: 25rem) {
+  .onboarding-shell {
+    padding-inline: 0.7rem;
+  }
+
+  .onboarding-header {
+    padding-inline: 0.8rem;
+  }
+
+  .onboarding-progress {
+    padding-inline: 0.6rem;
+    gap: 0.2rem;
+  }
+
+  .onboarding-cadence {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.3rem;
   }
 }

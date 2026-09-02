@@ -32,30 +32,55 @@ export class AssetsController {
   ) {
     let metadataValue: unknown;
     let uploaded: { filename: string; mimeType: string; bytes: Buffer } | null = null;
-    for await (const part of request.parts()) {
-      if (part.type === "file") {
-        if (uploaded)
-          throw new AppError(
-            "ASSET_FILE_COUNT_INVALID",
-            "Upload exactly one image.",
-            HttpStatus.UNPROCESSABLE_ENTITY,
-          );
-        uploaded = {
-          filename: part.filename,
-          mimeType: part.mimetype,
-          bytes: await part.toBuffer(),
-        };
-      } else if (part.fieldname === "metadata") {
-        try {
-          metadataValue = JSON.parse(String(part.value));
-        } catch {
-          throw new AppError(
-            "ASSET_METADATA_INVALID",
-            "Asset metadata must be valid JSON.",
-            HttpStatus.UNPROCESSABLE_ENTITY,
-          );
+    try {
+      for await (const part of request.parts()) {
+        if (part.type === "file") {
+          if (uploaded)
+            throw new AppError(
+              "ASSET_FILE_COUNT_INVALID",
+              "Upload exactly one image.",
+              HttpStatus.UNPROCESSABLE_ENTITY,
+            );
+          uploaded = {
+            filename: part.filename,
+            mimeType: part.mimetype,
+            bytes: await part.toBuffer(),
+          };
+        } else if (part.fieldname === "metadata") {
+          try {
+            metadataValue = JSON.parse(String(part.value));
+          } catch {
+            throw new AppError(
+              "ASSET_METADATA_INVALID",
+              "Asset metadata must be valid JSON.",
+              HttpStatus.UNPROCESSABLE_ENTITY,
+            );
+          }
         }
       }
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? (error as { code?: unknown }).code
+          : undefined;
+      if (code === "FST_REQ_FILE_TOO_LARGE")
+        throw new AppError(
+          "ASSET_UPLOAD_TOO_LARGE",
+          "The image must be smaller than 2 MB.",
+          HttpStatus.PAYLOAD_TOO_LARGE,
+        );
+      if (
+        code === "FST_FILES_LIMIT" ||
+        code === "FST_FIELDS_LIMIT" ||
+        code === "FST_PARTS_LIMIT" ||
+        code === "FST_INVALID_MULTIPART_CONTENT_TYPE"
+      )
+        throw new AppError(
+          "ASSET_MULTIPART_INVALID",
+          "The image upload is incomplete or invalid.",
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      throw error;
     }
     if (!uploaded || metadataValue === undefined)
       throw new AppError(

@@ -99,6 +99,17 @@ export const onboardingInterfaceCopy = {
       description:
         "You will not be charged today. A card is required for the free trial and future subscription payments.",
       opening: "Opening secure payment form…",
+      loadingBillingIdentity: "Loading saved billing details…",
+      billingIdentityUnavailable:
+        "Saved billing details are unavailable. Return to billing details and try again.",
+      returnToBilling: "Return to billing details",
+      preparingSetup: "Preparing secure payment form…",
+      loadingStripe: "Loading Stripe's secure payment form…",
+      stripeLoadFailed: "Stripe's secure payment form could not be loaded. Try again.",
+      providerInitializationFailed:
+        "Stripe's secure payment form could not be initialized. Try again.",
+      initializingElements: "Initializing secure card entry…",
+      retry: "Try again",
     },
     billing: {
       step: "Step 3 of 5",
@@ -286,6 +297,16 @@ export const onboardingInterfaceCopy = {
       description:
         "لن يتم خصم أي مبلغ اليوم. نحتاج البطاقة لبدء التجربة المجانية وإجراء الدفعات المستقبلية.",
       opening: "جارٍ فتح نموذج الدفع الآمن…",
+      loadingBillingIdentity: "جارٍ تحميل تفاصيل الفوترة المحفوظة…",
+      billingIdentityUnavailable:
+        "تفاصيل الفوترة المحفوظة غير متاحة. عُد إلى تفاصيل الفوترة وحاول مرة أخرى.",
+      returnToBilling: "العودة إلى تفاصيل الفوترة",
+      preparingSetup: "جارٍ تجهيز نموذج الدفع الآمن…",
+      loadingStripe: "جارٍ تحميل نموذج الدفع الآمن من Stripe…",
+      stripeLoadFailed: "تعذر تحميل نموذج الدفع الآمن من Stripe. حاول مرة أخرى.",
+      providerInitializationFailed: "تعذر تهيئة نموذج الدفع الآمن من Stripe. حاول مرة أخرى.",
+      initializingElements: "جارٍ تهيئة إدخال البطاقة الآمن…",
+      retry: "حاول مرة أخرى",
     },
     billing: {
       step: "الخطوة 3 من 5",
@@ -472,6 +493,17 @@ export const onboardingInterfaceCopy = {
       description:
         "ئەڤڕۆ چ پارە ناهێتە وەرگرتن. کارت بۆ دەستپێکرنا تاقیکرنا خۆڕایی و پارەدانێن پاشی پێدڤییە.",
       opening: "فۆرما پارەدانا پاراستی ڤەدبیت…",
+      loadingBillingIdentity: "بەلگەیێن پارەدانێ یێن پاشەکەفتی دهێن بارکرن…",
+      billingIdentityUnavailable:
+        "بەلگەیێن پارەدانێ یێن پاشەکەفتی نەبەردەستن. بگەڕە بۆ بەلگەیێن پارەدانێ و دووبارە هەول بدە.",
+      returnToBilling: "بگەڕە بۆ بەلگەیێن پارەدانێ",
+      preparingSetup: "فۆرما پارەدانا پاراستی دهێتە ئامادەکرن…",
+      loadingStripe: "فۆرما پارەدانا پاراستی یا Stripe دهێتە بارکرن…",
+      stripeLoadFailed: "فۆرما پارەدانا پاراستی یا Stripe نەشیا بهێتە بارکرن. دووبارە هەول بدە.",
+      providerInitializationFailed:
+        "فۆرما پارەدانا پاراستی یا Stripe نەشیا بهێتە دەستپێکرن. دووبارە هەول بدە.",
+      initializingElements: "تێکرنا پاراستی یا کارت دهێتە دەستپێکرن…",
+      retry: "دووبارە هەول بدە",
     },
     billing: {
       step: "هەنگاڤا 3 ژ 5",
@@ -660,6 +692,17 @@ export const onboardingInterfaceCopy = {
       description:
         "ئەمڕۆ هیچ پارەیەک وەرناگیرێت. کارت بۆ دەستپێکردنی تاقیکردنەوەی خۆڕایی و پارەدانەکانی دواتر پێویستە.",
       opening: "فۆڕمی پارەدانی پارێزراو دەکرێتەوە…",
+      loadingBillingIdentity: "وردەکارییە پاشەکەوتکراوەکانی پسوڵەکردن بار دەکرێن…",
+      billingIdentityUnavailable:
+        "وردەکارییە پاشەکەوتکراوەکانی پسوڵەکردن بەردەست نین. بگەڕێوە بۆ وردەکارییەکانی پسوڵەکردن و دووبارە هەوڵ بدە.",
+      returnToBilling: "گەڕانەوە بۆ وردەکارییەکانی پسوڵەکردن",
+      preparingSetup: "فۆڕمی پارەدانی پارێزراو ئامادە دەکرێت…",
+      loadingStripe: "فۆڕمی پارەدانی پارێزراوی Stripe بار دەکرێت…",
+      stripeLoadFailed: "نەتوانرا فۆڕمی پارەدانی پارێزراوی Stripe بار بکرێت. دووبارە هەوڵ بدە.",
+      providerInitializationFailed:
+        "نەتوانرا فۆڕمی پارەدانی پارێزراوی Stripe دەستپێبکرێت. دووبارە هەوڵ بدە.",
+      initializingElements: "تێکردنی پارێزراوی کارت دەستپێدەکات…",
+      retry: "دووبارە هەوڵ بدە",
     },
     billing: {
       step: "هەنگاوی 3 لە 5",

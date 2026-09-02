@@ -29,7 +29,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ApiClientError, apiFetch } from "../lib/api-client";
+import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
 import {
   LocationAddressFields,
@@ -52,6 +52,27 @@ interface BillingIdentityDraft {
   region: string;
   postalCode: string;
 }
+
+interface BillingReadModel {
+  billingIdentity: {
+    name: string | null;
+    email: string | null;
+    countryCode: string | null;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    region: string | null;
+    postalCode: string | null;
+  };
+  onboardingSetup: {
+    status: "SETUP_PENDING" | "SETUP_COMPLETED";
+    checkoutSessionId: string;
+  } | null;
+}
+
+type PaymentSetupState = "idle" | "loading" | "ready" | "error";
+type StripeScriptState = "idle" | "loading" | "ready" | "error";
+type CheckoutElementsState = "idle" | "loading" | "ready" | "error";
 
 interface TrialSetupResponse {
   completed: boolean;
@@ -148,6 +169,34 @@ function readWizard(): WizardDraft {
 
 function writeWizard(update: Partial<WizardDraft>) {
   window.sessionStorage.setItem(WIZARD_KEY, JSON.stringify({ ...readWizard(), ...update }));
+}
+
+function clearWizardBillingIdentity(): void {
+  const draft = readWizard();
+  delete draft.billingIdentity;
+  window.sessionStorage.setItem(WIZARD_KEY, JSON.stringify(draft));
+}
+
+function billingIdentityFromServer(model: BillingReadModel): BillingIdentityDraft | null {
+  const identity = model.billingIdentity;
+  if (
+    !identity.name ||
+    !identity.email ||
+    !identity.countryCode ||
+    !identity.addressLine1 ||
+    !identity.city
+  )
+    return null;
+  return {
+    name: identity.name,
+    email: identity.email,
+    countryCode: identity.countryCode,
+    addressLine1: identity.addressLine1,
+    addressLine2: identity.addressLine2 ?? "",
+    city: identity.city,
+    region: identity.region ?? "",
+    postalCode: identity.postalCode ?? "",
+  };
 }
 
 type OnboardingCopy = InterfaceMessages["onboarding"];
@@ -254,6 +303,9 @@ function OnboardingShell({
           // biome-ignore lint/a11y/noNoninteractiveTabindex: The progress rail scrolls horizontally on small screens and must be keyboard-accessible.
           tabIndex={0}
         >
+          <span className="onboarding-progress__context" aria-hidden="true">
+            {`${step}. ${steps[step - 1]}`}
+          </span>
           {steps.map((label, index) => {
             const number = (index + 1) as OnboardingStep;
             const complete = number < step;
@@ -404,17 +456,32 @@ function SecurePaymentForm({
   billingIdentity,
   billingCommand,
   onReady,
+  onCheckoutStateChange,
+  onRetry,
 }: {
   locale: InterfaceLocale;
   organizationId: string;
   billingIdentity: BillingIdentityDraft;
   billingCommand: string;
   onReady: (preview: TrialPreview) => void;
+  onCheckoutStateChange: (state: CheckoutElementsState, canConfirm: boolean) => void;
+  onRetry: () => void;
 }) {
   const copy = messages[locale].onboarding;
   const checkoutState = useCheckoutElements();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    onCheckoutStateChange(
+      checkoutState.type === "success"
+        ? "ready"
+        : checkoutState.type === "error"
+          ? "error"
+          : "loading",
+      checkoutState.type === "success" && checkoutState.checkout.canConfirm,
+    );
+  }, [checkoutState, onCheckoutStateChange]);
 
   const loadPreview = useCallback(
     async (checkoutSessionId: string) => {
@@ -473,6 +540,25 @@ function SecurePaymentForm({
     }
   }
 
+  if (checkoutState.type === "error") {
+    return (
+      <div className="onboarding-payment" role="alert">
+        <Alert tone="danger" title={copy.payment.providerInitializationFailed} />
+        <Button type="button" variant="secondary" onClick={onRetry}>
+          {copy.payment.retry}
+        </Button>
+      </div>
+    );
+  }
+
+  if (checkoutState.type === "loading") {
+    return (
+      <div className="onboarding-local-loading" role="status">
+        {copy.payment.initializingElements}
+      </div>
+    );
+  }
+
   return (
     <form className="onboarding-payment" onSubmit={submit}>
       {error ? <Alert tone="danger" title={error} /> : null}
@@ -514,6 +600,13 @@ export function BusinessOnboarding({
   const [catalog, setCatalog] = useState<OnboardingCatalog | null>(null);
   const [setup, setSetup] = useState<TrialSetupResponse | null>(null);
   const [preview, setPreview] = useState<TrialPreview | null>(null);
+  const [billingIdentityState, setBillingIdentityState] = useState<PaymentSetupState>("idle");
+  const [paymentSetupState, setPaymentSetupState] = useState<PaymentSetupState>("idle");
+  const [stripeScriptState, setStripeScriptState] = useState<StripeScriptState>("idle");
+  const [checkoutElementsState, setCheckoutElementsState] = useState<CheckoutElementsState>("idle");
+  const [resumableCheckoutSessionId, setResumableCheckoutSessionId] = useState<string | null>(null);
+  const [stripeAttempt, setStripeAttempt] = useState(0);
+  const [checkoutAttempt, setCheckoutAttempt] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [slug, setSlug] = useState("");
@@ -525,15 +618,23 @@ export function BusinessOnboarding({
   const [firstLocation, setFirstLocation] =
     useState<LocationMapSelection>(initialLocationSelection);
   const resumed = useRef(false);
-  const stripePromise = useMemo(
-    () => (setup?.publishableKey ? loadStripe(setup.publishableKey) : null),
-    [setup?.publishableKey],
-  );
+  const stripePromise = useMemo(() => {
+    if (!setup?.publishableKey) return null;
+    // Start a fresh observable loading cycle for an explicit retry. Stripe.js
+    // owns script de-duplication internally, so this never exposes a key or
+    // injects duplicate scripts.
+    if (stripeAttempt > 0) {
+      return Promise.resolve().then(() => loadStripe(setup.publishableKey));
+    }
+    return loadStripe(setup.publishableKey);
+  }, [setup?.publishableKey, stripeAttempt]);
   const countries = useMemo(
     () =>
       countryOptions(contentLocale).map((option) => ({ value: option.code, label: option.name })),
     [contentLocale],
   );
+  const showPaymentDiagnostics =
+    process.env.NODE_ENV !== "production" || apiUrl.includes("staging.waflo.app");
 
   const loadCatalog = useCallback(async (currentOrganizationId: string) => {
     const nextCatalog = await apiFetch<OnboardingCatalog>(
@@ -545,13 +646,33 @@ export function BusinessOnboarding({
     setCatalog(nextCatalog);
   }, []);
 
+  const loadBillingIdentity = useCallback(async (currentOrganizationId: string) => {
+    setBillingIdentityState("loading");
+    try {
+      const model = await apiFetch<BillingReadModel>(
+        `/v1/organizations/${currentOrganizationId}/billing`,
+      );
+      const authoritativeIdentity = billingIdentityFromServer(model);
+      setBillingIdentity(authoritativeIdentity);
+      setBillingIdentityState(authoritativeIdentity ? "ready" : "error");
+      const checkoutSessionId = model.onboardingSetup?.checkoutSessionId ?? null;
+      setResumableCheckoutSessionId(checkoutSessionId);
+      return { identity: authoritativeIdentity, checkoutSessionId };
+    } catch (caught) {
+      setBillingIdentity(null);
+      setResumableCheckoutSessionId(null);
+      setBillingIdentityState("error");
+      throw caught;
+    }
+  }, []);
+
   const finishCompletedTrial = useCallback(
-    async (currentOrganizationId: string, checkoutSessionId: string, billingCommand: string) => {
+    async (currentOrganizationId: string, checkoutSessionId: string, billingCommand?: string) => {
       const result = await apiFetch<TrialResult>(
         `/v1/organizations/${currentOrganizationId}/billing/trial/complete`,
         {
           method: "POST",
-          headers: { "x-idempotency-key": billingCommand },
+          ...(billingCommand ? { headers: { "x-idempotency-key": billingCommand } } : {}),
           body: JSON.stringify({ checkoutSessionId }),
         },
       );
@@ -565,24 +686,57 @@ export function BusinessOnboarding({
     [locale, router],
   );
 
+  const recoverCompletedTrialPreview = useCallback(
+    async (currentOrganizationId: string, checkoutSessionId: string) => {
+      const recoveredPreview = await apiFetch<TrialPreview>(
+        `/v1/organizations/${currentOrganizationId}/billing/trial/preview`,
+        {
+          method: "POST",
+          body: JSON.stringify({ checkoutSessionId }),
+        },
+      );
+      setPreview(recoveredPreview);
+      setResumableCheckoutSessionId(checkoutSessionId);
+      setStep(5);
+      writeWizard({ organizationId: currentOrganizationId, step: 5 });
+    },
+    [],
+  );
+
   const preparePayment = useCallback(
     async (
       currentOrganizationId: string,
       currentPlan: PlanCode,
       currentCadence: BillingCadence,
     ) => {
+      setPaymentSetupState("loading");
+      setCheckoutElementsState("idle");
+      const { identity: authoritativeIdentity } = await loadBillingIdentity(currentOrganizationId);
+      if (!authoritativeIdentity) {
+        setPaymentSetupState("error");
+        throw new ApiClientError(
+          "BILLING_IDENTITY_REQUIRED",
+          copy.payment.billingIdentityUnavailable,
+        );
+      }
       const billingCommand = sessionCommand(BILLING_COMMAND_KEY);
-      const response = await apiFetch<TrialSetupResponse>(
-        `/v1/organizations/${currentOrganizationId}/billing/trial/setup`,
-        {
-          method: "POST",
-          headers: { "x-idempotency-key": billingCommand },
-          body: JSON.stringify({
-            plan: currentPlan,
-            cadence: currentCadence,
-          }),
-        },
-      );
+      let response: TrialSetupResponse;
+      try {
+        response = await apiFetch<TrialSetupResponse>(
+          `/v1/organizations/${currentOrganizationId}/billing/trial/setup`,
+          {
+            method: "POST",
+            headers: { "x-idempotency-key": billingCommand },
+            body: JSON.stringify({
+              plan: currentPlan,
+              cadence: currentCadence,
+            }),
+          },
+        );
+      } catch (caught) {
+        setPaymentSetupState("error");
+        throw caught;
+      }
       if (response.completed) {
         if (!response.checkoutSessionId) {
           throw new ApiClientError("BILLING_SETUP_INVALID", copy.payment.setupUnavailable);
@@ -595,9 +749,11 @@ export function BusinessOnboarding({
         return;
       }
       if (!response.clientSecret) {
+        setPaymentSetupState("error");
         throw new ApiClientError("BILLING_SETUP_INVALID", copy.payment.setupUnavailable);
       }
       setSetup(response);
+      setPaymentSetupState("ready");
       setStep(4);
       writeWizard({
         organizationId: currentOrganizationId,
@@ -606,8 +762,33 @@ export function BusinessOnboarding({
         step: 4,
       });
     },
-    [copy.payment.setupUnavailable, finishCompletedTrial],
+    [
+      copy.payment.billingIdentityUnavailable,
+      copy.payment.setupUnavailable,
+      finishCompletedTrial,
+      loadBillingIdentity,
+    ],
   );
+
+  useEffect(() => {
+    if (!stripePromise) {
+      setStripeScriptState("idle");
+      return;
+    }
+    let active = true;
+    setStripeScriptState("loading");
+    void stripePromise
+      .then((stripe) => {
+        if (!active) return;
+        setStripeScriptState(stripe ? "ready" : "error");
+      })
+      .catch(() => {
+        if (active) setStripeScriptState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [stripePromise]);
 
   useEffect(() => {
     if (resumed.current) return;
@@ -619,12 +800,15 @@ export function BusinessOnboarding({
     setOrganizationId(currentOrganizationId);
     setPlan(currentPlan);
     setCadence(currentCadence);
-    if (draft.billingIdentity) setBillingIdentity(draft.billingIdentity);
-    if (currentOrganizationId && draft.billingIdentity && (draft.step ?? 2) >= 4) {
+    // sessionStorage is resumable UX only. Never let its absence prevent an
+    // organization with durable billing details from recovering Checkout.
+    if (currentOrganizationId && (draft.step ?? 2) >= 4) {
       setLoading(true);
       void preparePayment(currentOrganizationId, currentPlan, currentCadence)
         .catch((caught) => {
-          setStep(2);
+          setStep(
+            caught instanceof ApiClientError && caught.code === "BILLING_IDENTITY_REQUIRED" ? 2 : 3,
+          );
           setError(localizedError(caught, copy, copy.payment.resumeError));
         })
         .finally(() => setLoading(false));
@@ -637,9 +821,29 @@ export function BusinessOnboarding({
             : resumeState === "billing_identity_required"
               ? 2
               : 2;
-      setStep(authoritativeResumeStep as OnboardingStep);
+      setLoading(resumeState === "trial_confirmation_required");
+      void loadBillingIdentity(currentOrganizationId)
+        .then(({ checkoutSessionId }) => {
+          if (resumeState === "trial_confirmation_required" && checkoutSessionId) {
+            return recoverCompletedTrialPreview(currentOrganizationId, checkoutSessionId);
+          }
+          setStep(authoritativeResumeStep as OnboardingStep);
+          return undefined;
+        })
+        .catch((caught) => {
+          setStep(authoritativeResumeStep as OnboardingStep);
+          setError(localizedError(caught, copy, copy.payment.resumeError));
+        })
+        .finally(() => setLoading(false));
     }
-  }, [copy, initialOrganizationId, preparePayment, resumeState]);
+  }, [
+    copy,
+    initialOrganizationId,
+    loadBillingIdentity,
+    preparePayment,
+    recoverCompletedTrialPreview,
+    resumeState,
+  ]);
 
   useEffect(() => {
     if (slug.length < 3) {
@@ -799,7 +1003,6 @@ export function BusinessOnboarding({
       region: String(form.get("billingRegion") ?? ""),
       postalCode: String(form.get("postalCode") ?? ""),
     };
-    setBillingIdentity(identity);
     setCatalog(null);
     try {
       await apiFetch(`/v1/organizations/${organizationId}/billing/identity`, {
@@ -809,9 +1012,17 @@ export function BusinessOnboarding({
       // Billing details are part of the setup-session fingerprint. A later
       // edit must not reuse a session prefilling a stale country or address.
       window.sessionStorage.removeItem(BILLING_COMMAND_KEY);
+      const { identity: authoritativeIdentity } = await loadBillingIdentity(organizationId);
+      if (!authoritativeIdentity) {
+        throw new ApiClientError(
+          "BILLING_IDENTITY_REQUIRED",
+          copy.payment.billingIdentityUnavailable,
+        );
+      }
       await loadCatalog(organizationId);
       setStep(3);
-      writeWizard({ organizationId, plan, cadence, billingIdentity: identity, step: 3 });
+      clearWizardBillingIdentity();
+      writeWizard({ organizationId, plan, cadence, step: 3 });
     } catch (caught) {
       setError(localizedError(caught, copy, copy.billing.continue));
     } finally {
@@ -820,14 +1031,15 @@ export function BusinessOnboarding({
   }
 
   async function startTrial() {
-    if (!organizationId || !setup?.checkoutSessionId || !preview) return;
+    const checkoutSessionId = setup?.checkoutSessionId ?? resumableCheckoutSessionId;
+    if (!organizationId || !checkoutSessionId || !preview) return;
     setLoading(true);
     setError("");
     try {
       await finishCompletedTrial(
         organizationId,
-        setup.checkoutSessionId,
-        sessionCommand(BILLING_COMMAND_KEY),
+        checkoutSessionId,
+        setup ? sessionCommand(BILLING_COMMAND_KEY) : undefined,
       );
     } catch (caught) {
       setError(localizedError(caught, copy, copy.payment.startTrialError));
@@ -1007,8 +1219,23 @@ export function BusinessOnboarding({
               }}
             />
           ) : (
-            <div className="onboarding-local-loading" role="status">
-              {copy.payment.opening}
+            <div className="onboarding-payment-recovery" role={error ? "alert" : "status"}>
+              {error ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setError("");
+                    void loadCatalog(organizationId).catch((caught) =>
+                      setError(localizedError(caught, copy, copy.payment.priceMissing)),
+                    );
+                  }}
+                >
+                  {copy.payment.retry}
+                </Button>
+              ) : (
+                copy.payment.preparingSetup
+              )}
             </div>
           )}
         </div>
@@ -1103,6 +1330,14 @@ export function BusinessOnboarding({
 
   if (step === 4) {
     const clientSecret = setup?.clientSecret ?? null;
+    const retryPaymentSetup = () => {
+      if (!organizationId) return;
+      setError("");
+      setLoading(true);
+      void preparePayment(organizationId, plan, cadence)
+        .catch((caught) => setError(localizedError(caught, copy, copy.payment.resumeError)))
+        .finally(() => setLoading(false));
+    };
     return (
       <OnboardingShell locale={locale} step={4}>
         <div className="onboarding-heading">
@@ -1111,12 +1346,81 @@ export function BusinessOnboarding({
           <p>{copy.payment.description}</p>
         </div>
         {error ? <Alert tone="danger" title={error} /> : null}
-        {loading || !setup || !billingIdentity || !stripePromise || !clientSecret ? (
+        {showPaymentDiagnostics ? (
+          <details className="onboarding-payment-diagnostics">
+            <summary>Payment diagnostics</summary>
+            <dl>
+              <div>
+                <dt>Billing identity</dt>
+                <dd>{billingIdentityState}</dd>
+              </div>
+              <div>
+                <dt>Setup request</dt>
+                <dd>{paymentSetupState}</dd>
+              </div>
+              <div>
+                <dt>Checkout Session</dt>
+                <dd>{setup?.checkoutSessionId ? "present" : "missing"}</dd>
+              </div>
+              <div>
+                <dt>Client secret</dt>
+                <dd>{clientSecret ? "present" : "missing"}</dd>
+              </div>
+              <div>
+                <dt>Publishable configuration</dt>
+                <dd>{setup?.publishableKey ? "present" : "missing"}</dd>
+              </div>
+              <div>
+                <dt>Stripe.js</dt>
+                <dd>{stripeScriptState}</dd>
+              </div>
+              <div>
+                <dt>Checkout Elements</dt>
+                <dd>{checkoutElementsState}</dd>
+              </div>
+            </dl>
+          </details>
+        ) : null}
+        {billingIdentityState === "loading" ? (
           <div className="onboarding-local-loading" role="status">
-            {copy.payment.opening}
+            {copy.payment.loadingBillingIdentity}
+          </div>
+        ) : billingIdentityState === "error" || !billingIdentity ? (
+          <div className="onboarding-payment-recovery" role="alert">
+            <Alert tone="danger" title={copy.payment.billingIdentityUnavailable} />
+            <Button type="button" variant="secondary" onClick={() => setStep(2)}>
+              {copy.payment.returnToBilling}
+            </Button>
+          </div>
+        ) : paymentSetupState === "loading" || loading ? (
+          <div className="onboarding-local-loading" role="status">
+            {copy.payment.preparingSetup}
+          </div>
+        ) : paymentSetupState === "error" || !setup || !clientSecret ? (
+          <div className="onboarding-payment-recovery" role="alert">
+            <Alert tone="danger" title={copy.payment.setupUnavailable} />
+            <Button type="button" variant="secondary" onClick={retryPaymentSetup}>
+              {copy.payment.retry}
+            </Button>
+          </div>
+        ) : stripeScriptState === "loading" || stripeScriptState === "idle" || !stripePromise ? (
+          <div className="onboarding-local-loading" role="status">
+            {copy.payment.loadingStripe}
+          </div>
+        ) : stripeScriptState === "error" ? (
+          <div className="onboarding-payment-recovery" role="alert">
+            <Alert tone="danger" title={copy.payment.stripeLoadFailed} />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setStripeAttempt((attempt) => attempt + 1)}
+            >
+              {copy.payment.retry}
+            </Button>
           </div>
         ) : (
           <CheckoutElementsProvider
+            key={checkoutAttempt}
             stripe={stripePromise}
             options={{
               clientSecret,
@@ -1169,6 +1473,11 @@ export function BusinessOnboarding({
               organizationId={organizationId}
               billingIdentity={billingIdentity}
               billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
+              onCheckoutStateChange={setCheckoutElementsState}
+              onRetry={() => {
+                setCheckoutElementsState("loading");
+                setCheckoutAttempt((attempt) => attempt + 1);
+              }}
               onReady={(value) => {
                 setPreview(value);
                 setStep(5);

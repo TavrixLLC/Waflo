@@ -23,6 +23,7 @@ export class ApiClientError extends Error {
     readonly code: string,
     message: string,
     readonly details?: Record<string, unknown>,
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "ApiClientError";
@@ -88,6 +89,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
       error?.code ?? "REQUEST_FAILED",
       error?.message ?? "The request could not be completed.",
       error?.details,
+      error?.requestId,
     );
   }
   return (payload as SuccessEnvelope<T>).data;

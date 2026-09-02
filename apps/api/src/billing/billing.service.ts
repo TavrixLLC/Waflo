@@ -749,6 +749,15 @@ export class BillingService {
       await this.pricing.cadenceAvailabilityForOrganization(organizationId);
     const catalog = await this.pricing.catalogTermsForOrganization(organizationId);
     const owner = organization.members[0]?.user;
+    const onboardingSetup = await this.prisma.client.checkoutIdempotencyKey.findFirst({
+      where: {
+        organizationId,
+        status: { in: ["SETUP_PENDING", "SETUP_COMPLETED"] },
+        stripeSessionId: { not: null },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, stripeSessionId: true },
+    });
     return {
       selectedPlan: organization.selectedPlan,
       canManageBilling: membership.role === "OWNER",
@@ -782,6 +791,15 @@ export class BillingService {
         timezone: organization.timezone,
         syncedAt: organization.billingProfile?.stripeIdentitySyncedAt ?? null,
       },
+      // A session ID is not a client secret. This authenticated read model lets
+      // another browser resume an already-completed checkout for review, while
+      // preview/complete still validate the owning command server-side.
+      onboardingSetup: onboardingSetup
+        ? {
+            status: onboardingSetup.status,
+            checkoutSessionId: onboardingSetup.stripeSessionId,
+          }
+        : null,
       authoritativeState: {
         subscriptionStatus: organization.billingProfile?.subscriptionStatus ?? "PENDING_ACTIVATION",
         trialStart: organization.billingProfile?.trialStart ?? null,
@@ -1181,24 +1199,51 @@ export class BillingService {
     };
   }
 
-  async completeTrialSetup(
-    userId: string,
+  /**
+   * A browser-held idempotency key is useful for a single interaction, but it
+   * is not durable authority. On a different browser/session, recover the
+   * command only by the authenticated organization and its exact Checkout
+   * Session ID; never accept a session belonging to another command or tenant.
+   */
+  private async trialSetupCommandForSession(
     organizationId: string,
-    input: { checkoutSessionId: string },
-    request: WafloRequest,
-    idempotencyKey: string,
+    checkoutSessionId: string,
+    idempotencyKey?: string,
   ) {
-    await this.tenant.requireMembership(userId, organizationId, "billing.manage");
-    const command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
-      where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
-    });
-    if (!command) {
+    const command = idempotencyKey
+      ? await this.prisma.client.checkoutIdempotencyKey.findUnique({
+          where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
+        })
+      : await this.prisma.client.checkoutIdempotencyKey.findFirst({
+          where: { organizationId, stripeSessionId: checkoutSessionId },
+          orderBy: { createdAt: "desc" },
+        });
+    if (
+      !command ||
+      command.organizationId !== organizationId ||
+      command.stripeSessionId !== checkoutSessionId
+    )
       throw new AppError(
         "BILLING_SETUP_INVALID",
         "This payment setup is invalid or has expired.",
         HttpStatus.GONE,
       );
-    }
+    return command;
+  }
+
+  async completeTrialSetup(
+    userId: string,
+    organizationId: string,
+    input: { checkoutSessionId: string },
+    request: WafloRequest,
+    idempotencyKey?: string,
+  ) {
+    await this.tenant.requireMembership(userId, organizationId, "billing.manage");
+    const command = await this.trialSetupCommandForSession(
+      organizationId,
+      input.checkoutSessionId,
+      idempotencyKey,
+    );
     if (
       command.status === "INVALIDATED" ||
       (command.expiresAt && command.expiresAt <= new Date())
@@ -1461,20 +1506,15 @@ export class BillingService {
     userId: string,
     organizationId: string,
     input: { checkoutSessionId: string },
-    idempotencyKey: string,
+    idempotencyKey?: string,
   ) {
     await this.tenant.requireMembership(userId, organizationId, "billing.manage");
     const stripe = this.requireStripe();
-    const command = await this.prisma.client.checkoutIdempotencyKey.findUnique({
-      where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } },
-    });
-    if (!command) {
-      throw new AppError(
-        "BILLING_SETUP_INVALID",
-        "This payment setup is invalid or has expired.",
-        HttpStatus.GONE,
-      );
-    }
+    const command = await this.trialSetupCommandForSession(
+      organizationId,
+      input.checkoutSessionId,
+      idempotencyKey,
+    );
     const { paymentMethod } = await this.completedTrialCheckoutSession(
       command,
       input.checkoutSessionId,

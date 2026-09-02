@@ -253,6 +253,12 @@ describe("merchant account access authority", () => {
         latestBillingCommandStatus: "SETUP_SUCCEEDED",
       }).onboarding,
     ).toBe("trial_confirmation_required");
+    expect(
+      resolveMerchantOrganizationAccess({
+        ...pendingBilling,
+        latestBillingCommandStatus: "SETUP_COMPLETED",
+      }).onboarding,
+    ).toBe("trial_confirmation_required");
   });
 });
 
