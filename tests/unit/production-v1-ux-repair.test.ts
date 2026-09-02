@@ -123,7 +123,7 @@ describe("production-v1 UX and billing repair", () => {
     expect(worker).toContain('"logo@2x.png"');
     expect(worker).toContain('"logo@3x.png"');
     expect(previews).toContain("merchantBrandLogoDataUri");
-    expect(previews).toContain('data-issuer-brand="organization"');
+    expect(previews).toContain('data-issuer-brand="${issuerBrand}"');
     expect(publicEnrollment).toContain("brandLogoDataUri");
     expect(customerCard).toContain("brandLogoDataUri");
     expect(builder).not.toContain('category="LOGO"');
@@ -338,7 +338,7 @@ describe("production-v1 UX and billing repair", () => {
     expect(source).not.toContain("Vertical position");
   });
 
-  it("keeps the repaired mobile onboarding controls compact and validates uploads before sending", () => {
+  it("keeps mobile onboarding compact without a plan carousel and validates uploads before sending", () => {
     const onboarding = readFileSync("apps/merchant-dashboard/components/onboarding.tsx", "utf8");
     const uploader = readFileSync(
       "apps/merchant-dashboard/components/program-asset-uploader.tsx",
@@ -352,7 +352,13 @@ describe("production-v1 UX and billing repair", () => {
 
     expect(onboarding).toContain('className="wf-sr-only"');
     expect(onboarding).toContain('aria-current={number === step ? "step" : undefined}');
-    expect(styles).toContain("grid-auto-columns: min(82vw, 21rem);");
+    const mobilePlanRule =
+      /@media \(max-width: 47\.5rem\) \{\s*\.onboarding-plan-grid \{(?<rule>[\s\S]*?)\n  \}/u.exec(
+        styles,
+      )?.groups?.rule ?? "";
+    expect(mobilePlanRule).toContain("grid-template-columns: minmax(0, 1fr);");
+    expect(mobilePlanRule).not.toContain("grid-auto-flow: column");
+    expect(mobilePlanRule).not.toContain("scroll-snap-type");
     expect(styles).toContain("max-height: min(70dvh, 31rem);");
     expect(uploader).toContain("const maximumUploadBytes = 2 * 1024 * 1024;");
     expect(uploader).toContain("acceptedImageTypes.has(selected.type)");
