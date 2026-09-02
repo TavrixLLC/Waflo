@@ -484,7 +484,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
 
     const invalidTemplateLocale = await app.inject({
       method: "GET",
-      url: `${programsUrl}/templates?locale=fr`,
+      url: `${programsUrl}/templates?locale=zz`,
       headers: getHeaders(manager),
     });
     expect(invalidTemplateLocale.statusCode).toBe(400);
