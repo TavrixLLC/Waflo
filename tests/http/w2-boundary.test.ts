@@ -469,7 +469,7 @@ describe.sequential("Waflo W2 real NestJS/Fastify HTTP boundary", () => {
     ).toEqual(["APPLE_WALLET", "CUSTOMER_WEB", "GOOGLE_WALLET"]);
     expect(
       Object.values(data<Record<string, { locale: string; svg: string }>>(detailedPreviews)).every(
-        (preview) => preview.locale === "AR" && preview.svg.startsWith("<svg"),
+        (preview) => preview.locale === "ar" && preview.svg.startsWith("<svg"),
       ),
     ).toBe(true);
 
