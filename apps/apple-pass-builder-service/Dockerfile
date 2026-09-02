@@ -15,7 +15,7 @@ RUN git init \
     && git apply --check /tmp/pass-builder.patch \
     && git apply /tmp/pass-builder.patch
 RUN swift package resolve \
-    && echo "6f08c399a8e556772264dd6ef345cb41e8dab878afd3bcc34922ee4e9850c635  Package.resolved" \
+    && echo "e1ebbb0c0b7c7d75a278cf3280b91bf2baad0c07700663671e56151310bccd52  Package.resolved" \
       | sha256sum --check --strict
 RUN --mount=type=cache,target=/source/pass-builder/.build \
     swift build -c release --product buildpass --static-swift-stdlib --disable-automatic-resolution \
