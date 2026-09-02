@@ -85,7 +85,7 @@ const en: MarketingDocuments = {
     sections: [
       {
         heading: "Cancellation, downgrade, and refunds",
-        body: "Cancellation stops renewal and a downgrade moves an organization to lower plan limits after blockers are resolved. Neither automatically reverses a past payment. An approved refund returns a full or partial amount through the original Stripe payment path.",
+        body: "Stops renewal according to the subscription state; it does not automatically reverse a past payment. A downgrade moves an organization to lower plan limits after blockers are resolved; it is not a refund. An approved refund returns a full or partial amount through the original Stripe payment path.",
       },
       {
         heading: "What Waflo can review",
