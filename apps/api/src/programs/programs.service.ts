@@ -363,7 +363,7 @@ export class ProgramsService {
     });
   }
 
-  templates(userId: string, organizationId: string, locale: "EN" | "AR" = "EN") {
+  templates(userId: string, organizationId: string, locale = "en") {
     return this.tenant.requireMembership(userId, organizationId, "programs.view").then(() =>
       templates.map((template) => ({
         ...template,
@@ -395,7 +395,7 @@ export class ProgramsService {
     organizationId: string,
     templateCode: string,
     version: number | undefined,
-    locale: "EN" | "AR",
+    locale: string,
     presentation: "TEMPLATE" | "BLANK",
   ) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");

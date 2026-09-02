@@ -137,7 +137,8 @@ interface PublishedMembershipStampRenderInputBase {
 export type PublishedMembershipStampRenderInput =
   | (PublishedMembershipStampRenderInputBase & {
       readonly rendererSchemaVersion: "waflo-stamp-render-v1";
-      readonly locale: "en" | "ar";
+      /** Canonical card-content BCP-47 locale. v1 artwork itself is text-free. */
+      readonly locale: string;
       readonly layoutPolicy?: "BALANCED_WALLET_ROWS_V1";
     })
   | (PublishedMembershipStampRenderInputBase & {

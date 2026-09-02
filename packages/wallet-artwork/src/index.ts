@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { cardLocalePresentation, walletStructuralCopyForLocale } from "@waflo/contracts";
 import { createQrPng, decodeQrImage } from "@waflo/qr-core";
 import {
   balancedWalletStampDistribution,
@@ -148,7 +149,8 @@ export interface WalletArtworkCompositionInput {
   readonly appleStampPanelInset?: number;
   readonly headerOffsetY?: number;
   readonly lowerGroupOffsetY?: number;
-  readonly locale: "en" | "ar";
+  /** Canonical BCP-47 card locale. */
+  readonly locale: string;
 }
 
 export interface WalletArtworkVisibleBounds extends WalletArtworkPlacement {
@@ -289,7 +291,22 @@ function escapeXml(value: string): string {
   );
 }
 
-function wrapLabel(value: string, maxCharacters: number, maxLines = 2): string[] {
+function graphemeSegments(value: string, locale: string): string[] {
+  return typeof Intl.Segmenter === "function"
+    ? [...new Intl.Segmenter(locale, { granularity: "grapheme" }).segment(value)].map(
+        (part) => part.segment,
+      )
+    : Array.from(value);
+}
+
+function truncateGraphemes(value: string, maximum: number, locale: string): string {
+  const graphemes = graphemeSegments(value, locale);
+  return graphemes.length <= maximum
+    ? value
+    : `${graphemes.slice(0, Math.max(1, maximum - 1)).join("")}\u2026`;
+}
+
+function wrapLabel(value: string, maxCharacters: number, maxLines = 2, locale = "en"): string[] {
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) return [];
   const words = normalized.split(" ");
@@ -297,12 +314,7 @@ function wrapLabel(value: string, maxCharacters: number, maxLines = 2): string[]
   let current = "";
   let truncated = false;
   for (const rawWord of words) {
-    const word =
-      Array.from(rawWord).length > maxCharacters
-        ? `${Array.from(rawWord)
-            .slice(0, Math.max(1, maxCharacters - 1))
-            .join("")}…`
-        : rawWord;
+    const word = truncateGraphemes(rawWord, maxCharacters, locale);
     if (word !== rawWord) truncated = true;
     const candidate = current ? `${current} ${word}` : word;
     if (candidate.length <= maxCharacters || !current) {
@@ -320,7 +332,7 @@ function wrapLabel(value: string, maxCharacters: number, maxLines = 2): string[]
   if (current && lines.length < maxLines) lines.push(current);
   if (truncated && lines.length > 0) {
     const last = lines.length - 1;
-    const graphemes = Array.from((lines[last] ?? "").replace(/…$/, ""));
+    const graphemes = graphemeSegments((lines[last] ?? "").replace(/…$/, ""), locale);
     lines[last] = `${graphemes
       .slice(0, Math.max(1, maxCharacters - 1))
       .join("")
@@ -410,10 +422,27 @@ function fittedFontSize(
   preferredSize: number,
   minimumSize: number,
   availableWidth: number,
-  arabic: boolean,
+  locale: string,
 ): number {
-  const characters = Math.max(1, Array.from(value).length);
-  const estimatedWidth = characters * preferredSize * (arabic ? 0.61 : 0.56);
+  const presentation = cardLocalePresentation(locale);
+  // Sharp/libvips does not expose text metrics for SVG overlays. Estimate at
+  // grapheme level instead of UTF-16/code-point length: combining marks take
+  // no advance width and Arabic-script clusters are wider than Latin glyphs.
+  const graphemes =
+    typeof Intl.Segmenter === "function"
+      ? [
+          ...new Intl.Segmenter(presentation.locale, { granularity: "grapheme" }).segment(value),
+        ].map((part) => part.segment)
+      : Array.from(value);
+  const units = graphemes.reduce((total, grapheme) => {
+    if (/^\p{Mark}+$/u.test(grapheme)) return total;
+    if (/\p{Script=Arabic}|\p{Script=Hebrew}/u.test(grapheme)) return total + 0.68;
+    if (/\p{Number}|[/:.-]/u.test(grapheme)) return total + 0.56;
+    if (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(grapheme))
+      return total + 0.98;
+    return total + 0.56;
+  }, 0);
+  const estimatedWidth = Math.max(1, units) * preferredSize;
   return Math.max(
     minimumSize,
     Math.min(preferredSize, Number((preferredSize * (availableWidth / estimatedWidth)).toFixed(2))),
@@ -434,7 +463,7 @@ function containsLatin(value: string): boolean {
  */
 export function walletArtworkIdentityTitleLines(
   programName: string,
-  locale: "en" | "ar",
+  locale: string,
 ): readonly string[] {
   const phrases = programName
     .split(/\s*[/|]\s*/u)
@@ -450,7 +479,7 @@ export function walletArtworkIdentityTitleLines(
   const latinLine = join([...latin, ...neutral]);
 
   if (arabicLine && latinLine) {
-    return locale === "ar" ? [arabicLine, latinLine] : [latinLine, arabicLine];
+    return cardLocalePresentation(locale).isRtl ? [arabicLine, latinLine] : [latinLine, arabicLine];
   }
   // A single-language name remains one complete phrase even when it needs a
   // smaller measured font size to fit the identity region.
@@ -463,17 +492,19 @@ function counterBadgeSvg(
   typeface: string,
 ): string {
   const { accentColor, backgroundColor } = input.theme;
+  const presentation = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(presentation.locale);
   const visualRegion = calibratedGoogleHeroCounterRegion(input, region);
   const textColor = input.counterForegroundColor ?? readableTextColor(backgroundColor, accentColor);
-  const label = input.locale === "ar" ? "الأختام" : "STAMPS";
-  const isArabic = input.locale === "ar";
+  const label = copy.stamps;
+  const isRtl = presentation.isRtl;
   const cx = visualRegion.left + visualRegion.width / 2;
   const cy = visualRegion.top + visualRegion.height / 2;
   const radius = Math.min(visualRegion.width, visualRegion.height) / 2;
   const headerScale = input.headerScale ?? 1;
   const labelSize = (visualRegion.width > 150 ? 18 : 10) * headerScale;
   const valueSize = (visualRegion.width > 150 ? 36 : 22) * headerScale;
-  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${visualRegion.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (visualRegion.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 1.5}" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (visualRegion.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext" xml:lang="en">${input.currentStampCount} / ${input.requiredStampCount}</text>`;
+  return `<circle cx="${cx}" cy="${cy + 5}" r="${radius - 3}" fill="#000000" opacity="0.12"/><circle cx="${cx}" cy="${cy}" r="${radius - 3}" fill="${accentColor}" stroke="${backgroundColor}" stroke-width="${visualRegion.width > 150 ? 6 : 3}" stroke-opacity="0.72"/><text x="${cx}" y="${cy - (visualRegion.width > 150 ? 13 : 9)}" text-anchor="middle" font-family="${typeface}" font-size="${labelSize}" font-weight="800" letter-spacing="${isRtl ? 0 : 1.5}" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(label)}</text><text x="${cx}" y="${cy + (visualRegion.width > 150 ? 30 : 21)}" text-anchor="middle" font-family="${typeface}" font-size="${valueSize}" font-weight="900" letter-spacing="-0.8" fill="${textColor}" direction="ltr" unicode-bidi="plaintext" xml:lang="en">${input.currentStampCount}/${input.requiredStampCount}</text>`;
 }
 
 function calibratedGoogleHeroCounterRegion(
@@ -523,25 +554,29 @@ function identitySvg(
   region: WalletArtworkPlacement,
   typeface: string,
 ): string {
-  const isArabic = input.locale === "ar";
+  const presentation = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(presentation.locale);
+  const isRtl = presentation.isRtl;
   const isGoogle = region.width > 400;
   const approvedGoogleHero = isGoogle && !input.applePosterRefinement;
   const inset = isGoogle ? (approvedGoogleHero ? 15 : 18) : 8;
-  const textX = isArabic ? region.left + region.width - inset : region.left + inset;
+  const textX = isRtl ? region.left + region.width - inset : region.left + inset;
   // SVG `start` follows the active direction, so it is the visual right edge
   // for Arabic and the visual left edge for English.
   const textAnchor = "start";
-  const direction = isArabic ? "rtl" : "ltr";
+  const direction = presentation.direction;
   const headerScale = input.headerScale ?? 1;
   const textColor = readableTextColor(input.theme.foregroundColor, input.theme.backgroundColor);
-  const organization = wrapLabel(input.organizationName, isGoogle ? 44 : 24, 1)[0] ?? "";
+  const organization =
+    wrapLabel(input.organizationName, isGoogle ? 44 : 24, 1, presentation.locale)[0] ?? "";
   const titleLines = walletArtworkIdentityTitleLines(input.programName, input.locale);
-  const memberPrefix = isArabic ? "العضو" : "MEMBER";
+  const memberPrefix = copy.member;
   const member =
     wrapLabel(
       input.suppressMemberPrefix ? input.memberName : `${memberPrefix}: ${input.memberName}`,
       isGoogle ? 48 : 28,
       1,
+      presentation.locale,
     )[0] ?? "";
   const availableWidth = region.width - inset * 2;
   const organizationSize = fittedFontSize(
@@ -549,7 +584,7 @@ function identitySvg(
     (isGoogle ? 15 : 8) * headerScale,
     (isGoogle ? 11 : 6.5) * headerScale,
     availableWidth,
-    isArabic,
+    presentation.locale,
   );
   const titleSize = isGoogle
     ? Math.min(
@@ -559,7 +594,7 @@ function identitySvg(
             (approvedGoogleHero ? 35 : 27) * headerScale,
             16 * headerScale,
             availableWidth,
-            containsArabic(line),
+            presentation.locale,
           ),
         ),
       )
@@ -570,7 +605,7 @@ function identitySvg(
             15 * headerScale,
             9 * headerScale,
             availableWidth,
-            containsArabic(line),
+            presentation.locale,
           ),
         ),
       );
@@ -579,20 +614,20 @@ function identitySvg(
     (isGoogle ? (approvedGoogleHero ? 22 : 21) : 10.5) * headerScale,
     (isGoogle ? 14 : 7.5) * headerScale,
     availableWidth,
-    isArabic,
+    presentation.locale,
   );
   const organizationY = region.top + (isGoogle ? (approvedGoogleHero ? 17 : 18) : 11);
   const titleY = region.top + (isGoogle ? (approvedGoogleHero ? 59 : 52) : 33);
   const titleLineGap = isGoogle ? 28 : 18;
   const memberY = region.top + (isGoogle ? (approvedGoogleHero ? 97 : 103) : 70);
-  const markerX = isArabic
+  const markerX = isRtl
     ? region.left + region.width - 4
     : region.left - (approvedGoogleHero ? 4 : 0);
   const clipId = `identity-${region.left}-${region.top}`;
   const title = titleLines
     .map((line, index) => {
-      const arabic = isGoogle ? isArabic : containsArabic(line);
-      const commonRtlTitle = isArabic;
+      const arabic = presentation.isRtl;
+      const commonRtlTitle = isRtl;
       // Arabic RTL `start` and English LTR `end` meet at one common trailing
       // edge, keeping the bilingual name as a single identity block.
       const x = isGoogle
@@ -603,13 +638,13 @@ function identitySvg(
             ? region.left + region.width - inset
             : region.left + inset;
       const anchor = commonRtlTitle && !arabic ? "end" : "start";
-      return `<text x="${x}" y="${titleY + index * titleLineGap}" text-anchor="${anchor}" font-family="${typeface}" font-size="${titleSize}" font-weight="900" fill="${textColor}" direction="${arabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${arabic ? "ar" : "en"}">${escapeXml(line)}</text>`;
+      return `<text x="${x}" y="${titleY + index * titleLineGap}" text-anchor="${anchor}" font-family="${typeface}" font-size="${titleSize}" font-weight="900" fill="${textColor}" direction="${direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`;
     })
     .join("");
   const organizationMarkup = isGoogle
-    ? `<text x="${textX}" y="${organizationY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isArabic ? 0 : 2}" fill="${textColor}" opacity="0.82" direction="${direction}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(organization)}</text>`
+    ? `<text x="${textX}" y="${organizationY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isRtl ? 0 : 2}" fill="${textColor}" opacity="0.82" direction="${direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(organization)}</text>`
     : "";
-  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/>${organizationMarkup}${title}<text x="${textX}" y="${memberY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${direction}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(member)}</text></g>`;
+  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/>${organizationMarkup}${title}<text x="${textX}" y="${memberY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(member)}</text></g>`;
 }
 
 export function posterSafeReserveDecorationSvg(
@@ -636,21 +671,16 @@ function rewardPanelSvg(
   typeface: string,
 ): string {
   const { accentColor, backgroundColor, foregroundColor, secondaryColor } = input.theme;
+  const presentation = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(presentation.locale);
   // Google’s native Hero plate is fractionally wider than its semantic region.
   // Keep the Poster master untouched; its compact projection already accounts
   // for that presentation difference.
   const visualRegion = calibratedGoogleHeroRewardRegion(input, region);
-  const eyebrow =
-    input.locale === "ar"
-      ? input.rewardReady
-        ? "المكافأة جاهزة"
-        : "المكافأة"
-      : input.rewardReady
-        ? "REWARD READY"
-        : "REWARD";
-  const fallback = input.locale === "ar" ? "مكافأتك القادمة" : "Your next reward";
+  const eyebrow = input.rewardReady ? copy.rewardReady : copy.reward;
+  const fallback = presentation.isRtl ? copy.nextReward : "Your next reward";
   const isGoogle = visualRegion.width > 500;
-  const isArabic = input.locale === "ar";
+  const isRtl = presentation.isRtl;
   // A slash divides translated reward phrases; it must never create an
   // ellipsized partial English word on the compact calibrated Poster.
   const lines = walletArtworkIdentityTitleLines(input.rewardLabel || fallback, input.locale);
@@ -664,18 +694,18 @@ function rewardPanelSvg(
   const compactApple = !isGoogle && visualRegion.height <= 70;
   const iconSize = isGoogle ? 62 : compactApple ? 22 : 28;
   const horizontalPadding = isGoogle ? 34 : compactApple ? 10 : 14;
-  const defaultIconX = isArabic
+  const defaultIconX = isRtl
     ? region.left + region.width - horizontalPadding - iconSize
     : region.left + horizontalPadding;
   const iconX =
     visualRegion.left === region.left && visualRegion.width === region.width
       ? defaultIconX
-      : isArabic
+      : isRtl
         ? visualRegion.left + visualRegion.width - horizontalPadding - iconSize
         : visualRegion.left + horizontalPadding;
   const iconY = visualRegion.top + (visualRegion.height - iconSize) / 2;
   const textGap = isGoogle ? 30 : compactApple ? 6 : 10;
-  const textX = isArabic ? iconX - textGap : iconX + iconSize + textGap;
+  const textX = isRtl ? iconX - textGap : iconX + iconSize + textGap;
   // In SVG, `start` follows the active writing direction: it is the right edge
   // for RTL and the left edge for LTR. This keeps Arabic text left of the
   // mirrored right-side gift icon instead of allowing it to grow into the icon.
@@ -691,21 +721,21 @@ function rewardPanelSvg(
         isGoogle ? 30 : 15,
         isGoogle ? 20 : compactApple ? 7.5 : 10.5,
         availableTextWidth,
-        isArabic,
+        presentation.locale,
       ),
     ),
   );
   const lineGap = isGoogle ? 34 : compactApple ? 14 : 18;
   const clipId = `reward-${visualRegion.left}-${visualRegion.top}`;
   const clipInset = compactApple ? 4 : 8;
-  return `<rect x="${visualRegion.left}" y="${visualRegion.top + 6}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${visualRegion.left}" y="${visualRegion.top}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${visualRegion.left + 10}" y="${visualRegion.top + clipInset}" width="${visualRegion.width - 20}" height="${visualRegion.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isArabic ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(eyebrow)}</text>${lines
+  return `<rect x="${visualRegion.left}" y="${visualRegion.top + 6}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${visualRegion.left}" y="${visualRegion.top}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${visualRegion.left + 10}" y="${visualRegion.top + clipInset}" width="${visualRegion.width - 20}" height="${visualRegion.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isRtl ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(eyebrow)}</text>${lines
     .map(
       (line, index) =>
-        `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${isArabic ? "rtl" : "ltr"}" unicode-bidi="plaintext" xml:lang="${isArabic ? "ar" : "en"}">${escapeXml(line)}</text>`,
+        `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${typeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`,
     )
     .join(
       "",
-    )}</g><circle cx="${isArabic ? visualRegion.left + (isGoogle ? 32 : 16) : visualRegion.left + visualRegion.width - (isGoogle ? 32 : 16)}" cy="${visualRegion.top + visualRegion.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
+    )}</g><circle cx="${isRtl ? visualRegion.left + (isGoogle ? 32 : 16) : visualRegion.left + visualRegion.width - (isGoogle ? 32 : 16)}" cy="${visualRegion.top + visualRegion.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
 }
 
 function diagonalCornerPanelPath(
@@ -1562,7 +1592,7 @@ export function walletArtworkInputFromStampRender(
     readonly rewardLabel: string;
     readonly stampRenderInput: {
       readonly layoutType: StampLayout;
-      readonly locale: "en" | "ar";
+      readonly locale: string;
       readonly currentStampCount: number;
       readonly requiredStampCount: number;
       readonly rewardReady: boolean;

@@ -1,9 +1,10 @@
-import { isLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { MarketingShell } from "../../../components/marketing-shell";
 import { PricingExplorer } from "../../../components/pricing-explorer";
+import { marketingCopy } from "../../../lib/marketing-copy";
 import { fetchMarketingPricing, trustedCloudflareCountry } from "../../../lib/public-pricing";
 import { createMarketingMetadata } from "../../../lib/seo";
 
@@ -19,26 +20,22 @@ export async function generateMetadata({
   params: Promise<{ locale: string }>;
 }): Promise<Metadata> {
   const { locale } = await params;
-  return isLocale(locale) ? createMarketingMetadata(locale, "pricing") : {};
+  return isInterfaceLocale(locale) ? createMarketingMetadata(locale, "pricing") : {};
 }
 
 export default async function PricingPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
-  const ar = locale === "ar";
+  if (!isInterfaceLocale(locale)) notFound();
+  const copy = marketingCopy[locale].pricing;
   const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? "https://dashboard.waflo.app";
   const country = trustedCloudflareCountry(await headers());
   const pricing = await fetchMarketingPricing(country);
   return (
     <MarketingShell locale={locale} path="/pricing">
       <section className="marketing-container marketing-content">
-        <span className="marketing-kicker">{ar ? "حساب واضح قبل أن تبدأ" : "One clear price"}</span>
-        <h1>{ar ? "أسعار بلا حسابات مخفية." : "Pricing without hidden math."}</h1>
-        <p className="marketing-content__lead">
-          {ar
-            ? "اختر وتيرة الدفع وشاهد الرقمين المهمين: التكلفة الشهرية الفعلية والمبلغ الذي ستدفعه."
-            : "Pick a cadence and see both numbers that matter: the effective monthly cost and the total you are billed."}
-        </p>
+        <span className="marketing-kicker">{copy.kicker}</span>
+        <h1>{copy.title}</h1>
+        <p className="marketing-content__lead">{copy.lede}</p>
         <PricingExplorer locale={locale} dashboardUrl={dashboardUrl} pricing={pricing} />
       </section>
     </MarketingShell>

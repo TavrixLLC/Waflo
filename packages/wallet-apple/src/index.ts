@@ -1,4 +1,9 @@
 import { createHash, createHmac } from "node:crypto";
+import {
+  cardLocalePresentation,
+  cardLocaleRegistry,
+  walletStructuralCopyForLocale,
+} from "@waflo/contracts";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
   composeAppleLegacyStripArtwork,
@@ -56,6 +61,7 @@ export interface ApplePassField {
   readonly label?: string;
   readonly value: string | number;
   readonly changeMessage?: string;
+  readonly textAlignment?: "PKTextAlignmentNatural";
 }
 
 export interface AppleStoreCardPass {
@@ -311,7 +317,7 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
 async function progressStripImages(
   input: WalletMembershipInput,
 ): Promise<Readonly<Record<string, Buffer>>> {
-  const walletLocale: "en" | "ar" = input.stampRenderInput.locale === "ar" ? "ar" : "en";
+  const walletLocale = cardLocalePresentation(input.locale).locale;
   const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
   const rendered = renderPublishedMembershipStampSvg({
     ...stampRenderInput,
@@ -386,17 +392,25 @@ function localizedStrings(
   locale: string,
   replacements: readonly { key: string; value: string }[] = [],
 ): string {
-  const structural =
-    locale === "ar"
-      ? '"STAMPS" = "الأختام";\n"MEMBER" = "العضو";\n"STATUS" = "الحالة";\n"Transferred" = "تم النقل";\n"No longer valid" = "لم تعد صالحة";\n'
-      : '"STAMPS" = "STAMPS";\n"MEMBER" = "MEMBER";\n"STATUS" = "STATUS";\n"Transferred" = "Transferred";\n"No longer valid" = "No longer valid";\n';
-  const legacyLabels =
-    locale === "ar"
-      ? '"PROGRAM" = "\u0627\u0644\u0628\u0631\u0646\u0627\u0645\u062c";\n"REWARD" = "\u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629";\n"SECURITY" = "\u0627\u0644\u0623\u0645\u0627\u0646";\n'
-      : '"PROGRAM" = "PROGRAM";\n"REWARD" = "REWARD";\n"SECURITY" = "SECURITY";\n';
-  return `${structural}${legacyLabels}${replacements
-    .map(({ key, value }) => `"${appleStringsEscape(key)}" = "${appleStringsEscape(value)}";\n`)
-    .join("")}`;
+  const presentation = cardLocalePresentation(locale);
+  const copy = walletStructuralCopyForLocale(presentation.locale);
+  const structural = [
+    ["STAMPS", copy.stamps],
+    ["MEMBER", copy.member],
+    ["STATUS", copy.status],
+    ["REWARD", copy.reward],
+    ["PROGRAM", copy.program],
+    ["SECURITY", copy.security],
+    ["Active", copy.active],
+    ["Reward ready", copy.rewardReady],
+    ["Transferred", copy.transferred],
+    ["Temporarily paused", copy.paused],
+    ["No longer valid", copy.invalid],
+  ] as const;
+  return [...structural, ...replacements.map(({ key, value }) => [key, value] as const)]
+    .filter(([key]) => key.length > 0)
+    .map(([key, value]) => `"${appleStringsEscape(key)}" = "${appleStringsEscape(value)}";\n`)
+    .join("");
 }
 
 function utf16AppleStrings(value: string): Buffer {
@@ -414,6 +428,40 @@ function passFieldValue(pass: AppleStoreCardPass, key: string): string {
   return field?.value.toString() ?? "";
 }
 
+const appleLocalizableValueKeys: Readonly<Record<string, string>> = Object.freeze({
+  progress: "__WAFLO_PROGRESS__",
+  reward: "__WAFLO_REWARD__",
+  program: "__WAFLO_PROGRAM__",
+  member: "__WAFLO_MEMBER__",
+  security: "__WAFLO_SECURITY_VALUE__",
+  operator: "__WAFLO_OPERATOR_VALUE__",
+});
+
+/**
+ * Apple resolves pass.strings by matching pass.json string values. Stable keys
+ * keep that mapping independent of the language used to issue this pass while
+ * retaining the approved field hierarchy and geometry.
+ */
+function withAppleLocalizationKeys(pass: AppleStoreCardPass): AppleStoreCardPass {
+  const fields = (value: readonly ApplePassField[]) =>
+    value.map((field) => ({
+      ...field,
+      value: appleLocalizableValueKeys[field.key] ?? field.value,
+    }));
+  return {
+    ...pass,
+    description: "__WAFLO_DESCRIPTION__",
+    logoText: "__WAFLO_LOGO_TEXT__",
+    storeCard: {
+      headerFields: fields(pass.storeCard.headerFields),
+      primaryFields: fields(pass.storeCard.primaryFields),
+      secondaryFields: fields(pass.storeCard.secondaryFields),
+      auxiliaryFields: fields(pass.storeCard.auxiliaryFields),
+      backFields: fields(pass.storeCard.backFields),
+    },
+  };
+}
+
 export async function buildApplePassPackage(input: {
   pass: AppleStoreCardPass;
   signer: ApplePassSigner;
@@ -427,7 +475,8 @@ export async function buildApplePassPackage(input: {
   }>;
 }): Promise<Buffer> {
   const defaults = await defaultPassImages();
-  const localizations = input.localizations?.length
+  const localizablePass = withAppleLocalizationKeys(input.pass);
+  const configuredLocalizations = input.localizations?.length
     ? input.localizations
     : [
         {
@@ -436,39 +485,58 @@ export async function buildApplePassPackage(input: {
           description: input.pass.description,
           rewardSummary: passFieldValue(input.pass, "reward"),
         },
-        {
-          locale: "ar",
-          programName: passFieldValue(input.pass, "program"),
-          description: input.pass.description,
-          rewardSummary: passFieldValue(input.pass, "reward"),
-        },
       ];
-  const defaultLocale = input.defaultLocale ?? localizations[0]?.locale ?? "en";
+  const defaultLocale = cardLocalePresentation(
+    input.defaultLocale ?? configuredLocalizations[0]?.locale ?? "en",
+  ).locale;
   const defaultContent =
-    localizations.find((item) => item.locale === defaultLocale) ?? localizations[0];
+    configuredLocalizations.find(
+      (item) => cardLocalePresentation(item.locale).locale === defaultLocale,
+    ) ?? configuredLocalizations[0];
+  if (!defaultContent) throw new Error("Apple pass needs localized default content.");
+  // Apple receives a complete localization folder for every locale Waflo can
+  // issue. A program's configured values win; unconfigured locales retain the
+  // default merchant copy while their structural field labels remain correct.
+  const localizations = cardLocaleRegistry.map((locale) => {
+    const configured = configuredLocalizations.find(
+      (item) => cardLocalePresentation(item.locale).locale === locale.id,
+    );
+    return configured ?? { ...defaultContent, locale: locale.id };
+  });
   const localizedFiles = Object.fromEntries(
     localizations.map((content) => [
-      `${content.locale}.lproj/pass.strings`,
+      `${cardLocalePresentation(content.locale).appleLocale}.lproj/pass.strings`,
       utf16AppleStrings(
         localizedStrings(content.locale, [
           {
-            key: defaultContent?.programName ?? "",
+            key: "__WAFLO_PROGRAM__",
             value: content.programName,
           },
           {
-            key: defaultContent?.description ?? "",
+            key: "__WAFLO_DESCRIPTION__",
             value: content.description,
           },
           {
-            key: defaultContent?.rewardSummary ?? "",
+            key: "__WAFLO_REWARD__",
             value: content.rewardSummary,
+          },
+          { key: "__WAFLO_LOGO_TEXT__", value: input.pass.logoText },
+          { key: "__WAFLO_PROGRESS__", value: passFieldValue(input.pass, "progress") },
+          { key: "__WAFLO_MEMBER__", value: passFieldValue(input.pass, "member") },
+          {
+            key: "__WAFLO_SECURITY_VALUE__",
+            value: passFieldValue(input.pass, "security"),
+          },
+          {
+            key: "__WAFLO_OPERATOR_VALUE__",
+            value: passFieldValue(input.pass, "operator"),
           },
         ]),
       ),
     ]),
   );
   const files: Record<string, Uint8Array> = {
-    "pass.json": Buffer.from(JSON.stringify(input.pass), "utf8"),
+    "pass.json": Buffer.from(JSON.stringify(localizablePass), "utf8"),
     ...defaults,
     ...localizedFiles,
     ...(input.images ?? {}),

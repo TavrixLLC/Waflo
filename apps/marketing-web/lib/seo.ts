@@ -1,7 +1,7 @@
-import type { Locale } from "@waflo/contracts";
 import type { InterfaceLocale } from "@waflo/i18n";
 import type { Metadata } from "next";
 import { marketingCopy } from "./marketing-copy";
+import { marketingDocuments } from "./marketing-documents";
 
 export const marketingOrigin = "https://waflo.app";
 export const marketingSocialImage = "/brand/waflo-open-graph-1200x630.png";
@@ -18,9 +18,11 @@ export type MarketingPage = "home" | "pricing" | "contact" | "privacy" | "terms"
 
 const pageCopy: Record<
   MarketingPage,
-  Record<
-    Locale,
-    { title: string; description: string; path: (typeof publicMarketingPaths)[number] }
+  Partial<
+    Record<
+      InterfaceLocale,
+      { title: string; description: string; path: (typeof publicMarketingPaths)[number] }
+    >
   >
 > = {
   home: {
@@ -114,10 +116,8 @@ export function alternateMarketingUrls(path = "") {
     ar: localizedMarketingUrl("ar", path),
     "x-default": localizedMarketingUrl("en", path),
   };
-  if (!path) {
-    languages["ku-badini"] = localizedMarketingUrl("ku-badini");
-    languages["ku-sorani"] = localizedMarketingUrl("ku-sorani");
-  }
+  languages["ku-badini"] = localizedMarketingUrl("ku-badini", path);
+  languages["ku-sorani"] = localizedMarketingUrl("ku-sorani", path);
   return languages;
 }
 
@@ -128,10 +128,25 @@ export function isStagingDeployment(
 }
 
 export function createMarketingMetadata(locale: InterfaceLocale, page: MarketingPage): Metadata {
+  const document =
+    page === "contact" || page === "privacy" || page === "terms" || page === "refunds"
+      ? marketingDocuments[locale][page]
+      : null;
+  const fallback = {
+    title:
+      page === "pricing"
+        ? marketingCopy[locale].pricing.title
+        : (document?.title ?? marketingCopy[locale].meta.title),
+    description:
+      page === "pricing"
+        ? marketingCopy[locale].pricing.lede
+        : (document?.lede ?? marketingCopy[locale].meta.description),
+    path: (page === "home" ? "" : `/${page}`) as (typeof publicMarketingPaths)[number],
+  };
   const content =
     page === "home"
       ? { ...marketingCopy[locale].meta, path: "" as const }
-      : pageCopy[page][locale === "en" || locale === "ar" ? locale : "en"];
+      : (pageCopy[page][locale] ?? fallback);
   const url = localizedMarketingUrl(locale, content.path);
   const socialTitle = `${content.title} · Waflo`;
 
@@ -188,7 +203,7 @@ export function configuredSupportEmail(value = process.env.SUPPORT_EMAIL): strin
 }
 
 export function configuredLegalEffectiveDate(
-  locale: Locale,
+  locale: InterfaceLocale,
   value = process.env.LEGAL_EFFECTIVE_DATE,
 ): string {
   const candidate = value?.trim() ?? "";
@@ -198,7 +213,13 @@ export function configuredLegalEffectiveDate(
     candidate === "To be confirmed after legal review" ||
     candidate.startsWith("REPLACE_")
   ) {
-    return locale === "ar" ? "يُحدد بعد المراجعة القانونية" : "To be confirmed after legal review";
+    return locale === "ar"
+      ? "يُحدد بعد المراجعة القانونية"
+      : locale === "ku-badini"
+        ? "پشتی پێداچوونا یاسایی دیار دبیت"
+        : locale === "ku-sorani"
+          ? "دوای پێداچوونەوەی یاسایی دیاری دەکرێت"
+          : "To be confirmed after legal review";
   }
   return candidate;
 }

@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@waflo/contracts": "workspace:*",
     "@waflo/qr-core": "workspace:*",
     "@waflo/stamp-engine": "workspace:*",
     "sharp": "^0.35.3"

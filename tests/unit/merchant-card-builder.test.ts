@@ -220,7 +220,7 @@ describe("merchant loyalty-card Builder state", () => {
     expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4, 2)).toBe("7:APPLE_WALLET:AR:4:2");
   });
 
-  it("updates colors and localized copy immediately while retaining provider structure", () => {
+  it("keeps the authoritative provider SVG intact until the canonical preview refreshes", () => {
     const source = createBuilderDraft(template("COFFEE"), locations, { locale: "en" });
     const next = updateBuilderRewardCopy(
       {
@@ -245,13 +245,10 @@ describe("merchant loyalty-card Builder state", () => {
       locale: "en",
     });
 
+    expect(optimistic).toBe(svg);
     expect(optimistic).toContain('data-provider-owned-layout="true"');
-    expect(optimistic).toContain(next.visualTheme.backgroundColor);
-    expect(optimistic).toContain(next.translations.en.programName);
-    const embedded = /data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)/u.exec(optimistic)?.[1];
-    expect(Buffer.from(embedded ?? "", "base64").toString("utf8")).toContain(
-      "A free signature drink",
-    );
+    expect(optimistic).toContain(source.visualTheme.backgroundColor);
+    expect(optimistic).not.toContain(next.visualTheme.backgroundColor);
   });
 
   it("keeps the fast Wallet canvas QR aligned with the authoritative preview QR", () => {

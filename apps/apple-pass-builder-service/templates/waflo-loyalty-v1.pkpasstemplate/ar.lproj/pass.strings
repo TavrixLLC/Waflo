@@ -4,5 +4,8 @@
 "STATUS" = "الحالة";
 "REWARD" = "المكافأة";
 "SECURITY" = "الأمان";
+"Active" = "نشطة";
+"Reward ready" = "المكافأة جاهزة";
 "Transferred" = "تم النقل";
+"Temporarily paused" = "متوقفة مؤقتًا";
 "No longer valid" = "لم تعد صالحة";

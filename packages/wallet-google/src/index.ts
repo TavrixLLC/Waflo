@@ -1,4 +1,5 @@
 import { createHash, createSign } from "node:crypto";
+import { cardLocalePresentation, walletOpenLinkCopyForLocale } from "@waflo/contracts";
 import {
   normalizeWalletProviderError,
   resolveWalletLoyaltyPresentation,
@@ -90,21 +91,19 @@ function translated(
   locale: string,
   translatedValues: readonly { locale: string; value: string }[] = [],
 ) {
+  const defaultLocale = cardLocalePresentation(locale).locale;
+  const seenLocales = new Set([defaultLocale]);
   return {
     defaultValue: {
-      language: locale,
+      language: defaultLocale,
       value,
     },
-    ...(translatedValues.length
-      ? {
-          translatedValues: translatedValues
-            .filter((translation) => translation.locale !== locale)
-            .map((translation) => ({
-              language: translation.locale,
-              value: translation.value,
-            })),
-        }
-      : {}),
+    translatedValues: translatedValues.flatMap((translation) => {
+      const language = cardLocalePresentation(translation.locale).locale;
+      if (seenLocales.has(language) || !translation.value.trim()) return [];
+      seenLocales.add(language);
+      return [{ language, value: translation.value }];
+    }),
   };
 }
 
@@ -112,7 +111,7 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
   if (input.nearbyRelevance?.enabled && input.nearbyRelevance.locations.length > 10) {
     throw new Error("Google Wallet supports at most 10 MerchantLocations per class.");
   }
-  const defaultLocale = input.defaultLocale ?? input.locale;
+  const defaultLocale = cardLocalePresentation(input.defaultLocale ?? input.locale).locale;
   const localizedContent = input.localizedContent ?? [
     {
       locale: defaultLocale,
@@ -122,7 +121,9 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
     },
   ];
   const defaultContent =
-    localizedContent.find((content) => content.locale === defaultLocale) ?? localizedContent[0];
+    localizedContent.find(
+      (content) => cardLocalePresentation(content.locale).locale === defaultLocale,
+    ) ?? localizedContent[0];
   const programName = defaultContent?.programName ?? input.programName;
   return {
     id: classId,
@@ -134,11 +135,25 @@ export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string
       ? {
           programLogo: {
             sourceUri: { uri: input.programLogoUrl },
-            contentDescription: translated(`${programName} logo`, defaultLocale),
+            contentDescription: translated(
+              `${programName} logo`,
+              defaultLocale,
+              localizedContent.map((content) => ({
+                locale: content.locale,
+                value: `${content.programName.slice(0, 60)} logo`,
+              })),
+            ),
           },
         }
       : {}),
-    localizedIssuerName: translated(input.organizationName.slice(0, 60), defaultLocale),
+    localizedIssuerName: translated(
+      input.organizationName.slice(0, 60),
+      defaultLocale,
+      localizedContent.map((content) => ({
+        locale: content.locale,
+        value: input.organizationName.slice(0, 60),
+      })),
+    ),
     localizedProgramName: translated(
       programName.slice(0, 60),
       defaultLocale,
@@ -172,9 +187,7 @@ export function mapGoogleLoyaltyObject(
 ) {
   const presentation = resolveWalletLoyaltyPresentation(input);
   const heroImageUrl = input.walletArtworkUrl ?? input.publicAssetBaseUrl;
-  void (input.locale === "ar"
-    ? `${input.programName} للعضو ${input.displayName}. تقدم الأختام ${input.currentStampCount} من ${input.requiredStampCount}. المكافأة: ${input.rewardSummary}`
-    : `${input.programName} for ${input.displayName}. Stamp progress ${input.currentStampCount} of ${input.requiredStampCount}. Reward: ${input.rewardSummary}`);
+
   return {
     id: objectId,
     classId,
@@ -608,9 +621,7 @@ export class GoogleWalletProvider implements WalletProvider {
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
     const body = message.destinationUrl
-      ? `${htmlEscape(message.body)} <a href="${htmlEscape(message.destinationUrl)}">${
-          message.locale === "ar" ? "فتح الرابط" : "Open link"
-        }</a>`
+      ? `${htmlEscape(message.body)} <a href="${htmlEscape(message.destinationUrl)}">${walletOpenLinkCopyForLocale(message.locale)}</a>`
       : message.body;
     const payload = {
       message: {

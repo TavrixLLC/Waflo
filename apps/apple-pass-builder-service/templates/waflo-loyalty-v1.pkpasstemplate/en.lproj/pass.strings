@@ -4,5 +4,8 @@
 "STATUS" = "STATUS";
 "REWARD" = "REWARD";
 "SECURITY" = "SECURITY";
+"Active" = "Active";
+"Reward ready" = "Reward ready";
 "Transferred" = "Transferred";
+"Temporarily paused" = "Temporarily paused";
 "No longer valid" = "No longer valid";

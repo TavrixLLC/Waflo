@@ -27,13 +27,7 @@ export function MarketingShell({
   const [menuOpen, setMenuOpen] = useState(false);
   const [condensed, setCondensed] = useState(false);
 
-  const hrefForLocale = useCallback(
-    (target: InterfaceLocale) => {
-      const targetPath = target.startsWith("ku-") && path ? "" : path;
-      return `/${target}${targetPath}`;
-    },
-    [path],
-  );
+  const hrefForLocale = useCallback((target: InterfaceLocale) => `/${target}${path}`, [path]);
 
   useEffect(() => {
     for (const target of interfaceLocales) router.prefetch(hrefForLocale(target.id));
@@ -56,8 +50,7 @@ export function MarketingShell({
     if (!menuOpen && dialog.open) dialog.close();
   }, [menuOpen]);
 
-  const localizedDocument = (documentPath: string) =>
-    locale === "en" || locale === "ar" ? `/${locale}${documentPath}` : `/en${documentPath}`;
+  const localizedDocument = (documentPath: string) => `/${locale}${documentPath}`;
   const pricingHref = localizedDocument("/pricing");
   const contactHref = localizedDocument("/contact");
   const links = [

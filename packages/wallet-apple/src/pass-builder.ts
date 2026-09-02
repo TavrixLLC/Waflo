@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { cardLocalePresentation } from "@waflo/contracts";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
   composeAppleGenericStripArtwork,
@@ -85,7 +86,10 @@ export interface ApplePassField {
   readonly label?: string;
   readonly value: string | number;
   readonly changeMessage?: string;
+  readonly textAlignment?: "PKTextAlignmentNatural";
 }
+
+const naturalTextAlignment = "PKTextAlignmentNatural" as const;
 
 function appleRgb(hex: string): string {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Apple Wallet color must be six-digit hex.");
@@ -119,16 +123,32 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
         key: "progress",
         label: "STAMPS",
         value: `${input.currentStampCount}/${input.requiredStampCount}`,
+        textAlignment: naturalTextAlignment,
       },
     ],
     // On pre-Poster Apple Wallet, primary fields are composited over strip
     // artwork. Keep this empty so native text cannot obscure the stamps.
     primaryFields: [],
-    secondaryFields: [{ key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) }],
+    secondaryFields: [
+      {
+        key: "reward",
+        label: "REWARD",
+        value: input.rewardSummary.slice(0, 500),
+        textAlignment: naturalTextAlignment,
+      },
+    ],
     auxiliaryFields: [],
     backFields: [
-      { key: "program", label: "PROGRAM", value: input.programName.slice(0, 80) },
-      { key: "member", label: "MEMBER", value: input.displayName.slice(0, 80) },
+      {
+        key: "program",
+        label: "PROGRAM",
+        value: input.programName.slice(0, 80),
+      },
+      {
+        key: "member",
+        label: "MEMBER",
+        value: input.displayName.slice(0, 80),
+      },
       {
         key: "status",
         label: "STATUS",
@@ -161,8 +181,15 @@ export function mapAppleGenericPass(
     input.membershipStatus !== "ACTIVE" ||
     input.programStatus === "ARCHIVED" ||
     input.programStatus === "SUSPENDED";
-  const member = { key: "member", label: "MEMBER", value: input.displayName.slice(0, 80) };
-  const program = { key: "program", value: input.programName.slice(0, 80) };
+  const member = {
+    key: "member",
+    label: "MEMBER",
+    value: input.displayName.slice(0, 80),
+  };
+  const program = {
+    key: "program",
+    value: input.programName.slice(0, 80),
+  };
   const status = {
     key: "status",
     label: "STATUS",
@@ -170,7 +197,11 @@ export function mapAppleGenericPass(
     changeMessage: "%@",
   };
   const posterBackFields = [
-    { key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) },
+    {
+      key: "reward",
+      label: "REWARD",
+      value: input.rewardSummary.slice(0, 500),
+    },
     {
       key: "security",
       label: "SECURITY",
@@ -212,7 +243,11 @@ export function mapAppleGenericPass(
         { ...program, label: "PROGRAM" },
         member,
         status,
-        { key: "progress_detail", label: "STAMPS", value: posterProgress },
+        {
+          key: "progress_detail",
+          label: "STAMPS",
+          value: posterProgress,
+        },
         ...posterBackFields,
       ],
     },
@@ -327,7 +362,7 @@ function defaultBrandImages() {
 async function personalizedVariants(
   input: WalletMembershipInput,
 ): Promise<Pick<PassBuilderServiceRequest["images"], "artwork" | "strip">> {
-  const walletLocale: "en" | "ar" = input.stampRenderInput.locale === "ar" ? "ar" : "en";
+  const walletLocale = cardLocalePresentation(input.locale).locale;
   const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
   const rendered = renderPublishedMembershipStampSvg({
     ...stampRenderInput,

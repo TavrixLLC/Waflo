@@ -554,7 +554,7 @@ describe("Wallet artwork composition", () => {
     expect(readFileSync("deploy/vps/Dockerfile", "utf8")).toContain("fonts-noto-core");
   }, 30_000);
 
-  it("uses shaped RTL text semantics and mirrors Arabic reward geometry", () => {
+  it("uses shaped RTL text semantics and canonical logical reward geometry", () => {
     const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");
     expect(walletArtworkArabicTypeface).toMatch(/Noto Sans Arabic/);
     expect(source).toContain('direction="');
@@ -562,8 +562,9 @@ describe("Wallet artwork composition", () => {
     expect(source).toContain('xml:lang="');
     expect(source).toContain("? region.left + region.width - horizontalPadding - iconSize");
     expect(source).toContain('const textAnchor = "start"');
-    expect(source).toContain('const label = input.locale === "ar" ? "الأختام" : "STAMPS"');
-    expect(source).toContain('input.rewardReady\n        ? "المكافأة جاهزة"');
+    expect(source).toContain("const presentation = cardLocalePresentation(input.locale);");
+    expect(source).toContain("const copy = walletStructuralCopyForLocale(presentation.locale);");
+    expect(source).not.toContain('input.locale === "ar"');
   });
 
   it("fails closed if the authoritative renderer output is modified after digesting", async () => {

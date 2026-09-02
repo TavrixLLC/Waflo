@@ -1,4 +1,4 @@
-import { canonicalizeCardLocale } from "@waflo/contracts";
+import { cardLocalePresentation } from "@waflo/contracts";
 import type { StampPosition } from "@waflo/stamp-engine";
 import {
   composeAppleLegacyStripArtwork,
@@ -36,7 +36,7 @@ export async function composeDashboardWalletArtwork(input: {
   readonly accentColor: string;
   readonly secondaryColor: string;
 }): Promise<DashboardWalletArtwork> {
-  const locale = canonicalizeCardLocale(input.locale) === "ar" ? "ar" : "en";
+  const locale = cardLocalePresentation(input.locale).locale;
   const artworkInput = {
     stampArtwork: {
       ...input.renderedStamp,

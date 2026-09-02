@@ -190,6 +190,10 @@ const zeroDecimalCurrencies = new Set<SupportedPricingCurrency>([
  * remains identical in English, Arabic, SSR, and client rendering.
  */
 const narrowSymbolOverrides: Readonly<Partial<Record<SupportedPricingCurrency, string>>> = {
+  // Keep the product's primary symbols stable across locales. In particular,
+  // some RTL Intl implementations expand USD to "US$", which is useful for
+  // disambiguation but not the customer-facing Waflo price token.
+  USD: "$",
   AED: "د.إ.",
   DZD: "د.ج.",
   EGP: "ج.م.",
@@ -197,6 +201,7 @@ const narrowSymbolOverrides: Readonly<Partial<Record<SupportedPricingCurrency, s
   MAD: "د.م.",
   QAR: "ر.ق.",
   SAR: "⃁",
+  TRY: "₺",
   YER: "﷼",
 };
 
@@ -338,7 +343,9 @@ function formatCurrencyValue(value: number, currency: PricingCurrency, locale: s
   const asNumber = value;
   if (!Number.isFinite(asNumber)) throw new RangeError("Currency amount is outside display range.");
   const formatter = new Intl.NumberFormat(
-    locale.toLowerCase().startsWith("ar") ? "ar-IQ" : locale,
+    // Preserve an explicitly supplied numbering-system extension (for example
+    // ar-IQ-u-nu-latn) instead of replacing it with the Arabic default.
+    locale === "ar" ? "ar-IQ" : locale,
     {
       style: "currency",
       currency: currency.isoCode,

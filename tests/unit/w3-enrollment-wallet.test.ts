@@ -248,9 +248,9 @@ describe("W3 customer security, QR, and Wallet domain", () => {
     const frenchStrings = Buffer.from(files["fr.lproj/pass.strings"] ?? [])
       .subarray(2)
       .toString("utf16le");
-    expect(frenchStrings).toContain('"Cedar Circle" = "Cercle Cedar";');
+    expect(frenchStrings).toContain('"__WAFLO_PROGRAM__" = "Cercle Cedar";');
     expect(frenchStrings).toContain(
-      '"A complimentary drink after eight stamps." = "Une boisson offerte après huit tampons.";',
+      '"__WAFLO_REWARD__" = "Une boisson offerte après huit tampons.";',
     );
   });
 

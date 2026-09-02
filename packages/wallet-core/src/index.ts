@@ -1,3 +1,10 @@
+import {
+  cardLocalePresentation,
+  walletNearbyCopyForLocale,
+  walletNearbyMessageForLocale,
+  walletStructuralCopyForLocale,
+} from "@waflo/contracts";
+
 export const walletProviderCodes = ["APPLE", "GOOGLE"] as const;
 export type WalletProviderCode = (typeof walletProviderCodes)[number];
 
@@ -93,41 +100,6 @@ const nearbyTemplateVerticalByCode: Readonly<Record<string, WalletNearbyVertical
   RETAIL_MINIMAL_STORE: "RETAIL",
 };
 
-const nearbyCopy: Readonly<Record<WalletNearbyVertical, Readonly<Record<"en" | "ar", string>>>> = {
-  COFFEE: {
-    en: "You’re near {merchant}. Your loyalty card is ready for your next coffee visit.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-  RESTAURANT: {
-    en: "You’re near {merchant}. Your loyalty card is ready for your next visit.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-  BARBER: {
-    en: "You’re near {merchant}. Your loyalty card is ready when you are.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-  SALON: {
-    en: "You’re near {merchant}. Your loyalty card is ready for your next visit.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-  BAKERY: {
-    en: "You’re near {merchant}. Your loyalty card is ready for your next bakery visit.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-  GYM: {
-    en: "You’re near {merchant}. Your membership card is ready for your next check-in.",
-    ar: "أنت بالقرب من {merchant}. بطاقة العضوية جاهزة لزيارتك القادمة.",
-  },
-  RETAIL: {
-    en: "You’re near {merchant}. Your loyalty card is ready for your next visit.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-  GENERAL: {
-    en: "You’re near {merchant}. Your loyalty card is ready for your next visit.",
-    ar: "أنت بالقرب من {merchant}. بطاقة الولاء جاهزة لزيارتك القادمة.",
-  },
-};
-
 const unsafeWalletText = /[\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069<>]/u;
 const credentialLikeWalletText =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk_(?:live|test)_[0-9a-z_-]{12,}|\bAIza[0-9a-z_-]{20,}|\bgh[pousr]_[0-9a-z]{20,}|\bAKIA[0-9A-Z]{16}\b/iu;
@@ -167,25 +139,26 @@ export function walletNearbyVertical(input: {
     ? nearbyTemplateVerticalByCode[input.templateCode.toUpperCase()]
     : undefined;
   if (byTemplate) return byTemplate;
+  // The vertical changes wording only. Keep matching deliberately language-
+  // neutral; locale-specific copy comes from the canonical locale contract.
   const category = (input.businessCategory ?? "").normalize("NFKC").toLocaleLowerCase("en-US");
-  if (/coffee|cafe|café|قهو|مقهى/u.test(category)) return "COFFEE";
-  if (/restaurant|dining|bistro|pizza|مطعم/u.test(category)) return "RESTAURANT";
-  if (/barber|groom|حلاق/u.test(category)) return "BARBER";
-  if (/salon|beauty|nail|spa|صالون|تجميل/u.test(category)) return "SALON";
-  if (/bakery|bake|bread|cookie|مخبز|حلويات/u.test(category)) return "BAKERY";
-  if (/gym|fitness|training|نادي|لياقة/u.test(category)) return "GYM";
-  if (/retail|shop|store|متجر|تجزئة/u.test(category)) return "RETAIL";
+  if (/coffee|cafe/u.test(category)) return "COFFEE";
+  if (/restaurant|dining|bistro|pizza/u.test(category)) return "RESTAURANT";
+  if (/barber|groom/u.test(category)) return "BARBER";
+  if (/salon|beauty|nail|spa/u.test(category)) return "SALON";
+  if (/bakery|bake|bread|cookie/u.test(category)) return "BAKERY";
+  if (/gym|fitness|training/u.test(category)) return "GYM";
+  if (/retail|shop|store/u.test(category)) return "RETAIL";
   return "GENERAL";
 }
 
-function safeNearbyName(value: string | null | undefined, locale: "en" | "ar"): string {
+function safeNearbyName(value: string | null | undefined, locale: string): string {
   try {
     return normalizeWalletPlainText(value ?? "", 80);
   } catch {
-    return locale === "ar" ? "هذا النشاط" : "this business";
+    return walletNearbyCopyForLocale(locale).business;
   }
 }
-
 function interpolateNearbyText(
   template: string,
   merchantName: string,
@@ -203,7 +176,7 @@ export function resolveWalletNearbyText(input: {
   businessCategory?: string | null | undefined;
   merchantName?: string | null | undefined;
   locationName?: string | null | undefined;
-  locale: "en" | "ar";
+  locale: string;
   customText?: string | null | undefined;
 }): { text: string; vertical: WalletNearbyVertical; usedCustomText: boolean } {
   const vertical = walletNearbyVertical(input);
@@ -211,22 +184,27 @@ export function resolveWalletNearbyText(input: {
   const location = input.locationName
     ? safeNearbyName(input.locationName, input.locale)
     : undefined;
+  const canonicalLocale = cardLocalePresentation(input.locale).locale;
   const source = input.customText
     ? normalizeWalletPlainText(input.customText, WALLET_NEARBY_TEXT_MAX_CODE_POINTS)
-    : nearbyCopy[vertical][input.locale];
+    : walletNearbyMessageForLocale(canonicalLocale, vertical);
   if (input.customText && unsupportedNearbyOfferClaim.test(source)) {
     throw new Error("Nearby wording cannot make unverified offer or discount claims.");
   }
   const text = interpolateNearbyText(source, merchant, location);
   if (walletTextCodePointLength(text) > WALLET_NEARBY_TEXT_MAX_CODE_POINTS) {
-    const fallback = interpolateNearbyText(nearbyCopy[vertical][input.locale], merchant, undefined);
+    const fallback = interpolateNearbyText(
+      walletNearbyMessageForLocale(canonicalLocale, vertical),
+      merchant,
+      undefined,
+    );
     if (walletTextCodePointLength(fallback) <= WALLET_NEARBY_TEXT_MAX_CODE_POINTS) {
       return { text: fallback, vertical, usedCustomText: false };
     }
     const clipped = Array.from(fallback)
       .slice(0, WALLET_NEARBY_TEXT_MAX_CODE_POINTS - 1)
       .join("");
-    return { text: `${clipped}…`, vertical, usedCustomText: false };
+    return { text: `${clipped}\u2026`, vertical, usedCustomText: false };
   }
   return { text, vertical, usedCustomText: Boolean(input.customText) };
 }
@@ -288,7 +266,7 @@ export interface WalletProgramInput {
 
 export interface WalletPromotionalMessageInput {
   readonly messageId: string;
-  readonly locale: "en" | "ar";
+  readonly locale: string;
   readonly title: string;
   readonly body: string;
   readonly destinationUrl?: string;
@@ -370,92 +348,11 @@ export interface WalletLoyaltyPresentation {
   };
 }
 
-type WalletCopyLocale = "en" | "ar" | "ku-badini" | "ku-sorani";
-
-const walletPresentationCopy: Readonly<
-  Record<
-    WalletCopyLocale,
-    {
-      stamps: string;
-      member: string;
-      status: string;
-      reward: string;
-      security: string;
-      operator: string;
-      active: string;
-      rewardReady: string;
-      transferred: string;
-      paused: string;
-      invalid: string;
-    }
-  >
-> = {
-  en: {
-    stamps: "STAMPS",
-    member: "MEMBER",
-    status: "STATUS",
-    reward: "REWARD",
-    security: "SECURITY",
-    operator: "WAFLO",
-    active: "Active",
-    rewardReady: "Reward ready",
-    transferred: "Transferred",
-    paused: "Temporarily paused",
-    invalid: "No longer valid",
-  },
-  ar: {
-    stamps: "الأختام",
-    member: "العضو",
-    status: "الحالة",
-    reward: "المكافأة",
-    security: "الأمان",
-    operator: "WAFLO",
-    active: "نشطة",
-    rewardReady: "المكافأة جاهزة",
-    transferred: "تم النقل",
-    paused: "متوقفة مؤقتًا",
-    invalid: "لم تعد صالحة",
-  },
-  "ku-badini": {
-    stamps: "مۆر",
-    member: "ئەندام",
-    status: "بارودۆخ",
-    reward: "خەلات",
-    security: "پاراستن",
-    operator: "WAFLO",
-    active: "چالاک",
-    rewardReady: "خەلات ئامادەیە",
-    transferred: "هاتە ڤەگوهاستن",
-    paused: "بۆ کاتەکی وەستیا",
-    invalid: "ئیدی نە دروستە",
-  },
-  "ku-sorani": {
-    stamps: "مۆر",
-    member: "ئەندام",
-    status: "دۆخ",
-    reward: "خەڵات",
-    security: "پاراستن",
-    operator: "WAFLO",
-    active: "چالاک",
-    rewardReady: "خەڵات ئامادەیە",
-    transferred: "گوازراوەتەوە",
-    paused: "کاتیی وەستێنراوە",
-    invalid: "چیتر دروست نییە",
-  },
-};
-
-function walletCopyLocale(locale: string): WalletCopyLocale {
-  const normalized = locale.toLocaleLowerCase("en-US");
-  if (normalized === "ar" || normalized.startsWith("ar-")) return "ar";
-  if (normalized === "ckb" || normalized.startsWith("ckb-")) return "ku-sorani";
-  if (normalized === "ku-arab-iq" || normalized.includes("badini")) return "ku-badini";
-  return "en";
-}
-
 export function resolveWalletLoyaltyPresentation(
   input: WalletMembershipInput,
 ): WalletLoyaltyPresentation {
-  const copy = walletPresentationCopy[walletCopyLocale(input.locale)];
+  const presentation = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(presentation.locale);
   const inactive =
     input.transferred ||
     input.membershipStatus !== "ACTIVE" ||
@@ -484,7 +381,8 @@ export function resolveWalletLoyaltyPresentation(
       status: copy.status,
       reward: copy.reward,
       security: copy.security,
-      operator: copy.operator,
+      // Waflo is a registered operator name, not a translatable label.
+      operator: "WAFLO",
     },
     barcode: {
       payload: input.credentialPayload,

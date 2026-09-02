@@ -1,6 +1,11 @@
-import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
+import {
+  cardLocalePresentation,
+  cardLocaleRegistry,
+  walletStructuralCopyForLocale,
+} from "@waflo/contracts";
 import { validateSigningCertificate } from "./certificate.js";
 import type { PassBuilderServiceConfiguration } from "./config.js";
 import type { PassBuilderRequest, SigningIdentity } from "./contracts.js";
@@ -29,6 +34,55 @@ function safeValidationWarnings(output: string): readonly string[] {
     .filter(Boolean)
     .slice(0, 20)
     .map((line) => line.replace(/[A-Za-z0-9_-]{24,}/g, "[REDACTED]").slice(0, 240));
+}
+
+function applePassStrings(locale: string): string {
+  const copy = walletStructuralCopyForLocale(locale);
+  const quote = (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const entries: readonly (readonly [string, string])[] = [
+    ["STAMPS", copy.stamps],
+    ["MEMBER", copy.member],
+    ["PROGRAM", copy.program],
+    ["STATUS", copy.status],
+    ["REWARD", copy.reward],
+    ["SECURITY", copy.security],
+    ["Active", copy.active],
+    ["Reward ready", copy.rewardReady],
+    ["Transferred", copy.transferred],
+    ["Temporarily paused", copy.paused],
+    ["No longer valid", copy.invalid],
+  ];
+  return entries
+    .map(([key, value]) => `"${quote(key)}" = "${quote(value)}";`)
+    .join("\n")
+    .concat("\n");
+}
+
+async function writeApplePassStrings(path: string, locale: string): Promise<void> {
+  const contents = applePassStrings(locale);
+  await writeFile(
+    path,
+    Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(contents, "utf16le")]),
+    { mode: 0o600 },
+  );
+}
+
+/** Apple requires non-ASCII pass.strings in the produced pass to be UTF-16. */
+async function materializeAppleLocalizedTemplate(
+  source: string,
+  destination: string,
+): Promise<void> {
+  await cp(source, destination, { recursive: true, errorOnExist: true });
+  // A personalized pass can be displayed on a device in any locale Waflo
+  // advertises. Generate every artifact directory from the same shared copy
+  // contract used by issuance rather than leaving the build template EN/AR-only.
+  await Promise.all(
+    cardLocaleRegistry.map(async ({ id }) => {
+      const directory = join(destination, `${cardLocalePresentation(id).appleLocale}.lproj`);
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await writeApplePassStrings(join(directory, "pass.strings"), id);
+    }),
+  );
 }
 
 export class ApplePassBuilder {
@@ -149,6 +203,8 @@ export class ApplePassBuilder {
       ) {
         throw new Error("PASS_TEMPLATE_INVALID");
       }
+      const localizedTemplatePath = join(workDirectory, "localized-template.pkpasstemplate");
+      await materializeAppleLocalizedTemplate(realTemplatePath, localizedTemplatePath);
       const protobufPath = await createPersonalizationProtobuf({
         request,
         protobufRoot: this.configuration.protobufRoot,
@@ -160,7 +216,7 @@ export class ApplePassBuilder {
           executable: this.configuration.buildpassPath,
           arguments: [
             "personalize",
-            realTemplatePath,
+            localizedTemplatePath,
             "--protobuf",
             protobufPath,
             "--output",

@@ -293,7 +293,17 @@ describe("Google merchant-written Wallet messages", () => {
             id: "wfl_campaign_pass_stable",
             header: "رسالة جديدة",
             messageType: "TEXT_AND_NOTIFY",
-            localizedHeader: { defaultValue: { language: "ar", value: "رسالة جديدة" } },
+            localizedHeader: expect.objectContaining({
+              defaultValue: { language: "ar", value: "رسالة جديدة" },
+              translatedValues: [],
+            }),
+            localizedBody: expect.objectContaining({
+              defaultValue: {
+                language: "ar",
+                value: 'هذه رسالة آمنة. <a href="https://merchant.waflo.app/offers">فتح الرابط</a>',
+              },
+              translatedValues: [],
+            }),
           }),
         },
       },

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Locale } from "@waflo/contracts";
+import { cardLocalePresentation } from "@waflo/contracts";
 import { renderStampSvg } from "@waflo/stamp-engine";
 import Image from "next/image";
 import type { CSSProperties } from "react";
@@ -23,7 +23,7 @@ export interface LoyaltyCardRealPreviewProps {
       }
     | null
     | undefined;
-  locale: Locale;
+  locale: string;
   brandLogoUrl?: string | null | undefined;
   className?: string | undefined;
 }
@@ -38,9 +38,14 @@ export function LoyaltyCardRealPreview({
   brandLogoUrl,
   className = "",
 }: LoyaltyCardRealPreviewProps) {
-  const ar = locale === "ar";
-  const displayName = programName || internalName || (ar ? "بطاقة الولاء" : "Loyalty card");
-  const initial = displayName.charAt(0).toLocaleUpperCase(ar ? "ar" : "en");
+  const presentation = cardLocalePresentation(locale);
+  const displayName =
+    programName ||
+    internalName ||
+    (presentation.isRtl
+      ? "\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0648\u0644\u0627\u0621"
+      : "Loyalty card");
+  const initial = displayName.charAt(0).toLocaleUpperCase(presentation.locale);
   const goal = Math.max(2, Math.min(30, Number(requiredStampCount) || 8));
   const layout = "GRID" as const;
 
@@ -71,7 +76,8 @@ export function LoyaltyCardRealPreview({
   return (
     <div
       className={`loyalty-card-real-preview ${className}`}
-      dir={ar ? "rtl" : "ltr"}
+      lang={presentation.locale}
+      dir={presentation.direction}
       style={
         {
           "--preview-bg": backgroundColor,
@@ -81,7 +87,7 @@ export function LoyaltyCardRealPreview({
         } as CSSProperties
       }
       role="img"
-      aria-label={`${ar ? "معاينة تصميم بطاقة الولاء" : "Loyalty card design preview"}: ${displayName}`}
+      aria-label={`${presentation.isRtl ? "\u0645\u0639\u0627\u064a\u0646\u0629 \u062a\u0635\u0645\u064a\u0645 \u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0648\u0644\u0627\u0621" : "Loyalty card design preview"}: ${displayName}`}
     >
       <div className="loyalty-card-real-preview__surface">
         {/* Header with initial brand badge & program name */}
@@ -92,9 +98,9 @@ export function LoyaltyCardRealPreview({
             fallback={initial}
             size={20}
           />
-          <span className="loyalty-card-real-preview__title" title={displayName}>
+          <bdi className="loyalty-card-real-preview__title" dir="auto" title={displayName}>
             {displayName}
-          </span>
+          </bdi>
         </div>
 
         {/* Real Stamp Artwork Seal */}
@@ -128,9 +134,9 @@ export function LoyaltyCardRealPreview({
             0 / {goal}
           </span>
           {rewardSummary ? (
-            <span className="loyalty-card-real-preview__reward" title={rewardSummary}>
+            <bdi className="loyalty-card-real-preview__reward" dir="auto" title={rewardSummary}>
               {rewardSummary}
-            </span>
+            </bdi>
           ) : null}
         </div>
       </div>

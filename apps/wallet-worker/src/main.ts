@@ -11,7 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { hasMerchantOperationalBillingAccess } from "@waflo/billing";
 import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
-import { resolveCardLocale } from "@waflo/contracts";
+import { cardLocalePresentation, resolveCardLocale } from "@waflo/contracts";
 import {
   createCustomerDataKeyring,
   decodeSecret,
@@ -1959,7 +1959,7 @@ export class WalletWorker {
         : cached;
       return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
-    const walletLocale: "en" | "ar" = input.stampRenderInput.locale === "ar" ? "ar" : "en";
+    const walletLocale = cardLocalePresentation(input.locale).locale;
     const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
     const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
     const composed = await composeWalletArtwork(

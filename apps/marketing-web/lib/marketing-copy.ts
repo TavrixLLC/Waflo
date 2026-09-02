@@ -103,6 +103,25 @@ interface MarketingCopy {
     readonly primary: string;
     readonly secondary: string;
   };
+  readonly pricing: {
+    readonly kicker: string;
+    readonly title: string;
+    readonly lede: string;
+    readonly explorerKicker: string;
+    readonly explorerTitle: string;
+    readonly cadenceLabel: string;
+    readonly monthly: string;
+    readonly quarterly: string;
+    readonly yearly: string;
+    readonly save: string;
+    readonly marketContext: string;
+    readonly starterBenefit: string;
+    readonly growthBenefit: string;
+    readonly scaleBenefit: string;
+    readonly trialTitle: string;
+    readonly trialBody: string;
+    readonly startTrial: string;
+  };
   readonly footer: {
     readonly tagline: string;
     readonly product: string;
@@ -309,6 +328,25 @@ const en: MarketingCopy = {
     primary: "Start free",
     secondary: "Talk to us",
   },
+  pricing: {
+    kicker: "One clear price",
+    title: "Pricing without hidden math.",
+    lede: "Pick a cadence and see both numbers that matter: the effective monthly cost and the total you are billed.",
+    explorerKicker: "Billing, clearly",
+    explorerTitle: "Choose a plan and billing cadence in one place",
+    cadenceLabel: "Billing cadence",
+    monthly: "Monthly",
+    quarterly: "Every 3 months",
+    yearly: "Yearly",
+    save: "Save",
+    marketContext: "Published prices for your market",
+    starterBenefit: "Everything you need to launch.",
+    growthBenefit: "More capacity for a growing team.",
+    scaleBenefit: "Advanced tools for larger operations.",
+    trialTitle: "15 days free",
+    trialBody: "Add billing details and a card securely. Nothing is charged today.",
+    startTrial: "Start your trial",
+  },
   footer: {
     tagline: "A digital loyalty platform for businesses people come back to.",
     product: "Product",
@@ -478,6 +516,25 @@ const ar: MarketingCopy = {
     lede: "أنشئ بطاقتك واختر مكافأتك وابدأ تجربة لمدة 15 يوماً من دون خصم اليوم.",
     primary: "ابدأ مجانًا",
     secondary: "تحدث معنا",
+  },
+  pricing: {
+    kicker: "سعر واضح واحد",
+    title: "أسعار بلا حسابات خفية.",
+    lede: "اختر وتيرة الدفع وشاهد الرقمين المهمين: التكلفة الشهرية الفعلية والمبلغ الذي ستدفعه.",
+    explorerKicker: "الفوترة بوضوح",
+    explorerTitle: "اختر الباقة ووتيرة الدفع في مكان واحد",
+    cadenceLabel: "دورة الفوترة",
+    monthly: "شهري",
+    quarterly: "كل 3 أشهر",
+    yearly: "سنوي",
+    save: "وفّر",
+    marketContext: "الأسعار المنشورة لسوقك",
+    starterBenefit: "كل ما تحتاجه للانطلاق.",
+    growthBenefit: "سعة أكبر لفريق ينمو.",
+    scaleBenefit: "أدوات متقدمة للعمليات الأكبر.",
+    trialTitle: "15 يوماً مجاناً",
+    trialBody: "أضف بيانات الفوترة والبطاقة بأمان. لن يتم تحصيل أي مبلغ اليوم.",
+    startTrial: "ابدأ تجربتك",
   },
   footer: {
     tagline: "منصة ولاء رقمية للأعمال التي يعود إليها الناس.",
@@ -656,6 +713,25 @@ const kuBadini: MarketingCopy = {
     lede: "کارتا خۆ چێ بکە، خەلاتی هەلبژێرە و 7 ڕۆژان ب خۆڕایی دەست پێ بکە.",
     primary: "ب خۆڕایی دەست پێ بکە",
     secondary: "د گەل مە ئاخفتن بکە",
+  },
+  pricing: {
+    kicker: "بهایەکێ ئاشکرا",
+    title: "نرخان بێ حسابکرنا ڤەشارتی.",
+    lede: "دەمێ پارەدانێ هەلبژێرە و هەردوو ژمارەی گرنگ ببینە: تێچوونا مانگانە و کۆی پارەیێ ددەی.",
+    explorerKicker: "فۆتیرە ب ئاشکرایی",
+    explorerTitle: "پلان و دەما پارەدانێ د جهەکێ هەلبژێرە",
+    cadenceLabel: "دەما فۆتیرە",
+    monthly: "مانگانە",
+    quarterly: "هەر 3 مانگ",
+    yearly: "سالانە",
+    save: "پاشەکەوت",
+    marketContext: "نرخێن بڵاوکری بۆ بازاڕێ تە",
+    starterBenefit: "هەمی یا پێدڤی بۆ دەستپێکرنێ.",
+    growthBenefit: "شێوەیەکا زێدەتر بۆ تیمەکا گەشەکر.",
+    scaleBenefit: "ئامێرێن پێشکەفتی بۆ کارێن مەزنتر.",
+    trialTitle: "15 رۆژ ب خۆرایی",
+    trialBody: "زانیاریێن فۆتیرە و کارتێ ب پاراستنێ زیاد بکە. ئێرو پارە ناهێتە وەرگرتن.",
+    startTrial: "دەست ب تاقیکرنێ بکە",
   },
   footer: {
     tagline: "پلاتفۆرما دلسۆزییا دیجیتاڵ بۆ وان بزنسان کو خەلک ڤەدگەڕنێ.",
@@ -840,6 +916,25 @@ const kuSorani: MarketingCopy = {
     lede: "کارتەکەت دروست بکە، خەڵات هەڵبژێرە و 7 ڕۆژ بەخۆڕایی دەست پێبکە.",
     primary: "بەخۆڕایی دەست پێبکە",
     secondary: "قسەمان لەگەڵ بکە",
+  },
+  pricing: {
+    kicker: "یەک نرخێکی ڕوون",
+    title: "نرخەکان بەبێ ژمێریاریی شاراوە.",
+    lede: "خشتەی پارەدان هەڵبژێرە و هەردوو ژمارەی گرنگ ببینە: تێچووی مانگانەی ڕاستەقینە و کۆی ئەو بڕەی کە دەیدەیت.",
+    explorerKicker: "بەپارەدان بە ڕوونی",
+    explorerTitle: "پلان و خشتەی پارەدان لە یەک شوێن هەڵبژێرە",
+    cadenceLabel: "خشتەی پارەدان",
+    monthly: "مانگانە",
+    quarterly: "هەر 3 مانگ",
+    yearly: "ساڵانە",
+    save: "پاشەکەوت",
+    marketContext: "نرخە بڵاوکراوەکان بۆ بازاڕەکەت",
+    starterBenefit: "هەموو ئەوەی پێویستتە بۆ دەستپێکردن.",
+    growthBenefit: "توانای زیاتر بۆ تیمێکی گەشەسەندوو.",
+    scaleBenefit: "ئامرازە پێشکەوتووەکان بۆ کارگێڕییە گەورەترەکان.",
+    trialTitle: "15 ڕۆژ بەخۆڕایی",
+    trialBody: "زانیارییەکانی بەپارەدان و کارت بە ئاسایش زیاد بکە. ئەمڕۆ هیچ بڕێک وەرناگیرێت.",
+    startTrial: "دەست بە تاقیکردنەوەکەت بکە",
   },
   footer: {
     tagline: "پلاتفۆرمی دڵسۆزیی دیجیتاڵی بۆ ئەو بزنسانەی خەڵک دەگەڕێنەوە بۆیان.",

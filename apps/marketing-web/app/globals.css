@@ -3204,11 +3204,10 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
 }
 
 .marketing-cadence-selector {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.2rem;
+  display: grid;
+  width: min(100%, 35rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
   padding: 0.3rem;
   background: white;
   border: 1px solid var(--waflo-border);
@@ -3217,41 +3216,59 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
 }
 
 .marketing-cadence-selector label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-height: 40px;
-  padding: 0.55rem 0.85rem;
-  color: var(--waflo-muted);
+  --marketing-cadence-foreground: var(--waflo-muted);
+  --marketing-cadence-badge-foreground: var(--waflo-brick);
+  --marketing-cadence-badge-background: var(--waflo-soft);
+
+  display: grid;
+  min-width: 0;
+  min-height: 3.35rem;
+  padding: 0.4rem 0.3rem;
+  place-content: center;
+  gap: 0.12rem;
+  color: var(--marketing-cadence-foreground);
   background: transparent;
   border: 0;
   border-radius: var(--waflo-radius-pill);
+  text-align: center;
   cursor: pointer;
 }
 
 .marketing-cadence-selector label strong {
+  min-width: 0;
+  overflow: hidden;
   font-size: 0.8rem;
   font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .marketing-cadence-selector label small {
-  padding: 0.2rem 0.42rem;
-  color: var(--waflo-brick);
-  background: var(--waflo-soft);
+  min-width: 0;
+  justify-self: center;
+  padding: 0.1rem 0.25rem;
+  color: var(--marketing-cadence-badge-foreground);
+  background: var(--marketing-cadence-badge-background);
   border-radius: var(--waflo-radius-pill);
   font-size: 0.62rem;
   font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .marketing-cadence-selector .marketing-cadence-selector__option--active {
-  color: white;
+  --marketing-cadence-foreground: var(--waflo-white);
+  --marketing-cadence-badge-foreground: var(--waflo-ink);
+  --marketing-cadence-badge-background: var(--waflo-coral);
+
   background: var(--waflo-ink);
   box-shadow: none;
 }
 
-.marketing-cadence-selector .marketing-cadence-selector__option--active small {
-  color: var(--waflo-ink);
-  background: var(--waflo-coral);
+.marketing-cadence-selector label:focus-within {
+  outline: 3px solid var(--waflo-focus);
+  outline-offset: 2px;
 }
 
 .marketing-pricing-explorer__context {
@@ -3422,9 +3439,8 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
   }
 
   .marketing-cadence-selector label {
-    flex: 1 1 auto;
-    justify-content: center;
-    padding-inline: 0.65rem;
+    min-height: 3.45rem;
+    padding-inline: 0.2rem;
   }
 
   .marketing-pricing-explorer__context {

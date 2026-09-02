@@ -222,8 +222,12 @@ function localizedError(caught: unknown, copy: OnboardingCopy, fallback: string)
   return fallback;
 }
 
-function money(amount: number, currency: string, locale: InterfaceLocale = "en"): string {
-  return formatCurrencyMinor(BigInt(amount), currency, locale === "ar" ? "ar" : "en");
+function money(
+  amount: bigint | number | string,
+  currency: string,
+  locale: InterfaceLocale = "en",
+): string {
+  return formatCurrencyMinor(amount, currency, localeRegistry[locale].numberFormattingLocale);
 }
 
 function dateLabel(value: string, locale: InterfaceLocale): string {
@@ -366,7 +370,7 @@ function PlanStep({
     catalog.terms.map((term) => [`${term.plan}:${term.cadence}`, term] as const),
   );
   return (
-    <>
+    <div className="onboarding-plan-step">
       <div className="onboarding-heading">
         <span>{copy.plan.step}</span>
         <h1>{copy.plan.title}</h1>
@@ -422,11 +426,11 @@ function PlanStep({
               </span>
               <strong>{planNames[value]}</strong>
               <span className="onboarding-plan-option__price">
-                <bdi>
+                <bdi dir="ltr">
                   {formatCurrencyMinor(
                     BigInt(pricing.amountMinor),
                     pricing.currency,
-                    locale === "ar" ? "ar" : "en",
+                    localeRegistry[locale].numberFormattingLocale,
                   )}
                 </bdi>
               </span>
@@ -446,7 +450,7 @@ function PlanStep({
       <div className="onboarding-actions">
         <Button onClick={onContinue}>{copy.plan.continue}</Button>
       </div>
-    </>
+    </div>
   );
 }
 

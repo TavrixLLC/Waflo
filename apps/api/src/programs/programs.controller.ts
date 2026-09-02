@@ -30,20 +30,18 @@ export class ProgramsController {
   templates(
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
-    @Query("locale") locale = "EN",
+    @Query("locale") locale = "en",
   ) {
-    const normalizedLocale = locale.toUpperCase();
-    if (!["EN", "AR"].includes(normalizedLocale))
+    const parsedLocale = cardLocaleSchema.safeParse(
+      locale === "EN" ? "en" : locale === "AR" ? "ar" : locale,
+    );
+    if (!parsedLocale.success)
       throw new AppError(
         "TEMPLATE_LOCALE_INVALID",
         "Invalid template locale.",
         HttpStatus.BAD_REQUEST,
       );
-    return this.programs.templates(
-      user.id,
-      parseUuid(organizationId),
-      normalizedLocale as "EN" | "AR",
-    );
+    return this.programs.templates(user.id, parseUuid(organizationId), parsedLocale.data);
   }
 
   @Get("templates/:templateCode/previews")
@@ -52,11 +50,13 @@ export class ProgramsController {
     @Param("organizationId") organizationId: string,
     @Param("templateCode") templateCode: string,
     @Query("version") version?: string,
-    @Query("locale") locale = "EN",
+    @Query("locale") locale = "en",
     @Query("presentation") presentation = "TEMPLATE",
   ) {
-    const normalizedLocale = locale.toUpperCase();
-    if (!["EN", "AR"].includes(normalizedLocale))
+    const parsedLocale = cardLocaleSchema.safeParse(
+      locale === "EN" ? "en" : locale === "AR" ? "ar" : locale,
+    );
+    if (!parsedLocale.success)
       throw new AppError(
         "TEMPLATE_LOCALE_INVALID",
         "Invalid template locale.",
@@ -85,7 +85,7 @@ export class ProgramsController {
       parseUuid(organizationId),
       templateCode,
       normalizedVersion,
-      normalizedLocale as "EN" | "AR",
+      parsedLocale.data,
       normalizedPresentation as "TEMPLATE" | "BLANK",
     );
   }
