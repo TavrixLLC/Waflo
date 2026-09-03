@@ -1,0 +1,66 @@
+name: Set up isolated validation environment
+description: Install deterministic dependencies and initialize one CI test stack.
+runs:
+  using: composite
+  steps:
+    - name: Check out the validated commit
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        fetch-depth: 0
+
+    - name: Install pnpm
+      uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      with:
+        version: ${{ env.PNPM_VERSION }}
+
+    - name: Install Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: pnpm
+
+    # A validation job can read only a trusted cache namespace. Cache writes
+    # remain explicit in the workflow and are limited to trusted push runs.
+    - id: turbo-cache
+      name: Restore safe Turborepo cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: .turbo
+        key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+        restore-keys: |
+          turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-
+
+    - name: Record Turborepo cache restore
+      shell: bash
+      env:
+        TURBO_CACHE_HIT: ${{ steps.turbo-cache.outputs.cache-hit }}
+      run: |
+        if [[ "${TURBO_CACHE_HIT}" == "true" ]]; then
+          echo "Turborepo cache: exact hit"
+        else
+          echo "Turborepo cache: miss or safe prefix restore"
+        fi
+
+    - name: Install frozen dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Start and initialize Wallet test object storage
+      shell: bash
+      run: bash deploy/vps/scripts/start-ci-object-storage.sh
+
+    - name: Validate test environment and Prisma schema
+      shell: bash
+      run: |
+        pnpm env:validate:test
+        pnpm db:validate
+
+    - name: Build database seed dependency graph
+      shell: bash
+      run: pnpm --filter "@waflo/database..." build
+
+    - name: Apply all migrations and seed
+      shell: bash
+      run: |
+        pnpm db:migrate:deploy
+        pnpm db:seed

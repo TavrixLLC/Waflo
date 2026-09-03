@@ -21,47 +21,22 @@ env:
   PNPM_VERSION: 11.5.2
 
 jobs:
-  verify:
-    name: Authoritative validation
+  release_static_verify:
+    name: Release static validation
     if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     concurrency:
-      group: waflo-validation-${{ github.event.pull_request.number || github.ref }}
+      # Keep separate release gates concurrent while cancelling an older run
+      # of the same gate for the same ref.
+      group: waflo-validation-static-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
-    services:
-      postgres:
-        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
-        env:
-          POSTGRES_DB: waflo
-          POSTGRES_USER: waflo
-          POSTGRES_PASSWORD: waflo_dev_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U waflo -d waflo"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-      redis:
-        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
-      mailpit:
-        image: axllent/mailpit:v1.27.9
-        ports:
-          - 1025:1025
-          - 8025:8025
-
     env:
       CI: true
       NODE_ENV: test
       API_PORT: 4000
+      # Static checks retain the same deterministic configuration as the
+      # service-backed gates. They validate shape and build outputs only.
       DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
       REDIS_URL: redis://127.0.0.1:6379
       SMTP_HOST: 127.0.0.1
@@ -129,48 +104,6 @@ jobs:
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Start and initialize Wallet test object storage
-        run: |
-          docker run --detach \
-            --name waflo-ci-wallet-storage \
-            --publish 127.0.0.1:9000:9000 \
-            --env MINIO_ROOT_USER="${OBJECT_STORAGE_ACCESS_KEY_ID}" \
-            --env MINIO_ROOT_PASSWORD="${OBJECT_STORAGE_SECRET_ACCESS_KEY}" \
-            --health-cmd "curl --fail http://localhost:9000/minio/health/live" \
-            --health-interval 2s \
-            --health-timeout 2s \
-            --health-retries 30 \
-            minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
-            server /data --address ":9000"
-
-          for attempt in {1..30}; do
-            storage_status="$(
-              docker inspect --format '{{.State.Health.Status}}' waflo-ci-wallet-storage
-            )"
-            if [[ "${storage_status}" == "healthy" ]]; then
-              break
-            fi
-            if [[ "${attempt}" -eq 30 ]]; then
-              docker logs waflo-ci-wallet-storage
-              exit 1
-            fi
-            sleep 1
-          done
-
-          docker run --rm --network host \
-            --env CI_STORAGE_ENDPOINT="${OBJECT_STORAGE_ENDPOINT}" \
-            --env CI_STORAGE_ACCESS_KEY="${OBJECT_STORAGE_ACCESS_KEY_ID}" \
-            --env CI_STORAGE_SECRET_KEY="${OBJECT_STORAGE_SECRET_ACCESS_KEY}" \
-            --env CI_STORAGE_BUCKET="${OBJECT_STORAGE_BUCKET}" \
-            --entrypoint /bin/sh \
-            minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
-            -c '
-              mc alias set ci "$CI_STORAGE_ENDPOINT" "$CI_STORAGE_ACCESS_KEY" "$CI_STORAGE_SECRET_KEY" &&
-              mc mb --ignore-existing "ci/$CI_STORAGE_BUCKET" &&
-              mc anonymous set none "ci/$CI_STORAGE_BUCKET" &&
-              mc stat "ci/$CI_STORAGE_BUCKET"
-            '
-
       - name: Static release safety
         run: |
           git diff --check
@@ -181,19 +114,6 @@ jobs:
       - name: Production dependency audit policy
         run: pnpm audit:production
 
-      - name: Validate test environment and Prisma schema
-        run: |
-          pnpm env:validate:test
-          pnpm db:validate
-
-      - name: Build database seed dependency graph
-        run: pnpm --filter "@waflo/database..." build
-
-      - name: Apply all migrations and seed
-        run: |
-          pnpm db:migrate:deploy
-          pnpm db:seed
-
       - name: Format and lint
         run: |
           pnpm format:check
@@ -201,9 +121,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
-
-      - name: Unit, integration, HTTP, concurrency, and failure tests
-        run: pnpm test
 
       - name: Production build
         env:
@@ -218,17 +135,149 @@ jobs:
       - name: Cloudflare token permission regression
         run: sudo bash tests/deployment/cloudflare-token-permissions.test.sh
 
+      - name: Save trusted Turborepo cache
+        if: ${{ success() && github.event_name == 'push' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+
+  release_unit_verify:
+    name: Release unit and integration validation
+    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: waflo-validation-unit-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env:
+          POSTGRES_DB: waflo
+          POSTGRES_USER: waflo
+          POSTGRES_PASSWORD: waflo_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U waflo -d waflo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      mailpit:
+        image: axllent/mailpit:v1.27.9
+        ports:
+          - 1025:1025
+          - 8025:8025
+    env:
+      CI: true
+      NODE_ENV: test
+      API_PORT: 4000
+      DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      EMAIL_FROM: Waflo CI <ci@waflo.local>
+      MARKETING_WEB_URL: http://localhost:3000
+      MERCHANT_DASHBOARD_URL: http://localhost:3001
+      CUSTOMER_WEB_URL: http://localhost:3002
+      API_PUBLIC_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      COOKIE_SECURE: false
+      COOKIE_NAME: waflo_session
+      MERCHANT_BASE_DOMAIN: waflo.app
+      LEGAL_TERMS_VERSION: ci-draft
+      LEGAL_PRIVACY_VERSION: ci-draft
+      LEGAL_EFFECTIVE_DATE: CI only
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: waflo-wallet-ci-test
+      OBJECT_STORAGE_ACCESS_KEY_ID: waflo_ci_test
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: waflo_ci_test_password
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true
+      OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
+    steps:
+      - name: Set up isolated test services and dependencies
+        uses: ./.github/actions/setup-isolated-validation
+      - name: Unit, integration, HTTP, concurrency, and failure tests
+        run: pnpm test
+      - name: Save trusted Turborepo cache
+        if: ${{ success() && github.event_name == 'push' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+
+  release_e2e:
+    name: Release browser validation
+    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: waflo-validation-e2e-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env: { POSTGRES_DB: waflo, POSTGRES_USER: waflo, POSTGRES_PASSWORD: waflo_dev_password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U waflo -d waflo" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 12
+      mailpit:
+        image: axllent/mailpit:v1.27.9
+        ports: ["1025:1025", "8025:8025"]
+    env:
+      CI: true
+      NODE_ENV: test
+      API_PORT: 4000
+      DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      EMAIL_FROM: Waflo CI <ci@waflo.local>
+      MARKETING_WEB_URL: http://localhost:3000
+      MERCHANT_DASHBOARD_URL: http://localhost:3001
+      CUSTOMER_WEB_URL: http://localhost:3002
+      API_PUBLIC_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      COOKIE_SECURE: false
+      COOKIE_NAME: waflo_session
+      MERCHANT_BASE_DOMAIN: waflo.app
+      LEGAL_TERMS_VERSION: ci-draft
+      LEGAL_PRIVACY_VERSION: ci-draft
+      LEGAL_EFFECTIVE_DATE: CI only
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: waflo-wallet-ci-test
+      OBJECT_STORAGE_ACCESS_KEY_ID: waflo_ci_test
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: waflo_ci_test_password
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true
+      OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
+    steps:
+      - name: Set up isolated test services and dependencies
+        uses: ./.github/actions/setup-isolated-validation
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
-
-      - id: browser
-        name: Browser flows
+      - name: Browser flows
         run: pnpm test:e2e
-
-      - id: accessibility
-        name: Accessibility
-        run: pnpm test:a11y
-
       - name: Upload failed browser diagnostics only
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -241,17 +290,95 @@ jobs:
             test-results/
             !test-results/evidence/**
 
-      - name: Save trusted Turborepo cache
-        if: ${{ success() && github.event_name == 'push' }}
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+  release_accessibility:
+    name: Release accessibility validation
+    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: waflo-validation-accessibility-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env: { POSTGRES_DB: waflo, POSTGRES_USER: waflo, POSTGRES_PASSWORD: waflo_dev_password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U waflo -d waflo" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 12
+      mailpit:
+        image: axllent/mailpit:v1.27.9
+        ports: ["1025:1025", "8025:8025"]
+    env:
+      CI: true
+      NODE_ENV: test
+      API_PORT: 4000
+      DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      EMAIL_FROM: Waflo CI <ci@waflo.local>
+      MARKETING_WEB_URL: http://localhost:3000
+      MERCHANT_DASHBOARD_URL: http://localhost:3001
+      CUSTOMER_WEB_URL: http://localhost:3002
+      API_PUBLIC_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      COOKIE_SECURE: false
+      COOKIE_NAME: waflo_session
+      MERCHANT_BASE_DOMAIN: waflo.app
+      LEGAL_TERMS_VERSION: ci-draft
+      LEGAL_PRIVACY_VERSION: ci-draft
+      LEGAL_EFFECTIVE_DATE: CI only
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: waflo-wallet-ci-test
+      OBJECT_STORAGE_ACCESS_KEY_ID: waflo_ci_test
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: waflo_ci_test_password
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true
+      OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
+    steps:
+      - name: Set up isolated test services and dependencies
+        uses: ./.github/actions/setup-isolated-validation
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Accessibility
+        run: pnpm test:a11y
+      - name: Upload failed browser diagnostics only
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          path: .turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+          name: accessibility-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 3
+          path: |
+            playwright-report/
+            test-results/
+            !test-results/evidence/**
+
+  release_verified:
+    name: Authoritative release validation complete
+    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    needs:
+      - release_static_verify
+      - release_unit_verify
+      - release_e2e
+      - release_accessibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Confirm every mandatory validation gate passed
+        run: echo "All static, unit/integration, browser, and accessibility release gates passed."
 
   publish_release_images:
     name: Publish immutable GHCR images
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
-    needs: verify
+    needs: release_verified
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
