@@ -17,11 +17,14 @@ RUN git init \
     && git apply --check /tmp/pass-builder.patch \
     && git apply /tmp/pass-builder.patch \
     && cp /tmp/Package.resolved Package.resolved
-RUN git config --global http.version HTTP/1.1 \
+RUN --mount=type=cache,id=waflo-apple-pass-builder-swiftpm,target=/root/.cache/org.swift.swiftpm,sharing=locked \
+    --mount=type=cache,id=waflo-apple-pass-builder-swift-build,target=/source/pass-builder/.build,sharing=locked \
+    git config --global http.version HTTP/1.1 \
     && swift package resolve \
     && echo "0cc5f7d74bba8d3882f2fd46b9dc0e107a977bb817872948a2f459276ee325a6  Package.resolved" \
       | sha256sum --check --strict
-RUN --mount=type=cache,target=/source/pass-builder/.build \
+RUN --mount=type=cache,id=waflo-apple-pass-builder-swiftpm,target=/root/.cache/org.swift.swiftpm,sharing=locked \
+    --mount=type=cache,id=waflo-apple-pass-builder-swift-build,target=/source/pass-builder/.build,sharing=locked \
     swift build -c release --product buildpass --static-swift-stdlib --disable-automatic-resolution \
     && mkdir -p /out/runtime /out/Protobufs \
     && cp .build/release/buildpass /out/runtime/buildpass \
@@ -34,9 +37,33 @@ FROM node:24-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed6116
 WORKDIR /workspace
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY apps apps
-COPY packages packages
-RUN pnpm install --frozen-lockfile --filter @waflo/apple-pass-builder-service...
+COPY apps/apple-pass-builder-service/package.json apps/apple-pass-builder-service/
+COPY packages/auth/package.json packages/auth/
+COPY packages/billing/package.json packages/billing/
+COPY packages/brand/package.json packages/brand/
+COPY packages/config/package.json packages/config/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/customer-security/package.json packages/customer-security/
+COPY packages/database/package.json packages/database/
+COPY packages/external-auth-security/package.json packages/external-auth-security/
+COPY packages/i18n/package.json packages/i18n/
+COPY packages/loyalty-ledger/package.json packages/loyalty-ledger/
+COPY packages/loyalty-policy/package.json packages/loyalty-policy/
+COPY packages/operational-analytics/package.json packages/operational-analytics/
+COPY packages/permissions/package.json packages/permissions/
+COPY packages/qr-core/package.json packages/qr-core/
+COPY packages/security/package.json packages/security/
+COPY packages/staff-device-security/package.json packages/staff-device-security/
+COPY packages/stamp-engine/package.json packages/stamp-engine/
+COPY packages/ui/package.json packages/ui/
+COPY packages/wallet-apple/package.json packages/wallet-apple/
+COPY packages/wallet-artwork/package.json packages/wallet-artwork/
+COPY packages/wallet-core/package.json packages/wallet-core/
+COPY packages/wallet-google/package.json packages/wallet-google/
+RUN --mount=type=cache,id=waflo-apple-pass-builder-pnpm-v11,target=/root/.local/share/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile --filter @waflo/apple-pass-builder-service...
+COPY apps/apple-pass-builder-service apps/apple-pass-builder-service
+COPY packages/contracts packages/contracts
 RUN pnpm --filter @waflo/contracts build \
     && pnpm --filter @waflo/apple-pass-builder-service build \
     && pnpm --filter @waflo/apple-pass-builder-service deploy --prod --legacy /out/service

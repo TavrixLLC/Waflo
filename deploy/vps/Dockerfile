@@ -13,11 +13,48 @@ RUN apt-get update && \
 WORKDIR /workspace
 
 FROM toolchain AS dependencies
-COPY . .
-RUN --mount=type=cache,id=waflo-pnpm,target=/pnpm/store \
+# Keep the expensive, lockfile-resolved workspace installation independent
+# from ordinary source edits. Every workspace manifest is copied explicitly so
+# pnpm can resolve workspace links without importing application source.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json ./
+COPY apps/admin-dashboard/package.json apps/admin-dashboard/
+COPY apps/api/package.json apps/api/
+COPY apps/apple-pass-builder-service/package.json apps/apple-pass-builder-service/
+COPY apps/customer-web/package.json apps/customer-web/
+COPY apps/marketing-web/package.json apps/marketing-web/
+COPY apps/merchant-dashboard/package.json apps/merchant-dashboard/
+COPY apps/operational-worker/package.json apps/operational-worker/
+COPY apps/wallet-worker/package.json apps/wallet-worker/
+COPY deploy/vps/migrate/package.json deploy/vps/migrate/
+COPY packages/auth/package.json packages/auth/
+COPY packages/billing/package.json packages/billing/
+COPY packages/brand/package.json packages/brand/
+COPY packages/config/package.json packages/config/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/customer-security/package.json packages/customer-security/
+COPY packages/database/package.json packages/database/
+COPY packages/external-auth-security/package.json packages/external-auth-security/
+COPY packages/i18n/package.json packages/i18n/
+COPY packages/loyalty-ledger/package.json packages/loyalty-ledger/
+COPY packages/loyalty-policy/package.json packages/loyalty-policy/
+COPY packages/operational-analytics/package.json packages/operational-analytics/
+COPY packages/permissions/package.json packages/permissions/
+COPY packages/qr-core/package.json packages/qr-core/
+COPY packages/security/package.json packages/security/
+COPY packages/staff-device-security/package.json packages/staff-device-security/
+COPY packages/stamp-engine/package.json packages/stamp-engine/
+COPY packages/ui/package.json packages/ui/
+COPY packages/wallet-apple/package.json packages/wallet-apple/
+COPY packages/wallet-artwork/package.json packages/wallet-artwork/
+COPY packages/wallet-core/package.json packages/wallet-core/
+COPY packages/wallet-google/package.json packages/wallet-google/
+RUN --mount=type=cache,id=waflo-pnpm-v11,target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
 
 FROM dependencies AS build
+# Source changes start here. The frozen dependency layer above only changes
+# when the workspace manifests, lockfile, or build configuration changes.
+COPY . .
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_DASHBOARD_URL
 ARG NEXT_PUBLIC_MARKETING_URL

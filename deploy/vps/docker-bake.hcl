@@ -63,10 +63,17 @@ target "_common" {
   ]
 }
 
-target "_production-build" {
+target "_runtime-build" {
   inherits = ["_common"]
-  cache-from = ["type=gha,scope=waflo-release-production"]
-  cache-to   = ["type=gha,mode=max,scope=waflo-release-production"]
+  # API, workers, and migrations share one production-configured Node build.
+  # Keep it separate from web and Swift caches so unrelated target updates do
+  # not replace their cache records. The old scope remains a read-only bridge
+  # while new trusted release runs populate the narrower scope.
+  cache-from = [
+    "type=gha,scope=waflo-release-node-runtime",
+    "type=gha,scope=waflo-release-production",
+  ]
+  cache-to = ["type=gha,mode=max,scope=waflo-release-node-runtime"]
   args = {
     DEPLOYMENT_ENVIRONMENT          = "production"
     NEXT_PUBLIC_API_URL             = "https://api.waflo.app"
@@ -78,13 +85,15 @@ target "_production-build" {
   }
 }
 
-target "_staging-build" {
+target "_staging-web-build" {
   inherits = ["_common"]
   cache-from = [
+    "type=gha,scope=waflo-release-web-staging",
+    "type=gha,scope=waflo-release-node-runtime",
     "type=gha,scope=waflo-release-staging",
     "type=gha,scope=waflo-release-production",
   ]
-  cache-to = ["type=gha,mode=max,scope=waflo-release-staging"]
+  cache-to = ["type=gha,mode=max,scope=waflo-release-web-staging"]
   args = {
     DEPLOYMENT_ENVIRONMENT          = "staging"
     NEXT_PUBLIC_API_URL             = "https://api-staging.waflo.app"
@@ -96,10 +105,29 @@ target "_staging-build" {
   }
 }
 
+target "_production-web-build" {
+  inherits = ["_common"]
+  cache-from = [
+    "type=gha,scope=waflo-release-web-production",
+    "type=gha,scope=waflo-release-node-runtime",
+    "type=gha,scope=waflo-release-production",
+  ]
+  cache-to = ["type=gha,mode=max,scope=waflo-release-web-production"]
+  args = {
+    DEPLOYMENT_ENVIRONMENT          = "production"
+    NEXT_PUBLIC_API_URL             = "https://api.waflo.app"
+    NEXT_PUBLIC_DASHBOARD_URL       = "https://app.waflo.app"
+    NEXT_PUBLIC_MARKETING_URL       = "https://waflo.app"
+    NEXT_PUBLIC_CUSTOMER_URL        = "https://card.waflo.app"
+    NEXT_PUBLIC_ADMIN_URL           = "https://admin.waflo.app"
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN = MAPBOX_PRODUCTION_PUBLIC_TOKEN
+  }
+}
+
 # API, workers, and migration receive environment configuration only at runtime.
 # Each target is built once and its identical manifest receives both Compose tags.
 target "migrate" {
-  inherits = ["_production-build"]
+  inherits = ["_runtime-build"]
   target   = "migrate"
   tags = [
     "${IMAGE_REGISTRY}/waflo-migrate:${RELEASE_SHA}-staging",
@@ -108,7 +136,7 @@ target "migrate" {
 }
 
 target "api" {
-  inherits = ["_production-build"]
+  inherits = ["_runtime-build"]
   target   = "api"
   tags = [
     "${IMAGE_REGISTRY}/waflo-api:${RELEASE_SHA}-staging",
@@ -119,6 +147,8 @@ target "api" {
 target "apple-pass-builder" {
   inherits   = ["_common"]
   dockerfile = "apps/apple-pass-builder-service/Dockerfile"
+  cache-from = ["type=gha,scope=waflo-release-apple-pass-builder"]
+  cache-to   = ["type=gha,mode=max,scope=waflo-release-apple-pass-builder"]
   tags = [
     "${IMAGE_REGISTRY}/waflo-apple-pass-builder:${RELEASE_SHA}-staging",
     "${IMAGE_REGISTRY}/waflo-apple-pass-builder:${RELEASE_SHA}-production",
@@ -126,7 +156,7 @@ target "apple-pass-builder" {
 }
 
 target "operational-worker" {
-  inherits = ["_production-build"]
+  inherits = ["_runtime-build"]
   target   = "operational-worker"
   tags = [
     "${IMAGE_REGISTRY}/waflo-operational-worker:${RELEASE_SHA}-staging",
@@ -135,7 +165,7 @@ target "operational-worker" {
 }
 
 target "wallet-worker" {
-  inherits = ["_production-build"]
+  inherits = ["_runtime-build"]
   target   = "wallet-worker"
   tags = [
     "${IMAGE_REGISTRY}/waflo-wallet-worker:${RELEASE_SHA}-staging",
@@ -144,49 +174,49 @@ target "wallet-worker" {
 }
 
 target "merchant-staging" {
-  inherits = ["_staging-build"]
+  inherits = ["_staging-web-build"]
   target   = "merchant-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-merchant:${RELEASE_SHA}-staging"]
 }
 
 target "customer-staging" {
-  inherits = ["_staging-build"]
+  inherits = ["_staging-web-build"]
   target   = "customer-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-customer:${RELEASE_SHA}-staging"]
 }
 
 target "admin-staging" {
-  inherits = ["_staging-build"]
+  inherits = ["_staging-web-build"]
   target   = "admin-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-admin:${RELEASE_SHA}-staging"]
 }
 
 target "marketing-staging" {
-  inherits = ["_staging-build"]
+  inherits = ["_staging-web-build"]
   target   = "marketing-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-marketing:${RELEASE_SHA}-staging"]
 }
 
 target "merchant-production" {
-  inherits = ["_production-build"]
+  inherits = ["_production-web-build"]
   target   = "merchant-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-merchant:${RELEASE_SHA}-production"]
 }
 
 target "customer-production" {
-  inherits = ["_production-build"]
+  inherits = ["_production-web-build"]
   target   = "customer-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-customer:${RELEASE_SHA}-production"]
 }
 
 target "admin-production" {
-  inherits = ["_production-build"]
+  inherits = ["_production-web-build"]
   target   = "admin-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-admin:${RELEASE_SHA}-production"]
 }
 
 target "marketing-production" {
-  inherits = ["_production-build"]
+  inherits = ["_production-web-build"]
   target   = "marketing-web"
   tags     = ["${IMAGE_REGISTRY}/waflo-marketing:${RELEASE_SHA}-production"]
 }

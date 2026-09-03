@@ -105,13 +105,26 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Restore safe Turborepo cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # Only trusted push runs save this cache. Pull requests may restore a
+      # scoped cache but cannot populate the release cache namespace.
+      - id: turbo-cache
+        name: Restore safe Turborepo cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-
+
+      - name: Record Turborepo cache restore
+        env:
+          TURBO_CACHE_HIT: ${{ steps.turbo-cache.outputs.cache-hit }}
+        run: |
+          if [[ "${TURBO_CACHE_HIT}" == "true" ]]; then
+            echo "Turborepo cache: exact hit"
+          else
+            echo "Turborepo cache: miss or safe prefix restore"
+          fi
 
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
@@ -228,6 +241,13 @@ jobs:
             test-results/
             !test-results/evidence/**
 
+      - name: Save trusted Turborepo cache
+        if: ${{ success() && github.event_name == 'push' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+
   publish_release_images:
     name: Publish immutable GHCR images
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
@@ -259,6 +279,28 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      # This uses the exact cache key written by the trusted verify job for
+      # this SHA. The lockfile/config prefix safely warms a new release SHA;
+      # Turborepo still validates every task input before reusing an output.
+      - id: turbo-cache
+        name: Restore release Turborepo cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-
+
+      - name: Record release Turborepo cache restore
+        env:
+          TURBO_CACHE_HIT: ${{ steps.turbo-cache.outputs.cache-hit }}
+        run: |
+          if [[ "${TURBO_CACHE_HIT}" == "true" ]]; then
+            echo "Release Turborepo cache: exact hit"
+          else
+            echo "Release Turborepo cache: miss or safe prefix restore"
+          fi
+
       - name: Prepare Pass Builder release smoke dependencies
         env:
           # Prisma generation validates that a URL exists but does not connect
@@ -268,6 +310,13 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm test:prepare
+
+      - name: Save trusted release Turborepo cache
+        if: ${{ success() && steps.turbo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
 
       - name: Configure Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
