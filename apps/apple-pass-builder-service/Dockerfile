@@ -7,15 +7,19 @@ RUN apt-get update \
 
 WORKDIR /source/pass-builder
 COPY apps/apple-pass-builder-service/patches/8908b955-swift-6.3-linux-pointer.patch /tmp/pass-builder.patch
+COPY apps/apple-pass-builder-service/Package.resolved /tmp/Package.resolved
 RUN git init \
     && git remote add origin https://github.com/apple/pass-builder.git \
+    && git config http.version HTTP/1.1 \
     && git fetch --depth 1 origin 8908b955a42da8294ce7506719aa1f186d096c02 \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "8908b955a42da8294ce7506719aa1f186d096c02" \
     && git apply --check /tmp/pass-builder.patch \
-    && git apply /tmp/pass-builder.patch
-RUN swift package resolve \
-    && echo "e1ebbb0c0b7c7d75a278cf3280b91bf2baad0c07700663671e56151310bccd52  Package.resolved" \
+    && git apply /tmp/pass-builder.patch \
+    && cp /tmp/Package.resolved Package.resolved
+RUN git config --global http.version HTTP/1.1 \
+    && swift package resolve \
+    && echo "0cc5f7d74bba8d3882f2fd46b9dc0e107a977bb817872948a2f459276ee325a6  Package.resolved" \
       | sha256sum --check --strict
 RUN --mount=type=cache,target=/source/pass-builder/.build \
     swift build -c release --product buildpass --static-swift-stdlib --disable-automatic-resolution \

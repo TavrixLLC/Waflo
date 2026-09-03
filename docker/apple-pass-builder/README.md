@@ -12,7 +12,7 @@ The image pins Apple Pass Builder commit
 indexes. It runs as UID/GID `10001`, uses a read-only root filesystem, and needs a bounded tmpfs.
 The pinned upstream commit needs the audited
 `8908b955-swift-6.3-linux-pointer.patch` compatibility change to compile on Swift 6.3.3/Linux.
-The build also verifies the exact upstream `Package.resolved` SHA-256 before compilation.
+The build resolves and verifies Waflo's checked-in `Package.resolved` SHA-256 before compilation.
 
 Copy `apps/apple-pass-builder-service/config/signing-identities.example.json` outside the
 repository and update it so its paths match the mounted secrets. The example Compose overlay

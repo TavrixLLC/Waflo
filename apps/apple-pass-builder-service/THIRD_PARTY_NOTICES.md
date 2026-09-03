@@ -9,7 +9,7 @@ Waflo applies `patches/8908b955-swift-6.3-linux-pointer.patch` to unwrap the
 non-null buffer pointer passed to secure memory clearing on Swift 6.3.3/Linux.
 The patch changes no pass-format, validation, manifest, or signing behavior.
 
-`Package.resolved` is installed beside the executable and its build-time SHA-256
-is pinned in the Dockerfile. The complete dependency-license inventory still
+Waflo's audited `Package.resolved` is installed beside the executable and its
+build-time SHA-256 is verified in the Dockerfile. The complete dependency-license inventory still
 requires the normal release legal/compliance review before commercial image
 distribution.
