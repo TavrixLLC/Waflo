@@ -129,6 +129,7 @@ target "_production-web-build" {
 target "migrate" {
   inherits = ["_runtime-build"]
   target   = "migrate"
+  args = { BUILD_SCOPE = "@waflo/deployment-migrate..." }
   tags = [
     "${IMAGE_REGISTRY}/waflo-migrate:${RELEASE_SHA}-staging",
     "${IMAGE_REGISTRY}/waflo-migrate:${RELEASE_SHA}-production",
@@ -138,6 +139,7 @@ target "migrate" {
 target "api" {
   inherits = ["_runtime-build"]
   target   = "api"
+  args = { BUILD_SCOPE = "@waflo/api..." }
   tags = [
     "${IMAGE_REGISTRY}/waflo-api:${RELEASE_SHA}-staging",
     "${IMAGE_REGISTRY}/waflo-api:${RELEASE_SHA}-production",
@@ -158,6 +160,7 @@ target "apple-pass-builder" {
 target "operational-worker" {
   inherits = ["_runtime-build"]
   target   = "operational-worker"
+  args = { BUILD_SCOPE = "@waflo/operational-worker..." }
   tags = [
     "${IMAGE_REGISTRY}/waflo-operational-worker:${RELEASE_SHA}-staging",
     "${IMAGE_REGISTRY}/waflo-operational-worker:${RELEASE_SHA}-production",
@@ -167,6 +170,7 @@ target "operational-worker" {
 target "wallet-worker" {
   inherits = ["_runtime-build"]
   target   = "wallet-worker"
+  args = { BUILD_SCOPE = "@waflo/wallet-worker..." }
   tags = [
     "${IMAGE_REGISTRY}/waflo-wallet-worker:${RELEASE_SHA}-staging",
     "${IMAGE_REGISTRY}/waflo-wallet-worker:${RELEASE_SHA}-production",
@@ -176,47 +180,55 @@ target "wallet-worker" {
 target "merchant-staging" {
   inherits = ["_staging-web-build"]
   target   = "merchant-web"
+  args     = { BUILD_SCOPE = "@waflo/merchant-dashboard..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-merchant:${RELEASE_SHA}-staging"]
 }
 
 target "customer-staging" {
   inherits = ["_staging-web-build"]
   target   = "customer-web"
+  args     = { BUILD_SCOPE = "@waflo/customer-web..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-customer:${RELEASE_SHA}-staging"]
 }
 
 target "admin-staging" {
   inherits = ["_staging-web-build"]
   target   = "admin-web"
+  args     = { BUILD_SCOPE = "@waflo/admin-dashboard..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-admin:${RELEASE_SHA}-staging"]
 }
 
 target "marketing-staging" {
   inherits = ["_staging-web-build"]
   target   = "marketing-web"
+  args     = { BUILD_SCOPE = "@waflo/marketing-web..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-marketing:${RELEASE_SHA}-staging"]
 }
 
 target "merchant-production" {
   inherits = ["_production-web-build"]
   target   = "merchant-web"
+  args     = { BUILD_SCOPE = "@waflo/merchant-dashboard..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-merchant:${RELEASE_SHA}-production"]
 }
 
 target "customer-production" {
   inherits = ["_production-web-build"]
   target   = "customer-web"
+  args     = { BUILD_SCOPE = "@waflo/customer-web..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-customer:${RELEASE_SHA}-production"]
 }
 
 target "admin-production" {
   inherits = ["_production-web-build"]
   target   = "admin-web"
+  args     = { BUILD_SCOPE = "@waflo/admin-dashboard..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-admin:${RELEASE_SHA}-production"]
 }
 
 target "marketing-production" {
   inherits = ["_production-web-build"]
   target   = "marketing-web"
+  args     = { BUILD_SCOPE = "@waflo/marketing-web..." }
   tags     = ["${IMAGE_REGISTRY}/waflo-marketing:${RELEASE_SHA}-production"]
 }

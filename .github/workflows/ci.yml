@@ -2,6 +2,13 @@ name: Waflo CI and Release
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: Force the conservative complete release validation path.
+        required: false
+        default: true
+        type: boolean
   push:
     branches:
       - main
@@ -21,9 +28,88 @@ env:
   PNPM_VERSION: 11.5.2
 
 jobs:
+  release_scope:
+    name: Resolve conservative release scope
+    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      scope: ${{ steps.resolve.outputs.scope }}
+      reason: ${{ steps.resolve.outputs.reason }}
+      changed_files: ${{ steps.resolve.outputs.changed_files }}
+      affected_workspaces: ${{ steps.resolve.outputs.affected_workspaces }}
+      image_targets: ${{ steps.resolve.outputs.image_targets }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+    steps:
+      - name: Check out the candidate release range
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: classify
+        name: Classify changed workspaces
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          output="${RUNNER_TEMP}/release-scope-output"
+          if [[ "${EVENT_NAME}" != "push" || "${REF}" != "refs/heads/release/production-v1" || "${FORCE_FULL}" == "true" ]]; then
+            node scripts/release-scope.mjs --force-full --github-output "${output}"
+          else
+            node scripts/release-scope.mjs --base "${BEFORE_SHA}" --head "${HEAD_SHA}" --github-output "${output}"
+          fi
+          cat "${output}" >>"${GITHUB_OUTPUT}"
+          cat "${output}"
+      - name: Configure Docker Buildx for trusted base verification
+        if: ${{ steps.classify.outputs.scope != 'FULL' }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Authenticate GHCR read-only for trusted base verification
+        if: ${{ steps.classify.outputs.scope != 'FULL' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: coordinates
+        if: ${{ steps.classify.outputs.scope != 'FULL' }}
+        name: Resolve lowercase GHCR namespace
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "registry=ghcr.io/${REPOSITORY_OWNER,,}" >>"${GITHUB_OUTPUT}"
+      - name: Require a verified immutable base release
+        if: ${{ steps.classify.outputs.scope != 'FULL' }}
+        env:
+          IMAGE_REGISTRY: ${{ steps.coordinates.outputs.registry }}
+          BASE_SHA: ${{ steps.classify.outputs.base_sha }}
+        run: |
+          if ! bash deploy/vps/scripts/verify-release-marker.sh staging "${BASE_SHA}"; then
+            echo "base release marker unavailable; forcing full validation" >&2
+            touch "${RUNNER_TEMP}/force-full-release-validation"
+          fi
+      - id: resolve
+        name: Publish fail-closed release decision
+        run: |
+          output="${RUNNER_TEMP}/release-scope-output"
+          if [[ -f "${RUNNER_TEMP}/force-full-release-validation" ]]; then
+            node scripts/release-scope.mjs --force-full --github-output "${GITHUB_OUTPUT}"
+            echo "reason=trusted base release marker unavailable" >>"${GITHUB_OUTPUT}"
+          else
+            cat "${output}" >>"${GITHUB_OUTPUT}"
+          fi
+          echo "Changed files: $(grep '^changed_files=' "${GITHUB_OUTPUT}" | tail -n1 | cut -d= -f2)"
+          echo "Release scope: $(grep '^scope=' "${GITHUB_OUTPUT}" | tail -n1 | cut -d= -f2)"
+          echo "Reason: $(grep '^reason=' "${GITHUB_OUTPUT}" | tail -n1 | cut -d= -f2-)"
+
   release_static_verify:
     name: Release static validation
     if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    needs: release_scope
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
@@ -119,32 +205,16 @@ jobs:
           pnpm format:check
           pnpm lint
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Production build
-        env:
-          # Browser flows serve the optimized build against the loopback CI API.
-          # Release images are rebuilt in a separate job without this local-only switch.
-          WAFLO_LOCAL_PRODUCTION_SMOKE: "1"
-        run: pnpm build
-
       - name: Deployment assertions
         run: pnpm deploy:validate
 
       - name: Cloudflare token permission regression
         run: sudo bash tests/deployment/cloudflare-token-permissions.test.sh
 
-      - name: Save trusted Turborepo cache
-        if: ${{ success() && github.event_name == 'push' }}
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: .turbo
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
-
   release_unit_verify:
     name: Release unit and integration validation
-    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ needs.release_scope.outputs.scope == 'FULL' }}
+    needs: release_scope
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     concurrency:
@@ -212,6 +282,12 @@ jobs:
         uses: ./.github/actions/setup-isolated-validation
       - name: Unit, integration, HTTP, concurrency, and failure tests
         run: pnpm test
+      - name: Full typecheck and production build
+        env:
+          WAFLO_LOCAL_PRODUCTION_SMOKE: "1"
+        run: |
+          pnpm typecheck
+          pnpm build
       - name: Save trusted Turborepo cache
         if: ${{ success() && github.event_name == 'push' }}
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -221,7 +297,8 @@ jobs:
 
   release_e2e:
     name: Release browser validation
-    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ needs.release_scope.outputs.scope == 'FULL' }}
+    needs: release_scope
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     concurrency:
@@ -292,7 +369,8 @@ jobs:
 
   release_accessibility:
     name: Release accessibility validation
-    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ needs.release_scope.outputs.scope == 'FULL' }}
+    needs: release_scope
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
@@ -361,24 +439,280 @@ jobs:
             test-results/
             !test-results/evidence/**
 
+  release_scoped_verify:
+    name: Scoped product validation
+    if: ${{ needs.release_scope.outputs.scope != 'FULL' }}
+    needs: release_scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    concurrency:
+      group: waflo-validation-scoped-${{ github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env: { POSTGRES_DB: waflo, POSTGRES_USER: waflo, POSTGRES_PASSWORD: waflo_dev_password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U waflo -d waflo" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 12
+      mailpit:
+        image: axllent/mailpit:v1.27.9
+        ports: ["1025:1025", "8025:8025"]
+    env:
+      CI: true
+      NODE_ENV: test
+      DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      EMAIL_FROM: Waflo CI <ci@waflo.local>
+      MARKETING_WEB_URL: http://localhost:3000
+      MERCHANT_DASHBOARD_URL: http://localhost:3001
+      CUSTOMER_WEB_URL: http://localhost:3002
+      API_PUBLIC_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      COOKIE_SECURE: false
+      COOKIE_NAME: waflo_session
+      MERCHANT_BASE_DOMAIN: waflo.app
+      LEGAL_TERMS_VERSION: ci-draft
+      LEGAL_PRIVACY_VERSION: ci-draft
+      LEGAL_EFFECTIVE_DATE: CI only
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: waflo-wallet-ci-test
+      OBJECT_STORAGE_ACCESS_KEY_ID: waflo_ci_test
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: waflo_ci_test_password
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true
+      OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
+      RELEASE_SCOPE: ${{ needs.release_scope.outputs.scope }}
+    steps:
+      - name: Set up isolated test services and dependencies
+        uses: ./.github/actions/setup-isolated-validation
+      - name: Run scope-specific typecheck, build, and unit coverage
+        run: |
+          case "${RELEASE_SCOPE}" in
+            MARKETING)
+              pnpm test:prepare
+              pnpm --filter @waflo/marketing-web typecheck
+              pnpm --filter @waflo/marketing-web build
+              node scripts/run-isolated-vitest.mjs unit \
+                tests/unit/marketing-pricing-localization-and-layout.test.ts \
+                tests/unit/regional-pricing-ui-and-marketing.test.ts \
+                tests/unit/pricing-money.test.ts
+              ;;
+            MERCHANT)
+              pnpm test:prepare
+              pnpm --filter @waflo/merchant-dashboard typecheck
+              pnpm --filter @waflo/merchant-dashboard build
+              node scripts/run-isolated-vitest.mjs unit \
+                tests/unit/onboarding-payment-and-logo-regressions.test.ts \
+                tests/unit/production-v1-ux-repair.test.ts
+              ;;
+            API)
+              pnpm test:prepare
+              pnpm --filter @waflo/api typecheck
+              pnpm --filter @waflo/api build
+              pnpm test:integration
+              ;;
+            *)
+              echo "Unsupported reduced release scope: ${RELEASE_SCOPE}" >&2
+              exit 2
+              ;;
+          esac
+      - name: Save trusted scoped Turborepo cache
+        if: ${{ success() && github.event_name == 'push' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
+
+  release_scoped_e2e:
+    name: Scoped browser validation
+    if: ${{ needs.release_scope.outputs.scope == 'MARKETING' || needs.release_scope.outputs.scope == 'MERCHANT' }}
+    needs: release_scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    concurrency:
+      group: waflo-validation-scoped-e2e-${{ github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env: { POSTGRES_DB: waflo, POSTGRES_USER: waflo, POSTGRES_PASSWORD: waflo_dev_password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U waflo -d waflo" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 12
+      mailpit:
+        image: axllent/mailpit:v1.27.9
+        ports: ["1025:1025", "8025:8025"]
+    env:
+      CI: true
+      NODE_ENV: test
+      DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      EMAIL_FROM: Waflo CI <ci@waflo.local>
+      MARKETING_WEB_URL: http://localhost:3000
+      MERCHANT_DASHBOARD_URL: http://localhost:3001
+      CUSTOMER_WEB_URL: http://localhost:3002
+      API_PUBLIC_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      COOKIE_SECURE: false
+      COOKIE_NAME: waflo_session
+      MERCHANT_BASE_DOMAIN: waflo.app
+      LEGAL_TERMS_VERSION: ci-draft
+      LEGAL_PRIVACY_VERSION: ci-draft
+      LEGAL_EFFECTIVE_DATE: CI only
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: waflo-wallet-ci-test
+      OBJECT_STORAGE_ACCESS_KEY_ID: waflo_ci_test
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: waflo_ci_test_password
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true
+      OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
+      RELEASE_SCOPE: ${{ needs.release_scope.outputs.scope }}
+    steps:
+      - name: Set up isolated test services and dependencies
+        uses: ./.github/actions/setup-isolated-validation
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run product browser flow in an isolated environment
+        run: |
+          if [[ "${RELEASE_SCOPE}" == "MARKETING" ]]; then
+            WAFLO_BROWSER_SURFACE=marketing pnpm test:e2e -- tests/e2e/platform.spec.ts --grep "marketing pages render"
+          else
+            WAFLO_BROWSER_SURFACE=merchant pnpm test:e2e -- tests/e2e/platform.spec.ts --grep "registers, verifies email, and reaches payment-gated onboarding"
+          fi
+
+  release_scoped_accessibility:
+    name: Scoped accessibility validation
+    if: ${{ needs.release_scope.outputs.scope == 'MARKETING' || needs.release_scope.outputs.scope == 'MERCHANT' }}
+    needs: release_scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: waflo-validation-scoped-a11y-${{ github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env: { POSTGRES_DB: waflo, POSTGRES_USER: waflo, POSTGRES_PASSWORD: waflo_dev_password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U waflo -d waflo" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.2-alpine@sha256:a7859ed111db3c1f5404a973a4747505d559fb5ca32d37e447afc0ef845a2103
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 12
+      mailpit:
+        image: axllent/mailpit:v1.27.9
+        ports: ["1025:1025", "8025:8025"]
+    env:
+      CI: true
+      NODE_ENV: test
+      DATABASE_URL: postgresql://waflo:waflo_dev_password@127.0.0.1:5432/waflo?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      EMAIL_FROM: Waflo CI <ci@waflo.local>
+      MARKETING_WEB_URL: http://localhost:3000
+      MERCHANT_DASHBOARD_URL: http://localhost:3001
+      CUSTOMER_WEB_URL: http://localhost:3002
+      API_PUBLIC_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      COOKIE_SECURE: false
+      COOKIE_NAME: waflo_session
+      MERCHANT_BASE_DOMAIN: waflo.app
+      LEGAL_TERMS_VERSION: ci-draft
+      LEGAL_PRIVACY_VERSION: ci-draft
+      LEGAL_EFFECTIVE_DATE: CI only
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: waflo-wallet-ci-test
+      OBJECT_STORAGE_ACCESS_KEY_ID: waflo_ci_test
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: waflo_ci_test_password
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true
+      OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
+      RELEASE_SCOPE: ${{ needs.release_scope.outputs.scope }}
+    steps:
+      - name: Set up isolated test services and dependencies
+        uses: ./.github/actions/setup-isolated-validation
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run product accessibility flow in a separate isolated environment
+        run: |
+          if [[ "${RELEASE_SCOPE}" == "MARKETING" ]]; then
+            WAFLO_BROWSER_SURFACE=marketing pnpm test:a11y -- tests/e2e/marketing-accessibility.spec.ts
+          else
+            WAFLO_BROWSER_SURFACE=merchant pnpm test:a11y -- --grep "Kurdish authentication, language menus, and onboarding remain accessible"
+          fi
+
   release_verified:
     name: Authoritative release validation complete
-    if: ${{ github.event_name == 'pull_request' || !startsWith(github.ref, 'refs/tags/') }}
+    if: >-
+      ${{
+        always() &&
+        needs.release_scope.result == 'success' &&
+        needs.release_static_verify.result == 'success' &&
+        (
+          (
+            needs.release_scope.outputs.scope == 'FULL' &&
+            needs.release_unit_verify.result == 'success' &&
+            needs.release_e2e.result == 'success' &&
+            needs.release_accessibility.result == 'success'
+          ) ||
+          (
+            needs.release_scope.outputs.scope != 'FULL' &&
+            needs.release_scoped_verify.result == 'success' &&
+            (
+              needs.release_scope.outputs.scope == 'API' ||
+              (
+                needs.release_scoped_e2e.result == 'success' &&
+                needs.release_scoped_accessibility.result == 'success'
+              )
+            )
+          )
+        )
+      }}
     needs:
+      - release_scope
       - release_static_verify
       - release_unit_verify
       - release_e2e
       - release_accessibility
+      - release_scoped_verify
+      - release_scoped_e2e
+      - release_scoped_accessibility
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Confirm every mandatory validation gate passed
-        run: echo "All static, unit/integration, browser, and accessibility release gates passed."
+        run: echo "All mandatory release gates for the resolved scope passed."
 
   publish_release_images:
     name: Publish immutable GHCR images
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
-    needs: release_verified
+    needs:
+      - release_verified
+      - release_scope
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -406,7 +740,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      # This uses the exact cache key written by the trusted verify job for
+      # This uses the exact cache key written by a trusted validation gate for
       # this SHA. The lockfile/config prefix safely warms a new release SHA;
       # Turborepo still validates every task input before reusing an output.
       - id: turbo-cache
@@ -471,6 +805,8 @@ jobs:
           IMAGE_PLATFORM: ${{ vars.RELEASE_IMAGE_PLATFORM || 'linux/amd64' }}
           MAPBOX_STAGING_PUBLIC_TOKEN: ${{ secrets.MAPBOX_STAGING_PUBLIC_TOKEN }}
           RELEASE_IMAGE_SCOPE: staging
+          RELEASE_BASE_SHA: ${{ needs.release_scope.outputs.base_sha }}
+          RELEASE_BUILD_TARGETS: ${{ needs.release_scope.outputs.image_targets }}
         run: deploy/vps/scripts/publish-images.sh
 
   deploy_staging:

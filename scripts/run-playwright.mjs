@@ -19,6 +19,7 @@ for (const [key, value] of Object.entries(localEnvironment)) {
   process.env[key] ??= value;
 }
 const project = process.argv[2] ?? "chromium";
+const browserSurface = process.env.WAFLO_BROWSER_SURFACE ?? "full";
 const databaseRequire = createRequire(
   new URL("../packages/database/package.json", import.meta.url),
 );
@@ -40,6 +41,9 @@ const supportedProjects = new Set([
 ]);
 if (!supportedProjects.has(project)) {
   throw new Error(`Unsupported Playwright project: ${project}`);
+}
+if (!new Set(["full", "marketing", "merchant"]).has(browserSurface)) {
+  throw new Error(`Unsupported browser surface: ${browserSurface}`);
 }
 /**
  * The primary browser gates own an isolated database and API by default. A
@@ -192,21 +196,25 @@ async function buildBrowserFrontends() {
   const ui = pnpmCommand(["--filter", "@waflo/ui", "build"]);
   if ((await runCommand(ui.command, ui.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser UI build failed.");
-  const marketing = pnpmCommand(["--filter", "@waflo/marketing-web", "build"]);
-  if ((await runCommand(marketing.command, marketing.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser Marketing build failed.");
-  const build = pnpmCommand(["--filter", "@waflo/merchant-dashboard", "build"]);
-  if ((await runCommand(build.command, build.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser Merchant build failed.");
-  const customer = pnpmCommand(["--filter", "@waflo/customer-web", "build"]);
-  if ((await runCommand(customer.command, customer.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser Customer build failed.");
-  const admin = pnpmCommand(["--filter", "@waflo/admin-dashboard", "build"]);
-  if ((await runCommand(admin.command, admin.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser Admin build failed.");
+  const frontendBuilds = [
+    ...(browserSurface === "full" || browserSurface === "marketing"
+      ? [["Marketing", "@waflo/marketing-web"]]
+      : []),
+    ...(browserSurface === "full" || browserSurface === "merchant"
+      ? [["Merchant", "@waflo/merchant-dashboard"]]
+      : []),
+    ...(browserSurface === "full" ? [["Customer", "@waflo/customer-web"]] : []),
+    ...(browserSurface === "full" ? [["Admin", "@waflo/admin-dashboard"]] : []),
+  ];
+  for (const [name, workspace] of frontendBuilds) {
+    const frontend = pnpmCommand(["--filter", workspace, "build"]);
+    if ((await runCommand(frontend.command, frontend.args, browserBuildEnvironment)) !== 0) {
+      throw new Error(`Browser ${name} build failed.`);
+    }
+  }
 }
 
-const commands = [
+const allCommands = [
   {
     name: "api",
     port: 4000,
@@ -270,6 +278,13 @@ const commands = [
     frontend: true,
   },
 ];
+const commands = allCommands.filter((command) => {
+  if (command.name === "api") return true;
+  if (browserSurface === "full") return true;
+  return browserSurface === "marketing"
+    ? command.name === "marketing"
+    : command.name === "dashboard";
+});
 if (usesWalletOperations) {
   commands.push({
     name: "wallet-worker",

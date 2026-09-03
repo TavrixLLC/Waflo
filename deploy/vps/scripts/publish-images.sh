@@ -8,6 +8,8 @@ source "${script_directory}/common.sh"
 release_sha="${RELEASE_SHA:-}"
 registry="${IMAGE_REGISTRY:-}"
 release_scope="${RELEASE_IMAGE_SCOPE:-staging}"
+release_base_sha="${RELEASE_BASE_SHA:-}"
+release_build_targets="${RELEASE_BUILD_TARGETS:-}"
 
 require_release_sha "${release_sha}"
 if [[ "$(git -C "${repository_root}" rev-parse HEAD)" != "${release_sha}" ]]; then
@@ -71,6 +73,21 @@ image_digest() {
   printf '%s\n' "${digest}"
 }
 
+publish_release_marker() {
+  local marker="${registry}/waflo-release-manifest:${release_sha}-${release_scope}"
+  docker buildx build \
+    --file "${repository_root}/deploy/vps/release-marker.Dockerfile" \
+    --build-arg "RELEASE_SHA=${release_sha}" \
+    --build-arg "RELEASE_ENVIRONMENT=${release_scope}" \
+    --platform "${IMAGE_PLATFORM}" \
+    --provenance=false \
+    --sbom=false \
+    --tag "${marker}" \
+    --push \
+    "${repository_root}"
+  printf 'Published verified release marker: %s\n' "${marker}"
+}
+
 declare -a missing_targets=()
 declare -A target_references=(
   [migrate]="${registry}/waflo-migrate:${release_sha}-staging"
@@ -100,7 +117,57 @@ else
   )
 fi
 
+if [[ -n "${release_build_targets}" && "${release_scope}" != "staging" ]]; then
+  printf 'Selective image publication is staging-only.\n' >&2
+  exit 2
+fi
+
+declare -A requested_targets=()
+if [[ -n "${release_build_targets}" ]]; then
+  [[ "${release_base_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+    printf 'Selective image publication requires RELEASE_BASE_SHA.\n' >&2
+    exit 2
+  }
+  IFS=',' read -r -a parsed_targets <<<"${release_build_targets}"
+  for target in "${parsed_targets[@]}"; do
+    [[ -n "${target}" ]] || continue
+    requested_targets["${target}"]=1
+  done
+fi
+
+for target in "${!requested_targets[@]}"; do
+  if [[ ! " ${targets[*]} " =~ " ${target} " ]]; then
+    printf 'Selective image publication includes an unknown target: %s\n' "${target}" >&2
+    exit 2
+  fi
+done
+
+if (( ${#requested_targets[@]} == ${#targets[@]} )); then
+  # FULL is represented in workflow outputs as the complete target list for
+  # observability. It is not selective publication and must not rely on a
+  # previously verified base release.
+  requested_targets=()
+fi
+
+if (( ${#requested_targets[@]} > 0 )); then
+  IMAGE_REGISTRY="${registry}" bash "${script_directory}/verify-release-marker.sh" \
+    "${release_scope}" "${release_base_sha}"
+fi
+
 for target in "${targets[@]}"; do
+  if (( ${#requested_targets[@]} > 0 )) && [[ -z "${requested_targets[${target}]:-}" ]]; then
+    source_reference="${target_references[${target}]//${release_sha}/${release_base_sha}}"
+    source_digest="$(image_digest "${source_reference}")" || {
+      printf 'Trusted base image is unavailable for %s: %s\n' "${target}" "${source_reference}" >&2
+      exit 4
+    }
+    docker buildx imagetools create \
+      --tag "${target_references[${target}]}" \
+      "${source_reference}@${source_digest}"
+    printf 'Reused immutable image for %s from %s at %s\n' \
+      "${target}" "${source_reference}" "${source_digest}"
+    continue
+  fi
   if image_exists "${target_references[${target}]}"; then
     printf 'Reusing existing immutable image for %s.\n' "${target}"
   else
@@ -125,4 +192,5 @@ fi
 "${script_directory}/verify-release-images.sh" "${release_scope}" "${release_sha}"
 if [[ "${release_scope}" == "staging" ]]; then
   "${script_directory}/smoke-node-release-images.sh" staging "${release_sha}"
+  publish_release_marker
 fi
