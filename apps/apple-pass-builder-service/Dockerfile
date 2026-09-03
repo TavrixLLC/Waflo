@@ -37,7 +37,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps apps
 COPY packages packages
 RUN pnpm install --frozen-lockfile --filter @waflo/apple-pass-builder-service...
-RUN pnpm --filter @waflo/apple-pass-builder-service build \
+RUN pnpm --filter @waflo/contracts build \
+    && pnpm --filter @waflo/apple-pass-builder-service build \
     && pnpm --filter @waflo/apple-pass-builder-service deploy --prod --legacy /out/service
 
 FROM ubuntu:noble@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS runtime
