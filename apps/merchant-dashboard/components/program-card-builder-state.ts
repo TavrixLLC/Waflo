@@ -25,6 +25,13 @@ export function shouldScheduleBuilderAutosave(
   );
 }
 
+export function shouldLoadBuilderPreview(
+  draft: ProgramDraftInput | null,
+  state: BuilderSaveState,
+): boolean {
+  return draft !== null && state === "saved";
+}
+
 export function builderPreviewCacheKey(
   revision: number,
   profile: string,

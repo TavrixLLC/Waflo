@@ -11,6 +11,7 @@ import {
   createBuilderDraft,
   isNeutralBuilderDraft,
   languageCompleteness,
+  shouldLoadBuilderPreview,
   shouldScheduleBuilderAutosave,
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
@@ -210,6 +211,7 @@ describe("merchant loyalty-card Builder state", () => {
   });
 
   it("debounces autosave, requires explicit retry after failure, and keys previews by state", () => {
+    const draft = createBuilderDraft(template("COFFEE"), locations, { locale: "en" });
     expect(BUILDER_AUTOSAVE_DELAY_MS).toBeGreaterThanOrEqual(800);
     expect(BUILDER_PREVIEW_DELAY_MS).toBeLessThanOrEqual(150);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "saved")).toBe(true);
@@ -217,6 +219,9 @@ describe("merchant loyalty-card Builder state", () => {
     expect(shouldScheduleBuilderAutosave("changed", "saved", "failed")).toBe(false);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "conflict")).toBe(false);
     expect(shouldScheduleBuilderAutosave("same", "same", "saved")).toBe(false);
+    expect(shouldLoadBuilderPreview(null, "saved")).toBe(false);
+    expect(shouldLoadBuilderPreview(draft, "unsaved")).toBe(false);
+    expect(shouldLoadBuilderPreview(draft, "saved")).toBe(true);
     expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4, 2)).toBe("7:APPLE_WALLET:AR:4:2");
   });
 

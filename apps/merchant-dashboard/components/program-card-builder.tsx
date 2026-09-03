@@ -65,6 +65,7 @@ import {
   cardLocaleCompleteness,
   isNeutralBuilderDraft,
   shouldScheduleBuilderAutosave,
+  shouldLoadBuilderPreview,
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
 } from "./program-card-builder-state";
@@ -432,10 +433,10 @@ export function ProgramCardBuilder({
   );
 
   useEffect(() => {
-    if (saveState !== "saved") return;
+    if (!shouldLoadBuilderPreview(draft, saveState)) return;
     const timer = window.setTimeout(() => void loadPreview(profile), BUILDER_PREVIEW_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [loadPreview, profile, saveState]);
+  }, [draft, loadPreview, profile, saveState]);
 
   const loadCustomerWebPreview = useCallback(async (): Promise<boolean> => {
     const persistedDraft = draftRef.current;
@@ -2200,7 +2201,7 @@ function PreviewPanel({
         lang={previewLocale}
         role="tabpanel"
         aria-labelledby={`${idPrefix}-${profile}`}
-        aria-busy={previewLoading}
+        aria-busy={previewLoading || !preview}
         className={`builder-preview-canvas builder-preview-canvas--${profile.toLocaleLowerCase("en-US")} ${preview ? "builder-preview-canvas--ready" : "builder-preview-canvas--empty"}`}
       >
         {preview ? (
