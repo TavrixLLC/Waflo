@@ -1066,9 +1066,9 @@ export class BillingService {
         currency: charge.currency.toLowerCase(),
         payment_method_types: ["card"],
         return_url: `${this.environment.values.MERCHANT_DASHBOARD_URL}/en/onboarding/business?organization=${organizationId}&session_id={CHECKOUT_SESSION_ID}`,
-        // Checkout pre-fills these values from the Customer. The browser also
-        // supplies the same canonical values to Checkout's confirm API; no
-        // payment-step data is trusted by Waflo.
+        // Checkout pre-fills canonical identity from this Customer. The
+        // Payment Element must not submit duplicate Customer-owned fields at
+        // confirmation; no payment-step data is trusted by Waflo.
         setup_intent_data: {
           metadata: {
             wafloOrganizationId: organizationId,

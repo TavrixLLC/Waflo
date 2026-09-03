@@ -126,6 +126,30 @@ describe("onboarding Checkout Session payment integration", () => {
     expect(source).toMatch(/finally\s*\{\s*setLoading\(false\);\s*\}/);
   });
 
+  it("lets the Customer-owned Checkout Session control duplicate identity and return fields", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "apps/merchant-dashboard/components/onboarding.tsx"),
+      "utf8",
+    );
+    const secureForm = source.slice(
+      source.indexOf("function SecurePaymentForm"),
+      source.indexOf("export function BusinessOnboarding"),
+    );
+    const checkoutProvider = source.slice(
+      source.indexOf("<CheckoutElementsProvider"),
+      source.indexOf("<SecurePaymentForm", source.indexOf("<CheckoutElementsProvider")),
+    );
+
+    expect(secureForm).toContain(
+      'checkoutState.checkout.confirm({\n        redirect: "if_required",\n      });',
+    );
+    expect(secureForm).not.toContain("returnUrl:");
+    expect(secureForm).not.toContain("email: billingIdentity.email");
+    expect(secureForm).not.toContain("billingAddress:");
+    expect(checkoutProvider).toContain("defaultValues:");
+    expect(checkoutProvider).not.toMatch(/defaultValues:\s*\{\s*email:/u);
+  });
+
   it("recovers canonical billing data and a completed trial review without browser session state", () => {
     const onboarding = readFileSync(
       resolve(process.cwd(), "apps/merchant-dashboard/components/onboarding.tsx"),

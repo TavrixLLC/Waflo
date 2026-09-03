@@ -30,6 +30,7 @@ import {
   useState,
 } from "react";
 import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
+import { safeCheckoutElementsDiagnosticMessage } from "../lib/checkout-elements-diagnostics";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
 import {
   LocationAddressFields,
@@ -457,7 +458,6 @@ function PlanStep({
 function SecurePaymentForm({
   locale,
   organizationId,
-  billingIdentity,
   billingCommand,
   onReady,
   onCheckoutStateChange,
@@ -465,10 +465,13 @@ function SecurePaymentForm({
 }: {
   locale: InterfaceLocale;
   organizationId: string;
-  billingIdentity: BillingIdentityDraft;
   billingCommand: string;
   onReady: (preview: TrialPreview) => void;
-  onCheckoutStateChange: (state: CheckoutElementsState, canConfirm: boolean) => void;
+  onCheckoutStateChange: (
+    state: CheckoutElementsState,
+    canConfirm: boolean,
+    diagnosticMessage: string | null,
+  ) => void;
   onRetry: () => void;
 }) {
   const copy = messages[locale].onboarding;
@@ -484,6 +487,9 @@ function SecurePaymentForm({
           ? "error"
           : "loading",
       checkoutState.type === "success" && checkoutState.checkout.canConfirm,
+      checkoutState.type === "error"
+        ? safeCheckoutElementsDiagnosticMessage(checkoutState.error.message)
+        : null,
     );
   }, [checkoutState, onCheckoutStateChange]);
 
@@ -517,20 +523,7 @@ function SecurePaymentForm({
     setError("");
     try {
       const outcome = await checkoutState.checkout.confirm({
-        returnUrl: `${window.location.origin}/${locale}/onboarding/business?organization=${organizationId}&session_id=${checkoutState.checkout.id}`,
         redirect: "if_required",
-        email: billingIdentity.email,
-        billingAddress: {
-          name: billingIdentity.name,
-          address: {
-            country: billingIdentity.countryCode,
-            line1: billingIdentity.addressLine1,
-            ...(billingIdentity.addressLine2 ? { line2: billingIdentity.addressLine2 } : {}),
-            city: billingIdentity.city,
-            ...(billingIdentity.region ? { state: billingIdentity.region } : {}),
-            ...(billingIdentity.postalCode ? { postal_code: billingIdentity.postalCode } : {}),
-          },
-        },
       });
       if (outcome.type === "error") {
         setError(outcome.error.message || copy.payment.saveCardError);
@@ -608,6 +601,9 @@ export function BusinessOnboarding({
   const [paymentSetupState, setPaymentSetupState] = useState<PaymentSetupState>("idle");
   const [stripeScriptState, setStripeScriptState] = useState<StripeScriptState>("idle");
   const [checkoutElementsState, setCheckoutElementsState] = useState<CheckoutElementsState>("idle");
+  const [checkoutElementsDiagnosticMessage, setCheckoutElementsDiagnosticMessage] = useState<
+    string | null
+  >(null);
   const [resumableCheckoutSessionId, setResumableCheckoutSessionId] = useState<string | null>(null);
   const [stripeAttempt, setStripeAttempt] = useState(0);
   const [checkoutAttempt, setCheckoutAttempt] = useState(0);
@@ -639,6 +635,14 @@ export function BusinessOnboarding({
   );
   const showPaymentDiagnostics =
     process.env.NODE_ENV !== "production" || apiUrl.includes("staging.waflo.app");
+  const showRawCheckoutElementsDiagnostics = process.env.NODE_ENV === "development";
+  const onCheckoutStateChange = useCallback(
+    (state: CheckoutElementsState, _canConfirm: boolean, diagnosticMessage: string | null) => {
+      setCheckoutElementsState(state);
+      setCheckoutElementsDiagnosticMessage(diagnosticMessage);
+    },
+    [],
+  );
 
   const loadCatalog = useCallback(async (currentOrganizationId: string) => {
     const nextCatalog = await apiFetch<OnboardingCatalog>(
@@ -1382,6 +1386,14 @@ export function BusinessOnboarding({
                 <dt>Checkout Elements</dt>
                 <dd>{checkoutElementsState}</dd>
               </div>
+              {showRawCheckoutElementsDiagnostics ? (
+                <div>
+                  <dt>Checkout Elements error message</dt>
+                  <dd data-testid="checkout-elements-error-message">
+                    {checkoutElementsDiagnosticMessage ?? "not reported"}
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           </details>
         ) : null}
@@ -1429,7 +1441,6 @@ export function BusinessOnboarding({
             options={{
               clientSecret,
               defaultValues: {
-                email: billingIdentity.email,
                 billingAddress: {
                   name: billingIdentity.name,
                   address: {
@@ -1475,11 +1486,11 @@ export function BusinessOnboarding({
             <SecurePaymentForm
               locale={locale}
               organizationId={organizationId}
-              billingIdentity={billingIdentity}
               billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
-              onCheckoutStateChange={setCheckoutElementsState}
+              onCheckoutStateChange={onCheckoutStateChange}
               onRetry={() => {
                 setCheckoutElementsState("loading");
+                setCheckoutElementsDiagnosticMessage(null);
                 setCheckoutAttempt((attempt) => attempt + 1);
               }}
               onReady={(value) => {
