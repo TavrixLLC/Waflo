@@ -80,6 +80,75 @@ function workflowJob(jobId: string): string {
   return workflow.slice(jobs[index].index, jobs[index + 1]?.index);
 }
 
+type JobResult = "success" | "failure" | "cancelled" | "skipped";
+
+const releaseBranch = "refs/heads/release/production-v1";
+
+function authoritativeReleasePasses({
+  scope,
+  staticValidation,
+  unitValidation = "skipped",
+  browserValidation = "skipped",
+  accessibilityValidation = "skipped",
+  scopedValidation = "skipped",
+  scopedBrowserValidation = "skipped",
+  scopedAccessibilityValidation = "skipped",
+}: {
+  scope: "FULL" | "MARKETING" | "MERCHANT" | "API";
+  staticValidation: JobResult;
+  unitValidation?: JobResult;
+  browserValidation?: JobResult;
+  accessibilityValidation?: JobResult;
+  scopedValidation?: JobResult;
+  scopedBrowserValidation?: JobResult;
+  scopedAccessibilityValidation?: JobResult;
+}): boolean {
+  if (staticValidation !== "success") return false;
+  if (scope === "FULL") {
+    return (
+      unitValidation === "success" &&
+      browserValidation === "success" &&
+      accessibilityValidation === "success"
+    );
+  }
+  return (
+    scopedValidation === "success" &&
+    (scope === "API" ||
+      (scopedBrowserValidation === "success" && scopedAccessibilityValidation === "success"))
+  );
+}
+
+function publicationMayRun({
+  event = "push",
+  ref = releaseBranch,
+  scopeResolution = "success",
+  authoritativeValidation = "success",
+}: {
+  event?: string;
+  ref?: string;
+  scopeResolution?: JobResult;
+  authoritativeValidation?: JobResult;
+} = {}): boolean {
+  return (
+    event === "push" &&
+    ref === releaseBranch &&
+    scopeResolution === "success" &&
+    authoritativeValidation === "success"
+  );
+}
+
+function stagingDeploymentMayRun({
+  event = "push",
+  ref = releaseBranch,
+  publication = "success",
+}: {
+  event?: string;
+  ref?: string;
+  publication?: JobResult;
+} = {}): boolean {
+  return event === "push" && ref === releaseBranch && publication === "success";
+}
+
 describe("production deployment platform", () => {
   it("builds browser-test frontends with their active API target in Next production mode", () => {
     expect(playwrightRunner).toContain('NODE_ENV: "production"');
@@ -310,14 +379,24 @@ describe("production deployment platform", () => {
       );
     }
     const releaseVerified = workflowJob("release_verified");
+    expect(releaseVerified).toContain("always()");
     for (const jobId of fullValidationJobs) {
       expect(releaseVerified).toContain(`- ${jobId}`);
       expect(releaseVerified).toContain(`needs.${jobId}.result == 'success'`);
     }
     const imagePublication = workflowJob("publish_release_images");
     expect(imagePublication).toContain("- release_verified");
+    expect(imagePublication).toContain("always()");
+    expect(imagePublication).toContain("github.event_name == 'push'");
+    expect(imagePublication).toContain("github.ref == 'refs/heads/release/production-v1'");
+    expect(imagePublication).toContain("needs.release_scope.result == 'success'");
+    expect(imagePublication).toContain("needs.release_verified.result == 'success'");
     const stagingDeployment = workflowJob("deploy_staging");
     expect(stagingDeployment).toContain("needs: publish_release_images");
+    expect(stagingDeployment).toContain("always()");
+    expect(stagingDeployment).toContain("github.event_name == 'push'");
+    expect(stagingDeployment).toContain("github.ref == 'refs/heads/release/production-v1'");
+    expect(stagingDeployment).toContain("needs.publish_release_images.result == 'success'");
     expect(workflow).toContain("run: pnpm test");
     expect(workflow).not.toMatch(/run: pnpm test:(unit|integration|http|concurrency)/u);
     expect(workflow).toContain("run: pnpm audit:production");
@@ -328,6 +407,98 @@ describe("production deployment platform", () => {
     expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d/u);
     expect(workflow).not.toContain("artifacts/");
     expect(workflow).toContain("retention-days: 3");
+  });
+
+  it("publishes only after the authoritative scope-specific validation path succeeds", () => {
+    const fullPass = authoritativeReleasePasses({
+      scope: "FULL",
+      staticValidation: "success",
+      unitValidation: "success",
+      browserValidation: "success",
+      accessibilityValidation: "success",
+      scopedValidation: "skipped",
+      scopedBrowserValidation: "skipped",
+      scopedAccessibilityValidation: "skipped",
+    });
+    expect(fullPass).toBe(true);
+    expect(publicationMayRun({ authoritativeValidation: fullPass ? "success" : "failure" })).toBe(
+      true,
+    );
+
+    const failedFull = authoritativeReleasePasses({
+      scope: "FULL",
+      staticValidation: "success",
+      unitValidation: "failure",
+      browserValidation: "success",
+      accessibilityValidation: "success",
+    });
+    expect(failedFull).toBe(false);
+    expect(publicationMayRun({ authoritativeValidation: failedFull ? "success" : "failure" })).toBe(
+      false,
+    );
+    const cancelledFull = authoritativeReleasePasses({
+      scope: "FULL",
+      staticValidation: "success",
+      unitValidation: "success",
+      browserValidation: "cancelled",
+      accessibilityValidation: "success",
+    });
+    expect(cancelledFull).toBe(false);
+    expect(
+      publicationMayRun({ authoritativeValidation: cancelledFull ? "success" : "cancelled" }),
+    ).toBe(false);
+
+    for (const scope of ["MARKETING", "MERCHANT"] as const) {
+      const scopedPass = authoritativeReleasePasses({
+        scope,
+        staticValidation: "success",
+        scopedValidation: "success",
+        scopedBrowserValidation: "success",
+        scopedAccessibilityValidation: "success",
+      });
+      expect(scopedPass).toBe(true);
+      expect(
+        publicationMayRun({ authoritativeValidation: scopedPass ? "success" : "failure" }),
+      ).toBe(true);
+    }
+    const failedScopedValidation = authoritativeReleasePasses({
+      scope: "MARKETING",
+      staticValidation: "success",
+      scopedValidation: "success",
+      scopedBrowserValidation: "failure",
+      scopedAccessibilityValidation: "success",
+    });
+    expect(failedScopedValidation).toBe(false);
+    expect(
+      publicationMayRun({
+        authoritativeValidation: failedScopedValidation ? "success" : "failure",
+      }),
+    ).toBe(false);
+    expect(publicationMayRun({ scopeResolution: "skipped" })).toBe(false);
+
+    // Missing immutable-base evidence forces FULL classification; it cannot
+    // suppress a fresh fully validated release publication.
+    const missingBaseMarkerScope = "FULL" as const;
+    expect(
+      publicationMayRun({
+        authoritativeValidation: authoritativeReleasePasses({
+          scope: missingBaseMarkerScope,
+          staticValidation: "success",
+          unitValidation: "success",
+          browserValidation: "success",
+          accessibilityValidation: "success",
+        })
+          ? "success"
+          : "failure",
+      }),
+    ).toBe(true);
+  });
+
+  it("deploys staging only after immutable image publication succeeds", () => {
+    expect(stagingDeploymentMayRun({ publication: "success" })).toBe(true);
+    expect(stagingDeploymentMayRun({ publication: "failure" })).toBe(false);
+    expect(stagingDeploymentMayRun({ publication: "cancelled" })).toBe(false);
+    expect(stagingDeploymentMayRun({ publication: "skipped" })).toBe(false);
   });
 
   it("builds invariant services once and preserves distinct Web environment outputs", () => {

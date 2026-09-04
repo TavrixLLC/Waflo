@@ -739,7 +739,18 @@ jobs:
 
   publish_release_images:
     name: Publish immutable GHCR images
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
+    # `release_verified` deliberately needs both FULL and scoped validators.
+    # The inactive branch is skipped, so override GitHub's inherited implicit
+    # success() check and require the two authoritative direct dependencies
+    # explicitly. A failed, cancelled, or skipped gate still fails closed.
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/release/production-v1' &&
+        needs.release_scope.result == 'success' &&
+        needs.release_verified.result == 'success'
+      }}
     needs:
       - release_verified
       - release_scope
@@ -841,7 +852,15 @@ jobs:
 
   deploy_staging:
     name: Deploy staging
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/production-v1' }}
+    # Publication has the same skipped-branch ancestry as its release gate.
+    # Run only after an explicit successful immutable image publication.
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/release/production-v1' &&
+        needs.publish_release_images.result == 'success'
+      }}
     needs: publish_release_images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
