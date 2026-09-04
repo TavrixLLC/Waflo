@@ -278,6 +278,11 @@ jobs:
       OBJECT_STORAGE_FORCE_PATH_STYLE: true
       OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
     steps:
+      # Local composite actions are resolved from this fresh job's checkout.
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Set up isolated test services and dependencies
         uses: ./.github/actions/setup-isolated-validation
       - name: Unit, integration, HTTP, concurrency, and failure tests
@@ -349,6 +354,11 @@ jobs:
       OBJECT_STORAGE_FORCE_PATH_STYLE: true
       OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
     steps:
+      # Local composite actions are resolved from this fresh job's checkout.
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Set up isolated test services and dependencies
         uses: ./.github/actions/setup-isolated-validation
       - name: Install Playwright Chromium
@@ -421,6 +431,11 @@ jobs:
       OBJECT_STORAGE_FORCE_PATH_STYLE: true
       OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
     steps:
+      # Local composite actions are resolved from this fresh job's checkout.
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Set up isolated test services and dependencies
         uses: ./.github/actions/setup-isolated-validation
       - name: Install Playwright Chromium
@@ -493,6 +508,11 @@ jobs:
       OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
       RELEASE_SCOPE: ${{ needs.release_scope.outputs.scope }}
     steps:
+      # Local composite actions are resolved from this fresh job's checkout.
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Set up isolated test services and dependencies
         uses: ./.github/actions/setup-isolated-validation
       - name: Run scope-specific typecheck, build, and unit coverage
@@ -587,6 +607,11 @@ jobs:
       OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
       RELEASE_SCOPE: ${{ needs.release_scope.outputs.scope }}
     steps:
+      # Local composite actions are resolved from this fresh job's checkout.
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Set up isolated test services and dependencies
         uses: ./.github/actions/setup-isolated-validation
       - name: Install Playwright Chromium
@@ -653,6 +678,11 @@ jobs:
       OBJECT_STORAGE_ALLOW_INSECURE_INTERNAL: false
       RELEASE_SCOPE: ${{ needs.release_scope.outputs.scope }}
     steps:
+      # Local composite actions are resolved from this fresh job's checkout.
+      - name: Check out the validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Set up isolated test services and dependencies
         uses: ./.github/actions/setup-isolated-validation
       - name: Install Playwright Chromium
