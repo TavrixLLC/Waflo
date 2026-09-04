@@ -43,6 +43,7 @@ const releaseEntrypoint = readFileSync(
   resolve(deploymentRoot, "scripts/release-deploy-entrypoint.sh"),
   "utf8",
 );
+const ciObjectStorageBootstrap = resolve(deploymentRoot, "scripts/start-ci-object-storage.sh");
 const playwrightRunner = readFileSync(resolve(root, "scripts/run-playwright.mjs"), "utf8");
 const templateGalleryFixture = readFileSync(
   resolve(root, "tests/e2e/template-gallery-fixtures.ts"),
@@ -68,17 +69,22 @@ function deploymentFiles(directory: string): string[] {
   });
 }
 
+function workflowJob(jobId: string): string {
+  const jobs = [...workflow.matchAll(/^  ([a-z][a-z0-9_]*):\n/gmu)];
+  const index = jobs.findIndex((job) => job[1] === jobId);
+  if (index < 0) throw new Error(`Missing workflow job: ${jobId}`);
+  return workflow.slice(jobs[index].index, jobs[index + 1]?.index);
+}
+
 describe("production deployment platform", () => {
   it("builds browser-test frontends with their active API target in Next production mode", () => {
     expect(playwrightRunner).toContain('NODE_ENV: "production"');
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain("WAFLO_E2E_API_URL: process.env.NEXT_PUBLIC_API_URL");
     expect(playwrightRunner).toContain(
-      "runCommand(build.command, build.args, browserBuildEnvironment)",
+      "runCommand(frontend.command, frontend.args, browserBuildEnvironment)",
     );
-    expect(playwrightRunner).toContain(
-      "runCommand(customer.command, customer.args, browserBuildEnvironment)",
-    );
+    expect(playwrightRunner).toContain('"@waflo/security", "build"');
     expect(playwrightRunner).toContain('"start", "-p"');
     expect(playwrightRunner).toContain("stable localhost origins");
     expect(playwrightRunner).toContain("strict CSRF cookie is sent");
@@ -90,6 +96,9 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain("process.env.API_INTERNAL_URL");
     expect(playwrightRunner).toContain("await buildBrowserFrontends()");
     expect(playwrightRunner).toContain("prior isolated random API port");
+    expect(
+      playwrightRunner.indexOf("process.env.NEXT_PUBLIC_API_URL = `http://localhost:${apiPort}`"),
+    ).toBeLessThan(playwrightRunner.indexOf("await buildBrowserFrontends()"));
     expect(playwrightRunner).toContain(
       '["chromium", "accessibility", "admin", "admin-accessibility"].includes(project)',
     );
@@ -161,6 +170,9 @@ describe("production deployment platform", () => {
 
   it("contains no legacy deployment root or inter-container localhost dependency", () => {
     const contents = deploymentFiles(deploymentRoot)
+      // This helper starts an ephemeral loopback-only MinIO container for CI
+      // tests. It is not a staging or production deployment input.
+      .filter((file) => file !== ciObjectStorageBootstrap)
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
     expect(contents).not.toMatch(/\/opt\/waflo(?!-platform)/);
@@ -257,7 +269,32 @@ describe("production deployment platform", () => {
   it("uses one authoritative, immutable-action release workflow without duplicated test gates", () => {
     expect(readdirSync(workflowRoot).filter((name) => /\.ya?ml$/u.test(name))).toEqual(["ci.yml"]);
     expect(workflow).toContain("release/production-v1");
-    expect(workflow).toContain("needs: verify");
+    const fullValidationJobs = [
+      "release_static_verify",
+      "release_unit_verify",
+      "release_e2e",
+      "release_accessibility",
+    ];
+    expect(workflowJob("release_scope")).toContain("Classify changed workspaces");
+    for (const jobId of fullValidationJobs) {
+      const job = workflowJob(jobId);
+      expect(job).toContain("needs: release_scope");
+    }
+    for (const jobId of fullValidationJobs.slice(1)) {
+      const job = workflowJob(jobId);
+      expect(job.indexOf("actions/checkout@")).toBeLessThan(
+        job.indexOf("uses: ./.github/actions/setup-isolated-validation"),
+      );
+    }
+    const releaseVerified = workflowJob("release_verified");
+    for (const jobId of fullValidationJobs) {
+      expect(releaseVerified).toContain(`- ${jobId}`);
+      expect(releaseVerified).toContain(`needs.${jobId}.result == 'success'`);
+    }
+    const imagePublication = workflowJob("publish_release_images");
+    expect(imagePublication).toContain("- release_verified");
+    const stagingDeployment = workflowJob("deploy_staging");
+    expect(stagingDeployment).toContain("needs: publish_release_images");
     expect(workflow).toContain("run: pnpm test");
     expect(workflow).not.toMatch(/run: pnpm test:(unit|integration|http|concurrency)/u);
     expect(workflow).toContain("run: pnpm audit:production");

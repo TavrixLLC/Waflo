@@ -182,6 +182,12 @@ async function buildBrowserFrontends() {
   const database = pnpmCommand(["--filter", "@waflo/database", "build"]);
   if ((await runCommand(database.command, database.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser database client build failed.");
+  // Every Next frontend imports the shared CSP implementation from its
+  // compiled workspace export. Isolated browser jobs start from a clean
+  // checkout, so build it before any frontend loads next.config.ts.
+  const security = pnpmCommand(["--filter", "@waflo/security", "build"]);
+  if ((await runCommand(security.command, security.args, browserBuildEnvironment)) !== 0)
+    throw new Error("Browser security package build failed.");
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
   if ((await runCommand(api.command, api.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser API build failed.");
