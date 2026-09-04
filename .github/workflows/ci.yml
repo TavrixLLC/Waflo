@@ -820,6 +820,13 @@ jobs:
           path: .turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'turbo.json') }}-${{ github.sha }}
 
+      # publish-images.sh invokes `docker buildx bake` directly. Expose the
+      # GitHub Actions runtime cache credentials that BuildKit's `type=gha`
+      # backend needs for layer imports and exports from an inline shell step.
+      # The cache is used only by this trusted release-publish job.
+      - name: Expose GitHub Actions runtime to BuildKit
+        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+
       - name: Configure Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 

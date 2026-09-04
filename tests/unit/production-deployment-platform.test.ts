@@ -524,6 +524,29 @@ describe("production deployment platform", () => {
     expect(bake).not.toMatch(/SECRET|PASSWORD|PRIVATE_KEY|SERVICE_ACCOUNT/u);
   });
 
+  it("exports the stable Apple Swift compile layer through the trusted GitHub Actions cache", () => {
+    const publishJob = workflowJob("publish_release_images");
+    const runtimeAction =
+      "crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487";
+    expect(publishJob).toContain(runtimeAction);
+    expect(publishJob.indexOf(runtimeAction)).toBeLessThan(
+      publishJob.indexOf("docker/setup-buildx-action@"),
+    );
+    const appleTarget = bake.slice(bake.indexOf('target "apple-pass-builder"'));
+    expect(appleTarget.slice(0, appleTarget.indexOf("\n}"))).toContain(
+      "type=gha,scope=waflo-release-apple-pass-builder",
+    );
+    expect(appleTarget.slice(0, appleTarget.indexOf("\n}"))).toContain("cache-to");
+    expect(appleTarget.slice(0, appleTarget.indexOf("\n}"))).toContain("mode=max");
+    expect(publishImages).toContain("apple_swift_source_fingerprint()");
+    expect(publishImages).toContain("Apple Swift source fingerprint:");
+    expect(publishImages).toContain("Apple Swift compile layer: CACHE HIT");
+    expect(publishImages).toContain("Apple Swift compile layer: BUILT");
+    expect(publishImages).toContain("awk '/^FROM node:/{exit} {print}'");
+    expect(publishImages).toContain("Package.resolved");
+    expect(publishImages).toContain("8908b955-swift-6.3-linux-pointer.patch");
+  });
+
   it("smoke tests the exact final Node release images before staging deployment", () => {
     expect(publishImages).toContain(
       `"${scriptDirectoryVariable}/smoke-node-release-images.sh" staging "${localReleaseShaVariable}"`,

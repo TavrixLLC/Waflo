@@ -88,6 +88,58 @@ publish_release_marker() {
   printf 'Published verified release marker: %s\n' "${marker}"
 }
 
+apple_swift_source_fingerprint() {
+  # This is observability only. Keep it limited to the stage that fetches and
+  # compiles the pinned Apple Pass Builder source, rather than unrelated Waflo
+  # Node sources that share the wider Docker build context.
+  {
+    printf 'waflo-apple-swift-build-inputs-v1\0'
+    awk '/^FROM node:/{exit} {print}' \
+      "${repository_root}/apps/apple-pass-builder-service/Dockerfile"
+    sha256sum \
+      "${repository_root}/apps/apple-pass-builder-service/Package.resolved" \
+      "${repository_root}/apps/apple-pass-builder-service/patches/8908b955-swift-6.3-linux-pointer.patch"
+  } | sha256sum | cut -c1-16
+}
+
+build_missing_target() {
+  local target="$1"
+  local build_log
+  local compile_step
+
+  if [[ "${target}" != "apple-pass-builder" ]]; then
+    docker buildx bake \
+      --file "${repository_root}/deploy/vps/docker-bake.hcl" \
+      --set "${target}.tags=${target_references[${target}]}" \
+      --push \
+      "${target}"
+    return
+  fi
+
+  printf 'Apple Swift source fingerprint: %s\n' "$(apple_swift_source_fingerprint)"
+  build_log="$(mktemp)"
+  if ! docker buildx bake \
+    --file "${repository_root}/deploy/vps/docker-bake.hcl" \
+    --set "${target}.tags=${target_references[${target}]}" \
+    --push \
+    "${target}" 2>&1 | tee "${build_log}"; then
+    rm -f "${build_log}"
+    return 1
+  fi
+
+  compile_step="$({
+    sed -nE 's/.*#([0-9]+) \[pass-builder-build [^]]+\] RUN.*swift build -c release.*/\1/p' "${build_log}"
+  } | head -n 1)"
+  if [[ -n "${compile_step}" ]] && grep -Fq "#${compile_step} CACHED" "${build_log}"; then
+    printf 'Apple Swift compile layer: CACHE HIT\n'
+  elif grep -Fq 'swift build -c release' "${build_log}"; then
+    printf 'Apple Swift compile layer: BUILT\n'
+  else
+    printf 'Apple Swift compile layer: UNKNOWN (BuildKit did not emit a recognizable compile step)\n'
+  fi
+  rm -f "${build_log}"
+}
+
 declare -a missing_targets=()
 declare -A target_references=(
   [migrate]="${registry}/waflo-migrate:${release_sha}-staging"
@@ -179,11 +231,7 @@ if (( ${#missing_targets[@]} > 0 )); then
   printf 'Building missing release targets sequentially on one Buildx runner: %s\n' \
     "${missing_targets[*]}"
   for target in "${missing_targets[@]}"; do
-    docker buildx bake \
-      --file "${repository_root}/deploy/vps/docker-bake.hcl" \
-      --set "${target}.tags=${target_references[${target}]}" \
-      --push \
-      "${target}"
+    build_missing_target "${target}"
   done
 else
   printf 'All SHA-qualified images already exist; no Docker build is required.\n'
