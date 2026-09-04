@@ -45,6 +45,10 @@ const releaseEntrypoint = readFileSync(
 );
 const ciObjectStorageBootstrap = resolve(deploymentRoot, "scripts/start-ci-object-storage.sh");
 const playwrightRunner = readFileSync(resolve(root, "scripts/run-playwright.mjs"), "utf8");
+const isolatedValidationAction = readFileSync(
+  resolve(root, ".github/actions/setup-isolated-validation/action.yml"),
+  "utf8",
+);
 const templateGalleryFixture = readFileSync(
   resolve(root, "tests/e2e/template-gallery-fixtures.ts"),
   "utf8",
@@ -84,15 +88,13 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain(
       "runCommand(frontend.command, frontend.args, browserBuildEnvironment)",
     );
-    expect(playwrightRunner).toContain('"@waflo/security", "build"');
+    expect(playwrightRunner).toContain('pnpmCommand(["test:prepare"])');
     expect(playwrightRunner).toContain('"start", "-p"');
     expect(playwrightRunner).toContain("stable localhost origins");
     expect(playwrightRunner).toContain("strict CSRF cookie is sent");
     expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
     expect(playwrightRunner).toContain("PORT: String(command.port)");
     expect(playwrightRunner).not.toContain("await prepareStandaloneFrontends()");
-    expect(playwrightRunner).toContain('"@waflo/i18n", "build"');
-    expect(playwrightRunner).toContain('"@waflo/ui", "build"');
     expect(playwrightRunner).toContain("process.env.API_INTERNAL_URL");
     expect(playwrightRunner).toContain("await buildBrowserFrontends()");
     expect(playwrightRunner).toContain("prior isolated random API port");
@@ -102,6 +104,27 @@ describe("production deployment platform", () => {
     expect(playwrightRunner).toContain(
       '["chromium", "accessibility", "admin", "admin-accessibility"].includes(project)',
     );
+  });
+
+  it("prepares workspace exports exactly once inside each isolated browser harness", () => {
+    const preparation = 'pnpmCommand(["test:prepare"])';
+    expect([...playwrightRunner.matchAll(/pnpmCommand\(\["test:prepare"\]\)/gu)]).toHaveLength(1);
+    expect(playwrightRunner.indexOf("await prepareBrowserWorkspace()")).toBeLessThan(
+      playwrightRunner.indexOf("await prepareIsolatedDatabase()"),
+    );
+    expect(playwrightRunner.indexOf("await prepareBrowserWorkspace()")).toBeLessThan(
+      playwrightRunner.indexOf("await buildBrowserFrontends()"),
+    );
+    expect(playwrightRunner.indexOf(preparation)).toBeLessThan(
+      playwrightRunner.indexOf('pnpmCommand(["--filter", "@waflo/api", "build"])'),
+    );
+    expect(playwrightRunner.indexOf(preparation)).toBeLessThan(
+      playwrightRunner.indexOf("const frontendBuilds = ["),
+    );
+    expect(isolatedValidationAction).not.toContain("pnpm test:prepare");
+    for (const jobId of ["release_e2e", "release_accessibility"]) {
+      expect(workflowJob(jobId)).not.toContain("pnpm test:prepare");
+    }
   });
 
   it("keeps browser fixtures bound to every isolated loopback API port", () => {

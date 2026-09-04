@@ -164,6 +164,19 @@ async function freePort() {
   });
 }
 
+async function prepareBrowserWorkspace() {
+  // A browser gate runs on a fresh runner. Build every workspace library once
+  // before database and browser bootstrap so workspace exports such as billing,
+  // UI, security, and Prisma resolve from their generated dist output. Turbo
+  // restores this deterministic package-only preparation when its trusted cache
+  // is warm; the environment-sensitive API and Next builds below still execute
+  // against this run's active API target.
+  const packagePreparation = pnpmCommand(["test:prepare"]);
+  if ((await runCommand(packagePreparation.command, packagePreparation.args, process.env)) !== 0) {
+    throw new Error("Browser workspace package preparation failed.");
+  }
+}
+
 async function buildBrowserFrontends() {
   // `next build` must always execute in production mode, even when the local
   // developer .env intentionally sets NODE_ENV=development for the test servers.
@@ -175,33 +188,9 @@ async function buildBrowserFrontends() {
     NODE_ENV: "production",
     WAFLO_E2E_NEXT_START: "1",
   };
-  // Browser runs create a fresh database and apply every migration. Generate
-  // the Prisma client from that same schema before compiling the API; otherwise
-  // a newly added column can be present in the database but absent from the
-  // previously built client used by the isolated server.
-  const database = pnpmCommand(["--filter", "@waflo/database", "build"]);
-  if ((await runCommand(database.command, database.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser database client build failed.");
-  // Every Next frontend imports the shared CSP implementation from its
-  // compiled workspace export. Isolated browser jobs start from a clean
-  // checkout, so build it before any frontend loads next.config.ts.
-  const security = pnpmCommand(["--filter", "@waflo/security", "build"]);
-  if ((await runCommand(security.command, security.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser security package build failed.");
   const api = pnpmCommand(["--filter", "@waflo/api", "build"]);
   if ((await runCommand(api.command, api.args, browserBuildEnvironment)) !== 0)
     throw new Error("Browser API build failed.");
-  // Workspace packages export compiled JavaScript to Next. Build the shared
-  // interface registry before its browser consumers so an isolated run never
-  // uses stale locale metadata from dist/.
-  const i18n = pnpmCommand(["--filter", "@waflo/i18n", "build"]);
-  if ((await runCommand(i18n.command, i18n.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser i18n build failed.");
-  // The shared control system is also consumed through its compiled export.
-  // Rebuild it here so browser assertions exercise the current UI primitive.
-  const ui = pnpmCommand(["--filter", "@waflo/ui", "build"]);
-  if ((await runCommand(ui.command, ui.args, browserBuildEnvironment)) !== 0)
-    throw new Error("Browser UI build failed.");
   const frontendBuilds = [
     ...(browserSurface === "full" || browserSurface === "marketing"
       ? [["Marketing", "@waflo/marketing-web"]]
@@ -457,6 +446,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 let exitCode = 1;
 try {
+  await prepareBrowserWorkspace();
   await prepareIsolatedDatabase();
   if (isolatedDatabase) {
     const apiPort = await freePort();
