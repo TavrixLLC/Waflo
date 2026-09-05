@@ -773,7 +773,19 @@ export class BillingService {
           }
         : null,
       customerPortalAvailable: Boolean(organization.billingProfile?.stripeCustomerId),
-      subscriptions: organization.subscriptions,
+      // Prisma represents the immutable pricing snapshot in a subscription as
+      // bigint. The dashboard only needs this safe, presentation-level
+      // summary; returning the raw database row would make Fastify's JSON
+      // serializer throw after an initial trial subscription is created.
+      subscriptions: organization.subscriptions.map((subscription) => ({
+        id: subscription.id,
+        status: subscription.status,
+        planCode: subscription.planCode,
+        cadence: subscription.cadence,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+        createdAt: subscription.createdAt,
+      })),
       stripeConfigured: this.environment.stripeConfigured,
       cadenceAvailability,
       catalog,

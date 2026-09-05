@@ -1515,71 +1515,81 @@ export function BusinessOnboarding({
       {error ? <Alert tone="danger" title={error} /> : null}
       {preview ? (
         <div className="onboarding-trial-review">
-          <div className="onboarding-trial-review__promise">
-            <strong>{copy.trial.free}</strong>
-            <span>
-              {formatMessage(copy.trial.thenStarting, {
-                amount: money(preview.amount, preview.currency, locale),
-                date: dateLabel(preview.expectedFirstChargeAt, locale),
-              })}
-            </span>
+          <section className="onboarding-trial-review__summary" aria-label={copy.trial.title}>
+            <div className="onboarding-trial-review__promise">
+              <strong>{copy.trial.free}</strong>
+              <span>
+                {formatMessage(copy.trial.thenStarting, {
+                  amount: money(preview.amount, preview.currency, locale),
+                  date: dateLabel(preview.expectedFirstChargeAt, locale),
+                })}
+              </span>
+            </div>
+            <dl>
+              <div>
+                <dt>{copy.trial.plan}</dt>
+                <dd>{planName(preview.plan, copy)}</dd>
+              </div>
+              <div>
+                <dt>{copy.trial.cadence}</dt>
+                <dd>{cadenceLabel(preview.cadence, copy)}</dd>
+              </div>
+              <div>
+                <dt>{copy.trial.trialStarts}</dt>
+                <dd>
+                  <bdi dir="auto">{dateLabel(preview.expectedTrialStart, locale)}</bdi>
+                </dd>
+              </div>
+              <div>
+                <dt>{copy.trial.firstCharge}</dt>
+                <dd>
+                  <bdi dir="auto">
+                    {dateLabel(preview.expectedFirstChargeAt, locale)} ·{" "}
+                    {money(preview.amount, preview.currency, locale)}
+                  </bdi>
+                </dd>
+              </div>
+              <div>
+                <dt>{copy.trial.paymentMethod}</dt>
+                <dd className="onboarding-card-summary">
+                  <CreditCard size={17} aria-hidden="true" />
+                  <bdi dir="ltr">
+                    {preview.paymentMethod.brand.toUpperCase()} •••• {preview.paymentMethod.last4} ·{" "}
+                    {preview.paymentMethod.expMonth}/{preview.paymentMethod.expYear}
+                  </bdi>
+                </dd>
+              </div>
+            </dl>
+            <p className="onboarding-trial-review__policy">{copy.trial.policy}</p>
+            <div className="onboarding-policy-links">
+              <a
+                href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/refunds`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {copy.trial.billingRefundPolicy}
+              </a>
+              <a
+                href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/terms`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {copy.trial.terms}
+              </a>
+              <a
+                href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/privacy`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {copy.trial.privacy}
+              </a>
+            </div>
+          </section>
+          <div className="onboarding-trial-review__actions">
+            <Button onClick={() => void startTrial()} loading={loading}>
+              {copy.trial.start}
+            </Button>
           </div>
-          <dl>
-            <div>
-              <dt>{copy.trial.plan}</dt>
-              <dd>{planName(preview.plan, copy)}</dd>
-            </div>
-            <div>
-              <dt>{copy.trial.cadence}</dt>
-              <dd>{cadenceLabel(preview.cadence, copy)}</dd>
-            </div>
-            <div>
-              <dt>{copy.trial.trialStarts}</dt>
-              <dd>{dateLabel(preview.expectedTrialStart, locale)}</dd>
-            </div>
-            <div>
-              <dt>{copy.trial.firstCharge}</dt>
-              <dd>
-                {dateLabel(preview.expectedFirstChargeAt, locale)} ·{" "}
-                {money(preview.amount, preview.currency, locale)}
-              </dd>
-            </div>
-            <div>
-              <dt>{copy.trial.paymentMethod}</dt>
-              <dd className="onboarding-card-summary">
-                <CreditCard size={17} aria-hidden="true" />
-                {preview.paymentMethod.brand.toUpperCase()} •••• {preview.paymentMethod.last4} ·{" "}
-                {preview.paymentMethod.expMonth}/{preview.paymentMethod.expYear}
-              </dd>
-            </div>
-          </dl>
-          <p className="onboarding-trial-review__policy">{copy.trial.policy}</p>
-          <div className="onboarding-policy-links">
-            <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/refunds`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {copy.trial.billingRefundPolicy}
-            </a>
-            <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/terms`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {copy.trial.terms}
-            </a>
-            <a
-              href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/privacy`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {copy.trial.privacy}
-            </a>
-          </div>
-          <Button onClick={() => void startTrial()} loading={loading}>
-            {copy.trial.start}
-          </Button>
         </div>
       ) : (
         <Alert tone="danger" title={copy.trial.unavailable} />

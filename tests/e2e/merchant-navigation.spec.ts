@@ -248,3 +248,109 @@ test("recovers an already completed trial after a browser retry", async ({ page 
   expect(completionRequests).toBe(1);
   expect(onboardingRequests).toBe(1);
 });
+
+test("keeps trial review information separate from its confirmation action across RTL and mobile", async ({
+  page,
+}) => {
+  await page.goto("/en/login");
+  await page.locator('input[name="email"]').fill("owner@waflo.local");
+  await page.locator('input[name="password"]').fill("Waflo-Development-2026");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
+
+  const organizationId = "trial-review-layout-organization";
+  const checkoutSessionId = "cs_trial_review_layout";
+  await page.route(`**/v1/organizations/${organizationId}/billing`, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          billingIdentity: {
+            name: "Review Coffee",
+            email: "billing@review.example",
+            countryCode: "IQ",
+            addressLine1: "Al Karrada",
+            addressLine2: null,
+            city: "Baghdad",
+            region: "Baghdad",
+            postalCode: "10001",
+          },
+          onboardingSetup: { status: "SETUP_COMPLETED", checkoutSessionId },
+        },
+        requestId: "trial-review-layout",
+      }),
+    });
+  });
+  await page.route(`**/v1/organizations/${organizationId}/billing/trial/preview`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          plan: "growth",
+          cadence: "monthly",
+          trialDays: 15,
+          amount: 2900,
+          currency: "USD",
+          expectedTrialStart: "2026-09-05T00:00:00.000Z",
+          expectedFirstChargeAt: "2026-09-20T00:00:00.000Z",
+          paymentMethod: { brand: "mastercard", last4: "4444", expMonth: 12, expYear: 2030 },
+        },
+        requestId: "trial-review-preview",
+      }),
+    });
+  });
+
+  const openReview = async (locale: "en" | "ar") => {
+    await page.goto(
+      `/${locale}/onboarding/business?organization=${organizationId}&resume=trial_confirmation_required`,
+    );
+    await expect(page.locator(".onboarding-trial-review__summary")).toBeVisible();
+  };
+
+  await openReview("en");
+  const summary = page.locator(".onboarding-trial-review__summary");
+  const action = page.locator(".onboarding-trial-review__actions .wf-button");
+  await expect(summary.getByRole("button")).toHaveCount(0);
+  await expect(action).toBeVisible();
+  await expect(page.locator(".onboarding-card-summary bdi")).toHaveAttribute("dir", "ltr");
+
+  for (const width of [1440, 1366, 430, 390, 375, 360]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dimensions = await page.evaluate(() => {
+      const summaryCard = document.querySelector<HTMLElement>(".onboarding-trial-review__summary");
+      const confirmation = document.querySelector<HTMLElement>(
+        ".onboarding-trial-review__actions .wf-button",
+      );
+      if (!summaryCard || !confirmation) throw new Error("Trial review layout is unavailable.");
+      const dimensions = {
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        summaryWidth: summaryCard.getBoundingClientRect().width,
+        actionWidth: confirmation.getBoundingClientRect().width,
+      };
+      return dimensions;
+    });
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+    if (width <= 430) {
+      expect(Math.abs(dimensions.actionWidth - dimensions.summaryWidth)).toBeLessThanOrEqual(1);
+    }
+  }
+
+  // The durable setup record, rather than browser state, must recover the
+  // review in a second locale as well.
+  await page.evaluate(() => window.sessionStorage.clear());
+  await openReview("ar");
+  await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  await expect(page.locator(".onboarding-trial-review__summary").getByRole("button")).toHaveCount(
+    0,
+  );
+  await expect(page.locator(".onboarding-trial-review__actions .wf-button")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    ),
+  ).toBe(true);
+});

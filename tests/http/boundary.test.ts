@@ -448,6 +448,108 @@ describe.sequential("Waflo W1 real NestJS/Fastify HTTP boundary", () => {
     expect(staffTeam.statusCode).toBe(403);
   });
 
+  it("returns a serializable billing read model after embedded card setup before and after trial activation", async () => {
+    const postSetupOrganizationId = await createOrganization(owner.userId, "billing-post-setup");
+    const billing = app.get(BillingService);
+    const stripe = (
+      billing as unknown as {
+        stripe: {
+          customers: { retrieve: (...args: never[]) => Promise<unknown> };
+          paymentMethods: { list: (...args: never[]) => Promise<unknown> };
+        };
+      }
+    ).stripe;
+    const originalRetrieve = stripe.customers.retrieve;
+    const originalList = stripe.paymentMethods.list;
+    const customerId = `cus_post_setup_${runId}`;
+    const paymentMethodId = `pm_post_setup_${runId}`;
+    const checkoutSessionId = `cs_test_post_setup_${runId}`;
+    try {
+      stripe.customers.retrieve = async () => ({
+        id: customerId,
+        deleted: false,
+        invoice_settings: { default_payment_method: { id: paymentMethodId } },
+      });
+      stripe.paymentMethods.list = async () => ({
+        data: [
+          {
+            id: paymentMethodId,
+            card: { brand: "mastercard", last4: "4444", exp_month: 12, exp_year: 2030 },
+          },
+        ],
+      });
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: postSetupOrganizationId },
+        data: { stripeCustomerId: customerId },
+      });
+      await prisma.client.checkoutIdempotencyKey.create({
+        data: {
+          organizationId: postSetupOrganizationId,
+          idempotencyKey: randomUUID(),
+          planCode: "GROWTH:MONTHLY",
+          selectedCadence: "MONTHLY",
+          stripeCustomerId: customerId,
+          stripePaymentMethodId: paymentMethodId,
+          stripeSessionId: checkoutSessionId,
+          status: "SETUP_COMPLETED",
+        },
+      });
+
+      const pending = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${postSetupOrganizationId}/billing`,
+        headers: { cookie: owner.sessionCookie },
+      });
+      expect(pending.statusCode).toBe(200);
+      expect(pending.json().data).toMatchObject({
+        onboardingSetup: { status: "SETUP_COMPLETED", checkoutSessionId },
+        paymentMethod: { status: "saved", brand: "mastercard", last4: "4444" },
+        subscriptions: [],
+      });
+
+      const createdAt = new Date();
+      await prisma.client.subscription.create({
+        data: {
+          organizationId: postSetupOrganizationId,
+          stripeSubscriptionId: `sub_post_setup_${runId}`,
+          stripePriceId: "price_test_growth",
+          planCode: "GROWTH",
+          cadence: "MONTHLY",
+          status: "TRIALING",
+          pricingAmountMinor: 6900n,
+          currentPeriodEnd: new Date(createdAt.getTime() + 15 * 24 * 60 * 60 * 1000),
+        },
+      });
+      const trialing = await app.inject({
+        method: "GET",
+        url: `/v1/organizations/${postSetupOrganizationId}/billing`,
+        headers: { cookie: owner.sessionCookie },
+      });
+      expect(trialing.statusCode).toBe(200);
+      const subscription = trialing.json().data.subscriptions[0];
+      expect(subscription).toMatchObject({
+        status: "TRIALING",
+        planCode: "GROWTH",
+        cadence: "MONTHLY",
+        cancelAtPeriodEnd: false,
+      });
+      expect(Object.keys(subscription).sort()).toEqual(
+        [
+          "id",
+          "status",
+          "planCode",
+          "cadence",
+          "currentPeriodEnd",
+          "cancelAtPeriodEnd",
+          "createdAt",
+        ].sort(),
+      );
+    } finally {
+      stripe.customers.retrieve = originalRetrieve;
+      stripe.paymentMethods.list = originalList;
+    }
+  });
+
   it("validates exact branch coordinates and derives timezone without trusting the client", async () => {
     const csrfState = await csrf();
     const coordinate = await app.inject({

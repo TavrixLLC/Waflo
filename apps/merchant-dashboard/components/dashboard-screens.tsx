@@ -1454,6 +1454,7 @@ export function BillingScreen({
           : "سنوي"
       : billingCadenceCatalog[value].label;
   const [data, setData] = useState<BillingView | null>(null);
+  const [loading, setLoading] = useState(true);
   const [cadence, setCadence] = useState<BillingCadence>("monthly");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1553,6 +1554,7 @@ export function BillingScreen({
     [ar],
   );
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const result = await apiFetch<BillingView>(
         `/v1/organizations/${membership.organization.id}/billing`,
@@ -1561,7 +1563,14 @@ export function BillingScreen({
       setCadence(result.selectedCadence);
       setError("");
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر تحميل الفوترة." : "Unable to load billing."));
+      const fallback = ar ? "تعذر تحميل الفوترة." : "Unable to load billing.";
+      setError(
+        caught instanceof ApiClientError && caught.code === "INTERNAL_ERROR"
+          ? fallback
+          : message(caught, fallback),
+      );
+    } finally {
+      setLoading(false);
     }
   }, [membership.organization.id, ar]);
   useEffect(() => {
@@ -1867,7 +1876,14 @@ export function BillingScreen({
             : "Manage your plan, payment method, and invoices."
         }
       />
-      {error ? <Alert tone="danger" title={error} /> : null}
+      {error ? (
+        <div className="billing-load-error" role="alert">
+          <Alert tone="danger" title={error} />
+          <Button type="button" variant="secondary" onClick={() => void load()} loading={loading}>
+            {ar ? "إعادة المحاولة" : "Try again"}
+          </Button>
+        </div>
+      ) : null}
       {notice ? <Alert tone="success" title={notice} /> : null}
       {saving ? (
         <Alert
@@ -2518,9 +2534,9 @@ export function BillingScreen({
             </Alert>
           ) : null}
         </>
-      ) : (
+      ) : loading ? (
         <Skeleton height="20rem" />
-      )}
+      ) : null}
       <Modal
         open={Boolean(subscriptionChange)}
         title={ar ? "تأكيد تغيير الاشتراك" : "Confirm subscription change"}
