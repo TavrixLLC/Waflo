@@ -14,18 +14,19 @@ RUN git init \
     && git fetch --depth 1 origin 8908b955a42da8294ce7506719aa1f186d096c02 \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "8908b955a42da8294ce7506719aa1f186d096c02" \
+    && echo "5a22f17961993b12c963bcb0ac1b5c0371d902a55361b5fb9524715b8b9938e6  /tmp/pass-builder.patch" \
+      | sha256sum --check --strict \
     && git apply --check /tmp/pass-builder.patch \
     && git apply /tmp/pass-builder.patch \
-    && cp /tmp/Package.resolved Package.resolved
-RUN --mount=type=cache,id=waflo-apple-pass-builder-swiftpm,target=/root/.cache/org.swift.swiftpm,sharing=locked \
-    --mount=type=cache,id=waflo-apple-pass-builder-swift-build,target=/source/pass-builder/.build,sharing=locked \
-    git config --global http.version HTTP/1.1 \
-    && swift package resolve \
+    && echo "0cc5f7d74bba8d3882f2fd46b9dc0e107a977bb817872948a2f459276ee325a6  /tmp/Package.resolved" \
+      | sha256sum --check --strict \
+    && cp /tmp/Package.resolved Package.resolved \
     && echo "0cc5f7d74bba8d3882f2fd46b9dc0e107a977bb817872948a2f459276ee325a6  Package.resolved" \
       | sha256sum --check --strict
 RUN --mount=type=cache,id=waflo-apple-pass-builder-swiftpm,target=/root/.cache/org.swift.swiftpm,sharing=locked \
     --mount=type=cache,id=waflo-apple-pass-builder-swift-build,target=/source/pass-builder/.build,sharing=locked \
-    swift build -c release --product buildpass --static-swift-stdlib --disable-automatic-resolution \
+    git config --global http.version HTTP/1.1 \
+    && swift build -c release --product buildpass --static-swift-stdlib --disable-automatic-resolution \
     && mkdir -p /out/runtime /out/Protobufs \
     && cp .build/release/buildpass /out/runtime/buildpass \
     && cp Package.resolved /out/runtime/Package.resolved \
