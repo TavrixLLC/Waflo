@@ -13,6 +13,7 @@
 
 import { isInterfaceLocale, localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 import { Cairo, Manrope, Noto_Sans_Arabic } from "next/font/google";
+import localFont from "next/font/local";
 import { useEffect, useState } from "react";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
@@ -20,6 +21,11 @@ const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", di
 const notoSansArabic = Noto_Sans_Arabic({
   subsets: ["arabic"],
   variable: "--font-noto-sans-arabic",
+  display: "swap",
+});
+const sirwan = localFont({
+  src: "../../../packages/brand/assets/fonts/Sirwan.ttf",
+  variable: "--font-sirwan",
   display: "swap",
 });
 
@@ -64,7 +70,7 @@ export default function GlobalError({
       data-interface-typography={definition.typography}
     >
       <body
-        className={`${manrope.variable} ${cairo.variable}${
+        className={`${manrope.variable} ${cairo.variable} ${sirwan.variable}${
           locale.startsWith("ku-") ? ` ${notoSansArabic.variable}` : ""
         }`}
       >
@@ -75,8 +81,10 @@ export default function GlobalError({
             background:#faf9f8;color:#241916}
           html[data-interface-typography="cairo"] body{
             font-family:var(--font-cairo),system-ui,sans-serif}
-          html:lang(kmr-Arab-IQ) body,html:lang(ckb-Arab-IQ) body{
-            font-family:var(--font-noto-sans-arabic),var(--font-cairo),system-ui,sans-serif;
+          html[lang="kmr-Arab-IQ"] body,html[lang="ckb-Arab-IQ"] body,
+          html[lang="kmr-Arab-IQ"] body [dir="rtl"],html[lang="ckb-Arab-IQ"] body [dir="rtl"]{
+              --waflo-font-arabic:var(--font-sirwan),Sirwan,var(--font-noto-sans-arabic),var(--font-cairo),system-ui,sans-serif;
+              font-family:var(--waflo-font-arabic);
             font-kerning:normal;font-variant-ligatures:common-ligatures contextual;
             letter-spacing:normal}
           .ge-card{width:min(480px,calc(100vw - 2rem));padding:2rem;

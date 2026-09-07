@@ -122,6 +122,9 @@ describe("production-v1 UX and billing repair", () => {
     expect(worker).toContain("merchantApplePassImages");
     expect(worker).toContain('"logo@2x.png"');
     expect(worker).toContain('"logo@3x.png"');
+    expect(worker).toContain('"thumbnail.png"');
+    expect(worker).toContain('"thumbnail@3x.png"');
+    expect(worker).toContain("defaultGoogleProgramLogo()");
     expect(previews).toContain("merchantBrandLogoDataUri");
     expect(previews).toContain('data-issuer-brand="${issuerBrand}"');
     expect(publicEnrollment).toContain("brandLogoDataUri");

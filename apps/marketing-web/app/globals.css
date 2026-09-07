@@ -12,6 +12,19 @@ body {
   background: var(--waflo-cloud);
 }
 
+html[lang="kmr-Arab-IQ"] > body,
+html[lang="ckb-Arab-IQ"] > body,
+html[lang="kmr-Arab-IQ"] > body [dir="rtl"],
+html[lang="ckb-Arab-IQ"] > body [dir="rtl"] {
+  /* The brand token applies an Arabic face to every RTL root. Kurdish has a
+     different approved face, so this must win that shared token at the
+     Kurdish root rather than relying on source-order inheritance. */
+  font-family:
+    var(--font-sirwan), "Sirwan", var(--font-cairo), "Cairo", system-ui, sans-serif !important;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
+}
+
 .marketing-shell {
   overflow: clip;
 }
@@ -639,8 +652,6 @@ body {
   cursor: pointer;
   transition:
     border-color var(--waflo-motion-quick) var(--waflo-ease),
-    color var(--waflo-motion-quick) var(--waflo-ease),
-    background-color var(--waflo-motion-quick) var(--waflo-ease),
     transform var(--waflo-motion-quick) var(--waflo-ease);
 }
 .marketing-cadence-selector label:hover {
@@ -1029,7 +1040,7 @@ body {
  * Marketing landing v2 — wallet-first product story
  * ----------------------------------------------------------------------- */
 
-body[data-interface-typography="cairo"] {
+body[data-interface-locale="ar"] {
   font-family: var(--waflo-font-arabic);
 }
 
@@ -1038,7 +1049,7 @@ body[data-interface-typography="cairo"] .wf-language-menu * {
   letter-spacing: normal;
 }
 
-[dir="rtl"] :where(.landing-shell, .wf-language-menu) {
+html[lang="ar"] :where(.landing-shell, .wf-language-menu) {
   font-family: var(--waflo-font-arabic);
   font-kerning: normal;
   font-variant-ligatures: common-ligatures contextual;
@@ -3262,7 +3273,8 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
   --marketing-cadence-badge-foreground: var(--waflo-ink);
   --marketing-cadence-badge-background: var(--waflo-coral);
 
-  background: var(--waflo-ink);
+  color: var(--marketing-cadence-foreground) !important;
+  background: var(--waflo-ink) !important;
   box-shadow: none;
 }
 

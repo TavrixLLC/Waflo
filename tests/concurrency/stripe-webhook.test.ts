@@ -843,7 +843,7 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
     ).rejects.toMatchObject({ code: "STRIPE_PRICE_UNKNOWN" });
   });
 
-  it("rejects a Stripe downgrade while the organization exceeds the target limits", async () => {
+  it("reconciles a historic Stripe downgrade while preserving over-limit resources", async () => {
     await prisma.client.location.createMany({
       data: [
         { organizationId: organizationAId, name: "Over limit 1", timezone: "UTC" },
@@ -896,18 +896,10 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
     ]);
     const b = billingWithCatalog(environment, audit, tenant, notifications);
     b.subscriptionProvider = makeMockProvider(subs);
-    await expect(b.processWebhook(signed.payload, signed.signature, request)).rejects.toMatchObject(
-      {
-        code: "PLAN_DOWNGRADE_BLOCKED_FROM_PROVIDER",
-        details: {
-          requestedPlan: "starter",
-          violations: expect.arrayContaining([
-            expect.objectContaining({ code: "LOCATIONS" }),
-            expect.objectContaining({ code: "ACTIVE_PROGRAMS" }),
-          ]),
-        },
-      },
-    );
+    await expect(b.processWebhook(signed.payload, signed.signature, request)).resolves.toEqual({
+      received: true,
+      duplicate: false,
+    });
     expect(
       await prisma.client.location.count({
         where: { organizationId: organizationAId, status: "ACTIVE" },
@@ -917,11 +909,16 @@ describe.sequential("Stripe webhook claim, lease, and validation", () => {
       where: { id: organizationAId },
       select: { selectedPlan: true },
     });
-    expect(organization.selectedPlan).toBe("GROWTH");
+    expect(organization.selectedPlan).toBe("STARTER");
     expect(
-      await prisma.client.auditLog.findFirst({
+      await prisma.client.auditLog.findFirstOrThrow({
         where: { action: "stripe.subscription_applied", targetId: subId },
       }),
-    ).toBeNull();
+    ).toMatchObject({
+      metadata: expect.objectContaining({
+        overLimit: true,
+        overLimitPolicy: "preserve_resources_and_block_new_capacity",
+      }),
+    });
   });
 });

@@ -1021,6 +1021,38 @@ describe.sequential("Waflo W1 service and database integration", () => {
     });
   });
 
+  it("reports the trial end and first paid amount instead of Stripe's zero-invoice start", async () => {
+    const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: organizationAId },
+      data: { subscriptionStatus: "TRIALING", trialEnd },
+    });
+    await prisma.client.subscription.create({
+      data: {
+        organizationId: organizationAId,
+        stripeSubscriptionId: `sub_trial_charge_${runId}`,
+        stripePriceId: "price_integration_starter_monthly",
+        planCode: "STARTER",
+        cadence: "MONTHLY",
+        status: "TRIALING",
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: trialEnd,
+        pricingMarketCode: "GLOBAL",
+        pricingCurrency: "USD",
+        pricingAmountMinor: 2900n,
+      },
+    });
+
+    const state = await billing.get(ownerId, organizationAId);
+
+    expect(state.authoritativeState).toMatchObject({
+      nextExpectedAmount: 2900,
+      currency: "USD",
+    });
+    expect(state.authoritativeState.nextExpectedChargeDate?.getTime()).toBe(trialEnd.getTime());
+    expect(state.authoritativeState.renewalDate?.getTime()).toBe(trialEnd.getTime());
+  });
+
   it("returns the authoritative saved Stripe card instead of a stale blank state", async () => {
     const previous = {
       STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,

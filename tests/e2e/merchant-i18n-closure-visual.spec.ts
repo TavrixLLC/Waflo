@@ -47,7 +47,7 @@ async function assertKurdishStudioSurface(page: Page, surface: ".builder-shell" 
     const style = getComputedStyle(element);
     return { fontFamily: style.fontFamily, letterSpacing: style.letterSpacing };
   });
-  expect(typography.fontFamily.toLowerCase()).toContain("noto sans arabic");
+  expect(typography.fontFamily.toLowerCase()).toContain("sirwan");
   expect(typography.letterSpacing).toBe("normal");
 }
 
@@ -112,7 +112,7 @@ async function assertKurdishGlobalSurface(page: Page, selector: string): Promise
     };
   });
   expect(direction).toBe("rtl");
-  expect(fontFamily.toLowerCase()).toContain("noto sans arabic");
+  expect(fontFamily.toLowerCase()).toContain("sirwan");
   expect(letterSpacing).toBe("normal");
 }
 

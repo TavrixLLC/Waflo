@@ -34,12 +34,19 @@ describe("onboarding trial review layout", () => {
   });
 
   it("uses logical, responsive layout and bidi isolation for review values", () => {
+    const promise = styles.slice(
+      styles.indexOf(".onboarding-trial-review__promise {"),
+      styles.indexOf(".onboarding-trial-review__promise strong"),
+    );
+
     expect(onboarding).toContain(
       '<bdi dir="auto">{dateLabel(preview.expectedTrialStart, locale)}</bdi>',
     );
     expect(onboarding).toContain('<bdi dir="ltr">');
     expect(styles).toContain(".onboarding-trial-review__summary");
     expect(styles).toContain("padding: clamp(1.25rem, 3vw, 2rem);");
+    expect(promise).toContain("border-block-end: 1px solid var(--waflo-border);");
+    expect(promise).not.toContain("border-block: 1px solid var(--waflo-border);");
     expect(styles).toContain(".onboarding-trial-review__actions");
     expect(styles).toContain("@media (max-width: 43.75rem)");
     expect(styles).toContain(".onboarding-trial-review__actions .wf-button {\n    flex: 1 1 0;");

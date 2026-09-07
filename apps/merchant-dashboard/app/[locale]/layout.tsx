@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cairo, Manrope, Noto_Sans_Arabic } from "next/font/google";
+import localFont from "next/font/local";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { interfaceLocaleFor } from "@waflo/i18n";
@@ -10,6 +11,11 @@ const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", di
 const notoSansArabic = Noto_Sans_Arabic({
   subsets: ["arabic"],
   variable: "--font-noto-sans-arabic",
+  display: "swap",
+});
+const sirwan = localFont({
+  src: "../../../../packages/brand/assets/fonts/Sirwan.ttf",
+  variable: "--font-sirwan",
   display: "swap",
 });
 
@@ -50,9 +56,10 @@ export default async function LocaleLayout({
   const { locale } = await params;
   const definition = interfaceLocaleFor(locale);
   if (!definition) notFound();
-  const fontVariables = `${manrope.variable} ${cairo.variable}${
-    locale.startsWith("ku-") ? ` ${notoSansArabic.variable}` : ""
-  }`;
+  // A merchant can preview Arabic-script card locales while their Dashboard
+  // interface remains English. Keep the approved font variable available to
+  // the browser-safe Wallet render plan without changing interface typography.
+  const fontVariables = `${manrope.variable} ${cairo.variable} ${notoSansArabic.variable} ${sirwan.variable}`;
   return (
     <html
       lang={definition.htmlLang}

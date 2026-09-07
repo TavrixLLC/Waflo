@@ -308,6 +308,14 @@ export class BillingService {
         "An active Stripe subscription is required to preview this change.",
         HttpStatus.CONFLICT,
       );
+    // Usage can make a lower plan impossible even though the current Stripe
+    // subscription is otherwise healthy. Reject that request before asking
+    // Stripe to price it so an invalid downgrade never reaches the provider.
+    await this.assertSubscriptionChangeAllowed(
+      organizationId,
+      dbToPlan(local.planCode),
+      targetPlan,
+    );
     if (
       !local.pricingVersionId ||
       !local.pricingMarketCode ||
@@ -542,6 +550,25 @@ export class BillingService {
             "The subscription changed after this preview.",
             HttpStatus.CONFLICT,
           );
+        // A preview is short lived, but usage may still have changed since it
+        // was created. Recheck under the same subscription lock before the
+        // provider mutation so a newly over-limit organization stays on its
+        // current usable plan.
+        if (planRank[dbToPlan(preview.targetPlan)] < planRank[dbToPlan(local.planCode)]) {
+          const violations = await this.downgradeViolations(
+            transaction,
+            organizationId,
+            dbToPlan(preview.targetPlan),
+          );
+          if (violations.length) {
+            throw new AppError(
+              "PLAN_DOWNGRADE_BLOCKED",
+              "Reduce usage before switching to this plan.",
+              HttpStatus.CONFLICT,
+              { requestedPlan: dbToPlan(preview.targetPlan), violations },
+            );
+          }
+        }
         const targetVersion = await transaction.pricingVersion.findUnique({
           where: { id: preview.targetPricingVersionId },
           include: { market: true },
@@ -666,6 +693,65 @@ export class BillingService {
             );
         }
         const confirmedAt = new Date();
+        const confirmedItem = confirmedProvider.items.data[0];
+        if (!confirmedItem) {
+          throw new AppError(
+            "SUBSCRIPTION_CHANGE_PROVIDER_STATE_AMBIGUOUS",
+            "Stripe did not return the expected subscription state.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const confirmedStatus = billingStatusFromStripe(confirmedProvider.status);
+        const currentPeriodStart = confirmedItem.current_period_start
+          ? new Date(confirmedItem.current_period_start * 1000)
+          : null;
+        const currentPeriodEnd = confirmedItem.current_period_end
+          ? new Date(confirmedItem.current_period_end * 1000)
+          : null;
+        // Stripe has now accepted the exact immutable pricing version in the
+        // preview. Persist that fact in the same durable operation rather than
+        // waiting for a later webhook to make the dashboard reflect it.
+        await transaction.subscription.update({
+          where: { id: local.id },
+          data: {
+            stripePriceId: preview.targetStripePriceId,
+            pricingVersionId: preview.targetPricingVersionId,
+            pricingMarketCode: authoritativeTarget.marketCode,
+            pricingCurrency: preview.targetCurrency,
+            pricingAmountMinor: preview.targetAmountMinor,
+            planCode: preview.targetPlan,
+            cadence: preview.targetCadence,
+            status: statusToDb(confirmedStatus),
+            currentPeriodStart,
+            currentPeriodEnd,
+            cancelAtPeriodEnd: confirmedProvider.cancel_at_period_end,
+            canceledAt: confirmedProvider.canceled_at
+              ? new Date(confirmedProvider.canceled_at * 1000)
+              : null,
+            lastProviderSyncAt: confirmedAt,
+            reconciliationLeaseOwner: null,
+            reconciliationLeaseExpiresAt: null,
+            reconciliationFailureCode: null,
+          },
+        });
+        await transaction.organizationBillingProfile.update({
+          where: { organizationId },
+          data: {
+            selectedPlan: preview.targetPlan,
+            selectedCadence: preview.targetCadence,
+            subscriptionStatus: statusToDb(confirmedStatus),
+            trialStart: confirmedProvider.trial_start
+              ? new Date(confirmedProvider.trial_start * 1000)
+              : null,
+            trialEnd: confirmedProvider.trial_end
+              ? new Date(confirmedProvider.trial_end * 1000)
+              : null,
+          },
+        });
+        await transaction.organization.update({
+          where: { id: organizationId },
+          data: { selectedPlan: preview.targetPlan },
+        });
         const confirmed = await transaction.billingSubscriptionChangePreview.update({
           where: { id: preview.id },
           data: { status: "CONFIRMED", confirmedAt },
@@ -758,6 +844,28 @@ export class BillingService {
       orderBy: { createdAt: "desc" },
       select: { status: true, stripeSessionId: true },
     });
+    // Stripe's trial invoice preview starts its current $0 period at the
+    // subscription creation time. That timestamp is not an upcoming charge.
+    // While a trial is active, the persisted trial end and immutable
+    // subscription price are the canonical first paid charge.
+    const activeTrialEnd =
+      organization.billingProfile?.subscriptionStatus === "TRIALING" &&
+      organization.billingProfile.trialEnd !== null &&
+      organization.billingProfile.trialEnd > new Date()
+        ? organization.billingProfile.trialEnd
+        : null;
+    const trialAmount =
+      currentSubscription?.pricingAmountMinor !== null &&
+      currentSubscription?.pricingAmountMinor !== undefined &&
+      currentSubscription.pricingAmountMinor <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(currentSubscription.pricingAmountMinor)
+        : null;
+    const nextExpectedChargeDate =
+      activeTrialEnd ?? upcomingCharge?.date ?? currentSubscription?.currentPeriodEnd ?? null;
+    const nextExpectedAmount = activeTrialEnd ? trialAmount : (upcomingCharge?.amount ?? null);
+    const nextExpectedCurrency = activeTrialEnd
+      ? (currentSubscription?.pricingCurrency ?? latestInvoice?.currency ?? null)
+      : (upcomingCharge?.currency ?? latestInvoice?.currency ?? null);
     return {
       selectedPlan: organization.selectedPlan,
       canManageBilling: membership.role === "OWNER",
@@ -816,11 +924,10 @@ export class BillingService {
         subscriptionStatus: organization.billingProfile?.subscriptionStatus ?? "PENDING_ACTIVATION",
         trialStart: organization.billingProfile?.trialStart ?? null,
         trialEnd: organization.billingProfile?.trialEnd ?? null,
-        renewalDate: currentSubscription?.currentPeriodEnd ?? null,
-        nextExpectedChargeDate:
-          upcomingCharge?.date ?? currentSubscription?.currentPeriodEnd ?? null,
-        nextExpectedAmount: upcomingCharge?.amount ?? null,
-        currency: upcomingCharge?.currency ?? latestInvoice?.currency ?? null,
+        renewalDate: activeTrialEnd ?? currentSubscription?.currentPeriodEnd ?? null,
+        nextExpectedChargeDate,
+        nextExpectedAmount,
+        currency: nextExpectedCurrency,
         latestPaymentStatus: latestInvoice?.status ?? null,
         outstandingInvoice,
         gracePeriodEnd:
@@ -3489,18 +3596,11 @@ export class BillingService {
     });
     const previousPlan = organization.selectedPlan;
     const previousStatus = profile.subscriptionStatus;
-    const previousPlanCode = dbToPlan(previousPlan);
-    if (planRank[plan] < planRank[previousPlanCode]) {
-      const violations = await this.downgradeViolations(transaction, profile.organizationId, plan);
-      if (violations.length) {
-        throw new AppError(
-          "PLAN_DOWNGRADE_BLOCKED_FROM_PROVIDER",
-          "Stripe requested a lower plan before the organization met its limits.",
-          HttpStatus.CONFLICT,
-          { requestedPlan: plan, violations },
-        );
-      }
-    }
+    // A direct Waflo downgrade is prevented before the Stripe mutation. If an
+    // older release nevertheless left Stripe on a lower plan, reconciliation
+    // must reflect the provider truth so Billing remains usable. Existing
+    // resources are preserved and the normal entitlement checks block new
+    // capacity until the merchant reduces usage.
 
     await transaction.subscription.upsert({
       where: { stripeSubscriptionId: subscriptionId },

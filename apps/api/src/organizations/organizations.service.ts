@@ -226,7 +226,21 @@ export class OrganizationsService {
     },
     request: WafloRequest,
   ) {
-    await this.tenant.requireMembership(userId, organizationId, "organization.manage");
+    const brandingOnly =
+      input.brandLogoAssetId !== undefined &&
+      input.name === undefined &&
+      input.businessCategory === undefined &&
+      input.defaultLocale === undefined &&
+      input.timezone === undefined;
+    if (brandingOnly) {
+      await this.tenant.requireOnboardingBrandingMembership(
+        userId,
+        organizationId,
+        "organization.manage",
+      );
+    } else {
+      await this.tenant.requireMembership(userId, organizationId, "organization.manage");
+    }
     const organization = await this.prisma.client.$transaction(
       async (transaction: Prisma.TransactionClient) => {
         if (input.brandLogoAssetId) {

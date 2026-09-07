@@ -29,6 +29,43 @@ type CropDrag = {
   crop: CropState;
 };
 
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function squareCropForZoom(
+  current: CropState,
+  nextZoom: number,
+  naturalSize: { width: number; height: number },
+): CropState {
+  const zoom = clamp(nextZoom, 1, 4);
+  if (!naturalSize.width || !naturalSize.height) {
+    const width = 1 / zoom;
+    const height = 1 / zoom;
+    const focalX = current.x + current.width / 2;
+    const focalY = current.y + current.height / 2;
+    return {
+      x: clamp(focalX - width / 2, 0, 1 - width),
+      y: clamp(focalY - height / 2, 0, 1 - height),
+      width,
+      height,
+      zoom,
+    };
+  }
+  const side = Math.min(naturalSize.width, naturalSize.height) / zoom;
+  const width = side / naturalSize.width;
+  const height = side / naturalSize.height;
+  const focalX = (current.x + current.width / 2) * naturalSize.width;
+  const focalY = (current.y + current.height / 2) * naturalSize.height;
+  return {
+    x: clamp((focalX - side / 2) / naturalSize.width, 0, 1 - width),
+    y: clamp((focalY - side / 2) / naturalSize.height, 0, 1 - height),
+    width,
+    height,
+    zoom,
+  };
+}
+
 function defaultCropForCategory(category: AssetCategory): CropState {
   // A merchant logo is a reusable source asset. Do not silently remove its
   // edges before the merchant has chosen to crop it. Other artwork retains its
@@ -97,6 +134,7 @@ export function ProgramAssetPicker({
 }) {
   const copy =
     localeRegistry[interfaceLocale ?? (ar ? "ar" : "en")].messages.merchant.assetUploader;
+  const cropDescription = category === "LOGO" ? copy.squareCropHelp : copy.cropHelp;
   const fileInput = useRef<HTMLInputElement>(null);
   const cropWorkspace = useRef<HTMLDivElement>(null);
   const dragOrigin = useRef<CropDrag | null>(null);
@@ -116,11 +154,8 @@ export function ProgramAssetPicker({
   );
   const selectedAsset = choices.find((asset) => asset.id === selectedId);
 
-  function clamp(value: number, minimum: number, maximum: number): number {
-    return Math.min(maximum, Math.max(minimum, value));
-  }
-
   function cropForZoom(current: CropState, nextZoom: number): CropState {
+    if (category === "LOGO") return squareCropForZoom(current, nextZoom, naturalSize);
     const zoom = clamp(nextZoom, 1, 4);
     const width = 1 / zoom;
     const height = 1 / zoom;
@@ -176,6 +211,22 @@ export function ProgramAssetPicker({
     const deltaX = (event.clientX - origin.pointerX) / bounds.width;
     const deltaY = (event.clientY - origin.pointerY) / bounds.height;
     if (origin.mode === "RESIZE") {
+      if (category === "LOGO" && naturalSize.width && naturalSize.height) {
+        const delta = Math.max(deltaX * naturalSize.width, deltaY * naturalSize.height);
+        const minimum = Math.min(naturalSize.width, naturalSize.height) / 4;
+        const maximum = Math.min(
+          naturalSize.width * (1 - origin.crop.x),
+          naturalSize.height * (1 - origin.crop.y),
+        );
+        const side = clamp(origin.crop.width * naturalSize.width + delta, minimum, maximum);
+        setCrop({
+          ...origin.crop,
+          width: side / naturalSize.width,
+          height: side / naturalSize.height,
+          zoom: Math.min(naturalSize.width, naturalSize.height) / side,
+        });
+        return;
+      }
       const delta = Math.max(deltaX, deltaY);
       const maximum = Math.min(1 - origin.crop.x, 1 - origin.crop.y);
       const width = clamp(origin.crop.width + delta, 0.25, maximum);
@@ -251,6 +302,7 @@ export function ProgramAssetPicker({
       return;
     }
     setCrop(defaultCropForCategory(category));
+    setNaturalSize({ width: 0, height: 0 });
     setFile(selected);
   }
 
@@ -263,6 +315,16 @@ export function ProgramAssetPicker({
     setPreviewUrl(next);
     return () => URL.revokeObjectURL(next);
   }, [file]);
+
+  useEffect(() => {
+    if (category !== "LOGO" || !file || !naturalSize.width || !naturalSize.height) {
+      return;
+    }
+    const renderedWidth = naturalSize.width * crop.width;
+    const renderedHeight = naturalSize.height * crop.height;
+    if (Math.abs(renderedWidth - renderedHeight) <= 1) return;
+    setCrop(squareCropForZoom(crop, crop.zoom, naturalSize));
+  }, [category, crop, file, naturalSize]);
 
   async function upload() {
     if (!file) return;
@@ -411,7 +473,7 @@ export function ProgramAssetPicker({
         open={Boolean(file)}
         title={copy.cropSafely}
         className="studio-crop-dialog"
-        description={copy.cropHelp}
+        description={cropDescription}
         onClose={() => setFile(null)}
       >
         {previewUrl ? (
@@ -541,8 +603,18 @@ export function ProgramAssetPicker({
                 </div>
               </FormField>
               <div className="studio-crop-control-row">
-                <p>{copy.cropHelp}</p>
-                <Button type="button" variant="ghost" onClick={() => setCrop(fullImageCrop)}>
+                <p>{cropDescription}</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() =>
+                    setCrop(
+                      category === "LOGO"
+                        ? squareCropForZoom(fullImageCrop, 1, naturalSize)
+                        : fullImageCrop,
+                    )
+                  }
+                >
                   {copy.resetCrop}
                 </Button>
               </div>

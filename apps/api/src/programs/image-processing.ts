@@ -66,6 +66,7 @@ export async function processMerchantImage(
   bytes: Buffer,
   declaredMimeType: SupportedImageMime,
   crop: ImageCrop,
+  options: { requireSquareCrop?: boolean } = {},
 ): Promise<ProcessedMerchantImage> {
   if (!bytes.length) throw new Error("The uploaded image is empty.");
   if (crop.x + crop.width > 1.000001 || crop.y + crop.height > 1.000001) {
@@ -113,6 +114,9 @@ export async function processMerchantImage(
     1,
     Math.min(normalized.height - top, Math.round(crop.height * normalized.height)),
   );
+  if (options.requireSquareCrop && Math.abs(width - height) > 1) {
+    throw new Error("Wallet logo crops must be square.");
+  }
   const cropped = await encodeSafe(
     sharp(normalized.bytes, decoderOptions).extract({ left, top, width, height }),
     hadAlpha,

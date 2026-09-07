@@ -155,6 +155,14 @@ export class ExternalAuthController {
     return this.externalAuth.identities(user.id);
   }
 
+  @Get("reauthentication")
+  reauthenticationStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentSession() sessionId: string,
+  ) {
+    return this.externalAuth.reauthenticationStatus(user.id, sessionId);
+  }
+
   @Delete(":provider")
   unlink(
     @Param("provider") providerValue: string,

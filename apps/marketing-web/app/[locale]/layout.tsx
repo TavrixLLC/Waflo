@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cairo, Manrope } from "next/font/google";
+import localFont from "next/font/local";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -14,6 +15,11 @@ import "../globals.css";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
 const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", display: "swap" });
+const sirwan = localFont({
+  src: "../../../../packages/brand/assets/fonts/Sirwan.ttf",
+  variable: "--font-sirwan",
+  display: "swap",
+});
 
 export async function generateMetadata({
   params,
@@ -55,7 +61,7 @@ export default async function LocaleLayout({
   return (
     <html lang={definition.htmlLang} dir={directionForInterface(locale)}>
       <body
-        className={`${manrope.variable} ${cairo.variable}`}
+        className={`${manrope.variable} ${cairo.variable} ${sirwan.variable}`}
         data-interface-locale={locale}
         data-interface-typography={definition.typography}
       >

@@ -52,6 +52,7 @@ const GOOGLE_CANONICAL_ISSUER = "https://accounts.google.com";
 const APPLE_ISSUER = APPLE_IDENTITY_ISSUER;
 const GOOGLE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
 const APPLE_JWKS = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"));
+const RECENT_EXTERNAL_AUTHENTICATION_MS = 5 * 60 * 1000;
 
 function providerCode(provider: PublicProvider): ExternalIdentityProvider {
   return provider === "google" ? "GOOGLE" : "APPLE";
@@ -83,6 +84,34 @@ export class ExternalAuthService {
       googleSignInAvailable: this.providerStatus("google") === "AVAILABLE",
       appleSignInAvailable: false,
     };
+  }
+
+  /** The UI reads the same short-lived session proof used by sensitive actions. */
+  async reauthenticationStatus(userId: string, sessionId: string) {
+    const user = await this.prisma.client.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+    if (user.passwordHash) return { status: "PASSWORD_REQUIRED" as const, expiresAt: null };
+
+    const session = await this.prisma.client.session.findFirst({
+      where: {
+        id: sessionId,
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+        createdAt: { gt: new Date(Date.now() - RECENT_EXTERNAL_AUTHENTICATION_MS) },
+      },
+      select: { createdAt: true },
+    });
+    return session
+      ? {
+          status: "VERIFIED" as const,
+          expiresAt: new Date(
+            session.createdAt.getTime() + RECENT_EXTERNAL_AUTHENTICATION_MS,
+          ).toISOString(),
+        }
+      : { status: "REQUIRED" as const, expiresAt: null };
   }
 
   providerStatus(provider: PublicProvider): CapabilityStatus {

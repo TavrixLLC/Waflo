@@ -16,6 +16,7 @@ import {
   countryOptions,
   type Locale,
   type PlanCode,
+  type ProgramTemplateCategory,
   timeZoneOptions,
 } from "@waflo/contracts";
 import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
@@ -55,7 +56,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
 import { beginGoogleReauthentication } from "../lib/oauth-reauthentication";
@@ -111,6 +112,23 @@ interface OrganizationView {
   locations?: { name: string }[];
   _count: { locations: number; members: number };
 }
+
+interface ReauthenticationStatus {
+  status: "VERIFIED" | "REQUIRED" | "PASSWORD_REQUIRED";
+  expiresAt: string | null;
+}
+
+const businessActivityOptions: readonly {
+  value: ProgramTemplateCategory;
+  en: string;
+  ar: string;
+}[] = [
+  { value: "food-and-beverage", en: "Food & beverage", ar: "الأطعمة والمشروبات" },
+  { value: "automotive", en: "Automotive", ar: "السيارات" },
+  { value: "beauty-and-wellness", en: "Beauty & wellness", ar: "الجمال والعافية" },
+  { value: "services-and-retail", en: "Services & retail", ar: "الخدمات والتجزئة" },
+  { value: "general", en: "General", ar: "عام" },
+];
 
 export function OverviewScreen({
   interfaceLocale,
@@ -1471,6 +1489,10 @@ export function BillingScreen({
   const [identitySaving, setIdentitySaving] = useState(false);
   const [refundInvoiceId, setRefundInvoiceId] = useState<string | null>(null);
   const [refundSaving, setRefundSaving] = useState(false);
+  const billingLoadInFlight = useRef<Promise<void> | null>(null);
+  const catalogSelectionInFlight = useRef(false);
+  const subscriptionPreviewInFlight = useRef(false);
+  const subscriptionConfirmationInFlight = useRef(false);
   const selectedRefundInvoice = data?.invoices.find((invoice) => invoice.id === refundInvoiceId);
   const paymentStripe = useMemo(
     () => (paymentSetup ? loadStripe(paymentSetup.publishableKey) : null),
@@ -1520,6 +1542,21 @@ export function BillingScreen({
     },
     [ar],
   );
+  const billingError = useCallback(
+    (caught: unknown, fallback: string) => {
+      if (caught instanceof ApiClientError && caught.code === "RATE_LIMITED") {
+        return caught.retryAfterSeconds
+          ? ar
+            ? `تم إبطاء الطلبات. حاول مجدداً بعد ${caught.retryAfterSeconds} ثوانٍ.`
+            : `Requests are temporarily limited. Try again in ${caught.retryAfterSeconds} seconds.`
+          : ar
+            ? "تم إبطاء الطلبات مؤقتاً. انتظر قليلاً ثم حاول مجدداً."
+            : "Requests are temporarily limited. Wait a moment and try again.";
+      }
+      return message(caught, fallback);
+    },
+    [ar],
+  );
   const formatBillingStatus = useCallback(
     (status: string) => {
       const normalized = status.toLocaleUpperCase("en-US");
@@ -1553,26 +1590,34 @@ export function BillingScreen({
     },
     [ar],
   );
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await apiFetch<BillingView>(
-        `/v1/organizations/${membership.organization.id}/billing`,
-      );
-      setData(result);
-      setCadence(result.selectedCadence);
-      setError("");
-    } catch (caught) {
-      const fallback = ar ? "تعذر تحميل الفوترة." : "Unable to load billing.";
-      setError(
-        caught instanceof ApiClientError && caught.code === "INTERNAL_ERROR"
-          ? fallback
-          : message(caught, fallback),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [membership.organization.id, ar]);
+  const load = useCallback((): Promise<void> => {
+    if (billingLoadInFlight.current) return billingLoadInFlight.current;
+    const request = (async () => {
+      setLoading(true);
+      try {
+        const result = await apiFetch<BillingView>(
+          `/v1/organizations/${membership.organization.id}/billing`,
+        );
+        setData(result);
+        setCadence(result.selectedCadence);
+        setError("");
+      } catch (caught) {
+        const fallback = ar ? "تعذر تحميل الفوترة." : "Unable to load billing.";
+        setError(
+          caught instanceof ApiClientError && caught.code === "INTERNAL_ERROR"
+            ? fallback
+            : billingError(caught, fallback),
+        );
+      } finally {
+        setLoading(false);
+      }
+    })();
+    billingLoadInFlight.current = request;
+    void request.finally(() => {
+      if (billingLoadInFlight.current === request) billingLoadInFlight.current = null;
+    });
+    return request;
+  }, [membership.organization.id, ar, billingError]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -1592,13 +1637,29 @@ export function BillingScreen({
     plan: PlanCode,
     selectedCadence: BillingCadence = cadence,
   ): Promise<boolean> {
+    if (catalogSelectionInFlight.current) return false;
+    catalogSelectionInFlight.current = true;
     setSaving(plan);
     setError("");
     try {
-      await apiFetch(`/v1/organizations/${membership.organization.id}/billing/selected-plan`, {
+      const accepted = await apiFetch<{
+        selectedPlan: BillingView["selectedPlan"];
+        selectedCadence: "MONTHLY" | "QUARTERLY" | "YEARLY";
+      }>(`/v1/organizations/${membership.organization.id}/billing/selected-plan`, {
         method: "PATCH",
         body: JSON.stringify({ plan, cadence: selectedCadence }),
       });
+      const acceptedCadence = accepted.selectedCadence.toLocaleLowerCase("en-US") as BillingCadence;
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              selectedPlan: accepted.selectedPlan,
+              selectedCadence: acceptedCadence,
+            }
+          : current,
+      );
+      setCadence(acceptedCadence);
       await load();
       return true;
     } catch (caught) {
@@ -1615,15 +1676,17 @@ export function BillingScreen({
             : caught.message,
         );
       } else {
-        setError(message(caught, ar ? "تعذر تغيير الخطة." : "Unable to change plan."));
+        setError(billingError(caught, ar ? "تعذر تغيير الخطة." : "Unable to change plan."));
       }
       return false;
     } finally {
+      catalogSelectionInFlight.current = false;
       setSaving(null);
     }
   }
   async function chooseCadence(nextCadence: BillingCadence) {
     if (!data) return;
+    if (nextCadence === cadence) return;
     if (canPersistCatalogSelection(data.authoritativeState.subscriptionStatus)) {
       setCadence(nextCadence);
       const selected = await select(
@@ -1640,6 +1703,8 @@ export function BillingScreen({
   }
   async function previewSubscriptionChange(plan: PlanCode, selectedCadence = cadence) {
     if (!data?.canManageBilling || !["ACTIVE", "TRIALING"].includes(subscriptionStatus)) return;
+    if (subscriptionPreviewInFlight.current) return;
+    subscriptionPreviewInFlight.current = true;
     setSaving(plan);
     setError("");
     setNotice("");
@@ -1664,23 +1729,58 @@ export function BillingScreen({
             .join(" · ") || caught.message,
         );
       } else {
-        setError(message(caught, ar ? "تعذرت معاينة التغيير." : "Unable to preview the change."));
+        setError(
+          billingError(caught, ar ? "تعذرت معاينة التغيير." : "Unable to preview the change."),
+        );
       }
       setCadence(data.selectedCadence);
     } finally {
+      subscriptionPreviewInFlight.current = false;
       setSaving(null);
     }
   }
   async function confirmSubscriptionChange() {
     if (!subscriptionChange) return;
+    if (subscriptionConfirmationInFlight.current) return;
+    subscriptionConfirmationInFlight.current = true;
     setSubscriptionAction("change");
     setError("");
     try {
-      await subscriptionChangeConfirmationRequest(
+      const confirmed = await subscriptionChangeConfirmationRequest(
         apiFetch,
         membership.organization.id,
         subscriptionChange.previewId,
       );
+      const confirmedPlan = confirmed.change.toPlan.toLocaleUpperCase(
+        "en-US",
+      ) as BillingView["selectedPlan"];
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              selectedPlan: confirmedPlan,
+              selectedCadence: confirmed.change.toCadence,
+              profile: current.profile
+                ? {
+                    ...current.profile,
+                    subscriptionStatus:
+                      confirmed.providerState.subscriptionStatus.toLocaleUpperCase("en-US"),
+                  }
+                : current.profile,
+              subscriptions: current.subscriptions.map((subscription, index) =>
+                index === 0
+                  ? {
+                      ...subscription,
+                      planCode: confirmedPlan,
+                      cadence: confirmed.change.toCadence.toLocaleUpperCase("en-US"),
+                      status: confirmed.providerState.subscriptionStatus.toLocaleUpperCase("en-US"),
+                    }
+                  : subscription,
+              ),
+            }
+          : current,
+      );
+      setCadence(confirmed.change.toCadence);
       setSubscriptionChange(null);
       setNotice(ar ? "تم تحديث اشتراكك عبر Stripe." : "Your Stripe subscription was updated.");
       await load();
@@ -1688,7 +1788,7 @@ export function BillingScreen({
       const stalePreview =
         caught instanceof ApiClientError && subscriptionChangeErrorKind(caught.code) === "stale";
       setError(
-        message(
+        billingError(
           caught,
           stalePreview
             ? ar
@@ -1700,6 +1800,7 @@ export function BillingScreen({
         ),
       );
     } finally {
+      subscriptionConfirmationInFlight.current = false;
       setSubscriptionAction(null);
     }
   }
@@ -2176,6 +2277,7 @@ export function BillingScreen({
                       (term) => term.plan === plan && term.cadence === "monthly",
                     ) ?? null
                   }
+                  disabled={saving !== null || subscriptionAction === "change"}
                   {...(data.authoritativeState.subscriptionStatus === "PENDING_ACTIVATION"
                     ? { onSelect: (value: PlanCode) => void select(value) }
                     : data.canManageBilling && ["ACTIVE", "TRIALING"].includes(subscriptionStatus)
@@ -2821,6 +2923,7 @@ export function SettingsScreen({
   const ar = locale === "ar";
   const [organization, setOrganization] = useState<OrganizationView | null>(null);
   const [identitySettings, setIdentitySettings] = useState<ExternalIdentitySettings | null>(null);
+  const [reauthentication, setReauthentication] = useState<ReauthenticationStatus | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [logoSaving, setLogoSaving] = useState(false);
@@ -2836,12 +2939,14 @@ export function SettingsScreen({
   const publicMerchantUrl = organization ? merchantPublicUrl(organization.merchantSlug) : "";
   const load = useCallback(async () => {
     try {
-      const [organizationData, identityData] = await Promise.all([
+      const [organizationData, identityData, reauthenticationData] = await Promise.all([
         apiFetch<OrganizationView>(`/v1/organizations/${membership.organization.id}`),
         apiFetch<ExternalIdentitySettings>("/v1/auth/external/identities"),
+        apiFetch<ReauthenticationStatus>("/v1/auth/external/reauthentication"),
       ]);
       setOrganization(organizationData);
       setIdentitySettings(identityData);
+      setReauthentication(reauthenticationData);
     } catch (caught) {
       setError(message(caught, ar ? "تعذر تحميل الإعدادات." : "Unable to load settings."));
     }
@@ -2943,7 +3048,21 @@ export function SettingsScreen({
                 <TextInput name="name" defaultValue={organization.name} required />
               </FormField>
               <FormField label={ar ? "نوع النشاط" : "Business category"}>
-                <TextInput name="category" defaultValue={organization.businessCategory ?? ""} />
+                <Select name="category" defaultValue={organization.businessCategory ?? ""}>
+                  <option value="">{ar ? "اختر نوع النشاط" : "Select an activity type"}</option>
+                  {!businessActivityOptions.some(
+                    (option) => option.value === organization.businessCategory,
+                  ) && organization.businessCategory ? (
+                    <option value={organization.businessCategory}>
+                      {organization.businessCategory}
+                    </option>
+                  ) : null}
+                  {businessActivityOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {ar ? option.ar : option.en}
+                    </option>
+                  ))}
+                </Select>
               </FormField>
               <FormField label={ar ? "اللغة الافتراضية" : "Default language"}>
                 <Select
@@ -3014,6 +3133,16 @@ export function SettingsScreen({
                   ? "تحقق باستخدام Google قبل تغيير الرابط. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
                   : "Verify with Google before changing the URL. The previous URL stays reserved for 90 days."}
             </Alert>
+            {!identitySettings?.passwordEnabled && reauthentication?.status === "VERIFIED" ? (
+              <Alert
+                tone="success"
+                title={ar ? "تم التحقق باستخدام Google" : "Verified with Google"}
+              >
+                {ar
+                  ? "يمكنك تغيير رابط التاجر خلال خمس دقائق."
+                  : "You can change the merchant URL within the next five minutes."}
+              </Alert>
+            ) : null}
             <form className="dashboard-form" onSubmit={changeSlug}>
               <FormField label={ar ? "الرابط الجديد" : "New slug"} required>
                 <TextInput
@@ -3044,9 +3173,13 @@ export function SettingsScreen({
               ) : (
                 <div className="security-step-up-callout">
                   <p>
-                    {ar
-                      ? "بعد التحقق، عد إلى هنا وأرسل التغيير خلال خمس دقائق."
-                      : "After verification, return here and submit the change within five minutes."}
+                    {reauthentication?.status === "VERIFIED"
+                      ? ar
+                        ? "التحقق نشط. أرسل تغيير الرابط قبل انتهاء صلاحيته."
+                        : "Verification is active. Submit the URL change before it expires."
+                      : ar
+                        ? "بعد التحقق، عد إلى هنا وأرسل التغيير خلال خمس دقائق."
+                        : "After verification, return here and submit the change within five minutes."}
                   </p>
                   <Button
                     type="button"
@@ -3065,7 +3198,13 @@ export function SettingsScreen({
                       )
                     }
                   >
-                    {ar ? "التحقق باستخدام Google" : "Verify with Google"}
+                    {reauthentication?.status === "VERIFIED"
+                      ? ar
+                        ? "إعادة التحقق باستخدام Google"
+                        : "Verify again with Google"
+                      : ar
+                        ? "التحقق باستخدام Google"
+                        : "Verify with Google"}
                   </Button>
                 </div>
               )}

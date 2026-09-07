@@ -123,6 +123,33 @@ export class TenantService {
     return membership;
   }
 
+  /**
+   * Branding is part of the account-setup flow, not an operational program
+   * change. Keep this exception deliberately narrow: active authorized members
+   * may upload or select a logo while onboarding, fully active organizations
+   * retain the normal permission path, and billing-recovery organizations stay
+   * read-only.
+   */
+  async requireOnboardingBrandingMembership(
+    userId: string,
+    organizationId: string,
+    permission: Permission,
+  ) {
+    const membership = await this.requireOnboardingMembership(userId, organizationId, permission);
+    const account = await this.accountAccess.resolveOrganization(organizationId);
+    if (account?.access === "onboarding_only" || account?.access === "full") return membership;
+    throw new AppError(
+      "BILLING_ACTION_REQUIRED",
+      "Your subscription needs attention before you can make changes.",
+      HttpStatus.PAYMENT_REQUIRED,
+      {
+        accessState: account?.access ?? "read_only_billing_recovery",
+        billingState: account?.billing ?? "restricted",
+        billingUrl: "/dashboard/billing",
+      },
+    );
+  }
+
   async requireOwner(userId: string, organizationId: string) {
     const membership = await this.requireMembership(userId, organizationId, "organization.view");
     if (membership.role !== "OWNER") {

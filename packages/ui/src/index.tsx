@@ -1306,6 +1306,7 @@ export function PlanCard({
   monthlyPrice,
   showCatalogPrice = true,
   onSelect,
+  disabled = false,
 }: {
   plan: PlanCode;
   selected: boolean;
@@ -1318,6 +1319,7 @@ export function PlanCard({
   /** Existing subscriptions must show the provider preview instead of a catalog estimate. */
   showCatalogPrice?: boolean;
   onSelect?: (plan: PlanCode) => void;
+  disabled?: boolean;
 }) {
   const definition = planCatalog[plan];
   const cadenceDefinition = billingCadenceCatalog[cadence];
@@ -1423,7 +1425,7 @@ export function PlanCard({
         <Button
           variant={selected ? "secondary" : "primary"}
           onClick={() => onSelect(plan)}
-          disabled={selected}
+          disabled={selected || disabled}
         >
           {selected ? (copy ? "محددة" : "Selected") : copy ? "اختيار الخطة" : "Choose plan"}
         </Button>

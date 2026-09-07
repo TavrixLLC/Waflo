@@ -10,7 +10,10 @@ describe("secondary product corrections", () => {
     const programs = source("apps/merchant-dashboard/components/programs-screen.tsx");
     const preview = source("apps/merchant-dashboard/components/loyalty-card-real-preview.tsx");
     const brandMark = source("apps/merchant-dashboard/components/merchant-brand-mark.tsx");
-    expect(programs.match(/apiFetch<OrganizationPresentationView>/gu)).toHaveLength(1);
+    // Both program-list and Builder views render the organization mark. Each
+    // isolated load path must fetch the authoritative organization branding
+    // rather than letting one view silently fall back to stale local state.
+    expect(programs.match(/apiFetch<OrganizationPresentationView>/gu)).toHaveLength(2);
     expect(programs).toContain('brandLogoAsset: Pick<AssetItem, "contentUrl"> | null');
     expect(programs).toContain("const logoUrl = theme?.logoAssetId");
     expect(programs).toContain(": brandLogoUrl;");

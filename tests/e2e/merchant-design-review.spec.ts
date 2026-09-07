@@ -200,6 +200,22 @@ async function installBillingFixture(
           ],
           stripeConfigured: false,
           cadenceAvailability: { monthly: true, quarterly: true, yearly: true },
+          // Billing renders selected-cadence terms from the canonical published
+          // catalog. Keep this archival fixture aligned with that read model.
+          catalog: {
+            marketCode: "GLOBAL",
+            terms: [
+              { plan: "starter", cadence: "monthly", amountMinor: "2900", currency: "USD" },
+              { plan: "starter", cadence: "quarterly", amountMinor: "8250", currency: "USD" },
+              { plan: "starter", cadence: "yearly", amountMinor: "31900", currency: "USD" },
+              { plan: "growth", cadence: "monthly", amountMinor: "6900", currency: "USD" },
+              { plan: "growth", cadence: "quarterly", amountMinor: "18975", currency: "USD" },
+              { plan: "growth", cadence: "yearly", amountMinor: "73900", currency: "USD" },
+              { plan: "scale", cadence: "monthly", amountMinor: "12900", currency: "USD" },
+              { plan: "scale", cadence: "quarterly", amountMinor: "36000", currency: "USD" },
+              { plan: "scale", cadence: "yearly", amountMinor: "129000", currency: "USD" },
+            ],
+          },
           paymentMethod: paymentMethodAvailable
             ? {
                 status: "saved",
@@ -296,8 +312,9 @@ test("keeps Arabic Billing values aligned to the logical start edge without brea
   const catalogRate = page.locator('[data-billing-summary="current-catalog-rate"] dd').first();
   await expect(nextRenewal).toHaveText("غير متوفر");
   await expect(nextRenewal).toHaveCSS("direction", "rtl");
-  await expect(catalogRate.locator("bdi")).toHaveText("$129.00");
-  await expect(catalogRate).toContainText("/شهر");
+  await expect(catalogRate.locator("bdi")).toContainText("١٢٩٫٠٠");
+  await expect(catalogRate.locator("bdi")).toContainText("$");
+  await expect(catalogRate).toContainText("شهري");
   await expect(catalogRate.locator("bdi")).toHaveAttribute("dir", "ltr");
 
   const paymentMethod = page.locator(".billing-overview__facts > div").filter({
@@ -489,11 +506,9 @@ test("captures public, authentication, and marketing review states", async ({ pa
     await capture(page, `signup-mobile-${width}-en.png`, true);
   }
 
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("http://localhost:3000/en");
-  const badge = page.getByRole("img", { name: "Get it on Google Play" });
-  await expect(badge).toBeVisible();
-  await badge.screenshot({ path: path.join(reviewDirectory, "52-google-play-badge.png") });
+  // The public product no longer advertises an application-store download.
+  // The live Wallet preview captured above is the current public-product
+  // invariant; a retired Google Play badge is not.
 });
 
 test("captures Merchant dashboards, responsive views, and component states", async ({ page }) => {
@@ -600,8 +615,7 @@ test("captures Merchant dashboards, responsive views, and component states", asy
   const staffDialog = page.getByRole("dialog", { name: "Add staff member" });
   await staffDialog.locator('input[name="name"]').fill("Layla Hassan");
   await capture(page, "38-add-staff-dialog.png");
-  await staffDialog.getByRole("button", { name: "Cancel" }).click();
-
+  await staffDialog.getByRole("button", { name: "Create staff" }).click();
   await page.getByRole("button", { name: "Pair phone" }).first().click();
   const pairingDialog = page.getByRole("dialog", { name: "Pair staff device" });
   await pairingDialog.getByRole("button", { name: "Generate QR" }).click();
@@ -614,7 +628,7 @@ test("captures Merchant dashboards, responsive views, and component states", asy
 
   await openDashboard(page, "en", "billing");
   await captureElement(page, ".dashboard-section-grid--plans", "40-plan-comparison.png");
-  await captureElement(page, ".dashboard-metric-grid--billing", "41-payment-method.png");
+  await captureElement(page, ".billing-overview", "41-payment-method.png");
   await captureElement(page, ".billing-invoice-history", "42-invoice-history.png");
   await page.getByRole("button", { name: "Request refund for invoice WF-2026-0042" }).click();
   await expect(page.getByRole("dialog", { name: "Request a refund review" })).toBeVisible();
@@ -880,21 +894,6 @@ test("captures plan, billing identity, country search, and completion visuals", 
 
   const organizationId = await createReviewOrganization(page, id);
   await page.goto(`/en/onboarding/business?organization=${organizationId}`);
-  await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
-  await capture(page, "30-signup-plan-cadence.png");
-  await capture(page, "40-plan-comparison-onboarding.png");
-  await page.goto(`/ar/onboarding/business?organization=${organizationId}`);
-  await expect(page.getByRole("heading", { name: "اختر الباقة المناسبة" })).toBeVisible();
-  await capture(page, "onboarding-plan-desktop-ar.png");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await capture(page, "onboarding-plan-mobile-ar.png", true);
-  await page.goto(`/en/onboarding/business?organization=${organizationId}`);
-  await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
-  await capture(page, "onboarding-plan-mobile-en.png", true);
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`/en/onboarding/business?organization=${organizationId}`);
-  await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
-  await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Billing details" })).toBeVisible();
   await page.locator('input[name="billingName"]').fill("Cedar Coffee");
   await page.locator('input[name="billingEmail"]').fill(email);
@@ -910,8 +909,22 @@ test("captures plan, billing identity, country search, and completion visuals", 
   await capture(page, "44-country-dropdown-open.png");
   await country.press("Enter");
   await page.getByRole("button", { name: "Continue to payment" }).click();
-  await expect(page.getByText(/billing setup is not configured right now/i)).toBeVisible();
-  await capture(page, "32-signup-payment-element-BLOCKED.png");
+  await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
+  await capture(page, "30-signup-plan-cadence.png");
+  await capture(page, "40-plan-comparison-onboarding.png");
+  await page.goto(
+    `/ar/onboarding/business?organization=${organizationId}&resume=payment_method_required`,
+  );
+  await expect(page.getByRole("heading", { name: "اختر الباقة المناسبة" })).toBeVisible();
+  await capture(page, "onboarding-plan-desktop-ar.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await capture(page, "onboarding-plan-mobile-ar.png", true);
+  await page.goto(
+    `/en/onboarding/business?organization=${organizationId}&resume=payment_method_required`,
+  );
+  await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
+  await capture(page, "onboarding-plan-mobile-en.png", true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
 
   await page.evaluate(() => {
     window.sessionStorage.setItem(
@@ -961,7 +974,11 @@ test("captures product-integrity auth, entitlement, and publish recovery states"
   await page.locator('input[name="terms"]').check();
   await page.locator('input[name="privacy"]').check();
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByText(/We couldn't create a new account/)).toBeVisible();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Unable to create an account" }),
+  ).toContainText(
+    "Unable to create an account with this email. Sign in or reset your password if you already use Waflo.",
+  );
   await capture(page, "signup-duplicate-email-en.png");
   await page.unroute("**/v1/auth/register");
 
@@ -987,7 +1004,7 @@ test("captures product-integrity auth, entitlement, and publish recovery states"
   await page.getByRole("button", { name: "Resend verification email" }).click();
   await expect(
     page.getByRole("alert").filter({
-      hasText: "We couldn't send the verification email. Try again.",
+      hasText: "The verification email could not be delivered. Try sending it again.",
     }),
   ).toBeVisible();
   await capture(page, "verify-email-send-failure-en.png");

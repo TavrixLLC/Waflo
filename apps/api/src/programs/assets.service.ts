@@ -116,7 +116,15 @@ export class AssetsService {
     file: { filename: string; mimeType: string; bytes: Buffer },
     request: WafloRequest,
   ) {
-    await this.tenant.requireMembership(userId, organizationId, "programs.edit");
+    if (metadata.category === "LOGO") {
+      await this.tenant.requireOnboardingBrandingMembership(
+        userId,
+        organizationId,
+        "programs.edit",
+      );
+    } else {
+      await this.tenant.requireMembership(userId, organizationId, "programs.edit");
+    }
     if (
       !["image/png", "image/jpeg", "image/webp"].includes(file.mimeType) ||
       file.bytes.length === 0 ||
@@ -135,6 +143,7 @@ export class AssetsService {
         file.bytes,
         file.mimeType as SupportedImageMime,
         metadata.crop,
+        { requireSquareCrop: metadata.category === "LOGO" },
       );
     } catch (error) {
       throw new AppError(

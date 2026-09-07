@@ -2088,10 +2088,7 @@ export class WalletWorker {
       (await this.readBrandLogoBytes(programLogo)) ?? (await this.readBrandLogoBytes(brandLogo));
     const bytes = source
       ? await prepareGoogleWalletProgramLogo(source)
-      : await this.defaultGoogleProgramLogo(
-          binding.programVersion.visualTheme?.accentColor,
-          binding.programVersion.visualTheme?.backgroundColor,
-        );
+      : await this.defaultGoogleProgramLogo();
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
     const assetType = source
       ? `GOOGLE_MERCHANT_LOGO_${contentDigest.slice(0, 24)}`
@@ -2220,10 +2217,8 @@ export class WalletWorker {
     });
   }
 
-  private async defaultGoogleProgramLogo(accent?: string | null, background?: string | null) {
-    const color = accent ?? "#E4572E";
-    const foreground = background ?? "#F7F4EE";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="0 0 660 660"><rect width="660" height="660" rx="132" fill="${color}"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="${foreground}" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  private async defaultGoogleProgramLogo() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="0 0 660 660"><rect width="660" height="660" rx="132" fill="#E4572E"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   }
 
@@ -2251,8 +2246,30 @@ export class WalletWorker {
         })
         .png()
         .toBuffer();
-    const [logo, logo2x, logo3x] = await Promise.all([appleLogo(1), appleLogo(2), appleLogo(3)]);
-    return { "logo.png": logo, "logo@2x.png": logo2x, "logo@3x.png": logo3x };
+    const appleThumbnail = (scale: 1 | 2 | 3) =>
+      sharp(bytes)
+        .resize(90 * scale, 90 * scale, {
+          fit: "contain",
+          background: { r: 255, g: 255, b: 255, alpha: 0 },
+        })
+        .png()
+        .toBuffer();
+    const [logo, logo2x, logo3x, thumbnail, thumbnail2x, thumbnail3x] = await Promise.all([
+      appleLogo(1),
+      appleLogo(2),
+      appleLogo(3),
+      appleThumbnail(1),
+      appleThumbnail(2),
+      appleThumbnail(3),
+    ]);
+    return {
+      "logo.png": logo,
+      "logo@2x.png": logo2x,
+      "logo@3x.png": logo3x,
+      "thumbnail.png": thumbnail,
+      "thumbnail@2x.png": thumbnail2x,
+      "thumbnail@3x.png": thumbnail3x,
+    };
   }
 
   private async readBrandLogoBytes(

@@ -43,6 +43,7 @@ function harness(
     provider?: Stripe.Subscription;
     updateError?: Error;
     auditFailsOnce?: boolean;
+    activePrograms?: number;
   } = {},
 ) {
   const sourceProvider = stripeSubscription("price_growth", 6900);
@@ -83,7 +84,7 @@ function harness(
     ...options.preview,
   };
   let preview = { ...basePreview };
-  const local =
+  let local =
     options.local === null
       ? null
       : {
@@ -127,11 +128,26 @@ function harness(
       }),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    subscription: { findFirst: vi.fn(async () => local) },
+    subscription: {
+      findFirst: vi.fn(async () => local),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        local = local ? { ...local, ...data } : local;
+        return local;
+      }),
+    },
     pricingVersion: { findUnique: vi.fn(async () => target) },
     organizationBillingProfile: {
       findUniqueOrThrow: vi.fn(async () => ({ stripeCustomerId: "cus_org" })),
+      update: vi.fn(async () => undefined),
     },
+    organization: { update: vi.fn(async () => undefined) },
+    location: { count: vi.fn(async () => 0) },
+    organizationMember: { count: vi.fn(async () => 0) },
+    organizationInvitation: { count: vi.fn(async () => 0) },
+    loyaltyProgram: {
+      findMany: vi.fn(async () => Array.from({ length: options.activePrograms ?? 0 }, () => ({}))),
+    },
+    exportCommand: { count: vi.fn(async () => 0) },
     auditLog: {
       create: vi.fn(async () => {
         if (auditShouldFail) {
@@ -153,10 +169,12 @@ function harness(
         });
         await previous;
         const before = { ...preview };
+        const localBefore = local ? { ...local } : local;
         try {
           return await operation(client);
         } catch (error) {
           preview = before;
+          local = localBefore;
           throw error;
         } finally {
           release();
@@ -203,6 +221,7 @@ function harness(
     pricing,
     updateCalls,
     getPreview: () => preview,
+    getLocal: () => local,
     getProvider: () => providerState,
   };
 }
@@ -226,6 +245,21 @@ describe("subscription-change confirmation", () => {
       authoritative: { plan: "starter" },
     });
     expect((await confirm(h)).change.toPlan).toBe("starter");
+  });
+  it("rejects a downgrade whose usage changed after preview without mutating Stripe", async () => {
+    const h = harness({
+      preview: {
+        targetPlan: "STARTER",
+        targetPricingVersionId: "version-scale",
+        targetStripePriceId: "price_scale",
+      },
+      target: { planCode: "STARTER" },
+      authoritative: { plan: "starter" },
+      activePrograms: 2,
+    });
+    await expect(confirm(h)).rejects.toMatchObject({ code: "PLAN_DOWNGRADE_BLOCKED" });
+    expect(h.updateCalls).toHaveLength(0);
+    expect(h.getLocal()?.planCode).toBe("GROWTH");
   });
   it("confirms a cadence change", async () => {
     const h = harness({
@@ -259,6 +293,15 @@ describe("subscription-change confirmation", () => {
     const h = harness();
     await confirm(h);
     expect(h.getPreview().status).toBe("CONFIRMED");
+  });
+  it("persists provider-confirmed plan and cadence before webhook reconciliation", async () => {
+    const h = harness();
+    await confirm(h);
+    expect(h.getLocal()).toMatchObject({
+      planCode: "SCALE",
+      cadence: "MONTHLY",
+      stripePriceId: "price_scale",
+    });
   });
   it("persists confirmedAt", async () => {
     const h = harness();

@@ -24,6 +24,7 @@ export class ApiClientError extends Error {
     message: string,
     readonly details?: Record<string, unknown>,
     readonly requestId?: string,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ApiClientError";
@@ -85,11 +86,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const payload = (await response.json().catch(() => ({}))) as SuccessEnvelope<T> | ErrorEnvelope;
   if (!response.ok) {
     const error = "error" in payload ? payload.error : undefined;
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN;
     throw new ApiClientError(
       error?.code ?? "REQUEST_FAILED",
       error?.message ?? "The request could not be completed.",
       error?.details,
       error?.requestId,
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds : undefined,
     );
   }
   return (payload as SuccessEnvelope<T>).data;

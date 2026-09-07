@@ -459,6 +459,9 @@ describe.sequential("production external identity and lifecycle", () => {
     );
     expect(completed.session.sessionId).not.toBe(sourceSession.sessionId);
     expect(
+      await external.reauthenticationStatus(user.id, completed.session.sessionId),
+    ).toMatchObject({ status: "VERIFIED" });
+    expect(
       (await prisma.client.session.findUniqueOrThrow({ where: { id: sourceSession.sessionId } }))
         .revocationReason,
     ).toBe("external_identity_reauthentication");

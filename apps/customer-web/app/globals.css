@@ -25,11 +25,13 @@ body {
   font-family: var(--waflo-font-arabic);
 }
 
-:lang(ckb),
-:lang(kmr),
-:lang(ku) {
-  font-family:
-    var(--font-noto-sans-arabic), "Noto Sans Arabic", var(--font-cairo), system-ui, sans-serif;
+body [lang^="ckb"],
+body [lang^="kmr"],
+body [lang^="ku"] {
+  --waflo-font-arabic:
+    var(--font-sirwan), "Sirwan", var(--font-noto-sans-arabic), "Noto Sans Arabic",
+    var(--font-cairo), system-ui, sans-serif !important;
+  font-family: var(--waflo-font-arabic) !important;
 }
 
 :where(:lang(ar), :lang(ckb), :lang(kmr), :lang(ku)) {

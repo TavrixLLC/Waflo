@@ -38,9 +38,15 @@ describe("merchant logo upload regressions", () => {
   const app = source("apps/api/src/app.ts");
   const assets = source("apps/api/src/programs/assets.service.ts");
 
-  it("keeps a logo's full rectangular source by default and labels source dimensions", () => {
-    expect(uploader).toContain('category === "LOGO" ? { ...fullImageCrop }');
-    expect(uploader).toContain("defaultCropForCategory(category)");
+  it("keeps Wallet logo crop selection square in source pixels and labels source dimensions", () => {
+    expect(uploader).toContain(
+      'if (category === "LOGO") return squareCropForZoom(current, nextZoom, naturalSize);',
+    );
+    expect(uploader).toContain(
+      "const side = Math.min(naturalSize.width, naturalSize.height) / zoom;",
+    );
+    expect(uploader).toContain("width: side / naturalSize.width");
+    expect(uploader).toContain("height: side / naturalSize.height");
     expect(uploader).toContain("copy.sourceDimensions");
     expect(uploader).toContain("naturalSize.width * crop.width");
     expect(uploader).toContain("naturalSize.height * crop.height");
@@ -48,6 +54,21 @@ describe("merchant logo upload regressions", () => {
     expect(css).toContain(".studio-crop-dialog .wf-dialog__body");
     expect(css).toContain("overflow-x: clip");
     expect(css).not.toContain(".studio-crop-preview img {\n  object-fit: fill;");
+  });
+
+  it("permits only the onboarding branding upload and selection path before activation", () => {
+    const organizations = source("apps/api/src/organizations/organizations.service.ts");
+    const tenant = source("apps/api/src/tenancy/tenant.service.ts");
+
+    expect(assets).toContain('metadata.category === "LOGO"');
+    expect(assets).toContain("requireOnboardingBrandingMembership(");
+    expect(assets).toContain('"programs.edit"');
+    expect(organizations).toContain("const brandingOnly =");
+    expect(organizations).toContain(
+      'requireOnboardingBrandingMembership(\n        userId,\n        organizationId,\n        "organization.manage",',
+    );
+    expect(tenant).toContain('account?.access === "onboarding_only" || account?.access === "full"');
+    expect(tenant).toContain('"BILLING_ACTION_REQUIRED"');
   });
 
   it("aligns the transport limit with the advertised two MiB image maximum and maps storage failures", () => {

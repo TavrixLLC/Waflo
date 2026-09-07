@@ -39,6 +39,8 @@ export const assetUploaderInterfaceCopy = {
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
     cropHelp: "Drag the image directly. Use the wheel to zoom, or arrow keys for precise movement.",
+    squareCropHelp:
+      "Wallet logos use a square crop. Drag the image, use the wheel to zoom, or use arrow keys to reposition.",
     resetCrop: "Reset crop",
     cancel: "Cancel",
     processUpload: "Process and upload",
@@ -82,6 +84,8 @@ export const assetUploaderInterfaceCopy = {
     zoomOut: "تصغير",
     zoomIn: "تكبير",
     cropHelp: "اسحب الصورة مباشرة. استخدم عجلة الفأرة للتكبير، أو الأسهم للتحريك الدقيق.",
+    squareCropHelp:
+      "يُقص شعار Wallet ضمن مربع. اسحب الصورة، واستخدم عجلة الفأرة للتكبير أو الأسهم للتحريك الدقيق.",
     resetCrop: "إعادة الضبط",
     cancel: "إلغاء",
     processUpload: "معالجة ورفع",
@@ -126,6 +130,8 @@ export const assetUploaderInterfaceCopy = {
     zoomOut: "بچویک بکە",
     zoomIn: "مەزن بکە",
     cropHelp: "وێنەیێ راستەوخۆ بکێشە. چەرخا ماوسێ بۆ مەزنکرنێ یان تیران بۆ لڤاندنا ورد ب کار بینە.",
+    squareCropHelp:
+      "لوگۆیێن والێت ب چوارگۆشەیی دهێن برین. وێنەیێ بکێشە، چەرخا ماوسێ بۆ مەزنکرنێ یان تیران بۆ لڤاندنێ ب کار بینە.",
     resetCrop: "برینێ ڤەگەڕینە",
     cancel: "هەلوەشاندن",
     processUpload: "ئامادە بکە و بار بکە",
@@ -171,6 +177,8 @@ export const assetUploaderInterfaceCopy = {
     zoomIn: "گەورەکردن",
     cropHelp:
       "وێنەکە ڕاستەوخۆ ڕابکێشە. چەرخی ماوس بۆ گەورەکردن یان تیرەکان بۆ جوڵاندنی ورد بەکاربهێنە.",
+    squareCropHelp:
+      "لۆگۆی وەلێت بە چوارگۆشە دەبڕدرێت. وێنەکە ڕابکێشە، چەرخی ماوس بۆ گەورەکردن یان تیرەکان بۆ جوڵاندن بەکاربهێنە.",
     resetCrop: "بڕین بگەڕێنەوە",
     cancel: "هەڵوەشاندنەوە",
     processUpload: "ئامادە بکە و بار بکە",

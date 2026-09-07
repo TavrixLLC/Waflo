@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cairo, Manrope, Noto_Sans_Arabic } from "next/font/google";
+import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "./globals.css";
 
@@ -8,6 +9,11 @@ const cairo = Cairo({ subsets: ["arabic", "latin"], variable: "--font-cairo", di
 const notoSansArabic = Noto_Sans_Arabic({
   subsets: ["arabic"],
   variable: "--font-noto-sans-arabic",
+  display: "swap",
+});
+const sirwan = localFont({
+  src: "../../../packages/brand/assets/fonts/Sirwan.ttf",
+  variable: "--font-sirwan",
   display: "swap",
 });
 
@@ -29,7 +35,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${manrope.variable} ${cairo.variable} ${notoSansArabic.variable}`}>
+      <body
+        className={`${manrope.variable} ${cairo.variable} ${notoSansArabic.variable} ${sirwan.variable}`}
+      >
         {children}
       </body>
     </html>

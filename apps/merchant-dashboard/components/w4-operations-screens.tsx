@@ -21,8 +21,8 @@ import {
 } from "@waflo/ui";
 import { Activity, Copy, Download, MonitorSmartphone, Search, UserRound } from "lucide-react";
 import Image from "next/image";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { ApiClientError, apiFetch } from "../lib/api-client";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
 import type { MembershipView } from "./dashboard";
 
 function apiMessage(error: unknown, fallback: string) {
@@ -1411,7 +1411,7 @@ type ExportType =
 interface ExportJob {
   publicId: string;
   exportType?: ExportType;
-  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "EXPIRED";
+  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "DEAD_LETTER" | "EXPIRED";
   rowCount?: number | null;
   createdAt?: string;
   completedAt?: string | null;
@@ -1433,6 +1433,8 @@ export function ExportsOperationsScreen({
   const [jobs, setJobs] = useState<ExportJob[]>([]);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const [awaitingDownloadIds, setAwaitingDownloadIds] = useState<string[]>([]);
+  const downloadedExportIds = useRef(new Set<string>());
   const exportLabels: Record<VisibleExportType, string> = {
     MEMBERSHIP_SUMMARY: ar ? "ملخص العملاء" : "Customer summary",
     LEDGER_OPERATIONS: ar ? "نشاط بطاقات الولاء" : "Loyalty activity",
@@ -1448,13 +1450,61 @@ export function ExportsOperationsScreen({
         ? "تقرير أمان قديم"
         : "Legacy security report";
 
-  useEffect(() => {
-    void apiFetch<{ items: ExportJob[] }>(`/v1/organizations/${organizationId}/exports?limit=50`)
-      .then((result) => setJobs(result.items))
-      .catch((caught) =>
-        setError(apiMessage(caught, ar ? "تعذر تحميل التصديرات." : "Unable to load exports.")),
+  const refreshJobs = useCallback(async () => {
+    try {
+      const result = await apiFetch<{ items: ExportJob[] }>(
+        `/v1/organizations/${organizationId}/exports?limit=50`,
       );
+      setJobs(result.items);
+    } catch (caught) {
+      setError(apiMessage(caught, ar ? "تعذر تحميل التصديرات." : "Unable to load exports."));
+    }
   }, [ar, organizationId]);
+
+  useEffect(() => {
+    void refreshJobs();
+  }, [refreshJobs]);
+
+  useEffect(() => {
+    const hasAwaitingJob = jobs.some(
+      (job) =>
+        awaitingDownloadIds.includes(job.publicId) &&
+        (job.status === "PENDING" || job.status === "PROCESSING"),
+    );
+    if (!hasAwaitingJob) return;
+    const timer = window.setTimeout(() => void refreshJobs(), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [awaitingDownloadIds, jobs, refreshJobs]);
+
+  useEffect(() => {
+    const terminal = jobs.filter((job) => awaitingDownloadIds.includes(job.publicId));
+    if (!terminal.length) return;
+    const completed = terminal.filter((job) => job.status === "COMPLETED");
+    const failed = terminal.filter((job) =>
+      ["FAILED", "DEAD_LETTER", "EXPIRED"].includes(job.status),
+    );
+    if (!completed.length && !failed.length) return;
+    for (const job of completed) {
+      if (downloadedExportIds.current.has(job.publicId)) continue;
+      downloadedExportIds.current.add(job.publicId);
+      const download = document.createElement("a");
+      download.href = `${apiUrl}/v1/organizations/${organizationId}/exports/${job.publicId}/download`;
+      download.download = "";
+      download.hidden = true;
+      document.body.append(download);
+      download.click();
+      download.remove();
+    }
+    if (failed.length) {
+      setError(
+        ar
+          ? "تعذر إنشاء ملف التصدير. حاول إنشاء ملف جديد."
+          : "The export could not be created. Create a new export and try again.",
+      );
+    }
+    const terminalIds = new Set([...completed, ...failed].map((job) => job.publicId));
+    setAwaitingDownloadIds((current) => current.filter((id) => !terminalIds.has(id)));
+  }, [ar, awaitingDownloadIds, jobs, organizationId]);
 
   async function createExport() {
     setWorking(true);
@@ -1465,6 +1515,7 @@ export function ExportsOperationsScreen({
         body: JSON.stringify({ exportType, filters: {} }),
       });
       setJobs((current) => [{ ...job, exportType }, ...current]);
+      setAwaitingDownloadIds((current) => [...new Set([...current, job.publicId])]);
     } catch (caught) {
       setError(apiMessage(caught, ar ? "تعذر إنشاء التصدير." : "Unable to create export."));
     } finally {
@@ -1568,7 +1619,7 @@ export function ExportsOperationsScreen({
                 {job.status === "COMPLETED" ? (
                   <a
                     className="wf-button wf-button--secondary"
-                    href={`/api/waflo/v1/organizations/${organizationId}/exports/${job.publicId}/download`}
+                    href={`${apiUrl}/v1/organizations/${organizationId}/exports/${job.publicId}/download`}
                   >
                     {ar ? "تنزيل" : "Download"}
                   </a>

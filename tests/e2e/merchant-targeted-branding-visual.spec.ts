@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import sharp from "sharp";
 
 const reviewDirectory = path.resolve("artifacts", "p1-final-review");
@@ -90,6 +90,17 @@ async function createDraft(
   ).toBe(true);
 }
 
+async function expectBrowserWalletPreview(
+  container: Locator,
+  profile: "APPLE_LEGACY" | "APPLE_IOS27" | "GOOGLE_WALLET",
+): Promise<void> {
+  const preview = container.locator(
+    `[data-preview-ready="true"][data-wallet-profile="${profile}"]`,
+  );
+  await expect(preview).toBeVisible({ timeout: 20_000 });
+  await expect(preview.locator("svg[data-wallet-provider]")).toHaveCount(1);
+}
+
 async function uploadedMerchantLogo(): Promise<Buffer> {
   return sharp({
     create: { width: 512, height: 512, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
@@ -112,6 +123,16 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
   await page.setViewportSize({ width: 1440, height: 1000 });
   await login(page);
   const organizationId = await selectTodayCoffee(page);
+  const legacyPreviewRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      /^http:\/\/localhost:4000\/v1\/organizations\/[^/]+\/programs\/[^/]+\/preview(?:\?|$)/u.test(
+        request.url(),
+      )
+    ) {
+      legacyPreviewRequests.push(request.url());
+    }
+  });
   await page.goto("/en/dashboard/programs");
   await expect(page.locator("main h1").first()).toBeVisible();
 
@@ -154,29 +175,21 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
 
   await page.goto(`/en/dashboard/programs/${programId}/edit`);
   const builderPreview = page.locator(".builder-preview-desktop");
-  await expect(builderPreview.locator("canvas[data-preview-ready='true']")).toBeVisible({
-    timeout: 20_000,
-  });
-  for (const [tab, filename] of [
-    ["Apple Legacy", "apple-legacy-dashboard-preview.png"],
-    ["Apple iOS 27+", "apple-ios27-dashboard-preview.png"],
-    ["Google Wallet", "google-wallet-dashboard-preview.png"],
+  for (const [tab, profile, filename] of [
+    ["Apple Legacy", "APPLE_LEGACY", "apple-legacy-dashboard-preview.png"],
+    ["Apple iOS 27+", "APPLE_IOS27", "apple-ios27-dashboard-preview.png"],
+    ["Google Wallet", "GOOGLE_WALLET", "google-wallet-dashboard-preview.png"],
   ] as const) {
     await builderPreview.getByRole("tab", { name: tab }).click();
-    await expect(builderPreview.locator("canvas[data-preview-ready='true']")).toBeVisible({
-      timeout: 20_000,
-    });
+    await expectBrowserWalletPreview(builderPreview, profile);
     await capture(page, filename);
   }
 
   await page.goto(`/ar/dashboard/programs/${programId}/edit`);
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-  await expect(page.locator(".builder-preview-desktop .builder-preview-canvas canvas")).toBeVisible(
-    {
-      timeout: 20_000,
-    },
-  );
+  await expectBrowserWalletPreview(page.locator(".builder-preview-desktop"), "APPLE_LEGACY");
   await capture(page, "merchant-logo-builder-preview-desktop-ar.png");
+  expect(legacyPreviewRequests).toEqual([]);
 
   await page.goto(`/en/dashboard/programs/${programId}`);
   const preview = page.getByRole("region", { name: "Card preview" });
@@ -190,15 +203,11 @@ test("captures real merchant-brand issuer identity across loyalty and Wallet pre
 
   await page.getByRole("tab", { name: "Saved changes" }).click();
   await page.getByRole("tab", { name: "Apple" }).click();
-  await expect(preview.locator("canvas[data-preview-ready='true']")).toBeVisible({
-    timeout: 20_000,
-  });
+  await expectBrowserWalletPreview(preview, "APPLE_LEGACY");
   await capture(page, "merchant-logo-apple-wallet-preview.png");
 
   await page.getByRole("tab", { name: "Google" }).click();
-  await expect(preview.locator("canvas[data-preview-ready='true']")).toBeVisible({
-    timeout: 20_000,
-  });
+  await expectBrowserWalletPreview(preview, "GOOGLE_WALLET");
   await capture(page, "merchant-logo-google-wallet-preview.png");
 
   await page.setViewportSize({ width: 1440, height: 1000 });

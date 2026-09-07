@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import sharp from "sharp";
 import { expectBuilderPreviewReady } from "./preview-assertions";
 
 const screenshots = "test-results/evidence/handoff-w2-round-5/screenshots";
@@ -112,6 +113,22 @@ async function screenshot(page: Page, name: string): Promise<void> {
   } catch {
     await page.screenshot({ path, fullPage: false, animations: "disabled" });
   }
+}
+
+async function expectStudioPreviewReady(page: Page): Promise<void> {
+  const preview = page.locator(".studio-device-frame [data-preview-ready='true']");
+  await expect(preview).toBeVisible();
+  await expect
+    .poll(() =>
+      preview.evaluate((element) => {
+        const svg = element.querySelector("svg");
+        return (
+          element.getAttribute("data-preview-ready") === "true" &&
+          Boolean(svg?.viewBox.baseVal.width)
+        );
+      }),
+    )
+    .toBe(true);
 }
 
 async function latestMailAction(
@@ -463,6 +480,193 @@ test.describe
       await screenshot(page, "11-dashboard-en");
     });
 
+    test("allows only onboarding logo branding changes and persists the square-cropped asset", async ({
+      page,
+    }) => {
+      const email = `onboarding-logo-${runId}@waflo.local`;
+      const password = "Onboarding Logo Waflo 2026!";
+      const organizationName = `Onboarding Logo ${runId}`;
+      const organizationId = await (async () => {
+        await signup(page, email, password);
+        await verifyLatestEmail(page, email);
+        await page.getByRole("link", { name: "Continue to sign in" }).click();
+        await login(page, email, password);
+        return postOrganizationWithExactLocation(
+          page,
+          organizationName,
+          `onboarding-logo-${runId}`,
+          "Onboarding Logo Main Branch",
+        );
+      })();
+      const logo = await sharp({
+        create: { width: 420, height: 240, channels: 4, background: "#125b72" },
+      })
+        .composite([
+          {
+            input: Buffer.from(
+              '<svg width="420" height="240" xmlns="http://www.w3.org/2000/svg"><circle cx="210" cy="120" r="76" fill="#f8e3b1"/></svg>',
+            ),
+          },
+        ])
+        .png()
+        .toBuffer();
+
+      await page.goto(
+        `/en/onboarding/business?organization=${organizationId}&resume=payment_method_required`,
+      );
+      const panel = page.locator(".onboarding-logo-panel");
+      await expect(panel.getByRole("heading", { name: "Merchant logo" }).first()).toBeVisible();
+      await panel.locator('input[type="file"]').setInputFiles({
+        name: "onboarding-logo.png",
+        mimeType: "image/png",
+        buffer: logo,
+      });
+      const dialog = page.getByRole("dialog", { name: "Crop image safely" });
+      await expect(dialog).toBeVisible();
+      const squareCrop = async () =>
+        dialog.locator(".studio-crop-safe-area").evaluate((element) => {
+          const source = element.parentElement?.querySelector<HTMLImageElement>("img");
+          if (!source?.naturalWidth || !source.naturalHeight) return null;
+          const width =
+            (Number.parseFloat((element as HTMLElement).style.width) / 100) * source.naturalWidth;
+          const height =
+            (Number.parseFloat((element as HTMLElement).style.height) / 100) * source.naturalHeight;
+          return { width, height };
+        });
+      const expectSquareCrop = async () => {
+        const crop = await squareCrop();
+        expect(crop).not.toBeNull();
+        expect(Math.abs((crop?.width ?? 0) - (crop?.height ?? 0))).toBeLessThanOrEqual(1);
+      };
+
+      await expect.poll(squareCrop).not.toBeNull();
+      await expectSquareCrop();
+      const cropSurface = dialog.locator(".studio-crop-preview");
+      const cropBounds = await cropSurface.boundingBox();
+      if (!cropBounds) throw new Error("Logo crop area is unavailable.");
+      await page.mouse.move(
+        cropBounds.x + cropBounds.width / 2,
+        cropBounds.y + cropBounds.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        cropBounds.x + cropBounds.width * 0.56,
+        cropBounds.y + cropBounds.height * 0.56,
+      );
+      await page.mouse.up();
+      await expectSquareCrop();
+      const cropHandle = dialog.getByRole("button", { name: /: resize$/u });
+      const cropHandleBounds = await cropHandle.boundingBox();
+      if (!cropHandleBounds) throw new Error("Logo crop resize handle is unavailable.");
+      await page.mouse.move(
+        cropHandleBounds.x + cropHandleBounds.width / 2,
+        cropHandleBounds.y + cropHandleBounds.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(cropHandleBounds.x - 28, cropHandleBounds.y - 18);
+      await page.mouse.up();
+      await expectSquareCrop();
+      await dialog.getByRole("slider").fill("1.8");
+      await expectSquareCrop();
+      await dialog.getByRole("button", { name: "Reset crop" }).click();
+      await expectSquareCrop();
+      await screenshot(page, "onboarding-logo-square-crop");
+
+      const uploadResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().includes(`/organizations/${organizationId}/assets`) &&
+          response.status() === 201,
+      );
+      const selectResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().endsWith(`/organizations/${organizationId}`) &&
+          response.status() === 200,
+      );
+      await dialog.getByRole("button", { name: "Process and upload" }).click();
+      const uploaded = await uploadResponse;
+      await selectResponse;
+      const uploadedAsset = (await uploaded.json()) as { data: { id: string } };
+      await expect(panel.locator(".studio-asset-current")).toBeVisible();
+      await screenshot(page, "onboarding-logo-upload-success");
+
+      const content = await page.request.get(
+        `${apiOrigin}/v1/organizations/${organizationId}/assets/${uploadedAsset.data.id}/content?variant=ORIGINAL_SAFE`,
+      );
+      expect(content.ok()).toBe(true);
+      expect(content.headers()["content-type"]).toContain("image/png");
+      expect((await content.body()).subarray(0, 8)).toEqual(
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      );
+      const { createPrismaClient } = await import("../../packages/database/dist/src/client.js");
+      const database = createPrismaClient(process.env.DATABASE_URL as string);
+      try {
+        const organization = await database.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { brandLogoAssetId: true },
+        });
+        const asset = await database.merchantAsset.findUniqueOrThrow({
+          where: { id: uploadedAsset.data.id },
+          include: { variants: true },
+        });
+        expect(organization.brandLogoAssetId).toBe(uploadedAsset.data.id);
+        expect(asset.variants.some((variant) => Boolean(variant.objectKey))).toBe(true);
+      } finally {
+        await database.$disconnect();
+      }
+
+      const deniedOrganizationChange = await page.request.patch(
+        `${apiOrigin}/v1/organizations/${organizationId}`,
+        {
+          headers: { origin: "http://localhost:3001", "x-csrf-token": await csrfToken(page) },
+          data: { name: `${organizationName} blocked change` },
+        },
+      );
+      expect(deniedOrganizationChange.status()).toBe(402);
+      expect((await deniedOrganizationChange.json()) as { error: { code: string } }).toMatchObject({
+        error: { code: "MERCHANT_ONBOARDING_REQUIRED" },
+      });
+      const deniedOperationalAsset = await page.request.post(
+        `${apiOrigin}/v1/organizations/${organizationId}/assets`,
+        {
+          headers: { origin: "http://localhost:3001", "x-csrf-token": await csrfToken(page) },
+          multipart: {
+            metadata: JSON.stringify({
+              category: "HERO",
+              crop: { x: 0, y: 0, width: 1, height: 1, zoom: 1 },
+            }),
+            file: { name: "blocked-hero.png", mimeType: "image/png", buffer: logo },
+          },
+        },
+      );
+      expect(deniedOperationalAsset.status()).toBe(402);
+      expect((await deniedOperationalAsset.json()) as { error: { code: string } }).toMatchObject({
+        error: { code: "MERCHANT_ONBOARDING_REQUIRED" },
+      });
+      const rejectedNonSquareLogo = await page.request.post(
+        `${apiOrigin}/v1/organizations/${organizationId}/assets`,
+        {
+          headers: { origin: "http://localhost:3001", "x-csrf-token": await csrfToken(page) },
+          multipart: {
+            metadata: JSON.stringify({
+              category: "LOGO",
+              crop: { x: 0, y: 0, width: 0.9, height: 0.3, zoom: 1 },
+            }),
+            file: { name: "rejected-non-square-logo.png", mimeType: "image/png", buffer: logo },
+          },
+        },
+      );
+      expect(rejectedNonSquareLogo.status()).toBe(422);
+      expect((await rejectedNonSquareLogo.json()) as { error: { code: string } }).toMatchObject({
+        error: { code: "ASSET_PROCESSING_FAILED" },
+      });
+
+      await page.reload();
+      await expect(panel.locator(".studio-asset-current")).toBeVisible();
+      await screenshot(page, "onboarding-logo-upload-refresh");
+    });
+
     test("completes Quick Mode, autosaves Studio, validates, and publishes", async ({ page }) => {
       await login(page, ownerEmail, initialPassword);
       await page.goto("/en/dashboard/programs");
@@ -494,17 +698,17 @@ test.describe
       await expect(
         page.getByRole("navigation", { name: "Studio sections" }).getByRole("button"),
       ).toHaveCount(6);
-      await expect(page.locator(".studio-device-frame img")).toBeVisible();
+      await expectStudioPreviewReady(page);
       await screenshot(page, "23-loyalty-studio-customer-preview");
       const previewProgress = page.locator(".studio-preview-panel input[type=range]");
       await previewProgress.fill("0");
-      await expect(page.locator(".studio-device-frame img")).toBeVisible();
+      await expectStudioPreviewReady(page);
       await screenshot(page, "41-r4-stamp-0-of-8-all-empty");
       await previewProgress.fill("5");
-      await expect(page.locator(".studio-device-frame img")).toBeVisible();
+      await expectStudioPreviewReady(page);
       await screenshot(page, "42-r4-stamp-5-of-8-two-state");
       await previewProgress.fill("8");
-      await expect(page.locator(".studio-device-frame img")).toBeVisible();
+      await expectStudioPreviewReady(page);
       await screenshot(page, "43-r4-stamp-8-of-8-reward-ready");
       await previewProgress.fill("0");
 
@@ -515,7 +719,7 @@ test.describe
       await arabicProgramCard.getByRole("button", { name: /فتح البطاقة/ }).click();
       await expect(page.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");
       await page.locator(".studio-preview-panel input[type=range]").fill("8");
-      await expect(page.locator(".studio-device-frame img")).toBeVisible();
+      await expectStudioPreviewReady(page);
       await screenshot(page, "47-r4-arabic-rtl-reward-ready");
 
       await page.goto("/en/dashboard/programs");
