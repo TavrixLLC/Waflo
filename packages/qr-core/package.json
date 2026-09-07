@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./preview": {
+      "types": "./src/preview.ts",
+      "default": "./dist/preview.js"
     }
   },
   "scripts": {

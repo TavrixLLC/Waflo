@@ -59,7 +59,6 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import Image from "next/image";
 import {
   createContext,
   Fragment,
@@ -77,8 +76,8 @@ import {
 } from "./loyalty-card-presentation";
 import { MerchantBrandMark } from "./merchant-brand-mark";
 import { ProgramAssetPicker } from "./program-asset-uploader";
-import { optimisticProgramPreviewSvg } from "./program-preview-optimistic";
-import { WalletPreviewCanvas } from "./program-preview-qr";
+import { DashboardWalletPreview } from "./dashboard-wallet-preview";
+import { materializeProgramValidationEvidence } from "./program-validation-evidence";
 import {
   type EnrollmentSettings,
   ProgramEnrollmentSettings,
@@ -131,19 +130,7 @@ import {
 import { WalletEngagementPanel } from "./wallet-engagement-panel";
 
 type SaveState = "saved" | "unsaved" | "saving" | "failed" | "conflict";
-type PreviewLoadState = "idle" | "loading" | "available" | "unavailable";
 type LifecycleAction = MerchantProgramLifecycleAction;
-
-interface PreviewResult {
-  svg: string;
-  width: number;
-  height: number;
-  warnings: Array<{ code: string; message: string }>;
-  profile: PreviewProfile;
-  sourceDraft: ProgramDraftInput;
-}
-
-type PreviewResponse = Omit<PreviewResult, "sourceDraft">;
 
 interface CursorPage<T> {
   items: T[];
@@ -314,14 +301,12 @@ function ProgramStudioEditorContent({
   const [draft, setDraft] = useState<ProgramDraftInput | null>(null);
   const [revision, setRevision] = useState(1);
   const [activeArea, setActiveArea] = useState<StudioArea>(initialArea);
-  const [selectedProfile, setSelectedProfile] = useState<PreviewProfile>("CUSTOMER_WEB");
+  const [selectedProfile, setSelectedProfile] = useState<PreviewProfile>("APPLE_WALLET");
   const [previewLocale, setPreviewLocale] = useState("en");
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(0);
-  const [previews, setPreviews] = useState<Partial<Record<PreviewProfile, PreviewResult>>>({});
-  const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>("idle");
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [historicalVersion, setHistoricalVersion] = useState<ProgramVersion | null>(null);
@@ -391,8 +376,6 @@ function ProgramStudioEditorContent({
     );
     setHistoryCursor(history.nextCursor);
     setDetail(program);
-    setPreviews({});
-    setPreviewLoadState("idle");
     setOrganization(nextOrganization);
     setEnrollmentAccess(access);
     setWalletHealth(providers);
@@ -441,7 +424,6 @@ function ProgramStudioEditorContent({
     const serialized = JSON.stringify(apiDraft(draft));
     if (serialized === persistedRef.current) return;
     setSaveState("unsaved");
-    setPreviewLoadState((current) => (current === "available" ? current : "idle"));
     const timer = window.setTimeout(async () => {
       setSaveState("saving");
       try {
@@ -474,34 +456,6 @@ function ProgramStudioEditorContent({
     }, 800);
     return () => window.clearTimeout(timer);
   }, [conflict, draft, interfaceLocale, organizationId, programId, revision]);
-
-  const generatePreviews = useCallback(async () => {
-    if (!draft) return;
-    if (saveState !== "saved" || JSON.stringify(apiDraft(draft)) !== persistedRef.current) return;
-    setPreviewLoadState("loading");
-    try {
-      const sourceDraft = structuredClone(draft);
-      const results = await Promise.all(
-        (["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const).map(async (profile) => ({
-          ...(await apiFetch<PreviewResponse>(
-            `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${profile}&locale=${encodeURIComponent(previewLocale)}`,
-          )),
-          sourceDraft,
-        })),
-      );
-      setPreviews(Object.fromEntries(results.map((item) => [item.profile, item])));
-      setPreviewLoadState("available");
-    } catch {
-      setPreviews({});
-      setPreviewLoadState("unavailable");
-      setError(studioOperationError("preview", interfaceLocale));
-    }
-  }, [draft, interfaceLocale, organizationId, previewLocale, programId, progress, saveState]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void generatePreviews(), 120);
-    return () => window.clearTimeout(timer);
-  }, [generatePreviews]);
 
   async function reloadLatest() {
     setConflict(null);
@@ -539,7 +493,11 @@ function ProgramStudioEditorContent({
     setWorking(true);
     setError("");
     try {
-      await generatePreviews();
+      await materializeProgramValidationEvidence({
+        organizationId,
+        programId,
+        locale: draft?.defaultLocale ?? previewLocale,
+      });
       const result = await apiFetch<ValidationResult>(
         `/v1/organizations/${organizationId}/programs/${programId}/validate`,
         { method: "POST" },
@@ -683,8 +641,6 @@ function ProgramStudioEditorContent({
   const validated =
     ["VALIDATED", "TEST_READY"].includes(editingVersion?.status ?? "") ||
     Boolean(validation && validation.errors.length === 0);
-  const selectedPreview = previews[selectedProfile];
-
   if (!detail) {
     if (error) {
       return (
@@ -897,8 +853,6 @@ function ProgramStudioEditorContent({
             selectedProfile={selectedProfile}
             previewLocale={previewLocale}
             onPreviewLocale={setPreviewLocale}
-            selectedPreview={selectedPreview}
-            previewLoadState={previewLoadState}
             progress={progress}
             onProgress={setProgress}
             onProfile={setSelectedProfile}
@@ -1200,8 +1154,6 @@ function StudioAreaContent({
   selectedProfile,
   previewLocale,
   onPreviewLocale,
-  selectedPreview,
-  previewLoadState,
   progress,
   onProgress,
   onProfile,
@@ -1248,8 +1200,6 @@ function StudioAreaContent({
   selectedProfile: PreviewProfile;
   previewLocale: string;
   onPreviewLocale: (locale: string) => void;
-  selectedPreview: PreviewResult | undefined;
-  previewLoadState: PreviewLoadState;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
@@ -1307,14 +1257,13 @@ function StudioAreaContent({
         displayVersion={displayVersion}
         detail={detail}
         locations={locations}
+        assets={assets}
         lifecycleState={lifecycleState}
         editable={Boolean(editableDraft)}
         ar={ar}
         selectedProfile={selectedProfile}
         previewLocale={previewLocale}
         onPreviewLocale={onPreviewLocale}
-        selectedPreview={selectedPreview}
-        previewLoadState={previewLoadState}
         progress={progress}
         onProgress={onProgress}
         onProfile={onProfile}
@@ -1431,14 +1380,13 @@ function StudioOverview({
   displayVersion,
   detail,
   locations,
+  assets,
   lifecycleState,
   editable,
   ar,
   selectedProfile,
   previewLocale,
   onPreviewLocale,
-  selectedPreview,
-  previewLoadState,
   progress,
   onProgress,
   onProfile,
@@ -1458,14 +1406,13 @@ function StudioOverview({
   displayVersion: ProgramVersion;
   detail: ProgramDetail;
   locations: LocationItem[];
+  assets: AssetItem[];
   lifecycleState: StudioLifecyclePresentation;
   editable: boolean;
   ar: boolean;
   selectedProfile: PreviewProfile;
   previewLocale: string;
   onPreviewLocale: (locale: string) => void;
-  selectedPreview: PreviewResult | undefined;
-  previewLoadState: PreviewLoadState;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
@@ -1560,15 +1507,11 @@ function StudioOverview({
           selectedProfile={selectedProfile}
           previewLocale={previewLocale}
           onPreviewLocale={onPreviewLocale}
-          preview={
-            customerPreview.source === "draft" || hasUnpublishedChanges
-              ? selectedPreview
-              : undefined
-          }
-          loadState={previewLoadState}
           source={customerPreview.source}
           publishedStatus={detail.status}
           brandLogoUrl={organization?.brandLogoAsset?.contentUrl}
+          assets={assets}
+          organizationName={organization?.name ?? displayDraft.internalName}
           progress={progress}
           onProgress={onProgress}
           onProfile={onProfile}
@@ -1703,14 +1646,14 @@ function StudioPreview({
   selectedProfile,
   previewLocale,
   onPreviewLocale,
-  preview,
-  loadState,
   source,
   publishedStatus,
   progress,
   onProgress,
   onProfile,
   brandLogoUrl,
+  assets,
+  organizationName,
 }: {
   draft: ProgramDraftInput;
   savedDraft?: ProgramDraftInput | null | undefined;
@@ -1718,14 +1661,14 @@ function StudioPreview({
   selectedProfile: PreviewProfile;
   previewLocale: string;
   onPreviewLocale: (locale: string) => void;
-  preview: PreviewResult | undefined;
-  loadState: PreviewLoadState;
   source: "published" | "draft" | "unavailable";
   publishedStatus: ProgramOperationalStatus;
   progress: number;
   onProgress: (progress: number) => void;
   onProfile: (profile: PreviewProfile) => void;
   brandLogoUrl?: string | undefined;
+  assets: AssetItem[];
+  organizationName: string;
 }) {
   const ui = useStudioUi();
   const [selectedVersion, setSelectedVersion] = useState<"published" | "draft">(
@@ -1737,18 +1680,6 @@ function StudioPreview({
   const activeSource = showingSavedChanges ? "draft" : source;
   const activeDraft = showingSavedChanges ? (savedDraft ?? draft) : draft;
   const showingPublishedVersion = activeSource === "published";
-  const optimisticPreviewSvg = useMemo(
-    () =>
-      preview
-        ? optimisticProgramPreviewSvg({
-            svg: preview.svg,
-            sourceDraft: preview.sourceDraft,
-            draft: activeDraft,
-            locale: previewLocale,
-          })
-        : "",
-    [activeDraft, preview, previewLocale],
-  );
   const profileLabel = showingPublishedVersion
     ? ui.publishedCardSummary
     : selectedProfile === "CUSTOMER_WEB"
@@ -1780,7 +1711,7 @@ function StudioPreview({
               label: ui.published,
               tone: "neutral" as const,
             };
-  const loading = activeSource === "draft" && (loadState === "idle" || loadState === "loading");
+  const loading = activeSource === "draft" && false;
   return (
     <section
       className="studio-preview-panel studio-preview-panel--overview"
@@ -1874,25 +1805,27 @@ function StudioPreview({
             draft={activeDraft}
             progress={progress}
           />
-        ) : activeSource === "draft" && preview && selectedProfile !== "CUSTOMER_WEB" ? (
+        ) : activeSource === "draft" && selectedProfile !== "CUSTOMER_WEB" ? (
           <span
             className={`wallet-preview-image-stack wallet-preview-image-stack--${selectedProfile.toLocaleLowerCase("en-US")}`}
           >
-            <WalletPreviewCanvas
+            <DashboardWalletPreview
               ariaLabel={interpolateStudioCopy(ui.previewAlt, profileLabel)}
-              height={preview.height}
-              profile={selectedProfile}
-              svg={optimisticPreviewSvg}
-              width={preview.width}
+              assets={assets}
+              draft={activeDraft}
+              locale={previewLocale}
+              {...(brandLogoUrl ? { merchantBrandLogoUrl: brandLogoUrl } : {})}
+              organizationName={organizationName}
+              profile={selectedProfile === "APPLE_WALLET" ? "APPLE_LEGACY" : "GOOGLE_WALLET"}
+              progress={progress}
             />
           </span>
-        ) : activeSource === "draft" && preview ? (
-          <Image
-            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(optimisticPreviewSvg)}`}
-            alt={interpolateStudioCopy(ui.previewAlt, profileLabel)}
-            width={preview.width}
-            height={preview.height}
-            unoptimized
+        ) : activeSource === "draft" ? (
+          <PublishedCardSummary
+            contentLocale={previewLocale}
+            {...(brandLogoUrl ? { brandLogoUrl } : {})}
+            draft={activeDraft}
+            progress={progress}
           />
         ) : (
           <div className="studio-preview-loading" role="status">
@@ -1921,10 +1854,6 @@ function StudioPreview({
           </div>
         </FormField>
       ) : null}
-      {activeSource === "draft" &&
-        preview?.warnings.map((warning) => (
-          <Alert key={warning.code} tone="warning" title={warning.message} />
-        ))}
     </section>
   );
 }

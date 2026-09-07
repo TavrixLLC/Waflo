@@ -50,14 +50,12 @@ import {
 } from "react";
 import { ApiClientError, apiFetch } from "../lib/api-client";
 import { ProgramAssetPicker } from "./program-asset-uploader";
-import { optimisticProgramPreviewSvg } from "./program-preview-optimistic";
-import { WalletPreviewCanvas } from "./program-preview-qr";
+import { DashboardWalletPreview } from "./dashboard-wallet-preview";
+import { materializeProgramValidationEvidence } from "./program-validation-evidence";
 import {
   BUILDER_AUTOSAVE_DELAY_MS,
-  BUILDER_PREVIEW_DELAY_MS,
   type BuilderSaveState,
   type BuilderSection,
-  builderPreviewCacheKey,
   builderReadiness,
   builderReadinessWithValidation,
   builderSectionForIssue,
@@ -65,7 +63,6 @@ import {
   cardLocaleCompleteness,
   isNeutralBuilderDraft,
   shouldScheduleBuilderAutosave,
-  shouldLoadBuilderPreview,
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
 } from "./program-card-builder-state";
@@ -90,20 +87,6 @@ import {
 
 const previewProfiles = ["APPLE_LEGACY", "APPLE_IOS27", "GOOGLE_WALLET"] as const;
 type DashboardWalletPreviewProfile = (typeof previewProfiles)[number];
-
-interface PreviewResult {
-  svg: string;
-  width: number;
-  height: number;
-  warnings: Array<{ code: string; message: string }>;
-  profile: "APPLE_WALLET" | "GOOGLE_WALLET";
-}
-
-interface PreviewState {
-  key: string;
-  result: PreviewResult;
-  sourceDraft: ProgramDraftInput;
-}
 
 interface ConflictState {
   localDraft: ProgramDraftInput;
@@ -189,6 +172,8 @@ export function ProgramCardBuilder({
   templates,
   locations,
   assets,
+  organizationName,
+  merchantBrandLogoUrl,
   onAssetUploaded,
   locale,
   onBack,
@@ -203,6 +188,8 @@ export function ProgramCardBuilder({
   templates: TemplateItem[];
   locations: LocationItem[];
   assets: AssetItem[];
+  organizationName: string;
+  merchantBrandLogoUrl?: string;
   onAssetUploaded: (asset: AssetItem) => void;
   locale: Locale;
   onBack: () => void;
@@ -221,12 +208,6 @@ export function ProgramCardBuilder({
   const [previewLocale, setPreviewLocale] = useState<string>(ar ? "ar" : "en");
   const [profile, setProfile] = useState<DashboardWalletPreviewProfile>("APPLE_LEGACY");
   const [progress, setProgress] = useState(0);
-  const [previews, setPreviews] = useState<
-    Partial<Record<DashboardWalletPreviewProfile, PreviewState>>
-  >({});
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState(false);
-  const [assetGeneration, setAssetGeneration] = useState(0);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -238,7 +219,6 @@ export function ProgramCardBuilder({
   const revisionRef = useRef(1);
   const initializedRef = useRef(false);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
-  const previewCacheRef = useRef(new Map<string, PreviewState>());
   const initialLoadKeyRef = useRef("");
   const sectionNavRef = useRef<HTMLElement | null>(null);
 
@@ -377,91 +357,6 @@ export function ProgramCardBuilder({
       ?.scrollIntoView({ block: "nearest", inline: "center" });
   }, [activeSection]);
 
-  const previewKey = useCallback(
-    (nextProfile: DashboardWalletPreviewProfile) =>
-      builderPreviewCacheKey(
-        revisionRef.current,
-        nextProfile,
-        previewLocale,
-        progress,
-        assetGeneration,
-      ),
-    [assetGeneration, previewLocale, progress],
-  );
-
-  const loadPreview = useCallback(
-    async (
-      nextProfile: DashboardWalletPreviewProfile,
-      force = false,
-    ): Promise<PreviewResult | null> => {
-      const persistedDraft = draftRef.current;
-      if (!persistedDraft || JSON.stringify(apiDraft(persistedDraft)) !== persistedRef.current)
-        return null;
-      const key = previewKey(nextProfile);
-      const cached = previewCacheRef.current.get(key);
-      if (cached && !force) {
-        setPreviews((current) => ({ ...current, [nextProfile]: cached }));
-        return cached.result;
-      }
-      setPreviewLoading(true);
-      setPreviewError(false);
-      try {
-        const apiProfile = nextProfile === "GOOGLE_WALLET" ? "GOOGLE_WALLET" : "APPLE_WALLET";
-        const appleWalletVariant =
-          nextProfile === "GOOGLE_WALLET"
-            ? ""
-            : nextProfile === "APPLE_IOS27"
-              ? "&appleWalletVariant=poster"
-              : "&appleWalletVariant=legacy";
-        const result = await apiFetch<PreviewResult>(
-          `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=${apiProfile}${appleWalletVariant}&locale=${encodeURIComponent(previewLocale)}`,
-        );
-        const sourceDraft = structuredClone(persistedDraft);
-        const nextPreview = { key, result, sourceDraft } satisfies PreviewState;
-        previewCacheRef.current.set(key, nextPreview);
-        setPreviews((current) => ({ ...current, [nextProfile]: nextPreview }));
-        return result;
-      } catch (caught) {
-        setPreviewError(true);
-        setError(merchantError(caught, interfaceLocale));
-        return null;
-      } finally {
-        setPreviewLoading(false);
-      }
-    },
-    [interfaceLocale, organizationId, previewKey, previewLocale, programId, progress],
-  );
-
-  useEffect(() => {
-    if (!shouldLoadBuilderPreview(draft, saveState)) return;
-    const timer = window.setTimeout(() => void loadPreview(profile), BUILDER_PREVIEW_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [draft, loadPreview, profile, saveState]);
-
-  const loadCustomerWebPreview = useCallback(async (): Promise<boolean> => {
-    const persistedDraft = draftRef.current;
-    if (!persistedDraft || JSON.stringify(apiDraft(persistedDraft)) !== persistedRef.current)
-      return false;
-    try {
-      await apiFetch<PreviewResult>(
-        `/v1/organizations/${organizationId}/programs/${programId}/preview?progress=${progress}&profile=CUSTOMER_WEB&locale=${encodeURIComponent(previewLocale)}`,
-      );
-      return true;
-    } catch (caught) {
-      setPreviewError(true);
-      setError(merchantError(caught, interfaceLocale));
-      return false;
-    }
-  }, [interfaceLocale, organizationId, previewLocale, programId, progress]);
-
-  async function ensureAllPreviews(): Promise<boolean> {
-    const results = await Promise.all([
-      ...previewProfiles.map((item) => loadPreview(item)),
-      loadCustomerWebPreview(),
-    ]);
-    return results.every(Boolean);
-  }
-
   async function runChecks(): Promise<void> {
     if (!draft || !builderReadiness(draft).ready) {
       setActiveSection("review");
@@ -471,7 +366,11 @@ export function ProgramCardBuilder({
     setError("");
     try {
       if (!(await saveNow())) return;
-      if (!(await ensureAllPreviews())) return;
+      await materializeProgramValidationEvidence({
+        organizationId,
+        programId,
+        locale: draftRef.current?.defaultLocale ?? previewLocale,
+      });
       const result = await apiFetch<ValidationResult>(
         `/v1/organizations/${organizationId}/programs/${programId}/validate`,
         { method: "POST" },
@@ -748,7 +647,6 @@ export function ProgramCardBuilder({
                 assets={assets}
                 onAssetUploaded={(asset) => {
                   onAssetUploaded(asset);
-                  setAssetGeneration((current) => current + 1);
                 }}
                 interfaceLocale={interfaceLocale}
               />
@@ -792,10 +690,9 @@ export function ProgramCardBuilder({
             setProfile={setProfile}
             progress={progress}
             setProgress={setProgress}
-            preview={previews[profile]}
-            previewLoading={previewLoading}
-            previewError={previewError}
-            onRetry={() => void loadPreview(profile, true)}
+            assets={assets}
+            organizationName={organizationName}
+            {...(merchantBrandLogoUrl ? { merchantBrandLogoUrl } : {})}
           />
         </aside>
       </div>
@@ -854,10 +751,9 @@ export function ProgramCardBuilder({
           setProfile={setProfile}
           progress={progress}
           setProgress={setProgress}
-          preview={previews[profile]}
-          previewLoading={previewLoading}
-          previewError={previewError}
-          onRetry={() => void loadPreview(profile, true)}
+          assets={assets}
+          organizationName={organizationName}
+          {...(merchantBrandLogoUrl ? { merchantBrandLogoUrl } : {})}
         />
       </Modal>
 
@@ -2102,10 +1998,9 @@ function PreviewPanel({
   setProfile,
   progress,
   setProgress,
-  preview,
-  previewLoading,
-  previewError,
-  onRetry,
+  assets,
+  organizationName,
+  merchantBrandLogoUrl,
 }: {
   idPrefix: string;
   draft: ProgramDraftInput;
@@ -2116,24 +2011,11 @@ function PreviewPanel({
   setProfile: Dispatch<SetStateAction<DashboardWalletPreviewProfile>>;
   progress: number;
   setProgress: Dispatch<SetStateAction<number>>;
-  preview: PreviewState | undefined;
-  previewLoading: boolean;
-  previewError: boolean;
-  onRetry: () => void;
+  assets: AssetItem[];
+  organizationName: string;
+  merchantBrandLogoUrl?: string;
 }) {
   const text = builderText(interfaceLocale);
-  const displaySvg = useMemo(
-    () =>
-      preview
-        ? optimisticProgramPreviewSvg({
-            svg: preview.result.svg,
-            sourceDraft: preview.sourceDraft,
-            draft,
-            locale: previewLocale,
-          })
-        : "",
-    [draft, preview, previewLocale],
-  );
   return (
     <div className="builder-preview-panel">
       <div className="builder-preview-header">
@@ -2201,53 +2083,24 @@ function PreviewPanel({
         lang={previewLocale}
         role="tabpanel"
         aria-labelledby={`${idPrefix}-${profile}`}
-        aria-busy={previewLoading || !preview}
-        className={`builder-preview-canvas builder-preview-canvas--${profile.toLocaleLowerCase("en-US")} ${preview ? "builder-preview-canvas--ready" : "builder-preview-canvas--empty"}`}
+        aria-busy="false"
+        className={`builder-preview-canvas builder-preview-canvas--${profile.toLocaleLowerCase("en-US")} builder-preview-canvas--ready`}
       >
-        {preview ? (
-          <span
-            className={`wallet-preview-image-stack wallet-preview-image-stack--${profile.toLocaleLowerCase("en-US")}`}
-          >
-            <WalletPreviewCanvas
-              ariaLabel={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
-              height={preview.result.height}
-              profile={profile}
-              svg={displaySvg}
-              width={preview.result.width}
-            />
-          </span>
-        ) : (
-          <div className="builder-preview-empty" role="status">
-            <RefreshCcw
-              className={previewLoading ? "studio-spin" : ""}
-              size={20}
-              aria-hidden="true"
-            />
-            <strong>{previewLabel(profile, interfaceLocale)}</strong>
-            <span>{previewLoading ? text.previewPreparing : text.previewPending}</span>
-          </div>
-        )}
-        {preview && previewLoading ? (
-          <div className="builder-preview-status" role="status">
-            <RefreshCcw
-              className={previewLoading ? "studio-spin" : ""}
-              size={18}
-              aria-hidden="true"
-            />
-            {previewLoading ? text.previewLoading : text.previewPending}
-          </div>
-        ) : null}
+        <span
+          className={`wallet-preview-image-stack wallet-preview-image-stack--${profile.toLocaleLowerCase("en-US")}`}
+        >
+          <DashboardWalletPreview
+            ariaLabel={`${previewLabel(profile, interfaceLocale)} ${text.previewOnly}`}
+            assets={assets}
+            draft={draft}
+            locale={previewLocale}
+            {...(merchantBrandLogoUrl ? { merchantBrandLogoUrl } : {})}
+            organizationName={organizationName}
+            profile={profile}
+            progress={progress}
+          />
+        </span>
       </div>
-      {previewError ? (
-        <Alert tone="warning" title={text.previewError}>
-          <Button type="button" variant="secondary" onClick={onRetry}>
-            {text.retry}
-          </Button>
-        </Alert>
-      ) : null}
-      {preview?.result.warnings.map((warning) => (
-        <Alert key={warning.code} tone="warning" title={warning.message} />
-      ))}
       <FormField label={text.previewProgress}>
         <div className="builder-preview-progress">
           <input

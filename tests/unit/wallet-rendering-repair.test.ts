@@ -177,7 +177,14 @@ describe("Wallet rendering repair completion", () => {
       unusableProgramLogo,
       organizationLogo,
     ]);
-    expect(Object.keys(result ?? {})).toEqual(["logo.png", "logo@2x.png", "logo@3x.png"]);
+    expect(Object.keys(result ?? {})).toEqual([
+      "logo.png",
+      "logo@2x.png",
+      "logo@3x.png",
+      "thumbnail.png",
+      "thumbnail@2x.png",
+      "thumbnail@3x.png",
+    ]);
     await expect(sharp(Buffer.from(result?.["logo.png"] ?? [])).metadata()).resolves.toMatchObject({
       width: 160,
       height: 50,
@@ -186,6 +193,9 @@ describe("Wallet rendering repair completion", () => {
     await expect(
       sharp(Buffer.from(result?.["logo@3x.png"] ?? [])).metadata(),
     ).resolves.toMatchObject({ width: 480, height: 150, format: "png" });
+    await expect(
+      sharp(Buffer.from(result?.["thumbnail@3x.png"] ?? [])).metadata(),
+    ).resolves.toMatchObject({ width: 270, height: 270, format: "png" });
     expect(storage.get).not.toHaveBeenCalled();
   });
 });

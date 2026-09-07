@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import sharp from "sharp";
@@ -40,45 +40,261 @@ test("uses the organization brand as the unmirrored issuer mark in every Builder
     '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" rx="20" fill="#125B72"/><path d="M26 28h44L48 70z" fill="#F8E3B1"/></svg>',
     "utf8",
   ).toString("base64")}`;
-  const previews: Array<{ profile: string; locale: string; svg: string }> = [];
+  let previewRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/preview")) previewRequests += 1;
+  });
   await mockTemplateGalleryApi(page, {
     merchantBrandLogoDataUri,
-    onBuilderPreview: (profile, locale, preview) => previews.push({ ...preview, profile, locale }),
   });
   await enterBuilder(page);
 
-  for (const [tab, profile] of [
+  for (const [tab] of [
     ["Apple Legacy", "APPLE_WALLET"],
     ["Apple iOS 27+", "APPLE_WALLET"],
     ["Google Wallet", "GOOGLE_WALLET"],
   ] as const) {
     await page.getByRole("tab", { name: tab }).click();
     await expect
-      .poll(() => previews.findLast((preview) => preview.profile === profile)?.svg ?? "")
+      .poll(() =>
+        page.locator(".builder-preview-desktop .wallet-preview-image-stack__canvas").innerHTML(),
+      )
       .toContain(merchantBrandLogoDataUri);
   }
 
-  const previewCountBeforeArabicInterface = previews.length;
   await page.goto("/ar/dashboard/programs/created-program-id/edit");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await page.getByRole("tab", { name: /Apple Legacy/u }).click();
-  await expect.poll(() => previews.length).toBeGreaterThan(previewCountBeforeArabicInterface);
   await expect
-    .poll(
-      () =>
-        previews.findLast(
-          (preview) => preview.profile === "APPLE_WALLET" && preview.locale === "en",
-        )?.svg ?? "",
+    .poll(() =>
+      page.locator(".builder-preview-desktop .wallet-preview-image-stack__canvas").innerHTML(),
     )
     .toContain(merchantBrandLogoDataUri);
-  expect(previews.findLast((preview) => preview.profile === "APPLE_WALLET")?.locale).toBe("en");
-
-  for (const preview of previews) {
-    if (!preview.svg.includes(merchantBrandLogoDataUri)) continue;
-    expect(preview.svg).toContain('data-issuer-brand="organization"');
-    expect(preview.svg).toContain('preserveAspectRatio="xMidYMid meet"');
-  }
+  expect(previewRequests).toBe(0);
   await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
+});
+
+test("captures local frontend wallet preview evidence without a preview endpoint", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const evidenceDirectory =
+    "C:/Users/Alhamza Nazhan/Desktop/TestRES/wallet-preview-frontend-parity/iteration-03-shared-rasterizer";
+  await mkdir(evidenceDirectory, { recursive: true });
+  const merchantBrandLogoDataUri = `data:image/svg+xml;base64,${Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" rx="20" fill="#125B72"/><path d="M20 48h56M48 20v56" stroke="#F8E3B1" stroke-width="10"/></svg>',
+    "utf8",
+  ).toString("base64")}`;
+  let previewRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/preview")) previewRequests += 1;
+  });
+  await mockTemplateGalleryApi(page, { merchantBrandLogoDataUri });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await enterBuilder(page);
+
+  const preview = page.locator(".builder-preview-desktop");
+  await expectBuilderPreviewReady(preview, "en");
+  await expect(preview.locator("[data-wallet-artwork-render-plan]").first()).toBeVisible();
+  await expect(
+    preview.locator("[data-wallet-artwork-transport=inline-plan]").first(),
+  ).toBeVisible();
+  const fontProof: Record<string, unknown> = await page.evaluate(async () => {
+    // The preview is an inline SVG and its Arabic-script scenarios are
+    // selected later in this evidence flow. Explicitly load the approved
+    // faces before the first capture so a font-display swap cannot produce
+    // an invalid parity capture.
+    await Promise.all([
+      document.fonts.load("16px Manrope", "Waflo"),
+      document.fonts.load('16px "Noto Sans Arabic"', "ع"),
+      document.fonts.load("16px Cairo", "ع"),
+    ]);
+    await document.fonts.ready;
+    const root = getComputedStyle(document.body);
+    const configuredNoto = root.getPropertyValue("--font-noto-sans-arabic").trim();
+    const configuredCairo = root.getPropertyValue("--font-cairo").trim();
+    const fontFaces = [...document.fonts].map((face) => ({
+      family: face.family,
+      status: face.status,
+    }));
+    const loadedFace = (family: string) =>
+      fontFaces.some((face) => face.family.includes(family) && face.status === "loaded");
+    return {
+      documentFontsReady: document.fonts.status === "loaded",
+      computedBodyFont: getComputedStyle(document.body).fontFamily,
+      configuredNoto,
+      configuredCairo,
+      notoSansArabicLoaded: loadedFace("Noto Sans Arabic"),
+      cairoLoaded: loadedFace("Cairo"),
+      manropeLoaded: loadedFace("Manrope"),
+      declaredFontFaces: fontFaces.sort((left, right) => left.family.localeCompare(right.family)),
+      previewFont: getComputedStyle(
+        document.querySelector("[data-wallet-artwork-render-plan] text") ?? document.body,
+      ).fontFamily,
+      locales: {},
+    };
+  });
+  await writeFile(
+    `${evidenceDirectory}/font-proof.json`,
+    `${JSON.stringify(fontProof, null, 2)}\n`,
+    "utf8",
+  );
+  await page.screenshot({
+    path: `${evidenceDirectory}/dashboard-english.png`,
+    fullPage: true,
+    animations: "disabled",
+  });
+  await preview.screenshot({
+    path: `${evidenceDirectory}/dashboard-logo.png`,
+    animations: "disabled",
+  });
+  await preview.screenshot({
+    path: `${evidenceDirectory}/dashboard-live-edit-before.png`,
+    animations: "disabled",
+  });
+
+  const networkProof: Record<string, number> = {
+    initialLogoRender: previewRequests,
+  };
+
+  await page
+    .getByRole("button", { name: /^Reward/u })
+    .first()
+    .click();
+  await page.getByRole("tab", { name: /English/u }).click();
+  await page
+    .getByLabel("What does the customer get?")
+    .fill(
+      "An intentionally long reward summary proves the exact shared text wrapping path remains stable.",
+    );
+  networkProof.textEdit = previewRequests - networkProof.initialLogoRender;
+  await preview.screenshot({
+    path: `${evidenceDirectory}/dashboard-long-content.png`,
+    animations: "disabled",
+  });
+  await preview.screenshot({
+    path: `${evidenceDirectory}/dashboard-live-edit-after.png`,
+    animations: "disabled",
+  });
+
+  await page
+    .getByRole("button", { name: /^Appearance/u })
+    .first()
+    .click();
+  await page.locator(".builder-color-control").nth(2).locator("input").nth(1).fill("#146C94");
+  networkProof.colorEdit = previewRequests - networkProof.initialLogoRender - networkProof.textEdit;
+  await preview.screenshot({
+    path: `${evidenceDirectory}/dashboard-custom-colors.png`,
+    animations: "disabled",
+  });
+
+  await page
+    .getByRole("button", { name: /^Languages/u })
+    .first()
+    .click();
+  await addCardLanguage(page, "Arabic");
+  const localePicker = page.getByRole("combobox", { name: "Add language" });
+  await localePicker.fill("Sorani");
+  await page.getByRole("option", { name: /^Kurdish \(Sorani\)/u }).click();
+  await localePicker.fill("Badini");
+  await page.getByRole("option", { name: /^Kurdish \(Badini\)/u }).click();
+
+  for (const [optionName, locale, providerTab, filename] of [
+    [/^Arabic\b/u, "ar", "Apple iOS 27+", "dashboard-arabic.png"],
+    [/^Kurdish \(Sorani\)/u, "ckb", "Google Wallet", "dashboard-sorani.png"],
+    [/^Kurdish \(Badini\)/u, "ku-Arab-IQ", "Google Wallet", "dashboard-badini.png"],
+  ] as const) {
+    await preview.locator(".builder-preview-language").getByRole("combobox").click();
+    await page.getByRole("option", { name: optionName }).click();
+    await preview.getByRole("tab", { name: providerTab }).click();
+    await expectBuilderPreviewReady(preview, locale);
+    const localeFontProof = await page.evaluate(async () => {
+      await document.fonts.ready;
+      const plan = document.querySelector(
+        ".builder-preview-desktop [data-wallet-artwork-render-plan]",
+      );
+      const text = plan?.querySelector("text");
+      const styleRules = [...document.styleSheets].flatMap((sheet) => {
+        try {
+          return [...sheet.cssRules].map((rule) => rule.cssText);
+        } catch {
+          return [];
+        }
+      });
+      return {
+        inlinePlan: plan?.getAttribute("data-wallet-artwork-render-plan") ?? null,
+        planLocale: plan?.getAttribute("lang") ?? null,
+        matchesArabicSelector:
+          plan?.matches('[data-wallet-artwork-render-plan][lang="ar"]') ?? false,
+        matchingStyleRuleLoaded: styleRules.some((rule) =>
+          rule.includes("wallet-artwork-render-plan"),
+        ),
+        computedTextFont: getComputedStyle(text ?? document.body).fontFamily,
+        textSamples: [...(plan?.querySelectorAll("text") ?? [])].slice(0, 8).map((node) => ({
+          content: node.textContent,
+          attributeFont: node.getAttribute("font-family"),
+          computedFont: getComputedStyle(node).fontFamily,
+        })),
+      };
+    });
+    fontProof.locales = {
+      ...(fontProof.locales as Record<string, unknown>),
+      [locale]: localeFontProof,
+    };
+    await page.screenshot({
+      path: `${evidenceDirectory}/${filename}`,
+      fullPage: true,
+      animations: "disabled",
+    });
+  }
+
+  networkProof.localeEdit =
+    previewRequests -
+    networkProof.initialLogoRender -
+    networkProof.textEdit -
+    networkProof.colorEdit;
+
+  await page
+    .getByRole("button", { name: /^Appearance/u })
+    .first()
+    .click();
+  const cropUpload = await sharp({
+    create: {
+      width: 64,
+      height: 40,
+      channels: 4,
+      background: { r: 18, g: 91, b: 114, alpha: 1 },
+    },
+  })
+    .png()
+    .toBuffer();
+  const beforeCropEdit = previewRequests;
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: "local-preview-crop-proof.png",
+    mimeType: "image/png",
+    buffer: cropUpload,
+  });
+  const cropDialog = page.getByRole("dialog", { name: "Crop image safely" });
+  await expect(cropDialog).toBeVisible();
+  await cropDialog.getByRole("slider", { name: "Zoom" }).fill("1.2");
+  await expect(cropDialog.getByRole("slider", { name: "Zoom" })).toHaveValue("1.2");
+  await cropDialog.getByRole("button", { name: "Cancel" }).click();
+  networkProof.cropZoomEdit = previewRequests - beforeCropEdit;
+
+  await writeFile(
+    `${evidenceDirectory}/font-and-network-proof.json`,
+    `${JSON.stringify({ fontProof, networkProof }, null, 2)}\n`,
+    "utf8",
+  );
+
+  expect(previewRequests).toBe(0);
+  expect(networkProof).toEqual({
+    initialLogoRender: 0,
+    textEdit: 0,
+    colorEdit: 0,
+    localeEdit: 0,
+    cropZoomEdit: 0,
+  });
 });
 
 test("switches among the three explicit legacy Apple, iOS 27+, and Google previews", async ({
@@ -99,16 +315,124 @@ test("switches among the three explicit legacy Apple, iOS 27+, and Google previe
   await expect(page.getByText("Stamp arrangement", { exact: true })).toHaveCount(0);
 });
 
+test("keeps each inline Wallet card centered inside its constrained preview frame", async ({
+  page,
+}) => {
+  await mockTemplateGalleryApi(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await enterBuilder(page);
+  const preview = page.locator(".builder-preview-desktop");
+
+  for (const label of ["Apple Legacy", "Apple iOS 27+", "Google Wallet"] as const) {
+    await preview.getByRole("tab", { name: label }).click();
+    await expectBuilderPreviewReady(preview);
+    const alignment = await preview.locator(".builder-preview-canvas").evaluate((frame) => {
+      const card = frame.querySelector<HTMLElement>(".wallet-preview-image-stack");
+      if (!card) throw new Error("Wallet card is missing.");
+      const frameBounds = frame.getBoundingClientRect();
+      const cardBounds = card.getBoundingClientRect();
+      return {
+        leadingSpace: cardBounds.left - frameBounds.left,
+        trailingSpace: frameBounds.right - cardBounds.right,
+      };
+    });
+    expect(Math.abs(alignment.leadingSpace - alignment.trailingSpace), label).toBeLessThanOrEqual(
+      1,
+    );
+    if (label !== "Apple iOS 27+") continue;
+    const artworkBounds = await preview.locator(".builder-preview-canvas").evaluate((frame) => {
+      const root = frame.querySelector<SVGSVGElement>(
+        ".wallet-preview-image-stack__canvas > span > svg",
+      );
+      const poster = frame.querySelector<SVGGraphicsElement>(
+        '[data-production-wallet-artwork="APPLE_POSTER"]',
+      );
+      const coordinateMap = frame.querySelector<SVGGElement>(
+        "[data-wallet-artwork-coordinate-map=canonical-viewbox]",
+      );
+      const master = frame.querySelector<SVGGraphicsElement>(
+        '[data-wallet-plan-layer="apple-google-master"]',
+      );
+      const reward = [...frame.querySelectorAll<SVGTextElement>("text")].find(
+        (node) => node.textContent === "REWARD",
+      );
+      if (!root || !poster || !coordinateMap || !master || !reward)
+        throw new Error("Apple Poster artwork is incomplete.");
+      const sourceViewport = master.querySelector<SVGGElement>(
+        "[data-wallet-artwork-inline-viewport=true]",
+      );
+      const aspect = root.getAttribute("data-apple-poster-aspect")?.split(":").map(Number);
+      const sourceViewBox = sourceViewport
+        ?.getAttribute("data-wallet-artwork-source-view-box")
+        ?.split(/\s+/u)
+        .map(Number);
+      const [posterWidth = Number.NaN, posterHeight = Number.NaN] = aspect ?? [];
+      const [
+        sourceX = Number.NaN,
+        sourceY = Number.NaN,
+        sourceWidth = Number.NaN,
+        sourceHeight = Number.NaN,
+      ] = sourceViewBox ?? [];
+      if (
+        !sourceViewport ||
+        !Number.isFinite(posterWidth) ||
+        !Number.isFinite(posterHeight) ||
+        !Number.isFinite(sourceX) ||
+        !Number.isFinite(sourceY) ||
+        !Number.isFinite(sourceWidth) ||
+        !Number.isFinite(sourceHeight)
+      )
+        throw new Error("Apple Poster viewport metadata is incomplete.");
+      const screenBounds = (
+        element: SVGGraphicsElement,
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+      ) => {
+        const matrix = element.getScreenCTM();
+        if (!matrix) throw new Error("Apple Poster viewport has no screen matrix.");
+        const points = [
+          new DOMPoint(x, y).matrixTransform(matrix),
+          new DOMPoint(x + width, y).matrixTransform(matrix),
+          new DOMPoint(x, y + height).matrixTransform(matrix),
+          new DOMPoint(x + width, y + height).matrixTransform(matrix),
+        ];
+        return {
+          left: Math.min(...points.map((point) => point.x)),
+          right: Math.max(...points.map((point) => point.x)),
+        };
+      };
+      const rootBounds = root.getBoundingClientRect();
+      const posterBounds = screenBounds(coordinateMap, 0, 0, posterWidth, posterHeight);
+      const masterBounds = screenBounds(master, sourceX, sourceY, sourceWidth, sourceHeight);
+      const rewardBounds = reward.getBoundingClientRect();
+      return {
+        rootBounds,
+        posterBounds,
+        masterBounds,
+        rewardBounds,
+        nestedSvgCount: coordinateMap.querySelectorAll("svg").length,
+      };
+    });
+    expect(artworkBounds.nestedSvgCount).toBe(0);
+    expect(artworkBounds.posterBounds.left).toBeGreaterThanOrEqual(artworkBounds.rootBounds.left);
+    expect(artworkBounds.posterBounds.right).toBeLessThanOrEqual(artworkBounds.rootBounds.right);
+    expect(artworkBounds.masterBounds.left).toBeGreaterThanOrEqual(artworkBounds.posterBounds.left);
+    expect(artworkBounds.masterBounds.right).toBeLessThanOrEqual(artworkBounds.posterBounds.right);
+    expect(artworkBounds.rewardBounds.left).toBeGreaterThanOrEqual(artworkBounds.masterBounds.left);
+    expect(artworkBounds.rewardBounds.right).toBeLessThanOrEqual(artworkBounds.masterBounds.right);
+  }
+});
+
 test("builds one continuously saved card with combined languages and lazy truthful previews", async ({
   page,
 }) => {
   const createBodies: Record<string, unknown>[] = [];
   const patchBodies: Record<string, unknown>[] = [];
-  const previewRequests: Array<[string, string]> = [];
   await mockTemplateGalleryApi(page, {
     onCreate: (body) => createBodies.push(body),
     onPatch: (body) => patchBodies.push(body),
-    onBuilderPreview: (profile, locale) => previewRequests.push([profile, locale]),
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await enterBuilder(page);
@@ -197,13 +521,7 @@ test("builds one continuously saved card with combined languages and lazy truthf
   await expect(page.locator(".builder-language-panel")).toHaveAttribute("dir", "rtl");
 
   await page.getByRole("tab", { name: "Apple Legacy" }).click();
-  await expect
-    .poll(() => previewRequests.some(([profile]) => profile === "APPLE_WALLET"))
-    .toBe(true);
   await page.getByRole("tab", { name: "Google Wallet" }).click();
-  await expect
-    .poll(() => previewRequests.some(([profile]) => profile === "GOOGLE_WALLET"))
-    .toBe(true);
 
   await page.reload();
   await page
@@ -280,12 +598,14 @@ test("changes the starting design on the same Program while preserving merchant 
 });
 
 test("renders truthful 0/8, 4/8, and 8/8 Grid-only Wallet Builder previews", async ({ page }) => {
-  const responses: Array<{ profile: string; svg: string }> = [];
-  await mockTemplateGalleryApi(page, {
-    onBuilderPreview: (profile, _locale, preview) => responses.push({ profile, svg: preview.svg }),
+  let previewRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/preview")) previewRequests += 1;
   });
+  await mockTemplateGalleryApi(page);
   await enterBuilder(page);
   const slider = page.locator('.builder-preview-desktop input[type="range"]');
+  const media = builderPreviewMedia(page.locator(".builder-preview-desktop"));
 
   for (const progress of [0, 4, 8]) {
     await slider.evaluate((element, value) => {
@@ -307,51 +627,67 @@ test("renders truthful 0/8, 4/8, and 8/8 Grid-only Wallet Builder previews", asy
           : profile === "APPLE_WALLET"
             ? "APPLE_LEGACY_STRIP"
             : "GOOGLE_HERO";
-      const matching = () =>
-        responses.findLast(
-          (item) =>
-            item.profile === profile &&
-            item.svg.includes(`data-progress="${progress}"`) &&
-            item.svg.includes(`data-production-wallet-artwork="${artworkTarget}"`),
-        );
       await expect
-        .poll(() => matching()?.svg ?? "")
+        .poll(() => media.innerHTML())
         .toContain(`data-production-wallet-artwork="${artworkTarget}"`);
-      const previewSvg = matching()?.svg ?? "";
+      const previewSvg = await media.innerHTML();
       expect(previewSvg, `${label} ${progress}/8`).toContain(
         `data-production-wallet-artwork="${artworkTarget}"`,
       );
+      expect(previewSvg, `${label} ${progress}/8`).toContain(`data-progress="${progress}"`);
       expect(previewSvg, `${label} ${progress}/8`).not.toContain('data-visual-state="MILESTONE"');
     }
   }
+
+  expect(previewRequests).toBe(0);
 
   await expect(
     page.getByText(/CUSTOMER_WEB|APPLE_WALLET|GOOGLE_WALLET|ProgramVersion|Draft revision/u),
   ).toHaveCount(0);
 });
 
-test("uses an explicit Wallet loading state and preserves the last good preview", async ({
+test("updates the inline Wallet preview immediately without a server preview request", async ({
   page,
 }) => {
-  await mockTemplateGalleryApi(page, { previewDelayMs: 650 });
+  let previewRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/preview")) previewRequests += 1;
+  });
+  await mockTemplateGalleryApi(page);
   await enterBuilder(page);
   const preview = page.locator(".builder-preview-desktop");
-  await expect(preview.locator(".builder-preview-empty")).toContainText("Preparing your preview");
-  await expect(builderPreviewMedia(preview)).toHaveCount(0);
+  await expect(preview.locator(".builder-preview-empty")).toHaveCount(0);
   await expectBuilderPreviewReady(preview);
 
   await page.getByRole("tab", { name: "Apple iOS 27+" }).click();
-  await expect(preview.locator(".builder-preview-empty")).toContainText("Apple iOS 27+");
-  await expect(preview.locator(".builder-preview-empty")).toContainText("Preparing your preview");
   await expectBuilderPreviewReady(preview);
+  const beforeTextEdit = await builderPreviewMedia(preview).innerHTML();
 
   await page
-    .getByRole("button", { name: /^Basics/u })
+    .getByRole("button", { name: /^Reward/u })
     .first()
     .click();
-  await page.getByLabel("Card name in your dashboard").fill("Updated coffee card");
-  await expectBuilderPreviewReady(preview);
-  await expect(preview.locator(".builder-preview-status")).toBeVisible();
+  await page.getByRole("tab", { name: /English/u }).click();
+  await page.getByLabel("What does the customer get?").fill("Updated coffee reward");
+  await expect.poll(() => builderPreviewMedia(preview).innerHTML()).not.toBe(beforeTextEdit);
+
+  await page
+    .getByRole("button", { name: /^Appearance/u })
+    .first()
+    .click();
+  const beforeColorEdit = await builderPreviewMedia(preview).innerHTML();
+  await page.locator(".builder-color-control").nth(2).locator("input").nth(1).fill("#146C94");
+  await expect.poll(() => builderPreviewMedia(preview).innerHTML()).not.toBe(beforeColorEdit);
+
+  await page
+    .getByRole("button", { name: /^Languages/u })
+    .first()
+    .click();
+  await addCardLanguage(page, "Arabic");
+  await preview.locator(".builder-preview-language").getByRole("combobox").click();
+  await page.getByRole("option", { name: /^Arabic\b/u }).click();
+  await expect(preview.locator(".builder-preview-canvas")).toHaveAttribute("dir", "rtl");
+  expect(previewRequests).toBe(0);
 });
 
 test("gives each customer field one owner and presents current built-in artwork", async ({
@@ -458,7 +794,7 @@ test("surfaces save failure and revision conflict without silently overwriting",
 
 test("turns review into automatic readiness and continues directly to Studio", async ({ page }) => {
   const observedApiPaths: string[] = [];
-  const observedPreviewProfiles: string[] = [];
+  let previewRequests = 0;
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
     if (
@@ -466,10 +802,7 @@ test("turns review into automatic readiness and continues directly to Studio", a
       requestUrl.pathname.startsWith("/v1/")
     )
       observedApiPaths.push(requestUrl.pathname);
-    if (requestUrl.pathname.endsWith("/preview")) {
-      const profile = requestUrl.searchParams.get("profile");
-      if (profile) observedPreviewProfiles.push(profile);
-    }
+    if (requestUrl.pathname.endsWith("/preview")) previewRequests += 1;
   });
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);
@@ -481,9 +814,7 @@ test("turns review into automatic readiness and continues directly to Studio", a
   await page.getByRole("button", { name: "Continue to Studio" }).click();
   await expect(page).toHaveURL(/\/dashboard\/programs\/created-program-id$/u);
   expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(false);
-  expect(observedPreviewProfiles).toEqual(
-    expect.arrayContaining(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"]),
-  );
+  expect(previewRequests).toBe(0);
 });
 
 test("blocks a Starter merchant at the real card limit before creating an impossible draft", async ({
@@ -649,24 +980,23 @@ test("reserves sticky-footer space and keeps active section navigation visible",
   }
 });
 
-test("coalesces sixty seconds of continuous editing into one save and one preview refresh", async ({
+test("coalesces sixty seconds of continuous editing into one save while rendering the preview locally", async ({
   page,
 }) => {
   test.setTimeout(120_000);
   const patchBodies: Record<string, unknown>[] = [];
-  const previewRequests: Array<[string, string]> = [];
+  let previewRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/preview")) previewRequests += 1;
+  });
   await mockTemplateGalleryApi(page, {
     onPatch: (body) => patchBodies.push(body),
-    onBuilderPreview: (profile, locale) => previewRequests.push([profile, locale]),
   });
   await enterBuilder(page);
   await page
     .getByRole("button", { name: /^Basics/u })
     .first()
     .click();
-  await expect.poll(() => previewRequests.length).toBeGreaterThan(0);
-  previewRequests.length = 0;
-
   const internalName = page.getByLabel("Card name in your dashboard");
   const startedAt = Date.now();
   for (let index = 0; index < 120; index += 1) {
@@ -677,13 +1007,12 @@ test("coalesces sixty seconds of continuous editing into one save and one previe
 
   await expect.poll(() => patchBodies.length).toBe(1);
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-  await expect.poll(() => previewRequests.length).toBe(1);
+  expect(previewRequests).toBe(0);
   expect(patchBodies).toHaveLength(1);
-  expect(previewRequests[0]?.[0]).toBe("APPLE_WALLET");
   expect(editingMs).toBeGreaterThanOrEqual(58_000);
   expect(editingMs).toBeLessThan(90_000);
   console.info(
-    `P3 builder edit metrics ${JSON.stringify({ editingMs, patches: patchBodies.length, previewRefreshes: previewRequests.length })}`,
+    `P3 builder edit metrics ${JSON.stringify({ editingMs, patches: patchBodies.length, previewRequests })}`,
   );
 });
 

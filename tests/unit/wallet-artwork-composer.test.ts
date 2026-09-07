@@ -548,8 +548,10 @@ describe("Wallet artwork composition", () => {
       );
     }
     const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");
-    expect(source.indexOf("canvasOverlaySvg")).toBeLessThan(
-      source.indexOf("const overlay = canvasOverlaySvg"),
+    expect(source).toContain("createWalletArtworkRenderPlan(");
+    expect(source).toContain("const overlay = plan.overlaySvg;");
+    expect(source.indexOf("const overlay = plan.overlaySvg;")).toBeLessThan(
+      source.lastIndexOf(".composite(["),
     );
     expect(readFileSync("deploy/vps/Dockerfile", "utf8")).toContain("fonts-noto-core");
   }, 30_000);

@@ -7,44 +7,89 @@ import {
   type StampLayout,
 } from "@waflo/stamp-engine";
 import sharp from "sharp";
+import {
+  applePosterTopAmbientSvg as renderPlanApplePosterTopAmbientSvg,
+  applePosterGoogleMasterTransform as sharedApplePosterGoogleMasterTransform,
+  createWalletArtworkApplePosterRenderPlan as createSharedApplePosterRenderPlan,
+  createLegacyWalletStampGridPlan,
+  createWalletArtworkRenderPlan,
+  googleMasterContentBounds as sharedGoogleMasterContentBounds,
+  measureWalletArtworkVisibleBounds,
+  type WalletArtworkRenderPlanInput,
+  walletArtworkLegacySurfaceSvg,
+} from "./render-plan.js";
+import {
+  APPLE_GENERIC_LAYOUT,
+  APPLE_LEGACY_LAYOUT,
+  APPLE_POSTER_LAYOUT,
+  GOOGLE_HERO_LAYOUT,
+  walletArtworkArabicTypeface,
+  walletArtworkDimensions,
+  walletArtworkLayouts,
+  walletArtworkPanelCorners,
+  type WalletArtworkLayout,
+  type WalletArtworkPlacement,
+  type WalletArtworkScale,
+  type WalletArtworkTarget,
+} from "./model.js";
 
-export type WalletArtworkTarget =
+export {
+  APPLE_GENERIC_LAYOUT,
+  APPLE_LEGACY_LAYOUT,
+  APPLE_POSTER_LAYOUT,
+  GOOGLE_HERO_LAYOUT,
+  walletArtworkArabicTypeface,
+  walletArtworkDimensions,
+  walletArtworkLayouts,
+  walletArtworkPanelCorners,
+};
+export type {
+  WalletArtworkLayout,
+  WalletArtworkPlacement,
+  WalletArtworkScale,
+  WalletArtworkTarget,
+};
+export { createWalletArtworkRenderPlan, measureWalletArtworkVisibleBounds };
+export type { WalletArtworkRenderPlan, WalletArtworkRenderPlanInput } from "./render-plan.js";
+
+/* Legacy local declarations were moved to model.ts so client and server use one source of geometry.
+type LegacyWalletArtworkTarget =
   | "APPLE_POSTER"
   | "APPLE_GENERIC_STRIP"
   | "APPLE_LEGACY_STRIP"
   | "GOOGLE_HERO";
-export type WalletArtworkScale = 1 | 2 | 3;
+type LegacyWalletArtworkScale = 1 | 2 | 3;
 
-export const walletArtworkDimensions = {
+const legacyWalletArtworkDimensions = {
   APPLE_POSTER: { width: 358, height: 448, maxBytes: 4_000_000 },
   APPLE_GENERIC_STRIP: { width: 375, height: 144, maxBytes: 4_000_000 },
   APPLE_LEGACY_STRIP: { width: 375, height: 123, maxBytes: 4_000_000 },
   GOOGLE_HERO: { width: 1_032, height: 812, maxBytes: 5_000_000 },
 } as const satisfies Readonly<
-  Record<WalletArtworkTarget, { width: number; height: number; maxBytes: number }>
+  Record<LegacyWalletArtworkTarget, { width: number; height: number; maxBytes: number }>
 >;
 
-export interface WalletArtworkPlacement {
+interface LegacyWalletArtworkPlacement {
   readonly left: number;
   readonly top: number;
   readonly width: number;
   readonly height: number;
 }
 
-export interface WalletArtworkLayout {
-  readonly safeArea: WalletArtworkPlacement;
-  readonly stampPanelRegion: WalletArtworkPlacement;
-  readonly stampRegion: WalletArtworkPlacement;
-  readonly identityRegion?: WalletArtworkPlacement;
-  readonly counterBadgeRegion?: WalletArtworkPlacement;
-  readonly rewardRegion?: WalletArtworkPlacement;
-  readonly qrRegion?: WalletArtworkPlacement;
-  readonly decorationRegion: WalletArtworkPlacement;
+interface LegacyWalletArtworkLayout {
+  readonly safeArea: LegacyWalletArtworkPlacement;
+  readonly stampPanelRegion: LegacyWalletArtworkPlacement;
+  readonly stampRegion: LegacyWalletArtworkPlacement;
+  readonly identityRegion?: LegacyWalletArtworkPlacement;
+  readonly counterBadgeRegion?: LegacyWalletArtworkPlacement;
+  readonly rewardRegion?: LegacyWalletArtworkPlacement;
+  readonly qrRegion?: LegacyWalletArtworkPlacement;
+  readonly decorationRegion: LegacyWalletArtworkPlacement;
   readonly centerToleranceRatio: number;
 }
 
-/** Explicit 1x layout contracts keep safe areas and visual hierarchy reviewable. */
-export const APPLE_POSTER_LAYOUT: WalletArtworkLayout = {
+// Legacy 1x layout contracts are retained only as commented historical context.
+const LEGACY_APPLE_POSTER_LAYOUT: LegacyWalletArtworkLayout = {
   safeArea: { left: 18, top: 22, width: 322, height: 404 },
   // Affine projection of GOOGLE_HERO's master component frame
   // (x:32–1000, y:70–750) into Apple’s calibrated safe frame
@@ -65,7 +110,7 @@ export const APPLE_POSTER_LAYOUT: WalletArtworkLayout = {
   centerToleranceRatio: 0.02,
 };
 
-export const APPLE_GENERIC_LAYOUT: WalletArtworkLayout = {
+const LEGACY_APPLE_GENERIC_LAYOUT: LegacyWalletArtworkLayout = {
   safeArea: { left: 5, top: 5, width: 365, height: 134 },
   stampPanelRegion: { left: 5, top: 5, width: 365, height: 134 },
   stampRegion: { left: 22, top: 19, width: 331, height: 106 },
@@ -73,7 +118,7 @@ export const APPLE_GENERIC_LAYOUT: WalletArtworkLayout = {
   centerToleranceRatio: 0.02,
 };
 
-export const APPLE_LEGACY_LAYOUT: WalletArtworkLayout = {
+const LEGACY_APPLE_LEGACY_LAYOUT: LegacyWalletArtworkLayout = {
   safeArea: { left: 5, top: 4, width: 365, height: 115 },
   stampPanelRegion: { left: 5, top: 4, width: 365, height: 115 },
   stampRegion: { left: 22, top: 16, width: 331, height: 91 },
@@ -81,7 +126,7 @@ export const APPLE_LEGACY_LAYOUT: WalletArtworkLayout = {
   centerToleranceRatio: 0.02,
 };
 
-export const GOOGLE_HERO_LAYOUT: WalletArtworkLayout = {
+const LEGACY_GOOGLE_HERO_LAYOUT: LegacyWalletArtworkLayout = {
   safeArea: { left: 54, top: 48, width: 924, height: 716 },
   identityRegion: { left: 68, top: 76, width: 650, height: 108 },
   counterBadgeRegion: { left: 786, top: 70, width: 178, height: 132 },
@@ -93,20 +138,21 @@ export const GOOGLE_HERO_LAYOUT: WalletArtworkLayout = {
   centerToleranceRatio: 0.02,
 };
 
-export const walletArtworkLayouts = {
-  APPLE_POSTER: APPLE_POSTER_LAYOUT,
-  APPLE_GENERIC_STRIP: APPLE_GENERIC_LAYOUT,
-  APPLE_LEGACY_STRIP: APPLE_LEGACY_LAYOUT,
-  GOOGLE_HERO: GOOGLE_HERO_LAYOUT,
-} as const satisfies Readonly<Record<WalletArtworkTarget, WalletArtworkLayout>>;
+const legacyWalletArtworkLayouts = {
+  APPLE_POSTER: LEGACY_APPLE_POSTER_LAYOUT,
+  APPLE_GENERIC_STRIP: LEGACY_APPLE_GENERIC_LAYOUT,
+  APPLE_LEGACY_STRIP: LEGACY_APPLE_LEGACY_LAYOUT,
+  GOOGLE_HERO: LEGACY_GOOGLE_HERO_LAYOUT,
+} as const satisfies Readonly<Record<LegacyWalletArtworkTarget, LegacyWalletArtworkLayout>>;
 
-export const walletArtworkPanelCorners = {
+const legacyWalletArtworkPanelCorners = {
   APPLE_POSTER: { topLeft: 38, topRight: 18, bottomLeft: 18, bottomRight: 38 },
   GOOGLE_HERO: { topLeft: 72, topRight: 30, bottomLeft: 30, bottomRight: 72 },
 } as const;
 
-export const walletArtworkArabicTypeface =
+const legacyWalletArtworkArabicTypeface =
   "'Noto Sans Arabic','Noto Sans','DejaVu Sans','Segoe UI','Arial',sans-serif";
+*/
 
 export interface WalletArtworkQrCenterLogo {
   /** Optional merchant/store mark. Unsafe or undecodable variants fall back to a plain QR. */
@@ -151,6 +197,19 @@ export interface WalletArtworkCompositionInput {
   readonly lowerGroupOffsetY?: number;
   /** Canonical BCP-47 card locale. */
   readonly locale: string;
+}
+
+/**
+ * Server-side entry point for the serializable composition authority. The
+ * Sharp pipeline owns only decoding, resampling and compositing; it must not
+ * recalculate artwork geometry, wrapping or locale presentation.
+ */
+export function createWalletArtworkCompositionPlan(
+  input: WalletArtworkCompositionInput,
+  target: Exclude<WalletArtworkTarget, "APPLE_POSTER">,
+  scale: WalletArtworkScale = 1,
+) {
+  return createWalletArtworkRenderPlan(input satisfies WalletArtworkRenderPlanInput, target, scale);
 }
 
 export interface WalletArtworkVisibleBounds extends WalletArtworkPlacement {
@@ -259,27 +318,7 @@ export function measureRenderedStampArtwork(
   stampArtwork: Pick<PublishedMembershipStampRenderResult, "width" | "height" | "positions">,
   stampSize: number,
 ): WalletArtworkVisibleBounds {
-  if (stampArtwork.positions.length === 0) {
-    throw new Error("Wallet stamp artwork contains no positioned stamps.");
-  }
-  const half = stampSize / 2;
-  const left = Math.max(
-    0,
-    Math.min(...stampArtwork.positions.map((position) => position.x - half)),
-  );
-  const top = Math.max(0, Math.min(...stampArtwork.positions.map((position) => position.y - half)));
-  const right = Math.min(
-    stampArtwork.width,
-    Math.max(...stampArtwork.positions.map((position) => position.x + half)),
-  );
-  const bottom = Math.min(
-    stampArtwork.height,
-    Math.max(...stampArtwork.positions.map((position) => position.y + half)),
-  );
-  if (right <= left || bottom <= top) {
-    throw new Error("Wallet stamp artwork visible bounds are empty.");
-  }
-  return { left, top, right, bottom, width: right - left, height: bottom - top };
+  return measureWalletArtworkVisibleBounds(stampArtwork, stampSize);
 }
 
 function escapeXml(value: string): string {
@@ -360,16 +399,19 @@ function googleHeroMotif(width: number, height: number, accent: string, secondar
 }
 
 /** Full-bleed Apple Poster header atmosphere, placed on the final canvas. */
-function applePosterTopAmbientSvg(
+export function applePosterTopAmbientSvg(
   width: number,
   height: number,
   accent: string,
   secondary: string,
 ): string {
+  return renderPlanApplePosterTopAmbientSvg(width, height, accent, secondary);
+  /* Moved to render-plan.ts so browser and Sharp compose identical atmosphere.
   const badgeX = width * 0.84;
   const badgeY = height * 0.174;
   const badgeClearRadius = width * 0.125;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="apple-top-horizontal" gradientUnits="userSpaceOnUse" x1="${width * 0.06}" y1="0" x2="${width}" y2="0"><stop offset="0%" stop-color="${secondary}" stop-opacity="0"/><stop offset="51%" stop-color="${secondary}" stop-opacity="0.04"/><stop offset="100%" stop-color="${accent}" stop-opacity="0.125"/></linearGradient><radialGradient id="apple-top-glow" gradientUnits="userSpaceOnUse" cx="${badgeX}" cy="${badgeY}" r="${width * 0.43}"><stop offset="0%" stop-color="${secondary}" stop-opacity="0.145"/><stop offset="58%" stop-color="${secondary}" stop-opacity="0.06"/><stop offset="100%" stop-color="${secondary}" stop-opacity="0"/></radialGradient><linearGradient id="apple-top-fade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${height * 0.34}"><stop offset="0%" stop-color="#FFFFFF" stop-opacity="1"/><stop offset="64%" stop-color="#FFFFFF" stop-opacity="0.72"/><stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient><radialGradient id="apple-top-badge-clear" gradientUnits="userSpaceOnUse" cx="${badgeX}" cy="${badgeY}" r="${badgeClearRadius}"><stop offset="0%" stop-color="#000000"/><stop offset="64%" stop-color="#000000"/><stop offset="100%" stop-color="#FFFFFF"/></radialGradient><linearGradient id="apple-top-line" gradientUnits="userSpaceOnUse" x1="${width * 0.04}" y1="0" x2="${width}" y2="0"><stop offset="0%" stop-color="${accent}" stop-opacity="0"/><stop offset="62%" stop-color="${accent}" stop-opacity="0.075"/><stop offset="100%" stop-color="${accent}" stop-opacity="0.025"/></linearGradient><mask id="apple-top-visible"><rect width="${width}" height="${height * 0.36}" fill="url(#apple-top-fade)"/><circle cx="${badgeX}" cy="${badgeY}" r="${badgeClearRadius}" fill="url(#apple-top-badge-clear)"/></mask></defs><g mask="url(#apple-top-visible)"><path d="M0 0H${width}V${height * 0.29}C${width * 0.77} ${height * 0.245},${width * 0.48} ${height * 0.235},${width * 0.12} ${height * 0.155}C${width * 0.055} ${height * 0.13},0 ${height * 0.12},0 ${height * 0.1}Z" fill="url(#apple-top-horizontal)"/><ellipse cx="${badgeX}" cy="${badgeY}" rx="${width * 0.44}" ry="${height * 0.28}" fill="url(#apple-top-glow)"/><path d="M${width * 0.05} ${height * 0.08}C${width * 0.31} ${height * 0.01},${width * 0.68} ${height * 0.1},${width * 1.02} ${height * 0.035}" fill="none" stroke="url(#apple-top-line)" stroke-width="${Math.max(1.2, width * 0.003)}" stroke-linecap="round"/></g></svg>`;
+  */
 }
 
 function relativeLuminance(hex: string): number {
@@ -774,6 +816,23 @@ function qrFrameSvg(
   return `<rect x="${region.left}" y="${region.top + (google ? 9 : 5)}" width="${region.width}" height="${region.height}" rx="${radius}" fill="#000000" opacity="${darkTheme ? 0.2 : 0.1}"/><rect x="${region.left}" y="${region.top}" width="${region.width}" height="${region.height}" rx="${radius}" fill="#FFFEFC" stroke="${accentColor}" stroke-width="${google ? 4 : 2}" stroke-opacity="0.42"/><path d="M${region.left + radius} ${region.top + (google ? 3 : 2)}H${region.left + region.width - radius}" stroke="#FFFFFF" stroke-width="${google ? 3 : 1.5}" stroke-linecap="round" opacity="0.9"/>`;
 }
 
+// These historical helpers are retained temporarily for source-level review
+// while active artwork composition has moved to render-plan.ts. The server no
+// longer invokes them; production output is created from the shared plan.
+void [
+  motif,
+  googleHeroMotif,
+  googleHeroSurfaceColor,
+  legacyAppleSurfaceColor,
+  counterBadgeSvg,
+  calibratedGoogleHeroStampPanelRegion,
+  identitySvg,
+  rewardPanelSvg,
+  imageFirstStampPanelSvg,
+  qrFrameSvg,
+  calibratedGoogleHeroQrRegion,
+];
+
 function canvasSvg(
   input: WalletArtworkCompositionInput,
   target: WalletArtworkTarget,
@@ -781,6 +840,16 @@ function canvasSvg(
   height: number,
   scale: WalletArtworkScale,
 ): string {
+  const plan = createWalletArtworkRenderPlan(
+    input satisfies WalletArtworkRenderPlanInput,
+    target as Exclude<WalletArtworkTarget, "APPLE_POSTER">,
+    scale,
+  );
+  if (plan.width !== width || plan.height !== height) {
+    throw new Error("Wallet artwork plan dimensions are invalid.");
+  }
+  return plan.baseSvg;
+  /* Legacy server-only layout decisions moved to render-plan.ts.
   const logical = walletArtworkDimensions[target];
   const layout = walletArtworkLayouts[target];
   const { backgroundColor, accentColor, secondaryColor } = input.theme;
@@ -833,6 +902,7 @@ function canvasSvg(
   // Apple-only decorative layer.
   const safeReserve = "";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><radialGradient id="${ambientId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.18"/><stop offset="100%" stop-color="${secondaryColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${surfaceBackgroundColor}"/><ellipse cx="${logical.width * 0.79}" cy="${logical.height * 0.18}" rx="${logical.width * 0.23}" ry="${logical.height * 0.19}" fill="url(#${ambientId})" opacity="${baseAmbientOpacity}"/>${refinedCounterAmbient}<path d="M${logical.width * 0.06} ${logical.height * 0.075}C${logical.width * 0.3} ${logical.height * 0.025},${logical.width * 0.56} ${logical.height * 0.13},${logical.width * 0.9} ${logical.height * 0.065}" fill="none" stroke="${secondaryColor}" stroke-width="${Math.max(4, logical.width * 0.012)}" stroke-linecap="round" opacity="${headerCurveOpacity}"/>${artworkMotif}${safeReserve}${foreground}<metadata data-composer="waflo-wallet-artwork-v5" data-target="${target}" data-scale="${scale}" data-source-stamp-digest="${input.stampArtwork.contentDigest}"/></svg>`;
+  */
 }
 
 function canvasOverlaySvg(
@@ -841,6 +911,13 @@ function canvasOverlaySvg(
   width: number,
   height: number,
 ): string | undefined {
+  if (target !== "GOOGLE_HERO") return undefined;
+  const plan = createWalletArtworkRenderPlan(input satisfies WalletArtworkRenderPlanInput, target);
+  if (plan.width !== width || plan.height !== height) {
+    throw new Error("Wallet artwork overlay dimensions are invalid.");
+  }
+  return plan.overlaySvg;
+  /* Legacy server-only overlay decisions moved to render-plan.ts.
   if (target !== "APPLE_POSTER" && target !== "GOOGLE_HERO") return undefined;
   const logical = walletArtworkDimensions[target];
   const regions = requiredImageFirstRegions(walletArtworkLayouts[target]);
@@ -865,7 +942,12 @@ function canvasOverlaySvg(
     : regions.rewardRegion;
   const overlay = `${identitySvg(input, scaleIdentityHeader(regions.identityRegion), typeface)}${counterBadgeSvg(input, scaleHeader(regions.counterBadgeRegion), typeface)}${rewardPanelSvg(input, baseRewardRegion, typeface)}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}">${overlay}</svg>`;
+  */
 }
+
+// composeWalletArtwork now consumes the plan directly. Retain these wrappers
+// only while the historical source section is removed in a follow-up cleanup.
+void [canvasSvg, canvasOverlaySvg];
 
 function requiredImageFirstRegions(layout: WalletArtworkLayout): {
   identityRegion: WalletArtworkPlacement;
@@ -992,6 +1074,13 @@ function legacyAppleSurfaceSvg(
   height: number,
   scale: WalletArtworkScale,
 ): string {
+  return walletArtworkLegacySurfaceSvg(
+    input satisfies WalletArtworkRenderPlanInput,
+    width,
+    height,
+    scale,
+  );
+  /* Moved to render-plan.ts so browser and Sharp share the legacy field.
   const logical = walletArtworkDimensions.APPLE_LEGACY_STRIP;
   const { backgroundColor, accentColor, secondaryColor } = input.theme;
   const surfaceBackgroundColor = legacyAppleSurfaceColor(backgroundColor);
@@ -999,6 +1088,7 @@ function legacyAppleSurfaceSvg(
   // This is deliberately a continuous field, not a framed image card: the
   // top/bottom fades let the strip settle into the native Wallet background.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}"><defs><linearGradient id="${id}-top" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.16"/><stop offset="42%" stop-color="${secondaryColor}" stop-opacity="0.045"/><stop offset="100%" stop-color="${surfaceBackgroundColor}" stop-opacity="0"/></linearGradient><linearGradient id="${id}-bottom" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.11"/><stop offset="42%" stop-color="${accentColor}" stop-opacity="0.025"/><stop offset="100%" stop-color="${surfaceBackgroundColor}" stop-opacity="0"/></linearGradient><radialGradient id="${id}-glow" cx="86%" cy="20%" r="48%"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.13"/><stop offset="100%" stop-color="${accentColor}" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${surfaceBackgroundColor}"/><rect width="100%" height="100%" fill="url(#${id}-glow)"/><path d="M-8 12C81 0 160 12 243 5S351 2 385 12" fill="none" stroke="${secondaryColor}" stroke-width="1.2" stroke-linecap="round" opacity="0.14"/><path d="M-12 110C78 120 147 106 227 114S334 121 385 105" fill="none" stroke="${accentColor}" stroke-width="1" stroke-linecap="round" opacity="0.11"/><rect width="100%" height="42" fill="url(#${id}-top)"/><rect y="81" width="100%" height="42" fill="url(#${id}-bottom)"/><metadata data-composer="waflo-legacy-apple-strip-v1" data-text="none" data-layout="balanced-wallet-rows"/></svg>`;
+  */
 }
 
 async function composeLegacyAppleStripArtwork(
@@ -1016,8 +1106,6 @@ async function composeLegacyAppleStripArtwork(
     throw new Error("Legacy Apple stamp artwork tile count does not match progress semantics.");
   }
 
-  const columns = Math.max(...rows);
-  const rowCount = rows.length;
   const grid = {
     left: layout.stampRegion.left * scale,
     top: layout.stampRegion.top * scale,
@@ -1025,6 +1113,66 @@ async function composeLegacyAppleStripArtwork(
     height: layout.stampRegion.height * scale,
   };
   const source = await rasterizedVisibleStamp(input);
+  const legacyPlan = createLegacyWalletStampGridPlan(
+    input satisfies WalletArtworkRenderPlanInput,
+    scale,
+    source.aspectRatio,
+  );
+  if (legacyPlan.rows.join(",") !== rows.join(",")) {
+    throw new Error("Legacy Wallet stamp distribution drifted from the shared render plan.");
+  }
+  const planTiles = new Map(legacyPlan.tiles.map((tile) => [tile.index, tile]));
+  const resizedTiles = await Promise.all(
+    tiles.map(async (tile) => {
+      const placement = planTiles.get(tile.index);
+      if (!placement) throw new Error("Legacy Wallet stamp plan is incomplete.");
+      return {
+        index: tile.index,
+        bytes: await sharp(tile.bytes)
+          .resize({
+            width: placement.width,
+            height: placement.height,
+            fit: "fill",
+            withoutEnlargement: false,
+            kernel: sharp.kernel.lanczos3,
+          })
+          .png()
+          .toBuffer(),
+      };
+    }),
+  );
+  const rasterTiles = new Map(resizedTiles.map((tile) => [tile.index, tile]));
+  const composites = legacyPlan.tiles.map((placement) => {
+    const tile = rasterTiles.get(placement.index);
+    if (!tile) throw new Error("Legacy Apple stamp artwork order is invalid.");
+    return { input: tile.bytes, left: placement.left, top: placement.top };
+  });
+  const bytes = await sharp(Buffer.from(legacyAppleSurfaceSvg(input, width, height, scale), "utf8"))
+    .composite(composites)
+    .png({ compressionLevel: 9, adaptiveFiltering: true })
+    .toBuffer();
+  await validateWalletArtworkPng({ bytes, target, scale });
+  return {
+    bytes,
+    target,
+    scale,
+    width,
+    height,
+    contentDigest: createHash("sha256").update(bytes).digest("hex"),
+    sourceStampDigest: input.stampArtwork.contentDigest,
+    sourceVisibleBounds: source.visibleBounds,
+    sourceVisibleRasterAspectRatio: source.aspectRatio,
+    stampPlacement: legacyPlan.stampPlacement,
+    stampGridRows: legacyPlan.rows,
+    stampPanelRegion: {
+      left: layout.stampPanelRegion.left * scale,
+      top: layout.stampPanelRegion.top * scale,
+      width: layout.stampPanelRegion.width * scale,
+      height: layout.stampPanelRegion.height * scale,
+    },
+    stampRegion: grid,
+  };
+  /* Legacy server layout calculations moved to render-plan.ts.
   const sourceGapRatio =
     (source.aspectRatio * rowCount - columns) / (columns - 1 - source.aspectRatio * (rowCount - 1));
   const estimatedTileSize =
@@ -1147,6 +1295,7 @@ async function composeLegacyAppleStripArtwork(
     },
     stampRegion: grid,
   };
+  */
 }
 
 async function premiumQrArtwork(
@@ -1267,23 +1416,10 @@ export async function validateWalletArtworkPng(input: {
 }
 
 /** Functional union of the approved Google composition, excluding only canvas dead space. */
-export const googleMasterContentBounds: WalletArtworkPlacement = {
-  left: 32,
-  top: 25,
-  width: 968,
-  // Includes the Google QR's complete framed shadow through Y=759.
-  height: 734,
-};
+export const googleMasterContentBounds: WalletArtworkPlacement = sharedGoogleMasterContentBounds;
 
 /** One content-group-to-Poster transform; no Apple component has an independent bound. */
-export const applePosterGoogleMasterTransform = {
-  // Affine calibration against the approved iOS 27 Poster: retain the
-  // master’s source-space panel inset, then project the full component group.
-  scale: 353 / googleMasterContentBounds.width,
-  translateX: 2,
-  // Keeps the functional group above the empirical Apple safe cutoff.
-  translateY: 33,
-} as const;
+export const applePosterGoogleMasterTransform = sharedApplePosterGoogleMasterTransform;
 
 function transformGoogleMasterPlacement(
   placement: WalletArtworkPlacement,
@@ -1306,58 +1442,29 @@ function transformGoogleMasterPlacement(
   };
 }
 
-function applePosterFooterContinuationSvg(
-  width: number,
-  height: number,
-  scale: WalletArtworkScale,
-  accentColor: string,
-  secondaryColor: string,
-): Buffer {
-  const transitionTop = 290 * scale;
-  const cutoff = 330 * scale;
-  return Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><linearGradient id="footer-fade" gradientUnits="userSpaceOnUse" x1="0" y1="${transitionTop}" x2="0" y2="${cutoff}"><stop offset="0%" stop-color="${secondaryColor}" stop-opacity="0.07"/><stop offset="100%" stop-color="${secondaryColor}" stop-opacity="0"/></linearGradient><linearGradient id="arc-fade" gradientUnits="userSpaceOnUse" x1="0" y1="${transitionTop}" x2="0" y2="${cutoff}"><stop offset="0%" stop-color="${accentColor}" stop-opacity="0.105"/><stop offset="100%" stop-color="${accentColor}" stop-opacity="0"/></linearGradient><clipPath id="footer-visible"><rect x="0" y="${transitionTop}" width="${width}" height="${cutoff - transitionTop}"/></clipPath></defs><g clip-path="url(#footer-visible)"><rect x="0" y="${transitionTop}" width="${width}" height="${cutoff - transitionTop}" fill="url(#footer-fade)"/><circle cx="${-22 * scale}" cy="${385 * scale}" r="${112 * scale}" fill="none" stroke="url(#arc-fade)" stroke-width="${1.5 * scale}"/><path d="M${width * 0.9} ${292 * scale}C${width * 0.62} ${286 * scale},${width * 0.24} ${314 * scale},${width * -0.1} ${299 * scale}" fill="none" stroke="url(#arc-fade)" stroke-width="${1.05 * scale}" stroke-linecap="round"/></g></svg>`,
-    "utf8",
-  );
-}
-
 async function composeApplePosterFromGoogleMaster(
   input: WalletArtworkCompositionInput,
   scale: WalletArtworkScale,
 ): Promise<ComposedWalletArtwork> {
+  const sharedPosterPlan = createSharedApplePosterRenderPlan(
+    input satisfies WalletArtworkRenderPlanInput,
+    scale,
+  );
   // Keep the source-space adjustment shared by the master render and its
   // returned visible bounds. The pixels already used this offset; reporting
   // the unadjusted QR region made downstream QR crops miss the code.
-  const posterLowerGroupOffsetY = -20;
-  const master = await composeWalletArtwork(
-    {
-      ...input,
-      organizationName: "\u200B",
-      counterForegroundColor: "#FFFFFF",
-      headerScale: 1.3,
-      appleStampPanelInset: 18,
-      headerOffsetY: -15,
-      lowerGroupOffsetY: posterLowerGroupOffsetY,
-      suppressMemberPrefix: true,
-      applePosterRefinement: true,
-    },
-    "GOOGLE_HERO",
-    1,
-  );
-  const width = walletArtworkDimensions.APPLE_POSTER.width * scale;
-  const height = walletArtworkDimensions.APPLE_POSTER.height * scale;
-  const masterWidth = Math.round(
-    googleMasterContentBounds.width * applePosterGoogleMasterTransform.scale * scale,
-  );
-  const masterHeight = Math.round(
-    googleMasterContentBounds.height * applePosterGoogleMasterTransform.scale * scale,
-  );
+  const posterLowerGroupOffsetY = sharedPosterPlan.master.input.lowerGroupOffsetY ?? 0;
+  const master = await composeWalletArtwork(sharedPosterPlan.master.input, "GOOGLE_HERO", 1);
+  const width = sharedPosterPlan.width;
+  const height = sharedPosterPlan.height;
+  const masterWidth = sharedPosterPlan.master.destination.width;
+  const masterHeight = sharedPosterPlan.master.destination.height;
   const masterImage = await sharp(master.bytes)
     .extract({
-      left: googleMasterContentBounds.left,
-      top: googleMasterContentBounds.top,
-      width: googleMasterContentBounds.width,
-      height: googleMasterContentBounds.height,
+      left: sharedPosterPlan.master.sourceBounds.left,
+      top: sharedPosterPlan.master.sourceBounds.top,
+      width: sharedPosterPlan.master.sourceBounds.width,
+      height: sharedPosterPlan.master.sourceBounds.height,
     })
     .resize({
       width: masterWidth,
@@ -1372,31 +1479,17 @@ async function composeApplePosterFromGoogleMaster(
   })
     .composite([
       {
-        input: applePosterFooterContinuationSvg(
-          width,
-          height,
-          scale,
-          input.theme.accentColor,
-          input.theme.secondaryColor,
-        ),
+        input: Buffer.from(sharedPosterPlan.footerSvg, "utf8"),
         left: 0,
         top: 0,
       },
       {
         input: masterImage,
-        left: applePosterGoogleMasterTransform.translateX * scale,
-        top: applePosterGoogleMasterTransform.translateY * scale,
+        left: sharedPosterPlan.master.destination.left,
+        top: sharedPosterPlan.master.destination.top,
       },
       {
-        input: Buffer.from(
-          applePosterTopAmbientSvg(
-            width,
-            height,
-            input.theme.accentColor,
-            input.theme.secondaryColor,
-          ),
-          "utf8",
-        ),
+        input: Buffer.from(sharedPosterPlan.topAmbientSvg, "utf8"),
         left: 0,
         top: 0,
       },
@@ -1455,16 +1548,11 @@ export async function composeWalletArtwork(
   if (target === "GOOGLE_HERO" && scale !== 1) {
     throw new Error("Google hero artwork has one fixed 1032x812 output size.");
   }
-  const dimensions = walletArtworkDimensions[target];
-  const width = dimensions.width * scale;
-  const height = dimensions.height * scale;
+  const plan = createWalletArtworkCompositionPlan(input, target, scale);
+  const width = plan.width;
+  const height = plan.height;
   const layout = walletArtworkLayouts[target];
-  const stampRegion = {
-    left: layout.stampRegion.left * scale,
-    top: layout.stampRegion.top * scale,
-    width: layout.stampRegion.width * scale,
-    height: layout.stampRegion.height * scale,
-  };
+  const stampRegion = plan.stampRegion;
   const stampPanelRegion = {
     // This contract reports the semantic stamp field. The visually calibrated
     // Google panel extends upward around it, while the Grid itself remains
@@ -1491,19 +1579,13 @@ export async function composeWalletArtwork(
     width: resized.info.width,
     height: resized.info.height,
   };
-  const base = Buffer.from(canvasSvg(input, target, width, height, scale), "utf8");
-  let qrRegion = scaledPlacement(layout.qrRegion, scale);
-  if (qrRegion && target === "GOOGLE_HERO" && input.lowerGroupOffsetY) {
-    qrRegion = { ...qrRegion, top: qrRegion.top + input.lowerGroupOffsetY * scale };
-  }
-  if (qrRegion && target === "GOOGLE_HERO") {
-    qrRegion = calibratedGoogleHeroQrRegion(input, qrRegion);
-  }
+  const base = Buffer.from(plan.baseSvg, "utf8");
+  const qrRegion = plan.qr?.frame;
   const qr =
     qrRegion && target === "GOOGLE_HERO"
       ? await premiumQrArtwork(input, target, qrRegion, scale)
       : undefined;
-  const overlay = canvasOverlaySvg(input, target, width, height);
+  const overlay = plan.overlaySvg;
   const bytes = await sharp(base)
     .composite([
       { input: resized.data, left: stampPlacement.left, top: stampPlacement.top },

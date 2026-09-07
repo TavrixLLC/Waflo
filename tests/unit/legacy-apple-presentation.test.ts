@@ -234,6 +234,15 @@ describe("legacy Apple Wallet presentation", () => {
       expect(metadata.width, name).toBe(size);
       expect(metadata.height, name).toBe(size);
     }
+    for (const [name, size] of [
+      ["thumbnail.png", 90],
+      ["thumbnail@2x.png", 180],
+      ["thumbnail@3x.png", 270],
+    ] as const) {
+      const metadata = await sharp(files[name]).metadata();
+      expect(metadata.width, name).toBe(size);
+      expect(metadata.height, name).toBe(size);
+    }
   });
 
   it("localizes newly front-facing legacy labels", async () => {

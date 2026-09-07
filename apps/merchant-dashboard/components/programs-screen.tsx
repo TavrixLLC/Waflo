@@ -152,7 +152,7 @@ export function ProgramsScreen({
     setError("");
     try {
       if (view === "builder") {
-        const [templateData, locationData, assetData] = await Promise.all([
+        const [templateData, locationData, assetData, organizationData] = await Promise.all([
           apiFetch<TemplateItem[]>(
             `/v1/organizations/${organizationId}/programs/templates?locale=${ar ? "AR" : "EN"}`,
           ),
@@ -160,11 +160,13 @@ export function ProgramsScreen({
             `/v1/organizations/${organizationId}/locations`,
           ),
           apiFetch<CursorPage<AssetItem>>(`/v1/organizations/${organizationId}/assets?limit=30`),
+          apiFetch<OrganizationPresentationView>(`/v1/organizations/${organizationId}`),
         ]);
         setTemplates(templateData);
         setLocations(Array.isArray(locationData) ? locationData : locationData.items);
         setAssets(assetData.items);
         setAssetCursor(assetData.nextCursor);
+        setBrandLogoUrl(organizationData.brandLogoAsset?.contentUrl ?? null);
         return;
       }
 
@@ -385,6 +387,8 @@ export function ProgramsScreen({
         templates={templates}
         locations={locations}
         assets={assets}
+        organizationName={membership.organization.name}
+        {...(brandLogoUrl ? { merchantBrandLogoUrl: brandLogoUrl } : {})}
         onAssetUploaded={(asset) =>
           setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)])
         }

@@ -7,6 +7,18 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./dashboard-preview": {
+      "types": "./src/dashboard-preview.ts",
+      "default": "./dist/dashboard-preview.js"
+    },
+    "./model": {
+      "types": "./src/model.ts",
+      "default": "./dist/model.js"
+    },
+    "./render-plan": {
+      "types": "./src/render-plan.ts",
+      "default": "./dist/render-plan.js"
     }
   },
   "scripts": {

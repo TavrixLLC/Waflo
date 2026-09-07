@@ -46,6 +46,7 @@ import type {
 } from "./program-studio-presentation";
 
 export interface OrganizationPublicationContext {
+  name?: string;
   billingProfile: {
     subscriptionStatus: string;
     trialStart: string | null;

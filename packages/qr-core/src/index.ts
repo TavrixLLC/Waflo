@@ -1,6 +1,7 @@
 import jsQR from "jsqr";
 import QRCode from "qrcode";
 import sharp from "sharp";
+export { createQrPreviewMarkup } from "./preview.js";
 
 type JsQrDecoder = (
   data: Uint8ClampedArray,
@@ -178,39 +179,6 @@ export async function createQrSvg(
  * The preview caller supplies a non-secret sample value; production credentials
  * continue to be rendered only by the Wallet providers and customer QR routes.
  */
-export function createQrPreviewMarkup(
-  value: string,
-  options: { margin?: number; errorCorrectionLevel?: "M" | "Q" | "H" } = {},
-): { viewSize: number; markup: string } {
-  const margin = Math.max(0, Math.min(8, Math.floor(options.margin ?? 4)));
-  const qr = QRCode.create(value, {
-    errorCorrectionLevel: options.errorCorrectionLevel ?? "Q",
-  });
-  const moduleCount = qr.modules.size;
-  const viewSize = moduleCount + margin * 2;
-  const rows: string[] = [];
-  for (let row = 0; row < moduleCount; row += 1) {
-    const runs: string[] = [];
-    let column = 0;
-    while (column < moduleCount) {
-      if (qr.modules.data[row * moduleCount + column] === 0) {
-        column += 1;
-        continue;
-      }
-      const start = column;
-      while (column < moduleCount && qr.modules.data[row * moduleCount + column] !== 0) {
-        column += 1;
-      }
-      runs.push(`M${start + margin} ${row + margin}h${column - start}v1h-${column - start}z`);
-    }
-    if (runs.length) rows.push(`<path d="${runs.join("")}"/>`);
-  }
-  return {
-    viewSize,
-    markup: `<rect width="${viewSize}" height="${viewSize}" fill="#FFFFFF"/><g fill="#111827">${rows.join("")}</g>`,
-  };
-}
-
 const TRANSFER_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export async function decodeQrImage(

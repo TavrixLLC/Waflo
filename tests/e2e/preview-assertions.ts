@@ -16,13 +16,18 @@ export async function expectBuilderPreviewReady(
         if (element instanceof HTMLCanvasElement) {
           return element.dataset.previewReady === "true" && element.width > 0 && element.height > 0;
         }
-        if (!(element instanceof HTMLImageElement)) return false;
-        if (!element.complete || element.naturalWidth <= 0) return false;
-        if (!locale) return true;
-        const encodedSvg = element.currentSrc.split(",", 2)[1];
-        return Boolean(
-          encodedSvg && decodeURIComponent(encodedSvg).includes(`<svg lang="${locale}"`),
-        );
+        if (element instanceof HTMLImageElement) {
+          if (!element.complete || element.naturalWidth <= 0) return false;
+          if (!locale) return true;
+          const encodedSvg = element.currentSrc.split(",", 2)[1];
+          return Boolean(
+            encodedSvg && decodeURIComponent(encodedSvg).includes(`<svg lang="${locale}"`),
+          );
+        }
+
+        const svg = element.querySelector("svg");
+        if (!svg || element.dataset.previewReady !== "true") return false;
+        return !locale || svg.getAttribute("lang") === locale;
       }, expectedLocale ?? null),
     )
     .toBe(true);

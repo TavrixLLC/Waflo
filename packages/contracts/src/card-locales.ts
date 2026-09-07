@@ -294,7 +294,7 @@ export function directionForCardLocale(value: string): CardTextDirection {
 
 function fontStackForPresentation(locale: string, script: string): string {
   if (locale === "ckb" || locale === "ku-Arab-IQ") {
-    return 'var(--font-noto-sans-arabic, "Noto Sans Arabic"), var(--font-cairo, Cairo), system-ui, sans-serif';
+    return 'var(--font-sirwan, Sirwan), var(--font-noto-sans-arabic, "Noto Sans Arabic"), var(--font-cairo, Cairo), system-ui, sans-serif';
   }
   if (script === "Arab") {
     return 'var(--font-cairo, Cairo), "Noto Sans Arabic", system-ui, sans-serif';

@@ -62,7 +62,7 @@ describe("W2 Round 2 visual pipeline", () => {
     await expect(processMerchantImage(jpeg, "image/png", crop)).rejects.toThrow("does not match");
   });
 
-  it("keeps a 1600 × 440 merchant-logo source rectangular while deriving safe square variants", async () => {
+  it("requires a square source crop for Wallet-compatible merchant logos", async () => {
     const logo = await sharp({
       create: {
         width: 1600,
@@ -73,12 +73,21 @@ describe("W2 Round 2 visual pipeline", () => {
     })
       .png()
       .toBuffer();
-    const processed = await processMerchantImage(logo, "image/png", crop);
+    await expect(
+      processMerchantImage(logo, "image/png", crop, { requireSquareCrop: true }),
+    ).rejects.toThrow("Wallet logo crops must be square.");
+
+    const processed = await processMerchantImage(
+      logo,
+      "image/png",
+      { x: 0.3625, y: 0, width: 0.275, height: 1, zoom: 1 },
+      { requireSquareCrop: true },
+    );
 
     expect(processed.source).toMatchObject({ width: 1600, height: 440, format: "png" });
     expect(processed.original).toMatchObject({
       code: "ORIGINAL_SAFE",
-      width: 1600,
+      width: 440,
       height: 440,
       mimeType: "image/png",
     });

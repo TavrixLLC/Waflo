@@ -448,8 +448,31 @@ async function captureFinalReleaseVisuals(context: BrowserContext): Promise<void
   await builder.close();
 
   const studio = await context.newPage();
+  const previewRequests: string[] = [];
+  studio.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/preview")) previewRequests.push(request.url());
+  });
   await openSeededStudio(studio, { state: "DRAFT" });
-  await expect(studio.locator(".studio-device-frame img")).toBeVisible();
+  const inlinePreview = studio.locator(
+    '.studio-device-frame [data-preview-ready="true"][data-wallet-profile="APPLE_LEGACY"]',
+  );
+  await expect(inlinePreview).toBeVisible();
+  await expect(inlinePreview.locator(".wallet-preview-image-stack__svg > svg")).toBeVisible();
+  await expect
+    .poll(() =>
+      inlinePreview.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const svg = element.querySelector("svg");
+        return Boolean(
+          svg?.getAttribute("viewBox") &&
+            bounds.width > 0 &&
+            bounds.height > 0 &&
+            element.dataset.previewReady === "true",
+        );
+      }),
+    )
+    .toBe(true);
+  expect(previewRequests).toEqual([]);
   await capture(studio, "04-final-studio.png");
   await studio.close();
 

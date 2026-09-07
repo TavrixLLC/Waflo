@@ -422,6 +422,9 @@ importers:
       '@waflo/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@waflo/qr-core':
+        specifier: workspace:*
+        version: link:../../packages/qr-core
       '@waflo/security':
         specifier: workspace:*
         version: link:../../packages/security
@@ -431,6 +434,9 @@ importers:
       '@waflo/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@waflo/wallet-artwork':
+        specifier: workspace:*
+        version: link:../../packages/wallet-artwork
       lucide-react:
         specifier: 1.27.0
         version: 1.27.0(react@19.2.8)

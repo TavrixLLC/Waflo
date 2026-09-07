@@ -6,6 +6,10 @@ import {
 } from "@waflo/contracts";
 import { createQrPreviewMarkup } from "@waflo/qr-core";
 import type { StampOutputProfile } from "@waflo/stamp-engine";
+import {
+  dashboardWalletPreviewTextLines,
+  renderDashboardWalletPreviewShell,
+} from "@waflo/wallet-artwork/dashboard-preview";
 import type { DashboardWalletArtwork } from "./wallet-preview-artwork.js";
 
 export interface ProgramPreviewCompositionInput {
@@ -91,16 +95,6 @@ function graphemeSegments(value: string): string[] {
   );
 }
 
-function previewWidth(value: string, locale: string): number {
-  const { script } = cardLocalePresentation(locale);
-  return graphemeSegments(value).reduce((width, grapheme) => {
-    if (/^\p{Mark}+$/u.test(grapheme)) return width;
-    if (script === "Arab" || script === "Hebr") return width + 0.7;
-    if (/^[\u2e80-\uffff]$/u.test(grapheme)) return width + 1;
-    return width + 0.56;
-  }, 0);
-}
-
 function truncate(value: string, limit: number): string {
   const graphemes = graphemeSegments(value);
   return graphemes.length > limit
@@ -108,33 +102,6 @@ function truncate(value: string, limit: number): string {
     : value;
 }
 
-function previewTextLines(
-  value: string,
-  lineLimit: number,
-  maximumLines = 2,
-  locale = "en",
-): string[] {
-  const words = value.trim().split(/\s+/u).filter(Boolean);
-  if (words.length === 0) return [""];
-  const lines: string[] = [];
-  let current = "";
-  for (const rawWord of words) {
-    const word = truncate(rawWord, lineLimit);
-    const candidate = current ? `${current} ${word}` : word;
-    if (previewWidth(candidate, locale) <= lineLimit * 0.56 || current.length === 0) {
-      current = candidate;
-      continue;
-    }
-    lines.push(current);
-    current = word;
-  }
-  if (current) lines.push(current);
-  if (lines.length <= maximumLines) return lines;
-  return [
-    ...lines.slice(0, maximumLines - 1),
-    truncate(lines.slice(maximumLines - 1).join(" "), lineLimit),
-  ];
-}
 function safeDataImage(value: string | undefined): string {
   return value && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/i.test(value)
     ? escapeXml(value)
@@ -209,14 +176,21 @@ function googleIssuerBrandMark(
   width: number,
   height: number,
 ): string {
-  if (value) return issuerBrandMark(value, x, y, width, height, Math.min(width, height) / 2);
-  // Android's native logo plate holds this issuer mark on its leading optical
-  // edge rather than geometrically centering its compact rectangular asset.
-  const innerWidth = width * 0.7;
-  const innerHeight = height * 0.52;
-  const innerX = x;
-  const innerY = y + height * 0.22;
-  return `<circle cx="${x + width / 2}" cy="${y + height / 2}" r="${Math.min(width, height) / 2}" fill="#FFFFFF"/>${wafloIssuerMark(innerX, innerY, innerWidth, innerHeight, Math.min(innerWidth, innerHeight) * 0.18, "#A03A21")}`;
+  const radius = Math.min(width, height) / 2;
+  const inset = Math.max(2, radius * 0.22);
+  const clipId = `google-issuer-clip-${x}-${y}-${width}-${height}`;
+  const href = safeDataImage(value);
+  const content = href
+    ? `<image href="${href}" x="${x + inset}" y="${y + inset}" width="${width - inset * 2}" height="${height - inset * 2}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${clipId})"/>`
+    : wafloIssuerMark(
+        x + inset,
+        y + inset,
+        width - inset * 2,
+        height - inset * 2,
+        Math.max(2, radius * 0.18),
+        "#E4572E",
+      );
+  return `<defs><clipPath id="${clipId}"><circle cx="${x + width / 2}" cy="${y + height / 2}" r="${radius - inset}"/></clipPath></defs><circle cx="${x + width / 2}" cy="${y + height / 2}" r="${radius}" fill="#FFFFFF"/>${content}`;
 }
 
 function qrCode(x: number, y: number, size: number): string {
@@ -510,7 +484,7 @@ function composeCustomer(
   return { svg, width, height, warnings };
 }
 
-function composeAppleLegacyWithProductionArtwork(
+function _composeAppleLegacyWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
@@ -529,7 +503,12 @@ function composeAppleLegacyWithProductionArtwork(
   const progressX = countX;
   const progressAnchor = rtl ? "start" : "end";
   const markX = rtl ? 382 : 38;
-  const rewardLines = previewTextLines(input.rewardSummary, rtl ? 32 : 42, 2, locale.locale);
+  const rewardLines = dashboardWalletPreviewTextLines(
+    input.rewardSummary,
+    rtl ? 32 : 42,
+    2,
+    locale.locale,
+  );
   const strip = productionArtworkImage(
     input.walletArtwork,
     "APPLE_LEGACY_STRIP",
@@ -546,7 +525,7 @@ function composeAppleLegacyWithProductionArtwork(
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple legacy Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="LEGACY" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="legacy-production-strip" data-provider-managed-layout="true" data-provider-owned-geometry="true" data-apple-strip-aspect="375:123"><rect width="100%" height="100%" fill="#15171B"/><rect data-apple-front-surface="true" x="24" y="20" width="412" height="581" rx="16" fill="${input.backgroundColor}"/><g data-apple-identity="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, markX, 31, 40, 40, 10, "#D2603C")}<text ${textAttributes} x="${identityX}" y="57" text-anchor="start" font-family="${appleFont}" font-size="17" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 48))}</text></g><g data-apple-header-field="stamps"><text ${textAttributes} x="${countX}" y="41" text-anchor="end" font-family="${appleFont}" font-size="11" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.stamps}</text><text ${progressTextAttributes()} x="${progressX}" y="63" text-anchor="${progressAnchor}" font-family="${appleFont}" font-size="19" font-weight="760" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g><g data-apple-progress-strip="true" data-apple-progress-artwork="production-compositor">${strip}</g><g data-apple-secondary-field="reward"><text ${textAttributes} x="${textX}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.reward}</text>${rewardLines.map((line, index) => `<text ${textAttributes} x="${textX}" y="${289 + index * 22}" text-anchor="start" font-family="${appleFont}" font-size="${index === 0 ? 18 : 16}" font-weight="720" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g><g data-apple-barcode-region="provider-managed" data-apple-barcode-source="qr-core"><rect x="${nativeQr.x}" y="${nativeQr.y}" width="${nativeQr.size}" height="${nativeQr.size}" rx="0" fill="#FFFFFF"/>${qrCode(nativeQr.x, nativeQr.y, nativeQr.size)}</g><metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;primary:empty;secondary:reward;back:member,status,program" data-reward-value="${escapeXml(input.rewardSummary)}">The strip is the exact production APPLE_LEGACY_STRIP PNG. Progress and reward use the same Apple field tiers as the issued pass; the native QR uses the shared QR renderer.</metadata></svg>`;
   return { svg, width, height, warnings: [] };
 }
-function composeApplePosterWithProductionArtwork(
+function _composeApplePosterWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
@@ -578,7 +557,7 @@ function composeApplePosterWithProductionArtwork(
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-production-artwork" data-provider-owned-geometry="true" data-apple-poster-aspect="358:448"><defs><clipPath id="apple-poster-card-clip"><rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="14"/></clipPath><linearGradient id="apple-poster-native-top-material" gradientUnits="userSpaceOnUse" x1="0" y1="${cardY}" x2="0" y2="161"><stop offset="0" stop-color="#000000" stop-opacity=".425"/><stop offset="6%" stop-color="#000000" stop-opacity=".29"/><stop offset="30%" stop-color="#000000" stop-opacity=".23"/><stop offset="90%" stop-color="#000000" stop-opacity=".07"/><stop offset="100%" stop-color="#000000" stop-opacity="0"/></linearGradient></defs><rect width="100%" height="100%" fill="#15171B"/><g clip-path="url(#apple-poster-card-clip)"><rect data-apple-poster-surface="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${input.backgroundColor}"/><g data-poster-artwork="production-compositor">${poster}</g><rect data-apple-native-top-material="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="141" fill="url(#apple-poster-native-top-material)"/><rect data-apple-native-reserve="true" x="${cardX}" y="${posterY + posterHeight}" width="${cardWidth}" height="${nativeReserveHeight}" fill="${input.backgroundColor}"/></g><g data-apple-native-primary-logo="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, logoX, 38, 29, 29, 7)}<text ${textAttributes} x="${merchantX}" y="58" text-anchor="${merchantAnchor}" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 24))}</text></g><metadata data-apple-poster-preview="true">The complete production APPLE_POSTER PNG is displayed at its native 358 by 448 aspect ratio. The empty lower reserve is Apple-owned continuation only; no dashboard placeholder content is drawn.</metadata></svg>`;
   return { svg, width, height, warnings: [] };
 }
-function composeGoogleWithProductionArtwork(
+function _composeGoogleWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
@@ -605,7 +584,12 @@ function composeGoogleWithProductionArtwork(
   );
   const titleTextX = rtl ? 418 : 42;
   const nativeTitleLineGap = 46.5;
-  const title = previewTextLines(truncate(input.programName, 60), rtl ? 18 : 16, 2, locale.locale)
+  const title = dashboardWalletPreviewTextLines(
+    truncate(input.programName, 60),
+    rtl ? 18 : 16,
+    2,
+    locale.locale,
+  )
     .map(
       (line, index) =>
         `<text ${textAttributes} x="${titleTextX}" y="${143 + index * nativeTitleLineGap}" text-anchor="${anchor}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="35" font-weight="700" fill="#202124">${escapeXml(line)}</text>`,
@@ -645,15 +629,36 @@ export function composeProgramPreview(
         }
       : providerInput;
   const result =
-    input.profile === "APPLE_WALLET"
-      ? input.appleWalletVariant === "POSTER"
-        ? composeApplePosterWithProductionArtwork(calibratedProviderInput)
-        : composeAppleLegacyWithProductionArtwork(calibratedProviderInput)
-      : input.profile === "GOOGLE_WALLET"
-        ? composeGoogleWithProductionArtwork(calibratedProviderInput)
-        : composeCustomer(calibratedProviderInput);
+    input.profile === "APPLE_WALLET" || input.profile === "GOOGLE_WALLET"
+      ? renderDashboardWalletPreviewShell({
+          profile:
+            input.profile === "GOOGLE_WALLET"
+              ? "GOOGLE_WALLET"
+              : input.appleWalletVariant === "POSTER"
+                ? "APPLE_IOS27"
+                : "APPLE_LEGACY",
+          locale: calibratedProviderInput.locale,
+          organizationName: calibratedProviderInput.organizationName,
+          programName: calibratedProviderInput.programName,
+          rewardSummary: calibratedProviderInput.rewardSummary,
+          progress: calibratedProviderInput.progress,
+          goal: calibratedProviderInput.goal,
+          backgroundColor: calibratedProviderInput.backgroundColor,
+          foregroundColor: calibratedProviderInput.foregroundColor,
+          artworkDataUri: calibratedProviderInput.walletArtwork?.dataUri ?? "",
+          ...(calibratedProviderInput.logoDataUri
+            ? { logoDataUri: calibratedProviderInput.logoDataUri }
+            : {}),
+          ...(calibratedProviderInput.merchantBrandLogoDataUri
+            ? { merchantBrandLogoDataUri: calibratedProviderInput.merchantBrandLogoDataUri }
+            : {}),
+        })
+      : composeCustomer(calibratedProviderInput);
   return {
-    ...result,
+    svg: result.svg,
+    width: result.width,
+    height: result.height,
+    warnings: [...result.warnings],
     digest: createHash("sha256").update(result.svg).digest("hex"),
   };
 }
