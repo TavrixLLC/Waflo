@@ -911,7 +911,10 @@ test.describe
 
       await page.goto("/en/dashboard/settings");
       await expect(page.getByRole("main").getByRole("heading", { name: "Settings" })).toBeVisible();
-      await page.locator('input[name="category"]').fill("Specialty café");
+      const activityType = page.locator('select[name="category"]');
+      await expect(activityType).toBeVisible();
+      await activityType.selectOption("food-and-beverage");
+      await expect(activityType).toHaveValue("food-and-beverage");
       await page.getByRole("button", { name: "Save changes" }).click();
       await expect(page.getByText("Settings saved.")).toBeVisible();
 

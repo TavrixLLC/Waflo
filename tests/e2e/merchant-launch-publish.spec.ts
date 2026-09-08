@@ -383,32 +383,29 @@ test("keeps ready, live, saved-change, paused, and archived access states truthf
   ).toHaveCount(0);
 });
 
-test("distinguishes a loading customer preview from a confirmed unavailable preview", async ({
+test("renders the draft customer preview immediately without legacy preview transport", async ({
   page,
 }) => {
   const desktop = { width: 1440, height: 900 };
   await resetScenario(page, { studioState: "READY", previewDelayMs: 600 }, desktop);
 
-  const loadingPreview = page.getByRole("region", { name: "Card preview" });
-  await expect(loadingPreview.getByText("Loading preview…", { exact: true })).toBeVisible();
-  await expect(loadingPreview.getByText("Preview unavailable", { exact: true })).toHaveCount(0);
-  await expect(loadingPreview.getByRole("img", { name: "Customer card preview" })).toBeVisible({
-    timeout: 10_000,
-  });
-  await expect(loadingPreview.getByText("Published card summary", { exact: true })).toHaveCount(0);
+  const preview = page.getByRole("region", { name: "Card preview" });
+  await preview.getByRole("tab", { name: "Customer" }).click();
+  const customerSummary = preview.locator(".studio-published-customer-preview");
+  await expect(customerSummary).toBeVisible();
+  await expect(customerSummary).toHaveAttribute("role", "img");
+  await expect(preview.getByText("Loading preview…", { exact: true })).toHaveCount(0);
+  await expect(preview.getByText("Preview unavailable", { exact: true })).toHaveCount(0);
+  await expect(preview.getByText("Published card summary", { exact: true })).toHaveCount(0);
 
-  await page.route("**/programs/created-program-id/preview?**", async (route) => {
-    await route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({
-        error: { code: "PROGRAM_PREVIEW_UNAVAILABLE", message: "Preview unavailable." },
-      }),
-    });
+  const previewRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/preview")) previewRequests.push(url.pathname);
   });
-  await loadingPreview.getByRole("slider").fill("1");
-  await expect(loadingPreview.getByText("Preview unavailable", { exact: true })).toBeVisible();
-  await expect(loadingPreview.getByText("Loading preview…", { exact: true })).toHaveCount(0);
+  await preview.getByRole("slider").fill("1");
+  await expect(customerSummary).toBeVisible();
+  expect(previewRequests).toEqual([]);
 });
 
 test("centers and locks publication and lifecycle dialogs across the required viewport matrix", async ({

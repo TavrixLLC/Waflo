@@ -35,7 +35,20 @@ async function openStudio(
   if (publishedSummary) {
     await expect(page.locator(".studio-published-customer-preview")).toBeVisible();
   } else {
-    await expect(page.locator(".studio-device-frame img")).toBeVisible();
+    const preview = page.locator('.studio-device-frame [data-preview-ready="true"]');
+    await expect(preview).toBeVisible();
+    await expect
+      .poll(() =>
+        preview.evaluate((element) => {
+          const svg = element.querySelector("svg");
+          return (
+            element.getAttribute("data-preview-ready") === "true" &&
+            Boolean(svg?.viewBox.baseVal.width) &&
+            Boolean(svg?.viewBox.baseVal.height)
+          );
+        }),
+      )
+      .toBe(true);
   }
 }
 

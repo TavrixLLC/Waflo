@@ -794,7 +794,7 @@ test("surfaces save failure and revision conflict without silently overwriting",
 
 test("turns review into automatic readiness and continues directly to Studio", async ({ page }) => {
   const observedApiPaths: string[] = [];
-  let previewRequests = 0;
+  const validationPreviewProfiles: string[] = [];
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
     if (
@@ -802,7 +802,9 @@ test("turns review into automatic readiness and continues directly to Studio", a
       requestUrl.pathname.startsWith("/v1/")
     )
       observedApiPaths.push(requestUrl.pathname);
-    if (requestUrl.pathname.endsWith("/preview")) previewRequests += 1;
+    if (requestUrl.pathname.endsWith("/preview")) {
+      validationPreviewProfiles.push(requestUrl.searchParams.get("profile") ?? "");
+    }
   });
   await mockTemplateGalleryApi(page);
   await enterBuilder(page);
@@ -814,7 +816,9 @@ test("turns review into automatic readiness and continues directly to Studio", a
   await page.getByRole("button", { name: "Continue to Studio" }).click();
   await expect(page).toHaveURL(/\/dashboard\/programs\/created-program-id$/u);
   expect(observedApiPaths.some((path) => path.includes("/test-sessions"))).toBe(false);
-  expect(previewRequests).toBe(0);
+  // Review is an explicit server-side validation action. The editor itself
+  // remains local; Review materializes exactly the bounded provider evidence.
+  expect(validationPreviewProfiles).toEqual(["CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"]);
 });
 
 test("blocks a Starter merchant at the real card limit before creating an impossible draft", async ({

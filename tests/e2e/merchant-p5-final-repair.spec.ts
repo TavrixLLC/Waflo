@@ -67,20 +67,16 @@ async function openBuilder(
     locale?: "en" | "ar";
     viewport?: { width: number; height: number };
     studioState?: "DRAFT" | "READY" | "LIVE";
-    onBuilderPreview?: (profile: string, locale: string, svg: string) => void;
   } = {},
 ): Promise<void> {
   const {
     locale = "en",
     viewport = { width: 1440, height: 1000 },
     studioState = "DRAFT",
-    onBuilderPreview,
   } = options;
   await mockTemplateGalleryApi(page, {
     studioState,
     billingStatus: studioState === "DRAFT" ? "PENDING_ACTIVATION" : "ACTIVE",
-    onBuilderPreview: (profile, previewLocale, preview) =>
-      onBuilderPreview?.(profile, previewLocale, preview.svg),
   });
   await page.setViewportSize(viewport);
   await page.goto(`/${locale}/dashboard/programs/new`);
@@ -227,12 +223,12 @@ test("uses a neutral Library summary when renderer-ready data is unavailable", a
 });
 
 test("selects Arabic customer content for the Arabic editor and preview", async ({ page }) => {
-  const previewResponses: Array<{ locale: string; profile: string; svg: string }> = [];
-  await openBuilder(page, {
-    locale: "ar",
-    onBuilderPreview: (profile, previewLocale, svg) =>
-      previewResponses.push({ locale: previewLocale, profile, svg }),
+  const previewRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/preview")) previewRequests.push(url.pathname);
   });
+  await openBuilder(page, { locale: "ar" });
   await page.getByRole("button", { name: /اللغات/u }).click();
   await addBuilderLanguage(page, "Arabic");
   const arabicTab = page.getByRole("tab", { name: /العربية/u });
@@ -240,17 +236,14 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
   const localizedName = "بطاقة القهوة العربية";
   await page.getByLabel("اسم البطاقة").fill(localizedName);
   await expect(page.locator(".builder-save-state")).toContainText("تم الحفظ", { timeout: 10_000 });
-  await expect
-    .poll(() =>
-      previewResponses.some(
-        (response) =>
-          response.locale === "ar" &&
-          response.profile === "APPLE_WALLET" &&
-          response.svg.includes('data-production-wallet-artwork="APPLE_LEGACY_STRIP"'),
-      ),
-    )
-    .toBe(true);
-  await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
+  const preview = page.locator(".builder-preview-desktop");
+  await expectBuilderPreviewReady(preview, "ar");
+  await expect(
+    preview.locator(
+      '[data-preview-ready="true"][data-wallet-profile="APPLE_LEGACY"] [data-wallet-artwork-render-plan="v1"][data-production-wallet-artwork="APPLE_LEGACY_STRIP"]',
+    ),
+  ).toHaveAttribute("lang", "ar");
+  expect(previewRequests).toEqual([]);
 });
 
 test("keeps focused bottom fields above the mobile Builder footer", async ({ page }) => {
