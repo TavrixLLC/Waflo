@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   billingDowngradeErrorMessage,
   billingDowngradeViolationMessage,
+  billingRequestErrorMessage,
 } from "../../apps/merchant-dashboard/components/billing-presentation.js";
 import { googleLinkErrorMessage } from "../../apps/merchant-dashboard/components/security-presentation.js";
 
@@ -14,6 +15,17 @@ describe("Dashboard billing and Google-link presentation", () => {
     expect(billingDowngradeViolationMessage(violation, "ar")).toContain("أرشف بطاقات الولاء");
     expect(billingDowngradeViolationMessage(violation, "ar")).toContain("7");
     expect(billingDowngradeErrorMessage(undefined, "ar")).toContain("لا يمكن خفض الخطة");
+  });
+
+  it("maps the known billing permission code without relying on backend prose", () => {
+    const fallback = "Unable to load billing.";
+    expect(billingRequestErrorMessage("PERMISSION_DENIED", fallback, "en")).toBe(
+      "You do not have permission to view billing.",
+    );
+    expect(billingRequestErrorMessage("PERMISSION_DENIED", fallback, "ar")).toBe(
+      "ليس لديك صلاحية لعرض الفوترة.",
+    );
+    expect(billingRequestErrorMessage("UNKNOWN", fallback, "ar")).toBe(fallback);
   });
 
   it("uses stable Google-link error codes and keeps password feedback inline-safe", () => {

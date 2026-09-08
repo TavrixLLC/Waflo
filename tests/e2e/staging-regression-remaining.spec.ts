@@ -184,6 +184,48 @@ test("maps the Arabic billing downgrade violation from its stable code and retai
   await captureStagingRepairEvidence(page, "08-billing-arabic-error.png");
 });
 
+test("keeps a direct Manager Billing route denied with localized stable-code feedback", async ({
+  page,
+}) => {
+  const rawBackendProse = "Your role does not allow this action.";
+  let observedCode = "";
+  await mockTemplateGalleryApi(page, { memberRole: "MANAGER" });
+  await page.route(
+    `**/v1/organizations/${templateGalleryOrganizationId}/billing`,
+    async (route) => {
+      observedCode = "PERMISSION_DENIED";
+      const origin = route.request().headers().origin ?? "http://localhost:3001";
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        headers: {
+          "access-control-allow-origin": origin,
+          "access-control-allow-credentials": "true",
+        },
+        body: JSON.stringify({
+          error: {
+            code: observedCode,
+            message: rawBackendProse,
+            requestId: "billing-permission-denied",
+          },
+        }),
+      });
+    },
+  );
+
+  await page.goto("/en/dashboard/billing");
+  await expect(page.locator(".dashboard-nav-link", { hasText: "Billing" })).toHaveCount(0);
+  const billingError = page.locator(".billing-load-error[role=alert]");
+  await expect(billingError).toContainText("You do not have permission to view billing.");
+  await expect(billingError).not.toContainText(rawBackendProse);
+  expect(observedCode).toBe("PERMISSION_DENIED");
+
+  await page.goto("/ar/dashboard/billing");
+  await expect(billingError).toBeVisible();
+  expect(await billingError.textContent()).toMatch(/[\u0600-\u06FF]/u);
+  await expect(billingError).not.toContainText(rawBackendProse);
+});
+
 test("uses themed keyboard-accessible SearchableSelect controls for Activity Type and Default Language", async ({
   page,
 }) => {

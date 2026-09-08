@@ -10,6 +10,22 @@ export interface BillingDowngradeViolation {
 }
 
 /**
+ * Stable billing error codes are presentation data, not backend prose. This
+ * keeps a direct, unauthorized Billing route useful without exposing a raw
+ * English API message in a localized dashboard.
+ */
+export function billingRequestErrorMessage(
+  code: string | undefined,
+  fallback: string,
+  locale: "en" | "ar",
+): string {
+  if (code !== "PERMISSION_DENIED") return fallback;
+  return locale === "ar"
+    ? "ليس لديك صلاحية لعرض الفوترة."
+    : "You do not have permission to view billing.";
+}
+
+/**
  * Billing returns stable domain codes and numeric facts. Presentation belongs
  * to the active interface locale, never to a backend English `message`.
  */

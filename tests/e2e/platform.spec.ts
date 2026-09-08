@@ -1312,7 +1312,7 @@ test.describe
       await expect(page).toHaveURL(/\/en\/dashboard/);
       await expect(page.locator(".dashboard-nav-link", { hasText: "Billing" })).toHaveCount(0);
       await page.goto("/en/dashboard/billing");
-      await expect(page.getByText("Your role does not allow this action.")).toBeVisible();
+      await expect(page.getByText("You do not have permission to view billing.")).toBeVisible();
 
       await page.context().clearCookies();
       await login(page, "owner@waflo.local", "Waflo-Development-2026");

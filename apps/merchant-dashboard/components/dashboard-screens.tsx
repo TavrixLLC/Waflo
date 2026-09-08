@@ -64,6 +64,7 @@ import { googleLinkErrorMessage } from "./security-presentation";
 import {
   billingDowngradeErrorMessage,
   billingDowngradeViolationMessage,
+  billingRequestErrorMessage,
   canPersistCatalogSelection,
 } from "./billing-presentation";
 import {
@@ -1559,7 +1560,11 @@ export function BillingScreen({
       }
       // Billing API codes are intentionally rendered through local copy. Raw
       // operational messages may be English even when the dashboard is not.
-      return fallback;
+      return billingRequestErrorMessage(
+        caught instanceof ApiClientError ? caught.code : undefined,
+        fallback,
+        ar ? "ar" : "en",
+      );
     },
     [ar],
   );
