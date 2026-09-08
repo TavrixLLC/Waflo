@@ -24,7 +24,7 @@ describe("release readiness policy", () => {
     });
   });
 
-  it("blocks catalog drift, unavailable workers, and deployed demo Wallets", () => {
+  it("warns on degraded staging wallet worker while still blocking catalog drift and demo Wallets", () => {
     expect(
       evaluateReleaseReadiness(
         {
@@ -34,8 +34,26 @@ describe("release readiness policy", () => {
           GOOGLE_WALLET: { status: "READY", metadata: { demo: true } },
         },
         "staging",
-      ).blockers,
-    ).toEqual(["GOOGLE_WALLET:DEMO_MODE", "STRIPE:INVALID_CONFIG", "WALLET_WORKER:DEGRADED"]);
+      ),
+    ).toEqual({
+      blockers: ["GOOGLE_WALLET:DEMO_MODE", "STRIPE:INVALID_CONFIG"],
+      warnings: ["WALLET_WORKER:DEGRADED"],
+    });
+  });
+
+  it("still blocks degraded wallet worker outside staging", () => {
+    expect(
+      evaluateReleaseReadiness(
+        {
+          ...readyJourney,
+          WALLET_WORKER: { status: "DEGRADED" },
+        },
+        "production",
+      ),
+    ).toEqual({
+      blockers: ["WALLET_WORKER:DEGRADED"],
+      warnings: [],
+    });
   });
 
   it("allows Apple external certification only as an explicit staging warning", () => {

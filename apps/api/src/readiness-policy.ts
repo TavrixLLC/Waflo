@@ -44,6 +44,14 @@ export function evaluateReleaseReadiness(
       warnings.push(`${component}:${result.status}`);
       continue;
     }
+    if (
+      component === "WALLET_WORKER" &&
+      result.status === "DEGRADED" &&
+      environment === "staging"
+    ) {
+      warnings.push(`${component}:${result.status}`);
+      continue;
+    }
 
     if (result.status !== "READY") {
       blockers.push(`${component}:${result.status}`);
