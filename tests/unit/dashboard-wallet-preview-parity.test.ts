@@ -14,6 +14,7 @@ import {
   createWalletArtworkApplePosterRenderPlan,
   renderWalletArtworkPlanSvg,
   applePosterGoogleMasterRenderInput,
+  walletArtworkContrastRatio,
 } from "../../packages/wallet-artwork/src/render-plan.js";
 import { createWalletArtworkCompositionPlan } from "../../packages/wallet-artwork/src/index.js";
 import {
@@ -228,6 +229,62 @@ describe("Dashboard Wallet shared preview shell", () => {
     expect(browser.svg.match(/data-google-native-title="true"/u)).toHaveLength(1);
     expect(server.svg.match(/data-google-native-title="true"/u)).toHaveLength(1);
   });
+
+  it("uses a deterministic readable Google native foreground on dark and light surfaces", async () => {
+    const { browserInput } = await renderPair("en", "GOOGLE_WALLET");
+    const dark = renderDashboardWalletPreviewSvg({
+      ...browserInput,
+      backgroundColor: "#171A20",
+      foregroundColor: "#202124",
+    });
+    const light = renderDashboardWalletPreviewSvg({
+      ...browserInput,
+      backgroundColor: "#F5E5D2",
+      foregroundColor: "#2A1710",
+    });
+    expect(dark.svg).toContain('data-google-native-identity="true"');
+    expect(dark.svg).toContain('fill="#FFFFFF"');
+    expect(light.svg).toContain('fill="#2A1710"');
+    expect(walletArtworkContrastRatio("#FFFFFF", "#171B22")).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each([
+    [
+      "en",
+      "An intentionally long English merchant and reward description that must remain inside the Apple poster",
+    ],
+    [
+      "ar",
+      "وصف عربي طويل جداً للتاجر والبرنامج والمكافأة يجب أن يبقى ضمن حدود بطاقة آبل دون أن يخرج منها",
+    ],
+  ] as const)(
+    "bounds long %s iOS 27+ text inside the canonical Poster viewport",
+    async (locale, longText) => {
+      const { browserInput } = await renderPair(locale, "APPLE_IOS27");
+      const plan = createDashboardWalletPreviewArtworkPlan({
+        ...browserInput,
+        organizationName: longText,
+        programName: longText,
+        rewardSummary: longText,
+      });
+      const preview = renderDashboardWalletPreviewSvg({
+        ...browserInput,
+        organizationName: longText,
+        programName: longText,
+        rewardSummary: longText,
+      });
+      expect(plan.posterPlan).toBeDefined();
+      const poster = plan.posterPlan;
+      if (!poster) throw new Error("Apple Poster plan is required for iOS 27+.");
+      expect(poster.master.destination.width / poster.master.sourceBounds.width).toBeCloseTo(
+        poster.master.destination.height / poster.master.sourceBounds.height,
+        12,
+      );
+      expect(preview.svg).toContain('clip-path="url(#apple-poster-card-clip)"');
+      expect(preview.svg).not.toMatch(/<text[^>]+x="-/u);
+      if (locale === "ar") expect(preview.svg).toContain('text-anchor="end"');
+    },
+  );
 
   it("uses the one shared artwork plan rather than a Dashboard-local compositor", async () => {
     const { browser, browserInput, stamp } = await renderPair("ar", "GOOGLE_WALLET");

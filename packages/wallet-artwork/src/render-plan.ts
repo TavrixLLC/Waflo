@@ -221,7 +221,8 @@ function relativeLuminance(hex: string): number {
   return 0.2126 * (channels[0] ?? 0) + 0.7152 * (channels[1] ?? 0) + 0.0722 * (channels[2] ?? 0);
 }
 
-function googleHeroSurfaceColor(hex: string): string {
+/** The effective Google Hero surface, shared by the plan and native preview shell. */
+export function walletArtworkGoogleSurfaceColor(hex: string): string {
   const channels = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)].map((part) =>
     Number.parseInt(part, 16),
   );
@@ -250,19 +251,24 @@ function legacySurfaceColor(hex: string): string {
   return `#${[red - 2, green + 1, blue + 2].map((channel) => Math.min(255, Math.max(0, channel)).toString(16).padStart(2, "0")).join("")}`;
 }
 
-function contrastRatio(foreground: string, background: string): number {
+export function walletArtworkContrastRatio(foreground: string, background: string): number {
   const first = relativeLuminance(foreground);
   const second = relativeLuminance(background);
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
-function readableTextColor(preferred: string, background: string): string {
-  if (contrastRatio(preferred, background) >= 4.5) return preferred;
+/** Keep an approved foreground when it meets AA contrast, otherwise select the safer extreme. */
+export function walletArtworkReadableTextColor(preferred: string, background: string): string {
+  if (walletArtworkContrastRatio(preferred, background) >= 4.5) return preferred;
   const candidates = ["#241916", "#FFFFFF"];
   return candidates.reduce((best, candidate) =>
-    contrastRatio(candidate, background) > contrastRatio(best, background) ? candidate : best,
+    walletArtworkContrastRatio(candidate, background) > walletArtworkContrastRatio(best, background)
+      ? candidate
+      : best,
   );
 }
+
+const readableTextColor = walletArtworkReadableTextColor;
 
 function fittedFontSize(
   value: string,
@@ -296,6 +302,8 @@ function fittedFontSize(
 export function walletArtworkPlanIdentityTitleLines(
   programName: string,
   locale: string,
+  maxCharacters = 42,
+  maxLines = 2,
 ): readonly string[] {
   const phrases = programName
     .split(/\s*[/|]\s*/u)
@@ -312,9 +320,19 @@ export function walletArtworkPlanIdentityTitleLines(
   const join = (items: readonly string[]) => items.join(" · ");
   const arabicLine = join(arabic);
   const latinLine = join([...latin, ...neutral]);
-  if (arabicLine && latinLine)
-    return cardLocalePresentation(locale).isRtl ? [arabicLine, latinLine] : [latinLine, arabicLine];
-  return [join(phrases)];
+  const ordered =
+    arabicLine && latinLine
+      ? cardLocalePresentation(locale).isRtl
+        ? [arabicLine, latinLine]
+        : [latinLine, arabicLine]
+      : [join(phrases)];
+  // Each line is bounded in the canonical coordinate system before SVG is
+  // emitted. This keeps long LTR, RTL and mixed-language content readable
+  // without relying on a provider shell to crop it after the fact.
+  const linesPerPhrase = ordered.length > 1 ? 1 : maxLines;
+  return ordered
+    .flatMap((line) => wrapLabel(line, maxCharacters, linesPerPhrase, locale))
+    .slice(0, maxLines);
 }
 
 function calibratedGoogleHeroCounterRegion(
@@ -339,6 +357,13 @@ function calibratedGoogleHeroRewardRegion(
   input: WalletArtworkRenderPlanInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
+  // APPLE_POSTER is a calibrated crop of the Google master. Its lower safe
+  // region is narrower than a full Google Hero reward panel; preserving the
+  // full-width panel makes long RTL reward lines enter the poster QR column.
+  // These coordinates are the inverse projection of Apple Poster’s canonical
+  // lower-left reward region into the shared master coordinate system.
+  if (input.applePosterRefinement && cardLocalePresentation(input.locale).isRtl)
+    return { ...region, left: 114, width: 430 };
   return region.width > 500 && !input.applePosterRefinement
     ? { ...region, top: region.top + 2 }
     : region;
@@ -383,7 +408,12 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
   const textColor = readableTextColor(input.theme.foregroundColor, input.theme.backgroundColor);
   const organization =
     wrapLabel(input.organizationName, isGoogle ? 44 : 24, 1, presentation.locale)[0] ?? "";
-  const titleLines = walletArtworkPlanIdentityTitleLines(input.programName, input.locale);
+  const titleLines = walletArtworkPlanIdentityTitleLines(
+    input.programName,
+    input.locale,
+    isGoogle ? (approvedGoogleHero ? 38 : 30) : 20,
+    isGoogle && approvedGoogleHero ? 2 : 1,
+  );
   const member =
     wrapLabel(
       input.suppressMemberPrefix ? input.memberName : `${copy.member}: ${input.memberName}`,
@@ -428,14 +458,14 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
   const title = titleLines
     .map((line, index) => {
       const x = isGoogle ? textX : isRtl ? region.left + region.width - inset : region.left + inset;
-      const anchor = isRtl && !presentation.isRtl ? "end" : "start";
+      const anchor = isRtl ? "end" : "start";
       return `<text x="${x}" y="${titleY + index * titleLineGap}" text-anchor="${anchor}" font-family="${walletArtworkArabicTypeface}" font-size="${titleSize}" font-weight="900" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`;
     })
     .join("");
   const organizationMarkup = isGoogle
-    ? `<text x="${textX}" y="${organizationY}" text-anchor="start" font-family="${walletArtworkArabicTypeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isRtl ? 0 : 2}" fill="${textColor}" opacity="0.82" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(organization)}</text>`
+    ? `<text x="${textX}" y="${organizationY}" text-anchor="${isRtl ? "end" : "start"}" font-family="${walletArtworkArabicTypeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isRtl ? 0 : 2}" fill="${textColor}" opacity="0.82" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(organization)}</text>`
     : "";
-  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/>${organizationMarkup}${title}<text x="${textX}" y="${memberY}" text-anchor="start" font-family="${walletArtworkArabicTypeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(member)}</text></g>`;
+  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/>${organizationMarkup}${title}<text x="${textX}" y="${memberY}" text-anchor="${isRtl ? "end" : "start"}" font-family="${walletArtworkArabicTypeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(member)}</text></g>`;
 }
 
 function giftIconSvg(x: number, y: number, size: number, color: string): string {
@@ -455,7 +485,6 @@ function rewardPanelSvg(
   const fallback = presentation.isRtl ? copy.nextReward : "Your next reward";
   const isGoogle = visualRegion.width > 500;
   const isRtl = presentation.isRtl;
-  const lines = walletArtworkPlanIdentityTitleLines(input.rewardLabel || fallback, input.locale);
   const darkTheme = relativeLuminance(backgroundColor) < 0.34;
   const fill = input.rewardReady ? accentColor : "#FFFFFF";
   const textColor = readableTextColor(
@@ -464,6 +493,12 @@ function rewardPanelSvg(
   );
   const stroke = input.rewardReady ? backgroundColor : accentColor;
   const compactApple = !isGoogle && visualRegion.height <= 70;
+  const lines = walletArtworkPlanIdentityTitleLines(
+    input.rewardLabel || fallback,
+    input.locale,
+    isGoogle ? 34 : compactApple ? 18 : 24,
+    2,
+  );
   const iconSize = isGoogle ? 62 : compactApple ? 22 : 28;
   const horizontalPadding = isGoogle ? 34 : compactApple ? 10 : 14;
   const iconX = isRtl
@@ -490,7 +525,8 @@ function rewardPanelSvg(
   const lineGap = isGoogle ? 34 : compactApple ? 14 : 18;
   const clipId = `reward-${visualRegion.left}-${visualRegion.top}`;
   const clipInset = compactApple ? 4 : 8;
-  return `<rect x="${visualRegion.left}" y="${visualRegion.top + 6}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${visualRegion.left}" y="${visualRegion.top}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${visualRegion.left + 10}" y="${visualRegion.top + clipInset}" width="${visualRegion.width - 20}" height="${visualRegion.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="start" font-family="${walletArtworkArabicTypeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isRtl ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(eyebrow)}</text>${lines.map((line, index) => `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="start" font-family="${walletArtworkArabicTypeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`).join("")}</g><circle cx="${isRtl ? visualRegion.left + (isGoogle ? 32 : 16) : visualRegion.left + visualRegion.width - (isGoogle ? 32 : 16)}" cy="${visualRegion.top + visualRegion.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
+  const textAnchor = isRtl ? "end" : "start";
+  return `<rect x="${visualRegion.left}" y="${visualRegion.top + 6}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${visualRegion.left}" y="${visualRegion.top}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${visualRegion.left + 10}" y="${visualRegion.top + clipInset}" width="${visualRegion.width - 20}" height="${visualRegion.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${walletArtworkArabicTypeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isRtl ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(eyebrow)}</text>${lines.map((line, index) => `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${walletArtworkArabicTypeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`).join("")}</g><circle cx="${isRtl ? visualRegion.left + (isGoogle ? 32 : 16) : visualRegion.left + visualRegion.width - (isGoogle ? 32 : 16)}" cy="${visualRegion.top + visualRegion.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
 }
 
 function diagonalCornerPanelPath(
@@ -563,7 +599,7 @@ function canvasSvg(
   const { backgroundColor, accentColor, secondaryColor } = input.theme;
   const surfaceBackgroundColor =
     target === "GOOGLE_HERO" && !input.applePosterRefinement
-      ? googleHeroSurfaceColor(backgroundColor)
+      ? walletArtworkGoogleSurfaceColor(backgroundColor)
       : backgroundColor;
   const masterPanel =
     target === "GOOGLE_HERO" && input.appleStampPanelInset
@@ -616,16 +652,17 @@ function canvasOverlaySvg(
     width: region.width * headerScale,
     height: region.height * headerScale,
   });
-  const scaleIdentityHeader = (region: WalletArtworkPlacement): WalletArtworkPlacement => ({
-    left: region.left - region.width * (headerScale - 1),
-    top: region.top - (region.height * (headerScale - 1)) / 2 + (input.headerOffsetY ?? 0),
-    width: region.width * headerScale,
-    height: region.height * headerScale,
+  // Poster refinement enlarges glyph metrics, not the canonical identity
+  // viewport. Expanding this region moved the LTR anchor into negative master
+  // coordinates and caused the iOS 27+ card to escape at every display scale.
+  const positionIdentityHeader = (region: WalletArtworkPlacement): WalletArtworkPlacement => ({
+    ...region,
+    top: region.top + (input.headerOffsetY ?? 0),
   });
   const reward = input.lowerGroupOffsetY
     ? { ...regions.rewardRegion, top: regions.rewardRegion.top + input.lowerGroupOffsetY }
     : regions.rewardRegion;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}">${identitySvg(input, scaleIdentityHeader(regions.identityRegion))}${counterBadgeSvg(input, scaleHeader(regions.counterBadgeRegion))}${rewardPanelSvg(input, reward)}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${logical.width} ${logical.height}">${identitySvg(input, positionIdentityHeader(regions.identityRegion))}${counterBadgeSvg(input, scaleHeader(regions.counterBadgeRegion))}${rewardPanelSvg(input, reward)}</svg>`;
 }
 
 function scaled(region: WalletArtworkPlacement, scale: WalletArtworkScale): WalletArtworkPlacement {
@@ -963,12 +1000,8 @@ export function createWalletArtworkApplePosterRenderPlan(
   const destination = {
     left: applePosterGoogleMasterTransform.translateX * scale,
     top: applePosterGoogleMasterTransform.translateY * scale,
-    width: Math.round(
-      googleMasterContentBounds.width * applePosterGoogleMasterTransform.scale * scale,
-    ),
-    height: Math.round(
-      googleMasterContentBounds.height * applePosterGoogleMasterTransform.scale * scale,
-    ),
+    width: googleMasterContentBounds.width * applePosterGoogleMasterTransform.scale * scale,
+    height: googleMasterContentBounds.height * applePosterGoogleMasterTransform.scale * scale,
   };
   return {
     target: "APPLE_POSTER",

@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
-import type { PlanDowngradeViolation } from "@waflo/billing";
 import {
   billingFailurePolicy,
   billingGraceDeadline,
@@ -144,20 +143,6 @@ function refundStatusFromStripe(status: string | null): "PROCESSING" | "SUCCEEDE
   if (status === "succeeded") return "SUCCEEDED";
   if (status === "failed" || status === "canceled") return "FAILED";
   return "PROCESSING";
-}
-
-function downgradeViolationMessage(violation: PlanDowngradeViolation): string {
-  const label: Record<PlanDowngradeViolation["code"], string> = {
-    LOCATIONS: "Archive locations until the active location count fits the target plan.",
-    TEAM_SEATS: "Remove or cancel Staff and Manager seats until the team fits the target plan.",
-    ACTIVE_PROGRAMS: "Archive loyalty cards until the active card count fits the target plan.",
-    PRO_MODE: "Move Pro Mode loyalty cards to supported settings before downgrading.",
-    MULTIPLE_REWARDS: "Reduce loyalty cards to one reward before downgrading.",
-    MILESTONE_REWARDS: "Remove milestone rewards before downgrading.",
-    ADVANCED_LAYOUT: "Stamp layouts are automatically normalized to the supported Grid.",
-    ACTIVE_ADVANCED_EXPORTS: "Wait for advanced exports to finish or expire before downgrading.",
-  };
-  return `${label[violation.code]} Current: ${violation.currentUsage}; allowed: ${violation.limit ?? "unlimited"}.`;
 }
 
 function billingStatusFromStripe(status: Stripe.Subscription.Status): BillingStatus {
@@ -4439,7 +4424,6 @@ export class BillingService {
       code: violation.code,
       actual: violation.currentUsage,
       limit: violation.limit,
-      message: downgradeViolationMessage(violation),
     }));
   }
 

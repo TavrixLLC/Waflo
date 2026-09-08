@@ -5063,7 +5063,10 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
 
 .template-preview-dialog__canvas {
   display: grid;
-  min-height: clamp(14rem, 32dvh, 18rem);
+  /* The canvas owns a real viewport. Its child must fit this box rather than
+     using an unrelated viewport-height cap and being hidden at the bottom. */
+  min-block-size: 0;
+  block-size: clamp(14rem, 32dvh, 18rem);
   place-items: center;
   margin-block: 1rem;
   padding: 1rem;
@@ -5076,17 +5079,27 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
   border-radius: var(--waflo-radius-lg);
 }
 
-.template-preview-dialog__canvas img {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  max-height: 38dvh;
-  object-fit: contain;
+.template-preview-dialog__media {
+  display: grid;
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  place-items: center;
 }
 
-.template-preview-dialog__canvas--customer_web img {
-  width: min(100%, 46rem);
+.template-preview-dialog__media img {
+  display: block;
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  block-size: 100%;
+  max-block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
 }
 
 .template-preview-dialog__actions {
@@ -5328,12 +5341,12 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
   }
 
   .template-preview-dialog__canvas {
-    min-height: min(15rem, 32dvh);
+    block-size: min(15rem, 32dvh);
     padding: 0.65rem;
   }
 
   .template-preview-dialog__canvas img {
-    max-height: 34dvh;
+    max-block-size: 100%;
   }
 
   .template-preview-dialog__error {
@@ -11947,4 +11960,94 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
     width: 100%;
     min-height: 3.25rem;
   }
+}
+
+/* A Wallet design always has one intrinsic SVG geometry. Layout only supplies
+   a uniformly scaled display surface; it never reserves a second, competing
+   provider ratio at narrow widths. */
+.wallet-preview-image-stack,
+.wallet-preview-image-stack--apple_wallet,
+.wallet-preview-image-stack--apple_legacy,
+.wallet-preview-image-stack--apple_ios27,
+.wallet-preview-image-stack--google_wallet {
+  box-sizing: border-box;
+  inline-size: min(100%, 460px);
+  max-inline-size: 460px;
+  min-inline-size: 0;
+  margin-inline: auto;
+  aspect-ratio: auto;
+}
+
+.wallet-preview-image-stack__canvas,
+.wallet-preview-image-stack__svg,
+.wallet-preview-image-stack__svg > svg {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  block-size: auto;
+  min-inline-size: 0;
+}
+
+.builder-preview-canvas,
+.studio-device-frame {
+  min-inline-size: 0;
+}
+
+/* The mobile More dialog is a full-width sheet with its equal logical insets
+   provided by the body. This replaces the invalid `min(100% - …)` override
+   that made the grid resolve from the left edge in some browsers. */
+@media (max-width: 63.9375rem) {
+  .dashboard-mobile-more__dialog {
+    inset: auto 0 0;
+    box-sizing: border-box;
+    inline-size: 100%;
+    max-inline-size: none;
+    margin: 0;
+    align-self: end;
+    border-radius: var(--waflo-radius-lg) var(--waflo-radius-lg) 0 0;
+  }
+
+  .dashboard-mobile-more__dialog .wf-dialog__body {
+    box-sizing: border-box;
+    padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
+    padding-block-end: calc(1rem + env(safe-area-inset-bottom));
+  }
+
+  .dashboard-mobile-more__navigation {
+    display: grid;
+    inline-size: 100%;
+    min-inline-size: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    justify-items: stretch;
+  }
+
+  .dashboard-mobile-more__navigation .dashboard-nav-link {
+    box-sizing: border-box;
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+}
+
+/* Sirwan ships as a regular face. Do not synthesize an overly dense bold for
+   ordinary Kurdish copy; preserve hierarchy through the existing sizes and
+   explicit UI weights while Cairo's Arabic treatment remains untouched. */
+html[lang="kmr-Arab-IQ"] body,
+html[lang="ckb-Arab-IQ"] body {
+  font-synthesis: none;
+}
+
+html[lang="kmr-Arab-IQ"] body :is(p, small, .dashboard-nav-link),
+html[lang="ckb-Arab-IQ"] body :is(p, small, .dashboard-nav-link) {
+  font-weight: 400;
+}
+
+html[lang="kmr-Arab-IQ"] body :is(.wf-button, .wf-badge),
+html[lang="ckb-Arab-IQ"] body :is(.wf-button, .wf-badge) {
+  font-weight: 500;
+}
+
+html[lang="kmr-Arab-IQ"] body :is(h1, h2, h3, h4, h5, h6),
+html[lang="ckb-Arab-IQ"] body :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
 }

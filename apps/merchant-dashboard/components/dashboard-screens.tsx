@@ -60,7 +60,12 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ApiClientError, apiFetch, resetCsrf } from "../lib/api-client";
 import { merchantPublicUrl } from "../lib/merchant-public-url";
 import { beginGoogleReauthentication } from "../lib/oauth-reauthentication";
-import { canPersistCatalogSelection } from "./billing-presentation";
+import { googleLinkErrorMessage } from "./security-presentation";
+import {
+  billingDowngradeErrorMessage,
+  billingDowngradeViolationMessage,
+  canPersistCatalogSelection,
+} from "./billing-presentation";
 import {
   formatBillingAmount,
   formatBillingDate as formatSubscriptionChangeDate,
@@ -1377,7 +1382,6 @@ interface BillingView {
     plan: PlanCode;
     violations: Array<{
       code: string;
-      message: string;
       actual?: number;
       limit?: number | null;
     }>;
@@ -1553,7 +1557,9 @@ export function BillingScreen({
             ? "تم إبطاء الطلبات مؤقتاً. انتظر قليلاً ثم حاول مجدداً."
             : "Requests are temporarily limited. Wait a moment and try again.";
       }
-      return message(caught, fallback);
+      // Billing API codes are intentionally rendered through local copy. Raw
+      // operational messages may be English even when the dashboard is not.
+      return fallback;
     },
     [ar],
   );
@@ -1665,16 +1671,14 @@ export function BillingScreen({
     } catch (caught) {
       if (caught instanceof ApiClientError && caught.code === "PLAN_DOWNGRADE_BLOCKED") {
         const violations = Array.isArray(caught.details?.violations)
-          ? (caught.details.violations as Array<{ message?: string }>)
-          : [];
-        setError(
-          violations.length
-            ? violations
-                .map((violation) => violation.message)
-                .filter(Boolean)
-                .join(" · ")
-            : caught.message,
-        );
+          ? (caught.details.violations as Array<{
+              code?: string;
+              actual?: number;
+              currentUsage?: number;
+              limit?: number | null;
+            }>)
+          : undefined;
+        setError(billingDowngradeErrorMessage(violations, ar ? "ar" : "en"));
       } else {
         setError(billingError(caught, ar ? "تعذر تغيير الخطة." : "Unable to change plan."));
       }
@@ -1720,14 +1724,14 @@ export function BillingScreen({
     } catch (caught) {
       if (caught instanceof ApiClientError && caught.code === "PLAN_DOWNGRADE_BLOCKED") {
         const violations = Array.isArray(caught.details?.violations)
-          ? (caught.details.violations as Array<{ message?: string }>)
-          : [];
-        setError(
-          violations
-            .map((violation) => violation.message)
-            .filter(Boolean)
-            .join(" · ") || caught.message,
-        );
+          ? (caught.details.violations as Array<{
+              code?: string;
+              actual?: number;
+              currentUsage?: number;
+              limit?: number | null;
+            }>)
+          : undefined;
+        setError(billingDowngradeErrorMessage(violations, ar ? "ar" : "en"));
       } else {
         setError(
           billingError(caught, ar ? "تعذرت معاينة التغيير." : "Unable to preview the change."),
@@ -1826,7 +1830,9 @@ export function BillingScreen({
       );
       await load();
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر جدولة الإلغاء." : "Unable to schedule cancellation."));
+      setError(
+        billingError(caught, ar ? "تعذر جدولة الإلغاء." : "Unable to schedule cancellation."),
+      );
     } finally {
       setSubscriptionAction(null);
     }
@@ -1845,7 +1851,7 @@ export function BillingScreen({
       setNotice(ar ? "سيستمر اشتراكك في التجدد." : "Your subscription will continue renewing.");
       await load();
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر استئناف التجديد." : "Unable to resume renewal."));
+      setError(billingError(caught, ar ? "تعذر استئناف التجديد." : "Unable to resume renewal."));
     } finally {
       setSubscriptionAction(null);
     }
@@ -1867,7 +1873,10 @@ export function BillingScreen({
       setPaymentSetup(result);
     } catch (caught) {
       setError(
-        message(caught, ar ? "تعذر فتح نموذج البطاقة الآمن." : "Unable to open secure card setup."),
+        billingError(
+          caught,
+          ar ? "تعذر فتح نموذج البطاقة الآمن." : "Unable to open secure card setup.",
+        ),
       );
     } finally {
       setPaymentSetupLoading(false);
@@ -1881,7 +1890,9 @@ export function BillingScreen({
       });
       await load();
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر تحديث بيانات الفوترة." : "Unable to refresh billing."));
+      setError(
+        billingError(caught, ar ? "تعذر تحديث بيانات الفوترة." : "Unable to refresh billing."),
+      );
     }
   }
   async function saveBillingIdentity(event: FormEvent<HTMLFormElement>) {
@@ -1906,7 +1917,9 @@ export function BillingScreen({
       });
       await load();
     } catch (caught) {
-      setError(message(caught, ar ? "تعذر حفظ هوية الفوترة." : "Unable to save billing identity."));
+      setError(
+        billingError(caught, ar ? "تعذر حفظ هوية الفوترة." : "Unable to save billing identity."),
+      );
     } finally {
       setIdentitySaving(false);
     }
@@ -1944,7 +1957,10 @@ export function BillingScreen({
       await load();
     } catch (caught) {
       setError(
-        message(caught, ar ? "تعذر إرسال طلب الاسترداد." : "Unable to submit the refund request."),
+        billingError(
+          caught,
+          ar ? "تعذر إرسال طلب الاسترداد." : "Unable to submit the refund request.",
+        ),
       );
     } finally {
       setRefundSaving(false);
@@ -2610,7 +2626,9 @@ export function BillingScreen({
                     {option.violations.length ? (
                       <ul>
                         {option.violations.map((violation) => (
-                          <li key={`${option.plan}-${violation.code}`}>{violation.message}</li>
+                          <li key={`${option.plan}-${violation.code}`}>
+                            {billingDowngradeViolationMessage(violation, ar ? "ar" : "en")}
+                          </li>
                         ))}
                       </ul>
                     ) : (
@@ -2936,7 +2954,25 @@ export function SettingsScreen({
       })),
     [locale],
   );
+  const activityTypes = useMemo(() => {
+    const canonical = businessActivityOptions.map((option) => ({
+      value: option.value,
+      label: ar ? option.ar : option.en,
+    }));
+    // A historical value remains editable even after the taxonomy evolves.
+    return organization?.businessCategory &&
+      !canonical.some((option) => option.value === organization.businessCategory)
+      ? [
+          { value: organization.businessCategory, label: organization.businessCategory },
+          ...canonical,
+        ]
+      : canonical;
+  }, [ar, organization?.businessCategory]);
   const publicMerchantUrl = organization ? merchantPublicUrl(organization.merchantSlug) : "";
+  const googleReauthenticationRequired =
+    identitySettings?.passwordEnabled === false && reauthentication?.status !== "VERIFIED";
+  const googleReauthenticationVerified =
+    identitySettings?.passwordEnabled === false && reauthentication?.status === "VERIFIED";
   const load = useCallback(async () => {
     try {
       const [organizationData, identityData, reauthenticationData] = await Promise.all([
@@ -3048,30 +3084,24 @@ export function SettingsScreen({
                 <TextInput name="name" defaultValue={organization.name} required />
               </FormField>
               <FormField label={ar ? "نوع النشاط" : "Business category"}>
-                <Select name="category" defaultValue={organization.businessCategory ?? ""}>
-                  <option value="">{ar ? "اختر نوع النشاط" : "Select an activity type"}</option>
-                  {!businessActivityOptions.some(
-                    (option) => option.value === organization.businessCategory,
-                  ) && organization.businessCategory ? (
-                    <option value={organization.businessCategory}>
-                      {organization.businessCategory}
-                    </option>
-                  ) : null}
-                  {businessActivityOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {ar ? option.ar : option.en}
-                    </option>
-                  ))}
-                </Select>
+                <SearchableSelect
+                  name="category"
+                  options={activityTypes}
+                  defaultValue={organization.businessCategory ?? ""}
+                  placeholder={ar ? "اختر نوع النشاط" : "Select an activity type"}
+                />
               </FormField>
               <FormField label={ar ? "اللغة الافتراضية" : "Default language"}>
-                <Select
+                <SearchableSelect
                   name="locale"
+                  options={[
+                    { value: "en", label: "English" },
+                    { value: "ar", label: "العربية" },
+                  ]}
                   defaultValue={organization.defaultLocale.toLocaleLowerCase("en-US")}
-                >
-                  <option value="en">English</option>
-                  <option value="ar">العربية</option>
-                </Select>
+                  placeholder={ar ? "اختر اللغة الافتراضية" : "Select default language"}
+                  required
+                />
               </FormField>
               <FormField label={ar ? "المنطقة الزمنية" : "Timezone"}>
                 <SearchableSelect
@@ -3124,25 +3154,51 @@ export function SettingsScreen({
           </Card>
           <Card className="dashboard-form-card">
             <h2>{ar ? "رابط التاجر" : "Merchant URL"}</h2>
-            <Alert tone="warning" title={ar ? "تحقق من هويتك" : "Verify your identity"}>
-              {identitySettings?.passwordEnabled
-                ? ar
-                  ? "أدخل كلمة مرور Waflo لحماية هذا التغيير. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
-                  : "Enter your Waflo password to protect this change. The previous URL stays reserved for 90 days."
-                : ar
-                  ? "تحقق باستخدام Google قبل تغيير الرابط. يبقى الرابط السابق محجوزاً لمدة 90 يوماً."
-                  : "Verify with Google before changing the URL. The previous URL stays reserved for 90 days."}
-            </Alert>
-            {!identitySettings?.passwordEnabled && reauthentication?.status === "VERIFIED" ? (
+            {identitySettings?.passwordEnabled ? (
               <Alert
-                tone="success"
-                title={ar ? "تم التحقق باستخدام Google" : "Verified with Google"}
+                tone="warning"
+                title={
+                  ar
+                    ? "\u062a\u062d\u0642\u0642 \u0645\u0646 \u0647\u0648\u064a\u062a\u0643"
+                    : "Verify your identity"
+                }
               >
                 {ar
-                  ? "يمكنك تغيير رابط التاجر خلال خمس دقائق."
+                  ? "\u0623\u062f\u062e\u0644 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 Waflo \u0644\u062d\u0645\u0627\u064a\u0629 \u0647\u0630\u0627 \u0627\u0644\u062a\u063a\u064a\u064a\u0631."
+                  : "Enter your Waflo password to protect this change."}
+              </Alert>
+            ) : googleReauthenticationRequired ? (
+              <Alert
+                tone="warning"
+                title={
+                  ar
+                    ? "\u062a\u062d\u0642\u0642 \u0645\u0646 \u0647\u0648\u064a\u062a\u0643"
+                    : "Verify your identity"
+                }
+              >
+                {ar
+                  ? "\u062a\u062d\u0642\u0642 \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 Google \u0642\u0628\u0644 \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0631\u0627\u0628\u0637."
+                  : "Verify with Google before changing the URL."}
+              </Alert>
+            ) : googleReauthenticationVerified ? (
+              <Alert
+                tone="success"
+                title={
+                  ar
+                    ? "\u062a\u0645 \u0627\u0644\u062a\u062d\u0642\u0642 \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 Google"
+                    : "Verified with Google"
+                }
+              >
+                {ar
+                  ? "\u064a\u0645\u0643\u0646\u0643 \u062a\u063a\u064a\u064a\u0631 \u0631\u0627\u0628\u0637 \u0627\u0644\u062a\u0627\u062c\u0631 \u062e\u0644\u0627\u0644 \u062e\u0645\u0633 \u062f\u0642\u0627\u0626\u0642."
                   : "You can change the merchant URL within the next five minutes."}
               </Alert>
             ) : null}
+            <p className="dashboard-form__hint">
+              {ar
+                ? "\u064a\u0628\u0642\u0649 \u0627\u0644\u0631\u0627\u0628\u0637 \u0627\u0644\u0633\u0627\u0628\u0642 \u0645\u062d\u062c\u0648\u0632\u0627\u064b \u0644\u0645\u062f\u0629 90 \u064a\u0648\u0645\u0627\u064b \u0628\u0639\u062f \u062a\u063a\u064a\u064a\u0631\u0647."
+                : "The previous URL stays reserved for 90 days after it is changed."}
+            </p>
             <form className="dashboard-form" onSubmit={changeSlug}>
               <FormField label={ar ? "الرابط الجديد" : "New slug"} required>
                 <TextInput
@@ -3173,7 +3229,7 @@ export function SettingsScreen({
               ) : (
                 <div className="security-step-up-callout">
                   <p>
-                    {reauthentication?.status === "VERIFIED"
+                    {googleReauthenticationVerified
                       ? ar
                         ? "التحقق نشط. أرسل تغيير الرابط قبل انتهاء صلاحيته."
                         : "Verification is active. Submit the URL change before it expires."
@@ -3198,7 +3254,7 @@ export function SettingsScreen({
                       )
                     }
                   >
-                    {reauthentication?.status === "VERIFIED"
+                    {googleReauthenticationVerified
                       ? ar
                         ? "إعادة التحقق باستخدام Google"
                         : "Verify again with Google"
@@ -3208,7 +3264,14 @@ export function SettingsScreen({
                   </Button>
                 </div>
               )}
-              <Button type="submit">{ar ? "تغيير رابط التاجر" : "Change merchant URL"}</Button>
+              <Button
+                type="submit"
+                disabled={
+                  identitySettings?.passwordEnabled === false && !googleReauthenticationVerified
+                }
+              >
+                {ar ? "تغيير رابط التاجر" : "Change merchant URL"}
+              </Button>
             </form>
           </Card>
         </div>
@@ -3278,6 +3341,8 @@ export function SecurityScreen({
     googleSignInAvailable: false,
   });
   const [identityPassword, setIdentityPassword] = useState("");
+  const [identityLinkError, setIdentityLinkError] = useState("");
+  const [identityLinking, setIdentityLinking] = useState(false);
   const [sensitiveAction, setSensitiveAction] = useState<SensitiveAction | null>(null);
   const [sensitiveConfirmation, setSensitiveConfirmation] = useState("");
   const [sensitivePassword, setSensitivePassword] = useState("");
@@ -3389,6 +3454,18 @@ export function SecurityScreen({
   }
   async function linkIdentity() {
     setError("");
+    setIdentityLinkError("");
+    if (!providerCapabilities.googleSignInAvailable) {
+      setIdentityLinkError(
+        googleLinkErrorMessage("PROVIDER_NOT_CONFIGURED", true, ar ? "ar" : "en"),
+      );
+      return;
+    }
+    if (identitySettings?.passwordEnabled && !identityPassword.trim()) {
+      setIdentityLinkError(googleLinkErrorMessage(undefined, false, ar ? "ar" : "en"));
+      return;
+    }
+    setIdentityLinking(true);
     try {
       const result = await apiFetch<{ authorizationUrl: string }>("/v1/auth/external/google/link", {
         method: "POST",
@@ -3396,12 +3473,15 @@ export function SecurityScreen({
       });
       window.location.assign(result.authorizationUrl);
     } catch (caught) {
-      setError(
-        message(
-          caught,
-          ar ? "تعذر بدء ربط طريقة تسجيل الدخول." : "Unable to start account linking.",
+      setIdentityLinkError(
+        googleLinkErrorMessage(
+          caught instanceof ApiClientError ? caught.code : undefined,
+          Boolean(identityPassword.trim()),
+          ar ? "ar" : "en",
         ),
       );
+    } finally {
+      setIdentityLinking(false);
     }
   }
   async function unlinkIdentity() {
@@ -3650,10 +3730,17 @@ export function SecurityScreen({
               : "Use Google to sign in to this existing Waflo account."}
           </p>
           {identitySettings?.passwordEnabled ? (
-            <FormField label={ar ? "كلمة المرور الحالية للتأكيد" : "Current password to confirm"}>
+            <FormField
+              label={ar ? "كلمة المرور الحالية للتأكيد" : "Current password to confirm"}
+              error={identityLinkError}
+            >
               <PasswordInput
                 value={identityPassword}
-                onChange={(event) => setIdentityPassword(event.currentTarget.value)}
+                error={Boolean(identityLinkError)}
+                onChange={(event) => {
+                  setIdentityPassword(event.currentTarget.value);
+                  if (identityLinkError) setIdentityLinkError("");
+                }}
                 autoComplete="current-password"
               />
             </FormField>
@@ -3685,16 +3772,19 @@ export function SecurityScreen({
             ) : (
               <Button
                 variant="secondary"
-                disabled={
-                  !providerCapabilities.googleSignInAvailable ||
-                  (Boolean(identitySettings?.passwordEnabled) && !identityPassword)
-                }
+                loading={identityLinking}
+                disabled={identityLinking}
                 onClick={() => void linkIdentity()}
               >
                 {ar ? "ربط Google" : "Connect Google"}
               </Button>
             )}
           </div>
+          {!identitySettings?.passwordEnabled && identityLinkError ? (
+            <p className="wf-form-error" role="alert">
+              {identityLinkError}
+            </p>
+          ) : null}
           {googleIdentity && !canDisconnectGoogle ? (
             <p className="security-provider-help">
               {ar

@@ -233,6 +233,16 @@ export interface WalletProviderHealth {
   readonly providerReachable?: boolean;
   readonly externallyCertified?: boolean;
   readonly certificateExpiresAt?: string;
+  /** Configuration is distinct from provider reachability and device support. */
+  readonly providerConfigured?: boolean;
+  /** Waflo can create the provider artifact with the saved configuration. */
+  readonly artifactAvailable?: boolean;
+  /** A production add/save action can be handed off to the provider. */
+  readonly installationAvailable?: boolean;
+  /** API health cannot infer the visitor browser; Dashboard may refine this. */
+  readonly deviceEligibility?: "UNKNOWN" | "ELIGIBLE" | "REQUIRES_COMPATIBLE_DEVICE";
+  /** Stable operational reason; `status` remains the canonical detailed code. */
+  readonly reason?: "CONFIGURATION" | "ARTIFACT" | "DEVICE" | "PROVIDER";
 }
 
 export interface WalletProgramInput {

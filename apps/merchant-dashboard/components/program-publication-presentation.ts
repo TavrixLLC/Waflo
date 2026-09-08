@@ -23,6 +23,17 @@ export interface WalletSurfacePresentation {
   tone: "success" | "neutral" | "warning";
 }
 
+export type WalletDeviceEligibility = "UNKNOWN" | "ELIGIBLE" | "REQUIRES_COMPATIBLE_DEVICE";
+
+/** Browser capability is presentation-only, never an authorization decision. */
+export function walletDeviceEligibilityForBrowser(
+  provider: "APPLE" | "GOOGLE",
+): WalletDeviceEligibility {
+  if (typeof navigator === "undefined") return "UNKNOWN";
+  if (provider === "GOOGLE") return "ELIGIBLE";
+  return /iPad|iPhone|iPod/u.test(navigator.userAgent) ? "ELIGIBLE" : "REQUIRES_COMPATIBLE_DEVICE";
+}
+
 export type ProgramSharingState =
   | "enrollment_open"
   | "enrollment_disabled"
@@ -260,6 +271,7 @@ export function canonicalPublicUrlForDisplay(value: string | null | undefined): 
 export function walletSurfacePresentation(
   provider: WalletHealth | undefined,
   ar: boolean,
+  deviceEligibility?: WalletDeviceEligibility,
 ): WalletSurfacePresentation {
   if (!provider)
     return {
@@ -270,6 +282,7 @@ export function walletSurfacePresentation(
       tone: "neutral",
     };
 
+  const providerConfigured = provider.providerConfigured ?? provider.configured ?? false;
   if (provider.mode === "DISABLED")
     return {
       label: ar ? "غير متاحة" : "Unavailable",
@@ -278,6 +291,53 @@ export function walletSurfacePresentation(
         : "This Wallet surface is disabled for the organization. Customer Web remains available.",
       tone: "neutral",
     };
+
+  if (!providerConfigured)
+    return {
+      label: ar ? "يلزم إعداد المؤسسة" : "Configuration required",
+      explanation: ar
+        ? "إعداد هذا المزود غير مكتمل. تبقى بطاقة العميل على الويب متاحة."
+        : "This provider is not configured. Customer Web remains available.",
+      tone: "warning",
+    };
+
+  if (provider.mode === "TEST_ADAPTER")
+    return {
+      label: ar ? "للاختبار فقط" : "Test only",
+      explanation: ar
+        ? "هذا محاكي محلي ولا ينشئ بطاقة يمكن حفظها في Wallet."
+        : "This local adapter does not create a pass that can be saved to Wallet.",
+      tone: "neutral",
+    };
+
+  if (provider.artifactAvailable === true) {
+    const eligibility = deviceEligibility ?? provider.deviceEligibility ?? "UNKNOWN";
+    if (provider.provider === "APPLE")
+      return {
+        label: ar ? "مهيأة" : "Configured",
+        explanation:
+          eligibility === "ELIGIBLE"
+            ? ar
+              ? "Apple Wallet مهيأ ويمكن إنشاء ملفات البطاقة. يدعم هذا الجهاز إكمال الإضافة إلى Wallet."
+              : "Apple Wallet is configured and pass artifacts can be generated. This device can complete the Add to Wallet action."
+            : ar
+              ? "Apple Wallet مهيأ ويمكن إنشاء ملفات البطاقة. تتطلب الإضافة النهائية إلى Wallet جهاز Apple متوافقاً."
+              : "Apple Wallet is configured and pass artifacts can be generated. Final Add to Wallet requires a compatible Apple device.",
+        tone: "success",
+      };
+    return {
+      label: ar ? "مهيأة" : "Configured",
+      explanation:
+        eligibility === "ELIGIBLE"
+          ? ar
+            ? "Google Wallet مهيأ ويمكن إنشاء ملفات البطاقة. يمكن لهذا المتصفح فتح رابط الحفظ، وتتحقق Google من أهلية الإضافة النهائية."
+            : "Google Wallet is configured and pass artifacts can be generated. This browser can open the save link; Google verifies final eligibility."
+          : ar
+            ? "Google Wallet مهيأ ويمكن إنشاء ملفات البطاقة. يحدد رابط الحفظ من Google أهلية الإضافة النهائية."
+            : "Google Wallet is configured and pass artifacts can be generated. The Google save link determines final installation eligibility.",
+      tone: "success",
+    };
+  }
 
   if (provider.status === "EXTERNALLY_UNCERTIFIED")
     return {
@@ -289,15 +349,6 @@ export function walletSurfacePresentation(
     };
 
   if (provider.status === "HEALTHY") {
-    if (provider.mode === "TEST_ADAPTER")
-      return {
-        label: ar ? "للاختبار فقط" : "Test only",
-        explanation: ar
-          ? "هذا محاكي محلي ولا ينشئ بطاقة قابلة للحفظ في Wallet."
-          : "This local adapter does not create a pass that can be saved to Wallet.",
-        tone: "neutral",
-      };
-
     if (provider.externallyCertified !== true)
       return {
         label: ar ? "متصل — اختبار الجهاز معلّق" : "Connected — device test pending",

@@ -171,7 +171,31 @@ export class WalletProviderRegistry {
   }
 
   healthChecks(): Promise<readonly WalletProviderHealth[]> {
-    return Promise.all(this.all().map((provider) => provider.healthCheck()));
+    return Promise.all(
+      this.all().map(async (provider) => this.withAvailability(await provider.healthCheck())),
+    );
+  }
+
+  /**
+   * Provider health is operational; availability has three separate meanings.
+   * Keep them on the contract so a physical-device certification result never
+   * makes a configured, artifact-capable provider look disabled.
+   */
+  private withAvailability(health: WalletProviderHealth): WalletProviderHealth {
+    const providerConfigured = this.configured[health.provider] && health.configured !== false;
+    const artifactAvailable =
+      providerConfigured &&
+      health.mode !== "DISABLED" &&
+      ["HEALTHY", "EXTERNALLY_UNCERTIFIED", "CERTIFICATE_EXPIRING"].includes(health.status);
+    const installationAvailable = artifactAvailable && health.mode === "REAL";
+    return {
+      ...health,
+      providerConfigured,
+      artifactAvailable,
+      installationAvailable,
+      deviceEligibility: "UNKNOWN",
+      reason: !providerConfigured ? "CONFIGURATION" : !artifactAvailable ? "ARTIFACT" : "DEVICE",
+    };
   }
 
   private cachedPublicHealth(): Promise<readonly WalletProviderHealth[]> {
@@ -188,14 +212,11 @@ export class WalletProviderRegistry {
     const health = await this.cachedPublicHealth();
     const state = (provider: WalletProviderCode) => {
       const current = health.find((item) => item.provider === provider);
-      if (!this.configured[provider] || !current || current.status === "NOT_CONFIGURED") {
+      if (!this.configured[provider] || !current || current.providerConfigured === false) {
         return "NOT_CONFIGURED" as const;
       }
       if (current.mode === "TEST_ADAPTER") return "TEST_ONLY" as const;
-      if (current.status === "HEALTHY") return "CONNECTED" as const;
-      if (current.status === "EXTERNALLY_UNCERTIFIED") {
-        return "DEVICE_VERIFICATION_REQUIRED" as const;
-      }
+      if (current.artifactAvailable) return "CONNECTED" as const;
       return "TEMPORARILY_UNAVAILABLE" as const;
     };
     const googleWallet = state("GOOGLE");
@@ -203,6 +224,10 @@ export class WalletProviderRegistry {
     return {
       googleWalletAvailable: googleWallet === "CONNECTED",
       appleWalletAvailable: appleWallet === "CONNECTED",
+      googleWalletArtifactAvailable:
+        health.find((item) => item.provider === "GOOGLE")?.artifactAvailable === true,
+      appleWalletArtifactAvailable:
+        health.find((item) => item.provider === "APPLE")?.artifactAvailable === true,
       googleWalletConfigured: this.configured.GOOGLE,
       appleWalletConfigured: this.configured.APPLE,
       googleWallet,

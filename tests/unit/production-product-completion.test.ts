@@ -143,6 +143,8 @@ describe("production environment and provider boundaries", () => {
     expect(await registry.publicCapabilities()).toEqual({
       googleWalletAvailable: false,
       appleWalletAvailable: false,
+      googleWalletArtifactAvailable: false,
+      appleWalletArtifactAvailable: false,
       googleWalletConfigured: false,
       appleWalletConfigured: false,
       googleWallet: "NOT_CONFIGURED",

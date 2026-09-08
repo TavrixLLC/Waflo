@@ -32,11 +32,14 @@ describe("dashboard operational fixes", () => {
     expect(screen).toContain("Requests are temporarily limited");
   });
 
-  it("uses the contracts-owned activity taxonomy in an accessible bounded select", () => {
+  it("uses the contracts-owned activity taxonomy in the standard accessible Select pattern", () => {
     const screen = source("apps/merchant-dashboard/components/dashboard-screens.tsx");
     expect(screen).toContain("type ProgramTemplateCategory");
     expect(screen).toContain("const businessActivityOptions");
-    expect(screen).toContain('<Select name="category"');
+    expect(screen).toContain('<SearchableSelect\n                  name="category"');
+    expect(screen).toContain('name="locale"');
+    expect(screen).toContain("type ProgramTemplateCategory");
+    expect(screen).toContain("organization?.businessCategory");
     expect(screen).not.toContain('<TextInput name="category"');
   });
 

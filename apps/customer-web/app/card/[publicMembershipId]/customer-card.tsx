@@ -11,7 +11,7 @@ import { Alert, Badge, Button, Card, SearchableSelect } from "@waflo/ui";
 import { ArrowRightLeft, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
 import { CustomerApiError, customerApi } from "../../client-api";
 import { type WalletPlatform, walletPlatform } from "../../wallet-platform";
@@ -77,12 +77,6 @@ interface CardView {
   };
 }
 
-function walletStatusLabel(status: string, ar: boolean): string {
-  if (status === "READY") return ar ? "جاهزة" : "Ready";
-  if (status === "PREPARING" || status === "PENDING") return ar ? "قيد التجهيز" : "Preparing";
-  return ar ? "غير متاحة" : "Unavailable";
-}
-
 function membershipStateLabel(state: string, ar: boolean): string {
   if (state === "ACTIVE") return ar ? "نشطة" : "Active";
   if (state === "TRANSFERRED") return ar ? "منقولة" : "Transferred";
@@ -103,6 +97,7 @@ export function CustomerCard({
   const [walletBusy, setWalletBusy] = useState<"apple" | "google" | null>(null);
   const [platform, setPlatform] = useState<WalletPlatform>("desktop");
   const [selectedCardLocale, setSelectedCardLocale] = useState<string | undefined>();
+  const walletConvergenceAttempts = useRef(0);
   const tenantQuery = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
 
   useEffect(() => {
@@ -134,12 +129,29 @@ export function CustomerCard({
       window.localStorage.getItem(`waflo:card-locale:${publicMembershipId}`) ?? undefined;
     setSelectedCardLocale(saved);
     void load(saved);
-    const timer = window.setInterval(() => void load(saved), 15_000);
-    return () => window.clearInterval(timer);
   }, [load, publicMembershipId]);
+
+  useEffect(() => {
+    if (!card || platform === "desktop") return;
+    const status = platform === "ios" ? card.wallet.apple.status : card.wallet.google.status;
+    if (status !== "PREPARING" && status !== "PENDING") {
+      walletConvergenceAttempts.current = 0;
+      return;
+    }
+    const delays = [1_000, 2_000, 4_000] as const;
+    const attempt = walletConvergenceAttempts.current;
+    if (attempt >= delays.length) return;
+    walletConvergenceAttempts.current += 1;
+    // Issuance is server-side and normally finishes while the customer reaches
+    // this page. Re-read the canonical no-store card model a bounded number of
+    // times so navigation, not a manual reload, observes that transition.
+    const timer = window.setTimeout(() => void load(selectedCardLocale), delays[attempt]);
+    return () => window.clearTimeout(timer);
+  }, [card, load, platform, selectedCardLocale]);
 
   function chooseCardLocale(locale: string) {
     if (!card?.program.enabledLocales.includes(locale)) return;
+    walletConvergenceAttempts.current = 0;
     setSelectedCardLocale(locale);
     window.localStorage.setItem(`waflo:card-locale:${publicMembershipId}`, locale);
     void load(locale);
@@ -355,34 +367,40 @@ export function CustomerCard({
               card.wallet.apple.status === "READY" ? (
                 <a
                   className="wallet-button wallet-button--apple"
+                  aria-label="Add to Apple Wallet"
                   href={`/api/waflo/v1/customer/wallet/apple/pass${tenantQuery}`}
                 >
                   Add to Apple Wallet
                 </a>
-              ) : (
-                <span className="wallet-state">
-                  Apple Wallet · {walletStatusLabel(card.wallet.apple.status, ar)}
-                </span>
-              )
+              ) : card.wallet.apple.status === "UNAVAILABLE" ? (
+                <p className="wallet-platform-note">
+                  {ar
+                    ? "\u064a\u062a\u0639\u0630\u0631 \u0625\u0636\u0627\u0641\u0629 \u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0625\u0644\u0649 Apple Wallet \u062d\u0627\u0644\u064a\u0627\u064b."
+                    : "This card cannot be added to Apple Wallet right now."}
+                </p>
+              ) : null
             ) : platform === "android" ? (
               card.wallet.google.status === "READY" ? (
                 <Button
+                  variant="secondary"
                   className="wallet-button wallet-button--google"
                   onClick={() => void addGoogle()}
                   loading={walletBusy === "google"}
                 >
                   Add to Google Wallet
                 </Button>
-              ) : (
-                <span className="wallet-state">
-                  Google Wallet · {walletStatusLabel(card.wallet.google.status, ar)}
-                </span>
-              )
+              ) : card.wallet.google.status === "UNAVAILABLE" ? (
+                <p className="wallet-platform-note">
+                  {ar
+                    ? "\u064a\u062a\u0639\u0630\u0631 \u0625\u0636\u0627\u0641\u0629 \u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0625\u0644\u0649 Google Wallet \u062d\u0627\u0644\u064a\u0627\u064b."
+                    : "This card cannot be added to Google Wallet right now."}
+                </p>
+              ) : null
             ) : (
               <p className="wallet-platform-note">
                 {ar
-                  ? "افتح هذه البطاقة على iPhone أو Android لإضافتها إلى محفظة جهازك."
-                  : "Open this card on iPhone or Android to add it to that device's wallet."}
+                  ? "\u0627\u0641\u062a\u062d \u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0639\u0644\u0649 iPhone \u0623\u0648 Android \u0644\u0625\u0636\u0627\u0641\u062a\u0647\u0627 \u0625\u0644\u0649 \u0645\u062d\u0641\u0638\u0629 \u062c\u0647\u0627\u0632\u0643."
+                  : "Open this card on iPhone or Android to add it to that device\u0027s wallet."}
               </p>
             )}
           </div>

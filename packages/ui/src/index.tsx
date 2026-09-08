@@ -330,6 +330,11 @@ export function SearchableSelect({
       event.preventDefault();
       choose(filtered[activeIndex]);
     } else if (event.key === "Escape") {
+      // Native search inputs clear themselves on Escape. That emits a change
+      // after this handler and would reopen the listbox, so own this key as
+      // the accessible combobox close action.
+      event.preventDefault();
+      event.stopPropagation();
       setOpen(false);
       setQuery(selected?.label ?? "");
       setActiveIndex(0);

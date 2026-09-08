@@ -6,7 +6,9 @@ import {
   createWalletArtworkRenderPlan,
   renderWalletArtworkApplePosterPlanSvg,
   renderWalletArtworkPlanSvg,
+  walletArtworkGoogleSurfaceColor,
   walletArtworkQrRasterRequest,
+  walletArtworkReadableTextColor,
   type WalletArtworkRenderPlanInput,
   type WalletArtworkRenderPlan,
   type WalletArtworkApplePosterRenderPlan,
@@ -518,6 +520,14 @@ export function renderDashboardWalletPreviewShell(
 
   const width = 460;
   const height = 564;
+  // Native Google fields sit on the same lifted Hero surface as the canonical
+  // artwork plan. Derive their foreground from that effective surface instead
+  // of keeping the old always-dark Google default.
+  const googleSurfaceColor = walletArtworkGoogleSurfaceColor(input.backgroundColor);
+  const googleForegroundColor = walletArtworkReadableTextColor(
+    input.foregroundColor,
+    googleSurfaceColor,
+  );
   const logoX = rtl ? 380 : 48;
   const textX = rtl ? 364 : 96;
   const titleTextX = rtl ? 418 : 42;
@@ -529,11 +539,11 @@ export function renderDashboardWalletPreviewShell(
   )
     .map(
       (line, index) =>
-        `<text ${text} x="${titleTextX}" y="${143 + index * 46.5}" text-anchor="start" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="35" font-weight="700" fill="#202124">${escapeXml(line)}</text>`,
+        `<text ${text} x="${titleTextX}" y="${143 + index * 46.5}" text-anchor="${rtl ? "end" : "start"}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="35" font-weight="700" fill="${googleForegroundColor}">${escapeXml(line)}</text>`,
     )
     .join("");
   const hero = shellArtwork(input, "GOOGLE_HERO", 25.5, 220, 409, 321.7286821705426, 0);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="GOOGLE" data-barcode-format="QR_CODE" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="${issuerBrand}" data-provider-managed-layout="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-full-production-hero" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="24" y="20" width="412" height="524" rx="32" fill="${input.backgroundColor}" stroke="#DADCE0"/><g data-google-native-identity="true">${googleIssuerMark(logo, logoX, 45, 34, 34)}<text ${text} x="${textX}" y="67" text-anchor="start" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="15" font-weight="600" fill="#202124">${escapeXml(truncate(input.organizationName, 60))}</text><path d="M48 98H412" stroke="#E4E7EB"/></g><g data-google-native-title="true">${title}</g><g data-google-hero-region="true" data-google-hero-artwork-composition="full-production-compositor">${hero}</g><metadata data-google-provider-payload="true">Native issuer and program fields use the Google class values. The full production GOOGLE_HERO PNG retains its 1032 by 812 aspect ratio without a dashboard crop.</metadata></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="GOOGLE" data-barcode-format="QR_CODE" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="${issuerBrand}" data-provider-managed-layout="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-full-production-hero" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="24" y="20" width="412" height="524" rx="32" fill="${googleSurfaceColor}" stroke="#DADCE0"/><g data-google-native-identity="true">${googleIssuerMark(logo, logoX, 45, 34, 34)}<text ${text} x="${textX}" y="67" text-anchor="${rtl ? "end" : "start"}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="15" font-weight="600" fill="${googleForegroundColor}">${escapeXml(truncate(input.organizationName, 60))}</text><path d="M48 98H412" stroke="${googleForegroundColor}" stroke-opacity=".18"/></g><g data-google-native-title="true">${title}</g><g data-google-hero-region="true" data-google-hero-artwork-composition="full-production-compositor">${hero}</g><metadata data-google-provider-payload="true">Native issuer and program fields use the Google class values. The full production GOOGLE_HERO PNG retains its 1032 by 812 aspect ratio without a dashboard crop.</metadata></svg>`;
   return { svg, width, height, warnings: [] };
 }
 

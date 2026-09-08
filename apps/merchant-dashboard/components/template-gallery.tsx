@@ -247,14 +247,16 @@ function TemplatePreviewDialog({
             <span>{copy.previewLoading}</span>
           </div>
         ) : selectedPreview ? (
-          <Image
-            src={previewSource(selectedPreview.svg)}
-            alt={`${title} — ${previewLabel(profile, interfaceLocale)} ${copy.previewOnly}`}
-            width={selectedPreview.width}
-            height={selectedPreview.height}
-            unoptimized
-            priority
-          />
+          <span className="template-preview-dialog__media">
+            <Image
+              src={previewSource(selectedPreview.svg)}
+              alt={`${title} — ${previewLabel(profile, interfaceLocale)} ${copy.previewOnly}`}
+              width={selectedPreview.width}
+              height={selectedPreview.height}
+              unoptimized
+              priority
+            />
+          </span>
         ) : null}
       </div>
       {error ? (

@@ -457,13 +457,6 @@ a {
   background: #16835a;
 }
 
-.wallet-readiness {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.wallet-readiness span,
 .wallet-state {
   padding: 0.55rem 0.75rem;
   border-radius: 999px;
@@ -1648,6 +1641,31 @@ body {
 
 .wallet-button {
   border-radius: var(--waflo-radius-pill);
+}
+
+/* Provider installation controls retain their approved badges rather than
+   inheriting the rounded Waflo action treatment used by generic buttons. */
+.wallet-button.wallet-button--apple {
+  min-width: 12.6rem;
+  min-height: 2.75rem;
+  border-radius: 0.45rem;
+  background: #050505;
+}
+
+.wallet-button.wallet-button--google {
+  min-width: 13.5rem;
+  min-height: 3rem;
+  color: #202124;
+  border-color: #dadce0;
+  border-radius: 0.25rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(60 64 67 / 16%);
+}
+
+.wallet-button.wallet-button--google:hover:not(:disabled) {
+  color: #202124;
+  background: #fff;
+  transform: none;
 }
 
 .transfer-intro {

@@ -16,6 +16,8 @@ const notoSansArabic = Noto_Sans_Arabic({
 const sirwan = localFont({
   src: "../../../../packages/brand/assets/fonts/Sirwan.ttf",
   variable: "--font-sirwan",
+  weight: "400",
+  style: "normal",
   display: "swap",
 });
 

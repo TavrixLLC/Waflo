@@ -113,6 +113,8 @@ export async function mockTemplateGalleryApi(
     arabicEarningCopy = "present",
     memberRole = "OWNER",
     merchantBrandLogoDataUri,
+    merchantName = "Gallery Coffee",
+    onOrganizationPatch,
   }: {
     businessCategory?: string | null;
     onCreate?: (body: Record<string, unknown>) => void;
@@ -161,6 +163,8 @@ export async function mockTemplateGalleryApi(
     arabicEarningCopy?: "present" | "missing";
     memberRole?: "OWNER" | "MANAGER" | "STAFF";
     merchantBrandLogoDataUri?: string;
+    merchantName?: string;
+    onOrganizationPatch?: (body: Record<string, unknown>) => void;
   } = {},
 ): Promise<void> {
   await page.route("https://fonts.googleapis.com/**", async (route) => {
@@ -209,6 +213,8 @@ export async function mockTemplateGalleryApi(
   let walletNearbyLocationIds: string[] = [];
   let walletNearbyCustomEn: string | null = null;
   let walletNearbyCustomAr: string | null = null;
+  let organizationBusinessCategory = businessCategory;
+  let organizationDefaultLocale = "EN";
   const walletCampaigns: Array<Record<string, unknown>> = [];
 
   function currentArtwork() {
@@ -523,7 +529,7 @@ export async function mockTemplateGalleryApi(
             locale,
             renderedStamp: stamp,
             stampSize: Number(visual.stampSize),
-            organizationName: locale === "ar" ? "Ù…Ù‚Ù‡Ù‰ Ø§Ù„Ù…Ø¹Ø±Ø¶" : "Gallery Coffee",
+            organizationName: merchantName,
             programName: content.programName,
             rewardSummary: content.rewardSummary,
             progress,
@@ -536,7 +542,7 @@ export async function mockTemplateGalleryApi(
     const result = composeProgramPreview({
       profile,
       locale,
-      organizationName: locale === "ar" ? "مقهى المعرض" : "Gallery Coffee",
+      organizationName: merchantName,
       programName: content.programName,
       shortDescription: content.shortDescription,
       rewardSummary: content.rewardSummary,
@@ -629,7 +635,7 @@ export async function mockTemplateGalleryApi(
             role: memberRole,
             organization: {
               id: templateGalleryOrganizationId,
-              name: "Gallery Coffee",
+              name: merchantName,
               merchantSlug: "gallery-coffee",
               defaultLocale: "EN",
               selectedPlan,
@@ -640,13 +646,30 @@ export async function mockTemplateGalleryApi(
       });
       return;
     }
+    if (
+      path === `/v1/organizations/${templateGalleryOrganizationId}` &&
+      request.method() === "PATCH"
+    ) {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      organizationBusinessCategory =
+        typeof body.businessCategory === "string" || body.businessCategory === null
+          ? body.businessCategory
+          : organizationBusinessCategory;
+      organizationDefaultLocale =
+        typeof body.defaultLocale === "string"
+          ? body.defaultLocale.toLocaleUpperCase("en-US")
+          : organizationDefaultLocale;
+      onOrganizationPatch?.(body);
+      await fulfill(route, { updated: true });
+      return;
+    }
     if (path === `/v1/organizations/${templateGalleryOrganizationId}`) {
       await fulfill(route, {
         id: templateGalleryOrganizationId,
-        name: "Gallery Coffee",
+        name: merchantName,
         merchantSlug: "gallery-coffee",
-        businessCategory,
-        defaultLocale: "EN",
+        businessCategory: organizationBusinessCategory,
+        defaultLocale: organizationDefaultLocale,
         timezone: "Asia/Baghdad",
         status: "ACTIVE",
         selectedPlan,

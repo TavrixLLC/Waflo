@@ -59,6 +59,11 @@ export interface WalletHealth {
   configured?: boolean;
   providerReachable?: boolean;
   externallyCertified?: boolean;
+  providerConfigured?: boolean;
+  artifactAvailable?: boolean;
+  installationAvailable?: boolean;
+  deviceEligibility?: "UNKNOWN" | "ELIGIBLE" | "REQUIRES_COMPATIBLE_DEVICE";
+  reason?: "CONFIGURATION" | "ARTIFACT" | "DEVICE" | "PROVIDER";
 }
 
 interface WalletSyncJob {

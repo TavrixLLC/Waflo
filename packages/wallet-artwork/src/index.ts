@@ -1457,8 +1457,15 @@ async function composeApplePosterFromGoogleMaster(
   const master = await composeWalletArtwork(sharedPosterPlan.master.input, "GOOGLE_HERO", 1);
   const width = sharedPosterPlan.width;
   const height = sharedPosterPlan.height;
-  const masterWidth = sharedPosterPlan.master.destination.width;
-  const masterHeight = sharedPosterPlan.master.destination.height;
+  // The render plan deliberately keeps its transform as one exact uniform
+  // scale. Sharp is the final bitmap boundary and requires integer pixels, so
+  // round once here while deriving height from the same ratio instead of
+  // feeding a second independently rounded canonical coordinate back into it.
+  const masterWidth = Math.round(sharedPosterPlan.master.destination.width);
+  const masterHeight = Math.round(
+    (masterWidth * sharedPosterPlan.master.sourceBounds.height) /
+      sharedPosterPlan.master.sourceBounds.width,
+  );
   const masterImage = await sharp(master.bytes)
     .extract({
       left: sharedPosterPlan.master.sourceBounds.left,

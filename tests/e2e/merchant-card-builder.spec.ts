@@ -1,9 +1,20 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { builderPreviewMedia, expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
+
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: a manual local browser run chooses its evidence destination.
+const stagingRepairEvidenceDirectory = process.env.WAFLO_STAGING_REPAIR_EVIDENCE_DIR;
+
+async function captureStagingRepairEvidence(target: Page, filename: string): Promise<void> {
+  if (!stagingRepairEvidenceDirectory) return;
+  await target.screenshot({
+    path: `${stagingRepairEvidenceDirectory}/${filename}`,
+    animations: "disabled",
+  });
+}
 
 function allTemplates(page: Page) {
   return page.locator('section[aria-labelledby="template-gallery-all-title"]');
@@ -334,11 +345,15 @@ test("keeps each inline Wallet card centered inside its constrained preview fram
       return {
         leadingSpace: cardBounds.left - frameBounds.left,
         trailingSpace: frameBounds.right - cardBounds.right,
+        topSpace: cardBounds.top - frameBounds.top,
+        bottomSpace: frameBounds.bottom - cardBounds.bottom,
       };
     });
     expect(Math.abs(alignment.leadingSpace - alignment.trailingSpace), label).toBeLessThanOrEqual(
       1,
     );
+    expect(alignment.topSpace, label).toBeGreaterThanOrEqual(-1);
+    expect(alignment.bottomSpace, label).toBeGreaterThanOrEqual(-1);
     if (label !== "Apple iOS 27+") continue;
     const artworkBounds = await preview.locator(".builder-preview-canvas").evaluate((frame) => {
       const root = frame.querySelector<SVGSVGElement>(
@@ -422,6 +437,69 @@ test("keeps each inline Wallet card centered inside its constrained preview fram
     expect(artworkBounds.masterBounds.right).toBeLessThanOrEqual(artworkBounds.posterBounds.right);
     expect(artworkBounds.rewardBounds.left).toBeGreaterThanOrEqual(artworkBounds.masterBounds.left);
     expect(artworkBounds.rewardBounds.right).toBeLessThanOrEqual(artworkBounds.masterBounds.right);
+    await captureStagingRepairEvidence(page, "03-ios27-ltr-desktop.png");
+  }
+});
+
+test("uniformly contains the canonical iOS 27+ artwork in the mobile preview sheet", async ({
+  page,
+}) => {
+  await mockTemplateGalleryApi(page);
+  await page.setViewportSize({ width: 360, height: 844 });
+  await enterBuilder(page);
+
+  for (const width of [360, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.locator(".builder-mobile-preview-action").click();
+    const sheet = page.locator(".builder-preview-modal");
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole("tab", { name: "Apple iOS 27+" }).click();
+    await expectBuilderPreviewReady(sheet);
+
+    const geometry = await sheet.locator(".builder-preview-canvas").evaluate((frame) => {
+      const card = frame.querySelector<HTMLElement>(".wallet-preview-image-stack");
+      const root = frame.querySelector<SVGSVGElement>(
+        ".wallet-preview-image-stack__canvas > span > svg",
+      );
+      if (!card || !root) throw new Error("Mobile iOS 27+ preview is incomplete.");
+      const frameBounds = frame.getBoundingClientRect();
+      const cardBounds = card.getBoundingClientRect();
+      const rootBounds = root.getBoundingClientRect();
+      return {
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        frameBounds,
+        cardBounds,
+        rootBounds,
+        rootAspectRatio: rootBounds.width / rootBounds.height,
+      };
+    });
+
+    expect(geometry.documentWidth, String(width)).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+    expect(geometry.cardBounds.left, String(width)).toBeGreaterThanOrEqual(
+      geometry.frameBounds.left - 1,
+    );
+    expect(geometry.cardBounds.right, String(width)).toBeLessThanOrEqual(
+      geometry.frameBounds.right + 1,
+    );
+    expect(geometry.cardBounds.top, String(width)).toBeGreaterThanOrEqual(
+      geometry.frameBounds.top - 1,
+    );
+    expect(geometry.cardBounds.bottom, String(width)).toBeLessThanOrEqual(
+      geometry.frameBounds.bottom + 1,
+    );
+    expect(geometry.rootBounds.left, String(width)).toBeGreaterThanOrEqual(
+      geometry.cardBounds.left - 1,
+    );
+    expect(geometry.rootBounds.right, String(width)).toBeLessThanOrEqual(
+      geometry.cardBounds.right + 1,
+    );
+    expect(geometry.rootAspectRatio, String(width)).toBeGreaterThan(0.7);
+    expect(geometry.rootAspectRatio, String(width)).toBeLessThan(1.1);
+    if (width === 360) await captureStagingRepairEvidence(page, "06-ios27-mobile-360.png");
+    if (width === 390) await captureStagingRepairEvidence(page, "07-ios27-mobile-390.png");
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
   }
 });
 
@@ -905,6 +983,153 @@ test("keeps Arabic intentional and adapts from split desktop to a mobile preview
       ["serious", "critical"].includes(violation.impact ?? ""),
     ),
   ).toEqual([]);
+
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("tab", { name: "Apple iOS 27+" }).click();
+  await expectBuilderPreviewReady(page.locator(".builder-preview-desktop"));
+  await captureStagingRepairEvidence(page, "04-ios27-rtl-desktop.png");
+  await captureStagingRepairEvidence(page, "05-ios27-long-content.png");
+});
+
+test("keeps deliberately long Arabic iOS 27+ content inside its canonical artwork regions", async ({
+  page,
+}) => {
+  const longArabicMerchant =
+    "\u0645\u062a\u062c\u0631 \u0627\u0644\u0642\u0647\u0648\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u0644\u0644\u0645\u0643\u0627\u0641\u0622\u062a \u0648\u0627\u0644\u0648\u0644\u0627\u0621 \u0627\u0644\u0645\u062d\u0644\u064a";
+  const longArabicTitle =
+    "\u0628\u0631\u0646\u0627\u0645\u062c \u0627\u0644\u0632\u0628\u0627\u0626\u0646 \u0627\u0644\u0645\u0645\u064a\u0632 \u0644\u0644\u0642\u0647\u0648\u0629 \u0627\u0644\u064a\u0648\u0645\u064a\u0629 \u0648\u0627\u0644\u0639\u0631\u0648\u0636 \u0627\u0644\u0645\u0633\u062a\u0645\u0631\u0629";
+  const longArabicReward =
+    "\u0645\u0643\u0627\u0641\u0623\u0629 \u0645\u062c\u0627\u0646\u064a\u0629 \u0645\u0645\u064a\u0632\u0629 \u0645\u0639 \u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0634\u0631\u0648\u0628 \u0648\u062d\u0644\u0648\u0649 \u0648\u0625\u0636\u0627\u0641\u0627\u062a \u0645\u0648\u0633\u0645\u064a\u0629 \u0637\u0648\u0627\u0644 \u0627\u0644\u064a\u0648\u0645";
+  await mockTemplateGalleryApi(page, { merchantName: longArabicMerchant });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await enterBuilder(page);
+  await addCardLanguage(page, "Arabic");
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.goto("/ar/dashboard/programs/created-program-id/edit");
+
+  await page.locator('[data-builder-section-link="languages"]').click();
+  await page.getByRole("tab", { name: /\u0627\u0644\u0639\u0631\u0628\u064a\u0629/u }).click();
+  const title = page.locator('.builder-language-panel[lang="ar"] input').first();
+  await title.fill(longArabicTitle);
+  await title.press("Tab");
+  await expect(page.locator(".builder-save-state--saved")).toBeVisible();
+
+  await page.locator('[data-builder-section-link="reward"]').click();
+  await page.getByRole("tab", { name: /\u0627\u0644\u0639\u0631\u0628\u064a\u0629/u }).click();
+  const reward = page.locator('[data-builder-section="reward"] input').first();
+  await reward.fill(longArabicReward);
+  await reward.press("Tab");
+  await expect(page.locator(".builder-save-state--saved")).toBeVisible();
+
+  const inspectGeometry = async (container: Locator) =>
+    container.locator(".builder-preview-canvas").evaluate((frame) => {
+      const root = frame.querySelector<SVGSVGElement>(
+        ".wallet-preview-image-stack__canvas > span > svg",
+      );
+      const master = frame.querySelector<SVGGraphicsElement>(
+        '[data-wallet-plan-layer="apple-google-master"]',
+      );
+      const qr = frame.querySelector<SVGGraphicsElement>('[data-wallet-plan-layer="qr"]');
+      const stamp = frame.querySelector<SVGGraphicsElement>('[data-wallet-plan-layer="stamp"]');
+      if (!root || !master || !qr || !stamp)
+        throw new Error("iOS 27+ artwork layers are incomplete.");
+      const rootBounds = root.getBoundingClientRect();
+      const masterBounds = master.getBoundingClientRect();
+      const screenBounds = (element: SVGGraphicsElement) => {
+        const box = element.getBBox();
+        const matrix = element.getScreenCTM();
+        if (!matrix) throw new Error("Wallet artwork layer has no screen transform.");
+        const points = [
+          new DOMPoint(box.x, box.y).matrixTransform(matrix),
+          new DOMPoint(box.x + box.width, box.y).matrixTransform(matrix),
+          new DOMPoint(box.x, box.y + box.height).matrixTransform(matrix),
+          new DOMPoint(box.x + box.width, box.y + box.height).matrixTransform(matrix),
+        ];
+        return {
+          left: Math.min(...points.map((point) => point.x)),
+          right: Math.max(...points.map((point) => point.x)),
+          top: Math.min(...points.map((point) => point.y)),
+          bottom: Math.max(...points.map((point) => point.y)),
+          width:
+            Math.max(...points.map((point) => point.x)) -
+            Math.min(...points.map((point) => point.x)),
+          height:
+            Math.max(...points.map((point) => point.y)) -
+            Math.min(...points.map((point) => point.y)),
+        };
+      };
+      const qrBounds = screenBounds(qr);
+      const stampBounds = screenBounds(stamp);
+      const overlaps = (left: DOMRect, right: DOMRect) =>
+        left.left < right.right &&
+        left.right > right.left &&
+        left.top < right.bottom &&
+        left.bottom > right.top;
+      const textBounds = [...root.querySelectorAll<SVGTextElement>("text")]
+        .filter((text) => !text.closest('[data-wallet-plan-layer="stamp"]'))
+        .map((text) => ({
+          content: text.textContent ?? "",
+          anchor: text.getAttribute("text-anchor"),
+          bounds: screenBounds(text),
+        }))
+        .filter((entry) => entry.bounds.width > 0 && entry.bounds.height > 0);
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        rootBounds,
+        masterBounds,
+        qrBounds,
+        stampBounds,
+        rootAspect: rootBounds.width / rootBounds.height,
+        rootDirection: root.getAttribute("direction"),
+        textBounds,
+        textOutsideRoot: textBounds.filter(
+          ({ bounds }) =>
+            bounds.left < rootBounds.left - 1 ||
+            bounds.right > rootBounds.right + 1 ||
+            bounds.top < rootBounds.top - 1 ||
+            bounds.bottom > rootBounds.bottom + 1,
+        ),
+        textOverlappingQr: textBounds.filter(({ bounds }) => overlaps(bounds, qrBounds)),
+        textOverlappingStamp: textBounds.filter(({ bounds }) => overlaps(bounds, stampBounds)),
+      };
+    });
+
+  const desktopPreview = page.locator(".builder-preview-desktop");
+  await desktopPreview.locator(".builder-preview-language").getByRole("combobox").click();
+  await page.getByRole("option", { name: /^Arabic\b/u }).click();
+  await desktopPreview.getByRole("tab", { name: "Apple iOS 27+" }).click();
+  await expectBuilderPreviewReady(desktopPreview, "ar");
+  const desktop = await inspectGeometry(desktopPreview);
+  expect(desktop.documentWidth).toBeLessThanOrEqual(desktop.viewportWidth + 1);
+  expect(desktop.textOutsideRoot).toEqual([]);
+  expect(desktop.textOverlappingQr).toEqual([]);
+  expect(desktop.textOverlappingStamp).toEqual([]);
+  expect(desktop.rootDirection).toBe("rtl");
+  const rtlContent = desktop.textBounds.filter(({ content }) =>
+    /\u0628\u0631\u0646\u0627\u0645\u062c|\u0645\u0643\u0627\u0641\u0623\u0629/u.test(content),
+  );
+  expect(rtlContent.length).toBeGreaterThan(0);
+  expect(rtlContent.every(({ anchor }) => anchor === "end")).toBe(true);
+  expect(desktop.rootAspect).toBeGreaterThan(0.7);
+  expect(desktop.rootAspect).toBeLessThan(1.1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".builder-mobile-preview-action").click();
+  const mobilePreview = page.locator(".builder-preview-modal");
+  await expect(mobilePreview).toBeVisible();
+  await mobilePreview.locator(".builder-preview-language").getByRole("combobox").click();
+  await page.getByRole("option", { name: /^Arabic\b/u }).click();
+  await mobilePreview.getByRole("tab", { name: "Apple iOS 27+" }).click();
+  await expectBuilderPreviewReady(mobilePreview, "ar");
+  const mobile = await inspectGeometry(mobilePreview);
+  expect(mobile.documentWidth).toBeLessThanOrEqual(mobile.viewportWidth + 1);
+  expect(mobile.textOutsideRoot).toEqual([]);
+  expect(mobile.textOverlappingQr).toEqual([]);
+  expect(mobile.textOverlappingStamp).toEqual([]);
+  expect(Math.abs(mobile.rootAspect - desktop.rootAspect)).toBeLessThan(0.01);
+  await captureStagingRepairEvidence(page, "05b-ios27-long-arabic.png");
 });
 
 test("reserves sticky-footer space and keeps active section navigation visible", async ({

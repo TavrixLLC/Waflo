@@ -99,7 +99,7 @@ async function enroll(page: Page, displayName: string, email?: string) {
   await page.getByLabel(/I accept the Waflo privacy notice/).check();
   await page.getByRole("button", { name: "Create my card" }).click();
   await expect(page.getByRole("heading", { name: `Welcome to ${programName}` })).toBeVisible();
-  await page.getByRole("button", { name: "Open my card" }).click();
+  await page.getByRole("button", { name: "View card" }).click();
   await expect(page.getByRole("heading", { name: programName })).toBeVisible();
   return page.url();
 }
