@@ -403,7 +403,14 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
   const isGoogle = region.width > 400;
   const approvedGoogleHero = isGoogle && !input.applePosterRefinement;
   const inset = isGoogle ? (approvedGoogleHero ? 15 : 18) : 8;
-  const textX = isRtl ? region.left + region.width - inset : region.left + inset;
+  // Apple Poster is a cropped Google-master composition. Reserve the mapped
+  // trailing edge for RTL glyph overhang: browser/font combinations can paint
+  // Arabic glyphs slightly beyond their SVG end anchor. Keeping this reserve
+  // in the canonical master plan prevents those glyphs escaping the poster
+  // viewport without changing Google Hero or the Apple card geometry.
+  const applePosterRtlTrailingReserve = input.applePosterRefinement && isRtl ? 48 : 0;
+  const textInset = inset + applePosterRtlTrailingReserve;
+  const textX = isRtl ? region.left + region.width - textInset : region.left + textInset;
   const headerScale = input.headerScale ?? 1;
   const textColor = readableTextColor(input.theme.foregroundColor, input.theme.backgroundColor);
   const organization =
@@ -421,7 +428,7 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
       1,
       presentation.locale,
     )[0] ?? "";
-  const availableWidth = region.width - inset * 2;
+  const availableWidth = region.width - inset * 2 - applePosterRtlTrailingReserve;
   const organizationSize = fittedFontSize(
     organization,
     (isGoogle ? 15 : 8) * headerScale,

@@ -911,10 +911,17 @@ test.describe
 
       await page.goto("/en/dashboard/settings");
       await expect(page.getByRole("main").getByRole("heading", { name: "Settings" })).toBeVisible();
-      const activityType = page.locator('select[name="category"]');
-      await expect(activityType).toBeVisible();
-      await activityType.selectOption("food-and-beverage");
-      await expect(activityType).toHaveValue("food-and-beverage");
+      const activityType = page
+        .locator(".wf-search-select")
+        .filter({ has: page.locator('input[name="category"]') });
+      const activityTypeInput = activityType.getByRole("combobox");
+      await expect(activityTypeInput).toBeVisible();
+      await expect(activityTypeInput).not.toHaveJSProperty("tagName", "SELECT");
+      await activityTypeInput.focus();
+      await activityTypeInput.press("ArrowDown");
+      await expect(page.getByRole("listbox")).toBeVisible();
+      await page.getByRole("listbox").getByRole("option", { name: "Food & beverage" }).click();
+      await expect(page.locator('input[name="category"]')).toHaveValue("food-and-beverage");
       await page.getByRole("button", { name: "Save changes" }).click();
       await expect(page.getByText("Settings saved.")).toBeVisible();
 
