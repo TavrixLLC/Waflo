@@ -23,7 +23,7 @@
     "@waflo/wallet-core": "workspace:*",
     "@waflo/wallet-google": "workspace:*",
     "ioredis": "5.11.1",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
