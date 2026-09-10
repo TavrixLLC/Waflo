@@ -5,11 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { ObjectStorage } from "../../apps/api/src/programs/object-storage.js";
 import type { PreviewAsset } from "../../apps/api/src/programs/preview-assets.js";
 import { resolveApplePassImagesWithFallback } from "../../apps/api/src/wallet/wallet.service.js";
-import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
-import {
-  GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION,
-  resolveGoogleProgressArtworkComposition,
-} from "../../packages/wallet-google/src/index.js";
 import {
   GOOGLE_WALLET_HERO_HEIGHT,
   GOOGLE_WALLET_HERO_WIDTH,
@@ -20,7 +15,12 @@ import {
   prepareGoogleWalletProgramLogo,
   prepareGoogleWalletProgressHero,
 } from "../../apps/wallet-worker/src/google-wallet-assets.js";
+import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 import { WALLET_PRESENTATION_SCHEMA_VERSION } from "../../packages/wallet-core/src/index.js";
+import {
+  GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION,
+  resolveGoogleProgressArtworkComposition,
+} from "../../packages/wallet-google/src/index.js";
 
 const storage = {
   put: vi.fn(),
@@ -54,7 +54,7 @@ describe("Wallet rendering repair completion", () => {
     const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
     expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(5);
-    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 10");
+    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 11");
     expect(enrollment).toContain("ensure-template:v");
     expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
     expect(worker).toContain("enqueuePresentationRepairs");

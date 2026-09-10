@@ -3,25 +3,25 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
 import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
+import { createQrPng } from "../../packages/qr-core/src/index.js";
+import {
+  createQrPreviewPngDataUri,
+  createQrPreviewRasterMarkup,
+} from "../../packages/qr-core/src/preview.js";
 import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 import {
   createDashboardWalletPreviewArtworkPlan,
   dashboardWalletPreviewQrRasterRequest,
   renderDashboardWalletPreviewSvg,
 } from "../../packages/wallet-artwork/src/dashboard-preview.js";
-import {
-  createWalletArtworkRenderPlan,
-  createWalletArtworkApplePosterRenderPlan,
-  renderWalletArtworkPlanSvg,
-  applePosterGoogleMasterRenderInput,
-  walletArtworkContrastRatio,
-} from "../../packages/wallet-artwork/src/render-plan.js";
 import { createWalletArtworkCompositionPlan } from "../../packages/wallet-artwork/src/index.js";
 import {
-  createQrPreviewPngDataUri,
-  createQrPreviewRasterMarkup,
-} from "../../packages/qr-core/src/preview.js";
-import { createQrPng } from "../../packages/qr-core/src/index.js";
+  applePosterGoogleMasterRenderInput,
+  createWalletArtworkApplePosterRenderPlan,
+  createWalletArtworkRenderPlan,
+  renderWalletArtworkPlanSvg,
+  walletArtworkContrastRatio,
+} from "../../packages/wallet-artwork/src/render-plan.js";
 
 const base = {
   organizationName: "Waflo Coffee",
@@ -228,6 +228,58 @@ describe("Dashboard Wallet shared preview shell", () => {
     expect(server.svg).toContain('direction="rtl"');
     expect(browser.svg.match(/data-google-native-title="true"/u)).toHaveLength(1);
     expect(server.svg.match(/data-google-native-title="true"/u)).toHaveLength(1);
+  });
+
+  it("uses shaped Arabic provider chrome and logical start anchors without changing English", async () => {
+    const [{ browser: arabicGoogle }, { browser: arabicPoster }] = await Promise.all([
+      renderPair("ar", "GOOGLE_WALLET"),
+      renderPair("ar", "APPLE_IOS27"),
+    ]);
+    expect(arabicGoogle.svg).toContain('x="364" y="67" text-anchor="start"');
+    expect(arabicGoogle.svg).toContain('x="418" y="143" text-anchor="start"');
+    expect(arabicGoogle.svg).toContain("font-family=\"'Noto Sans Arabic'");
+    expect(arabicPoster.svg).toContain('x="358" y="58" text-anchor="start"');
+    expect(arabicPoster.svg).toContain("font-family=\"'Noto Sans Arabic'");
+    const [arabicGoogleRaster, arabicPosterRaster] = await Promise.all([
+      sharp(Buffer.from(arabicGoogle.svg)).png().metadata(),
+      sharp(Buffer.from(arabicPoster.svg)).png().metadata(),
+    ]);
+    expect([arabicGoogleRaster.width, arabicGoogleRaster.height]).toEqual([460, 564]);
+    expect([arabicPosterRaster.width, arabicPosterRaster.height]).toEqual([460, 532]);
+
+    const [{ browser: englishGoogle }, { browser: englishPoster }] = await Promise.all([
+      renderPair("en", "GOOGLE_WALLET"),
+      renderPair("en", "APPLE_IOS27"),
+    ]);
+    expect(englishGoogle.svg).toContain('font-family="Google Sans,Roboto,Arial,sans-serif"');
+    expect(englishPoster.svg).toContain(
+      'font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif"',
+    );
+
+    const dashboardStyles = readFileSync("apps/merchant-dashboard/app/globals.css", "utf8");
+    expect(dashboardStyles).toContain(
+      ':is([data-wallet-artwork-render-plan], [data-wallet-provider])[lang="ar"]',
+    );
+  });
+
+  it("shows Legacy back fields separately while preserving the compact Apple front", async () => {
+    const { browserInput } = await renderPair("en", "APPLE_LEGACY");
+    const preview = renderDashboardWalletPreviewSvg({
+      ...browserInput,
+      memberName: "Amina Hassan",
+      status: "Active",
+    });
+
+    expect([preview.width, preview.height]).toEqual([460, 760]);
+    expect(preview.svg).toContain('data-apple-front-surface="true" x="24" y="20"');
+    expect(preview.svg).toContain('data-apple-back-details-preview="true"');
+    expect(preview.svg).toContain('data-apple-pass-face="back"');
+    expect(preview.svg).toContain('data-apple-back-field="program"');
+    expect(preview.svg).toContain('data-apple-back-field="member"');
+    expect(preview.svg).toContain('data-apple-back-field="status"');
+    expect(preview.svg).toContain("Amina Hassan");
+    expect(preview.svg).toContain("Active");
+    expect(preview.svg).toContain('y="633" width="412" height="107"');
   });
 
   it("uses a deterministic readable Google native foreground on dark and light surfaces", async () => {

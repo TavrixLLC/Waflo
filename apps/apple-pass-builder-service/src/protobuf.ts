@@ -18,6 +18,7 @@ const expectedImageSizes: Readonly<
   primaryLogo: [126, 30],
   artwork: [358, 448],
   strip: [375, 144],
+  thumbnail: [90, 90],
 };
 
 const barcodeFormats: Readonly<Record<PassBuilderRequest["pass"]["barcode"]["format"], number>> = {
@@ -76,11 +77,15 @@ export async function createPersonalizationProtobuf(input: {
 }): Promise<string> {
   const assetsDirectory = join(input.workDirectory, "assets");
   await mkdir(assetsDirectory, { mode: 0o700 });
+  const suppliedImageSets = passBuilderImageSlots.flatMap((slot) => {
+    const variants = input.request.images[slot];
+    return variants ? [{ slot, variants }] : [];
+  });
   const imageSets = Object.fromEntries(
     await Promise.all(
-      passBuilderImageSlots.map(async (slot) => [
+      suppliedImageSets.map(async ({ slot, variants }) => [
         slot,
-        await writeImageSet(assetsDirectory, slot, input.request.images[slot]),
+        await writeImageSet(assetsDirectory, slot, variants),
       ]),
     ),
   );

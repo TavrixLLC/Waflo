@@ -3,9 +3,24 @@ const serialPattern = /^[A-Za-z0-9._-]{1,255}$/;
 const colorPattern = /^#[0-9a-f]{6}$/i;
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
-export const passBuilderImageSlots = ["icon", "logo", "primaryLogo", "artwork", "strip"] as const;
+export const requiredPassBuilderImageSlots = [
+  "icon",
+  "logo",
+  "primaryLogo",
+  "artwork",
+  "strip",
+] as const;
+
+export const optionalPassBuilderImageSlots = ["thumbnail"] as const;
+
+export const passBuilderImageSlots = [
+  ...requiredPassBuilderImageSlots,
+  ...optionalPassBuilderImageSlots,
+] as const;
 
 export type PassBuilderImageSlot = (typeof passBuilderImageSlots)[number];
+export type RequiredPassBuilderImageSlot = (typeof requiredPassBuilderImageSlots)[number];
+export type OptionalPassBuilderImageSlot = (typeof optionalPassBuilderImageSlots)[number];
 
 export interface ImageVariants {
   readonly times1: string;
@@ -55,7 +70,10 @@ export interface PassBuilderRequest {
       readonly operator: string;
     };
   };
-  readonly images: Readonly<Record<PassBuilderImageSlot, ImageVariants>>;
+  readonly images: Readonly<
+    Record<RequiredPassBuilderImageSlot, ImageVariants> &
+      Partial<Record<OptionalPassBuilderImageSlot, ImageVariants>>
+  >;
 }
 
 export interface SigningIdentity {
@@ -130,9 +148,16 @@ export function parsePassBuilderRequest(value: unknown): PassBuilderRequest {
     throw new RequestValidationError("pass.voided must be a boolean.");
   }
 
-  const parsedImages = Object.fromEntries(
-    passBuilderImageSlots.map((slot) => [slot, imageVariants(images[slot], `images.${slot}`)]),
-  ) as unknown as Record<PassBuilderImageSlot, ImageVariants>;
+  const parsedImages: Record<RequiredPassBuilderImageSlot, ImageVariants> &
+    Partial<Record<OptionalPassBuilderImageSlot, ImageVariants>> = Object.fromEntries(
+    requiredPassBuilderImageSlots.map((slot) => [
+      slot,
+      imageVariants(images[slot], `images.${slot}`),
+    ]),
+  ) as Record<RequiredPassBuilderImageSlot, ImageVariants>;
+  if ("thumbnail" in images) {
+    parsedImages.thumbnail = imageVariants(images.thumbnail, "images.thumbnail");
+  }
 
   return {
     operationId: id("operationId", input.operationId),

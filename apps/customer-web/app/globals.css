@@ -657,32 +657,76 @@ a {
 .wallet-buttons {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.7rem;
   margin-top: 1rem;
 }
 
 .wallet-button {
   display: inline-flex;
-  min-height: 2.75rem;
-  padding: 0.75rem 1rem;
   align-items: center;
-  border-radius: 0.75rem;
-  font-weight: 800;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 0;
 }
 
-.wallet-button--apple {
-  color: white;
-  background: #050505;
+.wallet-button img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.wallet-button--apple img {
+  width: 111px;
 }
 
 .wallet-button--google {
-  min-width: 13.5rem;
-  justify-content: center;
-  color: #202124;
-  border: 1px solid #dadce0;
-  border-radius: 0.35rem;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(60 64 67 / 16%);
+  cursor: pointer;
+}
+
+.wallet-button--google img {
+  width: min(283px, calc(100vw - 4rem));
+}
+
+.wallet-button:focus-visible {
+  outline: 3px solid var(--waflo-coral);
+  outline-offset: 4px;
+}
+
+.wallet-button--google:disabled {
+  cursor: progress;
+  opacity: 0.68;
+}
+
+.wallet-check-again {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 0.65rem;
+  background: transparent;
+  color: var(--waflo-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wallet-check-again:hover:not(:disabled) {
+  background: var(--waflo-soft);
+}
+
+.wallet-check-again:focus-visible {
+  outline: 3px solid var(--waflo-coral);
+  outline-offset: 3px;
+}
+
+.wallet-check-again:disabled {
+  cursor: progress;
+  opacity: 0.68;
 }
 
 .wallet-platform-note {
@@ -1637,35 +1681,6 @@ body {
   padding: 1rem;
   border-radius: 22px;
   box-shadow: none;
-}
-
-.wallet-button {
-  border-radius: var(--waflo-radius-pill);
-}
-
-/* Provider installation controls retain their approved badges rather than
-   inheriting the rounded Waflo action treatment used by generic buttons. */
-.wallet-button.wallet-button--apple {
-  min-width: 12.6rem;
-  min-height: 2.75rem;
-  border-radius: 0.45rem;
-  background: #050505;
-}
-
-.wallet-button.wallet-button--google {
-  min-width: 13.5rem;
-  min-height: 3rem;
-  color: #202124;
-  border-color: #dadce0;
-  border-radius: 0.25rem;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(60 64 67 / 16%);
-}
-
-.wallet-button.wallet-button--google:hover:not(:disabled) {
-  color: #202124;
-  background: #fff;
-  transform: none;
 }
 
 .transfer-intro {

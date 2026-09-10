@@ -276,7 +276,7 @@ describe("P3 Builder preview fidelity", () => {
     expect(composition.svg).not.toContain('data-google-barcode-region="provider-managed"');
   });
 
-  it("keeps Apple Legacy front fields minimal and identifies its provider-managed back fields", async () => {
+  it("keeps Apple Legacy front fields minimal and renders its provider-managed back fields separately", async () => {
     const composition = await preview("APPLE_WALLET", 4);
     expect(composition.svg).toContain('data-apple-front-surface="true"');
     expect(composition.svg).toContain('data-apple-native-fields="true"');
@@ -286,6 +286,13 @@ describe("P3 Builder preview fidelity", () => {
     expect(composition.svg).toContain(
       'data-apple-field-groups="header:stamps;primary:empty;secondary:reward;back:member,status,program"',
     );
+    expect(composition.svg).toContain('data-apple-back-details-preview="true"');
+    expect(composition.svg).toContain('data-apple-pass-face="back"');
+    expect(composition.svg).toContain('data-apple-back-field="program"');
+    expect(composition.svg).toContain('data-apple-back-field="member"');
+    expect(composition.svg).toContain('data-apple-back-field="status"');
+    expect(composition.svg).toContain("Preview member");
+    expect(composition.svg).toContain("Active");
     expect(composition.svg).not.toContain('data-apple-field-role="primary"');
     expect(composition.svg).toContain(rewardSummary);
     expect(
@@ -385,6 +392,20 @@ describe("P3 Builder preview fidelity", () => {
         ]),
       );
       expect(composition.svg).toContain(String(reward.value));
+      // A program preview has no real customer record, so it uses the
+      // representative member placeholder while showing the same legacy
+      // back-field slots as the installed Store Card.
+      expect(composition.svg).toContain('data-apple-back-field="member"');
+      expect(composition.svg).toContain('data-apple-back-field="status"');
+      expect(composition.svg).toContain("Preview member");
+      expect(composition.svg).toContain(
+        String(
+          required(
+            pass.storeCard.backFields.find((field) => field.key === "status"),
+            "Apple status back field",
+          ).value,
+        ),
+      );
       expect(composition.svg).not.toContain(input.displayName);
       expect(composition.svg).toContain('data-barcode-format="QR"');
       expect(composition.svg).not.toContain("data-barcode-fallback");

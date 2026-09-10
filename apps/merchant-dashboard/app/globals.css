@@ -32,15 +32,25 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
  * the dashboard rather than letting a data-URI SVG choose a system fallback.
  * Geometry and line decisions stay in wallet-artwork/render-plan.ts.
  */
-.wallet-preview-image-stack__canvas [data-wallet-artwork-render-plan][lang="ar"] text {
+.wallet-preview-image-stack__canvas
+  :is([data-wallet-artwork-render-plan], [data-wallet-provider])[lang="ar"]
+  text {
   font-family:
     var(--font-noto-sans-arabic), "Noto Sans Arabic", var(--font-cairo), system-ui, sans-serif;
 }
 
-.wallet-preview-image-stack__canvas [data-wallet-artwork-render-plan][lang="ckb"] text,
-.wallet-preview-image-stack__canvas [data-wallet-artwork-render-plan][lang="ckb-Arab-IQ"] text,
-.wallet-preview-image-stack__canvas [data-wallet-artwork-render-plan][lang="ku-Arab-IQ"] text,
-.wallet-preview-image-stack__canvas [data-wallet-artwork-render-plan][lang="kmr-Arab-IQ"] text {
+.wallet-preview-image-stack__canvas
+  :is([data-wallet-artwork-render-plan], [data-wallet-provider])[lang="ckb"]
+  text,
+.wallet-preview-image-stack__canvas
+  :is([data-wallet-artwork-render-plan], [data-wallet-provider])[lang="ckb-Arab-IQ"]
+  text,
+.wallet-preview-image-stack__canvas
+  :is([data-wallet-artwork-render-plan], [data-wallet-provider])[lang="ku-Arab-IQ"]
+  text,
+.wallet-preview-image-stack__canvas
+  :is([data-wallet-artwork-render-plan], [data-wallet-provider])[lang="kmr-Arab-IQ"]
+  text {
   font-family:
     var(--font-sirwan), "Sirwan", var(--font-noto-sans-arabic), "Noto Sans Arabic",
     var(--font-cairo), system-ui, sans-serif;
@@ -11638,7 +11648,7 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
 .wallet-preview-image-stack--apple_legacy {
   width: min(100%, 460px);
   max-width: 460px;
-  aspect-ratio: 460 / 621;
+  aspect-ratio: 460 / 760;
 }
 
 .wallet-preview-image-stack--apple_ios27 {

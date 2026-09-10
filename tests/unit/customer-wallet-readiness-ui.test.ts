@@ -16,11 +16,29 @@ describe("customer Wallet readiness presentation", () => {
 
   it("uses bounded canonical card revalidation rather than a repeating preparation poll", () => {
     const card = source("apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx");
-    expect(card).toContain("const delays = [1_000, 2_000, 4_000]");
+    expect(card).toContain(
+      "const walletConvergenceDelays = [250, 500, 1_000, 2_000, 4_000, 8_000, 8_000]",
+    );
     expect(card).toContain("walletConvergenceAttempts");
     expect(card).not.toContain("window.setInterval");
-    expect(card).not.toContain("walletStatusLabel");
-    expect(card).toContain('variant="secondary"');
+    expect(card).toContain("walletDescription");
+    expect(card).toContain("walletIsPreparing");
+    expect(card).toContain("walletRetryExhausted");
+    expect(card).toContain("Check again");
+    expect(card).toContain("activeCardRequest.current?.abort()");
+    expect(card).toContain("cardRequestGeneration");
+    expect(card).toContain("walletRefreshInFlightRef");
+    expect(card).toContain('aria-live="polite"');
+  });
+
+  it("uses official Apple and Google Wallet badge files without a styled inner card", () => {
+    const card = source("apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx");
+    const styles = source("apps/customer-web/app/globals.css");
+    expect(card).toContain("/wallet-buttons/apple-add-to-wallet-en.svg");
+    expect(card).toContain("/wallet-buttons/google-add-to-wallet-en.svg");
+    expect(styles).toContain(".wallet-button img");
+    expect(styles).toContain("background: transparent;");
+    expect(styles).toContain("box-shadow: none;");
   });
 
   it("derives exactly one Google authorization banner from canonical server status", () => {

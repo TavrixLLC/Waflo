@@ -286,7 +286,8 @@ interface PassBuilderServiceRequest {
     readonly fieldValues: Readonly<Record<string, string>>;
   };
   readonly images: Readonly<
-    Record<"icon" | "logo" | "primaryLogo" | "artwork" | "strip", ImageVariants>
+    Record<"icon" | "logo" | "primaryLogo" | "artwork" | "strip", ImageVariants> &
+      Partial<Record<"thumbnail", ImageVariants>>
   >;
 }
 
@@ -394,6 +395,27 @@ async function personalizedVariants(
   return {
     strip: variants(genericStrip),
     artwork: variants(poster),
+  };
+}
+
+function merchantThumbnailVariants(input: WalletMembershipInput): ImageVariants | undefined {
+  const images = input.applePassImages;
+  if (!images) return undefined;
+  const times1 = images["thumbnail.png"];
+  const times2 = images["thumbnail@2x.png"];
+  const times3 = images["thumbnail@3x.png"];
+  const supplied = [times1, times2, times3].filter((value) => value !== undefined).length;
+  if (supplied === 0) return undefined;
+  if (supplied !== 3 || !times1 || !times2 || !times3) {
+    throw new Error("Apple thumbnail image set must include 1x, 2x, and 3x variants.");
+  }
+  if ([times1, times2, times3].some((value) => value.byteLength === 0)) {
+    throw new Error("Apple thumbnail image set contains an empty variant.");
+  }
+  return {
+    times1: Buffer.from(times1).toString("base64"),
+    times2: Buffer.from(times2).toString("base64"),
+    times3: Buffer.from(times3).toString("base64"),
   };
 }
 
@@ -530,6 +552,7 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
       defaultBrandImages(),
       personalizedVariants(input.membership),
     ]);
+    const thumbnail = merchantThumbnailVariants(input.membership);
     const field = (style: ApplePassFields, key: string) => {
       const result = [
         ...(style.headerFields ?? []),
@@ -582,6 +605,7 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
         primaryLogo: brand.primaryLogo,
         artwork: personalized.artwork,
         strip: personalized.strip,
+        ...(thumbnail ? { thumbnail } : {}),
       },
     };
   }
