@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import type { WalletCampaignCreateInput, WalletNearbyUpdateInput } from "@waflo/contracts";
+import {
+  walletCampaignProviders,
+  type WalletCampaignCreateInput,
+  type WalletNearbyUpdateInput,
+} from "@waflo/contracts";
 import {
   APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   resolveWalletNearbyText,
@@ -656,9 +660,11 @@ export class WalletEngagementService {
     request: WafloRequest,
   ) {
     const program = await this.program(userId, organizationId, programId, true);
-    if (
-      input.providers.some((provider) => !this.capability(provider).selectableForManualPromotion)
-    ) {
+    // Provider selection is deliberately absent from the merchant workflow.
+    // Normalize here as well as at the HTTP contract boundary so internal
+    // callers and legacy payloads cannot create a one-provider campaign.
+    const providers = [...walletCampaignProviders];
+    if (providers.some((provider) => !this.capability(provider).selectableForManualPromotion)) {
       throw new AppError(
         "WALLET_PROVIDER_MISCONFIGURED",
         "A selected Wallet provider is not configured for notifications.",
@@ -701,7 +707,7 @@ export class WalletEngagementService {
       return state === "CHECKING" || state === "PROVIDER_UNAVAILABLE";
     });
     await this.queueGoogleEligibilityReconciliation(organizationId, eligible);
-    if (input.providers.includes("GOOGLE") && googleUnknown.length > 0) {
+    if (providers.includes("GOOGLE") && googleUnknown.length > 0) {
       throw new AppError(
         "WALLET_PROVIDER_UNAVAILABLE",
         "Google Wallet saved-pass state is still being verified. Try again shortly.",
@@ -709,8 +715,8 @@ export class WalletEngagementService {
       );
     }
     const scopedEligible = [
-      ...(input.providers.includes("APPLE") ? appleCandidates : []),
-      ...(input.providers.includes("GOOGLE") ? googleEligible : []),
+      ...(providers.includes("APPLE") ? appleCandidates : []),
+      ...(providers.includes("GOOGLE") ? googleEligible : []),
     ];
     if (scopedEligible.length === 0) {
       throw new AppError(
@@ -734,7 +740,7 @@ export class WalletEngagementService {
       title: input.title,
       body: input.body,
       destinationUrl,
-      providers: input.providers,
+      providers,
       branchId: input.branchId ?? null,
     });
     const now = new Date();
@@ -803,22 +809,20 @@ export class WalletEngagementService {
             title: input.title,
             body: input.body,
             destinationUrl,
-            intendedProviders: input.providers,
+            intendedProviders: providers,
             audienceRule: input.audienceRule,
             contentFingerprint,
             idempotencyKey: input.idempotencyKey,
             eligibleCount: scopedEligible.length,
-            appleEligiblePassCount: input.providers.includes("APPLE") ? appleCandidates.length : 0,
-            appleRegisteredDeviceCount: input.providers.includes("APPLE")
+            appleEligiblePassCount: providers.includes("APPLE") ? appleCandidates.length : 0,
+            appleRegisteredDeviceCount: providers.includes("APPLE")
               ? appleCandidates.reduce(
                   (sum, candidate) => sum + Number(candidate.activeAppleRegistrations),
                   0,
                 )
               : 0,
-            googleEligibleObjectCount: input.providers.includes("GOOGLE")
-              ? googleEligible.length
-              : 0,
-            unknownCount: input.providers.includes("GOOGLE") ? googleUnknown.length : 0,
+            googleEligibleObjectCount: providers.includes("GOOGLE") ? googleEligible.length : 0,
+            unknownCount: providers.includes("GOOGLE") ? googleUnknown.length : 0,
             createdByUserId: userId,
             scheduledAt,
           },
@@ -833,7 +837,7 @@ export class WalletEngagementService {
             targetId: campaign.id,
             metadata: {
               programId,
-              providers: input.providers,
+              providers,
               audienceRule: input.audienceRule,
               eligibleCount: scopedEligible.length,
               branchId: input.branchId ?? null,

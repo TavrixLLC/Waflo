@@ -737,6 +737,246 @@ a {
   line-height: 1.6;
 }
 
+.wallet-preparation-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 100vh;
+}
+
+.wallet-preparation {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 1.1rem;
+  min-height: min(43rem, calc(100vh - 10rem));
+  margin-top: 1.25rem;
+  padding: clamp(1.35rem, 5vw, 2.5rem);
+  overflow: hidden;
+  color: var(--waflo-ink);
+  border: 1px solid var(--waflo-border);
+  border-block-start: 4px solid var(--waflo-brick);
+  border-radius: var(--waflo-radius-xl);
+  background: var(--waflo-surface);
+  box-shadow: var(--waflo-shadow-raised);
+}
+
+.wallet-preparation > * {
+  position: relative;
+  z-index: 1;
+}
+
+.wallet-preparation__visual {
+  position: relative;
+  display: grid;
+  width: 10rem;
+  height: 10rem;
+  place-items: center;
+  margin: 0 auto 0.15rem;
+}
+
+.wallet-preparation__pass {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 5.6rem;
+  height: 7.2rem;
+  place-items: center;
+  overflow: hidden;
+  color: var(--waflo-brick);
+  border: 1px solid var(--waflo-border-strong);
+  border-radius: var(--waflo-radius-lg);
+  background: var(--waflo-soft);
+  box-shadow: var(--waflo-shadow-card);
+}
+
+.wallet-preparation__pass::before,
+.wallet-preparation__pass::after {
+  position: absolute;
+  right: 0.85rem;
+  left: 0.85rem;
+  height: 0.28rem;
+  border-radius: var(--waflo-radius-pill);
+  background: color-mix(in srgb, var(--waflo-brick) 24%, transparent);
+  content: "";
+}
+
+.wallet-preparation__pass::before {
+  top: 1rem;
+}
+
+.wallet-preparation__pass::after {
+  bottom: 1rem;
+}
+
+.wallet-preparation__pass > span,
+.wallet-preparation__pass > i {
+  position: absolute;
+  right: 1.05rem;
+  left: 1.05rem;
+  height: 0.2rem;
+  border-radius: var(--waflo-radius-pill);
+  background: color-mix(in srgb, var(--waflo-brick) 16%, transparent);
+}
+
+.wallet-preparation__pass > span {
+  top: 1.72rem;
+}
+
+.wallet-preparation__pass > i {
+  bottom: 1.65rem;
+}
+
+.wallet-preparation__orbit {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, var(--waflo-coral) 40%, transparent);
+  border-radius: 50%;
+}
+
+.wallet-preparation__orbit--outer {
+  width: 9.6rem;
+  height: 9.6rem;
+  border-inline-start-color: transparent;
+  border-bottom-color: transparent;
+  animation: wallet-preparation-orbit 7s linear infinite;
+}
+
+.wallet-preparation__orbit--inner {
+  width: 7.7rem;
+  height: 7.7rem;
+  border-top-color: transparent;
+  border-inline-end-color: transparent;
+  animation: wallet-preparation-orbit 4.5s linear infinite reverse;
+}
+
+@keyframes wallet-preparation-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wallet-preparation__intro {
+  max-width: 35rem;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.wallet-preparation__eyebrow {
+  color: var(--waflo-brick);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.wallet-preparation__intro h1 {
+  margin: 0.45rem 0 0;
+  font-size: clamp(1.65rem, 6vw, 2.45rem);
+  letter-spacing: -0.045em;
+}
+
+.wallet-preparation__intro p,
+.wallet-preparation__current p {
+  margin: 0.5rem 0 0;
+  color: var(--waflo-muted);
+  line-height: 1.65;
+}
+
+.wallet-preparation__progress {
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: var(--waflo-radius-pill);
+  background: var(--waflo-soft);
+  box-shadow: inset 0 0 0 1px var(--waflo-border);
+}
+
+.wallet-preparation__progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--waflo-coral);
+  transition: width var(--waflo-motion-reassuring) var(--waflo-ease);
+}
+
+.wallet-preparation__current {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-md);
+  background: var(--waflo-surface-subtle);
+  text-align: center;
+}
+
+.wallet-preparation__current strong {
+  color: var(--waflo-ink);
+}
+
+.wallet-preparation__checkpoints {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.wallet-preparation__checkpoints li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+  min-height: 3.6rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--waflo-muted);
+  border: 1px solid transparent;
+  border-radius: var(--waflo-radius-md);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.wallet-preparation__checkpoints li > span {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  color: var(--waflo-muted);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wallet-preparation__checkpoints li[data-state="complete"] {
+  color: var(--waflo-success);
+}
+
+.wallet-preparation__checkpoints li[data-state="complete"] > span {
+  color: var(--waflo-surface);
+  border-color: var(--waflo-success);
+  background: var(--waflo-success);
+}
+
+.wallet-preparation__checkpoints li[data-state="active"] {
+  color: var(--waflo-ink);
+  border-color: color-mix(in srgb, var(--waflo-coral) 56%, var(--waflo-border));
+  background: var(--waflo-soft);
+}
+
+.wallet-preparation__checkpoints li[data-state="active"] > span {
+  color: var(--waflo-brick);
+  border-color: var(--waflo-coral);
+  background: var(--waflo-surface);
+  box-shadow: 0 0 0 0.28rem color-mix(in srgb, var(--waflo-coral) 16%, transparent);
+}
+
+.wallet-preparation__reassurance {
+  display: flex;
+  justify-content: center;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0;
+  color: var(--waflo-muted);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
 .transfer-action {
   display: flex;
   gap: 0.9rem;
@@ -967,6 +1207,15 @@ a {
   .progress-copy span {
     text-align: start;
   }
+
+  .wallet-preparation {
+    min-height: calc(100vh - 8.5rem);
+    border-radius: var(--waflo-radius-lg);
+  }
+
+  .wallet-preparation__checkpoints {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -975,6 +1224,11 @@ a {
   *::after {
     scroll-behavior: auto;
     transition-duration: 0.01ms;
+  }
+
+  .wallet-preparation__orbit--outer,
+  .wallet-preparation__orbit--inner {
+    animation: none;
   }
 }
 

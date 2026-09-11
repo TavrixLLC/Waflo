@@ -155,7 +155,6 @@ export function WalletEngagementPanel({
   const [body, setBody] = useState("");
   const [destinationUrl, setDestinationUrl] = useState("");
   const [selectedBranchId, setSelectedBranchId] = useState("");
-  const [selectedProviders, setSelectedProviders] = useState<Array<"APPLE" | "GOOGLE">>(["GOOGLE"]);
   const [messageLocale, setMessageLocale] = useState<"EN" | "AR">(ar ? "AR" : "EN");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const campaignIdempotencyKey = useRef("");
@@ -248,7 +247,6 @@ export function WalletEngagementPanel({
           title,
           body,
           destinationUrl: destinationUrl.trim() || null,
-          providers: selectedProviders,
           branchId: selectedBranchId || null,
           audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
         }),
@@ -578,11 +576,11 @@ export function WalletEngagementPanel({
                 </p>
               </div>
             </div>
-            {!view.capabilities.google.selectableForManualPromotion &&
+            {!view.capabilities.google.selectableForManualPromotion ||
             !view.capabilities.apple.selectableForManualPromotion ? (
               <Alert
                 tone="warning"
-                title={ar ? "Google Wallet يحتاج إلى إعداد" : "Google Wallet setup required"}
+                title={ar ? "إعداد إشعارات Wallet مطلوب" : "Wallet notification setup required"}
               />
             ) : null}
             <div className="wallet-audience-strip">
@@ -615,6 +613,7 @@ export function WalletEngagementPanel({
               <div className="wallet-form-row">
                 <FormField label={ar ? "اللغة" : "Message language"} required>
                   <Select
+                    className="wallet-campaign-select"
                     value={messageLocale}
                     onChange={(event) => {
                       campaignIdempotencyKey.current = "";
@@ -626,67 +625,28 @@ export function WalletEngagementPanel({
                     <option value="AR">العربية</option>
                   </Select>
                 </FormField>
-                <fieldset className="wallet-provider-choice">
-                  <legend className="sr-only">{ar ? "المزود" : "Provider"}</legend>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedProviders.includes("APPLE")}
-                      disabled={!canManage || !view.capabilities.apple.selectableForManualPromotion}
-                      onChange={(event) =>
-                        setSelectedProviders((current) =>
-                          event.target.checked
-                            ? [...new Set<"APPLE" | "GOOGLE">([...current, "APPLE"])]
-                            : current.filter((provider) => provider !== "APPLE"),
-                        )
-                      }
-                    />
-                    Apple Wallet
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedProviders.includes("GOOGLE")}
-                      disabled={
-                        !canManage || !view.capabilities.google.selectableForManualPromotion
-                      }
-                      onChange={(event) =>
-                        setSelectedProviders((current) =>
-                          event.target.checked
-                            ? [...new Set<"APPLE" | "GOOGLE">([...current, "GOOGLE"])]
-                            : current.filter((provider) => provider !== "GOOGLE"),
-                        )
-                      }
-                    />
-                    Google Wallet <Badge tone="success">TEXT_AND_NOTIFY</Badge>
-                  </label>
-                </fieldset>
+                <FormField label={ar ? "الفرع" : "Branch"}>
+                  <Select
+                    className="wallet-campaign-select"
+                    value={selectedBranchId}
+                    disabled={!canManage}
+                    onChange={(event) => {
+                      campaignIdempotencyKey.current = "";
+                      setSelectedBranchId(event.target.value);
+                    }}
+                  >
+                    <option value="">{ar ? "كل فروع البرنامج" : "Entire program"}</option>
+                    {view.eligibleLocations
+                      .filter((location) => location.participatesInThisCard)
+                      .map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                          {location.city ? ` — ${location.city}` : ""}
+                        </option>
+                      ))}
+                  </Select>
+                </FormField>
               </div>
-              <FormField
-                label={ar ? "الفرع" : "Branch"}
-                hint={
-                  ar ? "اختياري: عملية مسجلة في الفرع" : "Optional: recorded transaction at branch"
-                }
-              >
-                <Select
-                  value={selectedBranchId}
-                  disabled={!canManage}
-                  onChange={(event) => {
-                    campaignIdempotencyKey.current = "";
-                    setSelectedBranchId(event.target.value);
-                  }}
-                >
-                  <option value="">{ar ? "كل فروع البرنامج" : "Entire program"}</option>
-                  {view.eligibleLocations
-                    .filter((location) => location.participatesInThisCard)
-                    .map((location) => (
-                      <option key={location.id} value={location.id}>
-                        {location.name}
-                        {location.city ? ` — ${location.city}` : ""}
-                      </option>
-                    ))}
-                </Select>
-              </FormField>
               <FormField
                 label={ar ? "العنوان" : "Title"}
                 hint={`${Array.from(title).length}/28`}
@@ -745,11 +705,7 @@ export function WalletEngagementPanel({
               </FormField>
               <div className="wallet-message-preview">
                 <div>
-                  <span>
-                    {ar
-                      ? "محتوى محفوظ في Google Wallet"
-                      : "MESSAGE CONTENT STORED IN GOOGLE WALLET"}
-                  </span>
+                  <span>{ar ? "معاينة رسالة Wallet" : "WALLET MESSAGE PREVIEW"}</span>
                   <strong dir={contentDirection(messageLocale)}>
                     {title || (ar ? "عنوان رسالتك" : "Your message title")}
                   </strong>
@@ -764,16 +720,13 @@ export function WalletEngagementPanel({
                   <Radio size={18} />
                   <span>
                     {ar
-                      ? "تتحكم Google في عرض إشعار النظام"
-                      : "Google controls the system notification presentation"}
+                      ? "تظهر رسالتك من خلال Wallet"
+                      : "Your message will be delivered through Wallet"}
                   </span>
                 </div>
               </div>
               <div className="wallet-engagement-actions">
-                <Button
-                  type="submit"
-                  disabled={!canManage || !audience?.total || selectedProviders.length === 0}
-                >
+                <Button type="submit" disabled={!canManage || !audience?.total}>
                   <Send size={16} />
                   {ar ? "مراجعة وإرسال" : "Review and send"}
                 </Button>
@@ -876,22 +829,21 @@ export function WalletEngagementPanel({
               <dd>{audience?.total ?? 0}</dd>
             </div>
             <div>
-              <dt>{ar ? "المزود" : "Provider"}</dt>
-              <dd>Google Wallet</dd>
+              <dt>{ar ? "نطاق الجمهور" : "Audience scope"}</dt>
+              <dd>
+                {selectedBranchId
+                  ? (view.eligibleLocations.find((location) => location.id === selectedBranchId)
+                      ?.name ?? selectedBranchId)
+                  : ar
+                    ? "كل فروع البرنامج"
+                    : "Entire program"}
+              </dd>
             </div>
           </dl>
           <div className="wallet-confirmation-message" dir={contentDirection(messageLocale)}>
             <strong>{title}</strong>
             <p>{body}</p>
           </div>
-          <Alert
-            tone="warning"
-            title={ar ? "يتحكم المزود في العرض النهائي" : "Provider-controlled presentation"}
-          >
-            {ar
-              ? "يُحفظ محتوى الرسالة في Google Wallet، لكن Google تتحكم في ظهور إشعار شاشة القفل وتوقيته."
-              : "Your message content is stored in Google Wallet, but Google controls lock-screen notification presentation and timing."}
-          </Alert>
           <div className="wallet-engagement-actions">
             <Button
               type="button"

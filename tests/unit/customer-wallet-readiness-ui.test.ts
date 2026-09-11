@@ -32,6 +32,25 @@ describe("customer Wallet readiness presentation", () => {
     expect(card).toContain('aria-live="polite"');
   });
 
+  it("replaces the interim web-card preview with an honest staged Wallet preparation state", () => {
+    const card = source("apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx");
+    const styles = source("apps/customer-web/app/globals.css");
+    expect(card).toContain("WalletPassPreparation");
+    expect(card).toContain('data-testid="wallet-preparation"');
+    expect(card).toContain("Preparing your Wallet pass");
+    expect(card).toContain("Designing your card");
+    expect(card).toContain("Applying final details");
+    expect(card).toContain("Securing and publishing your pass");
+    expect(card).toContain("Checking device compatibility");
+    expect(card).toContain("Ready to add");
+    expect(card).toContain('role="progressbar"');
+    expect(card).toContain("if (waitingForWallet) {");
+    expect(card).not.toContain("window.setInterval");
+    expect(styles).toContain(".wallet-preparation__checkpoints");
+    expect(styles).toContain(".wallet-preparation__orbit--outer");
+    expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
+  });
+
   it("uses official Apple and Google Wallet badge files without a styled inner card", () => {
     const card = source("apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx");
     const styles = source("apps/customer-web/app/globals.css");

@@ -1043,11 +1043,10 @@ export class WalletWorker {
       where: { id: candidate.id },
     });
     try {
-      const providerCodes = Array.isArray(campaign.intendedProviders)
-        ? campaign.intendedProviders.filter(
-            (value): value is "APPLE" | "GOOGLE" => value === "APPLE" || value === "GOOGLE",
-          )
-        : [];
+      // Campaigns created before the unified composer may carry a legacy
+      // one-provider value. Delivery is provider-neutral now, so resolve both
+      // native pass populations for every queued campaign.
+      const providerCodes: Array<"APPLE" | "GOOGLE"> = ["APPLE", "GOOGLE"];
       const passes = await this.prisma.walletPassInstance.findMany({
         where: {
           organizationId: campaign.organizationId,

@@ -870,7 +870,7 @@ export async function mockTemplateGalleryApi(
         title: body.title,
         body: body.body,
         locale: body.locale,
-        providers: ["GOOGLE"],
+        providers: ["APPLE", "GOOGLE"],
         audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
         status: "PENDING",
         counts: { eligible: 12, queued: 0, succeeded: 0, skipped: 0, failed: 0 },

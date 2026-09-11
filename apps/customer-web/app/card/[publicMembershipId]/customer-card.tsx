@@ -8,7 +8,7 @@ import {
   type ProgramTemplatePresentation,
 } from "@waflo/contracts";
 import { Alert, Badge, Card, SearchableSelect } from "@waflo/ui";
-import { Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
+import { Check, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -83,6 +83,130 @@ type CardLoadOutcome = "applied" | "failed" | "superseded";
 
 const walletConvergenceDelays = [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000] as const;
 
+function walletPreparationStages(ar: boolean) {
+  return [
+    {
+      afterSeconds: 0,
+      title: ar ? "جارٍ تجهيز بطاقة المحفظة" : "Preparing your Wallet pass",
+      description: ar
+        ? "ننشئ نسخة آمنة من بطاقتك لتكون جاهزة على جهازك."
+        : "Creating a secure pass that is ready for this device.",
+    },
+    {
+      afterSeconds: 2,
+      title: ar ? "جارٍ تصميم بطاقتك" : "Designing your card",
+      description: ar
+        ? "نرتّب تفاصيل برنامج الولاء في تنسيق المحفظة الأصلي."
+        : "Arranging your loyalty details in the native Wallet format.",
+    },
+    {
+      afterSeconds: 5,
+      title: ar ? "جارٍ تطبيق التفاصيل النهائية" : "Applying final details",
+      description: ar
+        ? "نراجع التقدم والمكافآت وتفاصيل بطاقتك المنشورة."
+        : "Reviewing your progress, rewards, and published card details.",
+    },
+    {
+      afterSeconds: 9,
+      title: ar ? "جارٍ تأمين بطاقتك ونشرها" : "Securing and publishing your pass",
+      description: ar
+        ? "يتم حفظ البطاقة في مسار تسليم Wallet الآمن."
+        : "Saving the pass through Wallet’s secure delivery path.",
+    },
+    {
+      afterSeconds: 15,
+      title: ar ? "جارٍ التحقق من توافق الجهاز" : "Checking device compatibility",
+      description: ar
+        ? "سنُظهر إجراء الإضافة الحقيقي فور تأكيد الجاهزية."
+        : "We’ll show the real add action as soon as readiness is confirmed.",
+    },
+    {
+      afterSeconds: Number.POSITIVE_INFINITY,
+      title: ar ? "جاهزة للإضافة" : "Ready to add",
+      description: ar
+        ? "بانتظار تأكيد Wallet النهائي."
+        : "Waiting for Wallet’s final confirmation.",
+    },
+  ];
+}
+
+function WalletPassPreparation({ ar, elapsedSeconds }: { ar: boolean; elapsedSeconds: number }) {
+  const stages = walletPreparationStages(ar);
+  const currentIndex = stages.reduce(
+    (index, stage, candidate) => (stage.afterSeconds <= elapsedSeconds ? candidate : index),
+    0,
+  );
+  const current = stages[currentIndex] ?? stages[0]!;
+  const progress = [18, 36, 54, 72, 88][Math.min(currentIndex, 4)] ?? 18;
+
+  return (
+    <section
+      className="wallet-preparation"
+      data-testid="wallet-preparation"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="wallet-preparation__visual" aria-hidden="true">
+        <div className="wallet-preparation__pass">
+          <WalletCards size={42} />
+          <span />
+          <i />
+        </div>
+        <div className="wallet-preparation__orbit wallet-preparation__orbit--outer" />
+        <div className="wallet-preparation__orbit wallet-preparation__orbit--inner" />
+      </div>
+      <div className="wallet-preparation__intro">
+        <span className="wallet-preparation__eyebrow">{ar ? "إعداد Wallet" : "WALLET SETUP"}</span>
+        <h1>{ar ? "بطاقتك قيد التحضير" : "Your pass is being prepared"}</h1>
+        <p>
+          {ar
+            ? "نُكمل إعداد بطاقتك للمحفظة. لا تحتاج إلى التحديث أو إعادة فتح الصفحة."
+            : "We’re finishing your Wallet setup. You do not need to refresh or reopen this page."}
+        </p>
+      </div>
+      <div
+        className="wallet-preparation__progress"
+        role="progressbar"
+        aria-label={ar ? "تقدم تجهيز البطاقة" : "Wallet pass preparation progress"}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+        aria-valuetext={current.title}
+      >
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <div className="wallet-preparation__current" aria-live="polite">
+        <strong>{current.title}</strong>
+        <p>{current.description}</p>
+      </div>
+      <ol
+        className="wallet-preparation__checkpoints"
+        aria-label={ar ? "مراحل التجهيز" : "Preparation stages"}
+      >
+        {stages.map((stage, index) => {
+          const state =
+            index < currentIndex ? "complete" : index === currentIndex ? "active" : "pending";
+          return (
+            <li key={stage.title} data-state={state}>
+              <span aria-hidden="true">
+                {state === "complete" ? <Check size={14} /> : index + 1}
+              </span>
+              <strong>{stage.title}</strong>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="wallet-preparation__reassurance">
+        <ShieldCheck size={16} aria-hidden="true" />
+        {ar
+          ? "لن نعرض زر إضافة قبل أن تصبح البطاقة جاهزة بالفعل."
+          : "We only show the add action when the pass is genuinely ready."}
+      </p>
+    </section>
+  );
+}
+
 function walletIsPreparing(status: string): boolean {
   return status === "PREPARING" || status === "PENDING";
 }
@@ -108,6 +232,7 @@ export function CustomerCard({
   const [platform, setPlatform] = useState<WalletPlatform | null>(null);
   const [selectedCardLocale, setSelectedCardLocale] = useState<string | undefined>();
   const [cardLoadInFlight, setCardLoadInFlight] = useState(false);
+  const [walletPreparationSeconds, setWalletPreparationSeconds] = useState(0);
   const walletConvergenceAttempts = useRef(0);
   const activeCardRequest = useRef<AbortController | null>(null);
   const cardRequestGeneration = useRef(0);
@@ -299,6 +424,41 @@ export function CustomerCard({
     window.location.assign("/");
   }
 
+  const selectedWalletStatus =
+    platform === "ios"
+      ? card?.wallet.apple.status
+      : platform === "android"
+        ? card?.wallet.google.status
+        : null;
+  const desktopWalletPreparing = Boolean(
+    card &&
+      (walletIsPreparing(card.wallet.apple.status) || walletIsPreparing(card.wallet.google.status)),
+  );
+  const waitingForWallet = Boolean(
+    card &&
+      (platform === null ||
+        (platform === "desktop"
+          ? desktopWalletPreparing
+          : typeof selectedWalletStatus === "string" && walletIsPreparing(selectedWalletStatus))),
+  );
+
+  useEffect(() => {
+    if (!waitingForWallet) {
+      setWalletPreparationSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    let timer: number | undefined;
+    const updateElapsedTime = () => {
+      setWalletPreparationSeconds(Math.floor((Date.now() - startedAt) / 1_000));
+      timer = window.setTimeout(updateElapsedTime, 1_000);
+    };
+    updateElapsedTime();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [waitingForWallet]);
+
   if (!card) {
     return (
       <main className="customer-page customer-centered">
@@ -317,13 +477,31 @@ export function CustomerCard({
 
   const ar = card.customer.preferredLocale === "ar";
   const active = card.membership.state === "ACTIVE";
-  const selectedWalletStatus =
-    platform === "ios"
-      ? card.wallet.apple.status
-      : platform === "android"
-        ? card.wallet.google.status
-        : null;
-  const waitingForWallet = Boolean(selectedWalletStatus && walletIsPreparing(selectedWalletStatus));
+  if (waitingForWallet) {
+    return (
+      <main
+        className="customer-page card-page wallet-preparation-page"
+        lang={ar ? "ar" : "en"}
+        dir={ar ? "rtl" : "ltr"}
+      >
+        <header className="customer-header card-header">
+          <CustomerMerchantIdentity
+            locale={ar ? "ar" : "en"}
+            logoDataUri={card.merchant.brandLogoDataUri}
+            name={card.merchant.name}
+          />
+          <button type="button" className="customer-language" onClick={() => void logout()}>
+            <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
+          </button>
+        </header>
+        <WalletPassPreparation ar={ar} elapsedSeconds={walletPreparationSeconds} />
+        <footer className="customer-footer">
+          <ShieldCheck size={15} /> {ar ? "مدعوم من Waflo" : "Powered by Waflo"}
+        </footer>
+      </main>
+    );
+  }
+
   const walletDescription =
     platform === null
       ? ar

@@ -488,15 +488,21 @@ describe("Wallet Engagement input safety", () => {
     ).toThrow();
   });
 
-  it("accepts Apple, Google, or both Wallet providers and rejects duplicate selections", () => {
-    expect(() =>
-      walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["APPLE"] }),
-    ).not.toThrow();
-    expect(() =>
-      walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["APPLE", "GOOGLE"] }),
-    ).not.toThrow();
+  it("normalizes every campaign to both Wallet providers without exposing provider choice", () => {
+    expect(
+      walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["APPLE"] }).providers,
+    ).toEqual(["APPLE", "GOOGLE"]);
+    expect(
+      walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["GOOGLE"] }).providers,
+    ).toEqual(["APPLE", "GOOGLE"]);
+    expect(
+      walletCampaignCreateSchema.parse({ ...validCampaign, providers: undefined }).providers,
+    ).toEqual(["APPLE", "GOOGLE"]);
     expect(() =>
       walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["GOOGLE", "GOOGLE"] }),
+    ).toThrow();
+    expect(() =>
+      walletCampaignCreateSchema.parse({ ...validCampaign, providers: [] }),
     ).toThrow();
   });
 
