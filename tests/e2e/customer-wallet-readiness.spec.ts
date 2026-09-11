@@ -121,7 +121,11 @@ async function routeCard(page: Page, next: () => { google: string; apple: string
 async function exhaustWalletRetries(page: Page, reads: () => number): Promise<void> {
   await expect.poll(reads).toBe(1);
   for (const [index, delay] of [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000].entries()) {
-    await page.clock.fastForward(delay);
+    // Run every timer callback in the interval so the mocked response and the
+    // next React effect settle before asserting the following readiness read.
+    // `fastForward` intentionally fires due timers at most once, which can
+    // leave the final revalidation callback queued behind an async response.
+    await page.clock.runFor(delay);
     await expect.poll(reads).toBe(index + 2);
   }
 }

@@ -8,7 +8,7 @@ import {
   type ProgramTemplatePresentation,
 } from "@waflo/contracts";
 import { Alert, Badge, Card, SearchableSelect } from "@waflo/ui";
-import { Check, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
+import { Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -189,9 +189,7 @@ function WalletPassPreparation({ ar, elapsedSeconds }: { ar: boolean; elapsedSec
             index < currentIndex ? "complete" : index === currentIndex ? "active" : "pending";
           return (
             <li key={stage.title} data-state={state}>
-              <span aria-hidden="true">
-                {state === "complete" ? <Check size={14} /> : index + 1}
-              </span>
+              <span aria-hidden="true">{state === "complete" ? "✓" : index + 1}</span>
               <strong>{stage.title}</strong>
             </li>
           );
