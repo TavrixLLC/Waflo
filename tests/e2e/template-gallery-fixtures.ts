@@ -848,8 +848,8 @@ export async function mockTemplateGalleryApi(
         audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
         total: 12,
         providers: {
-          apple: { status: "READY", eligiblePasses: 0, registeredDevices: 0 },
-          google: { status: "READY", eligibleObjects: 12, checking: 0 },
+          apple: { status: "READY", eligiblePasses: 2, registeredDevices: 2 },
+          google: { status: "READY", eligibleObjects: 10, checking: 0 },
         },
         capped: false,
         exclusions: ["NO_ELIGIBLE_WALLET_PASS"],
@@ -872,13 +872,24 @@ export async function mockTemplateGalleryApi(
         locale: body.locale,
         providers: ["APPLE", "GOOGLE"],
         audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
-        status: "PENDING",
-        counts: { eligible: 12, queued: 0, succeeded: 0, skipped: 0, failed: 0 },
+        status: "COMPLETED",
+        counts: {
+          eligible: 12,
+          appleEligiblePasses: 2,
+          appleRegisteredDevices: 2,
+          googleEligibleObjects: 10,
+          queued: 0,
+          succeeded: 12,
+          skipped: 0,
+          failed: 0,
+          throttled: 0,
+          unknown: 0,
+        },
         creator: "Gallery Merchant",
       });
       await fulfill(route, {
         id,
-        status: "PENDING",
+        status: "COMPLETED",
         scheduledAt: "2026-08-12T09:00:00.000Z",
         replayed: false,
       });

@@ -96,10 +96,21 @@ async function enroll(page: Page, displayName: string, email?: string) {
   await page.getByLabel("Name on card").fill(displayName);
   if (email) await page.getByLabel("Email").fill(email);
   await page.getByLabel(new RegExp(`I accept the ${programName}`)).check();
-  await page.getByLabel(/I accept the Waflo privacy notice/).check();
   await page.getByRole("button", { name: "Create my card" }).click();
-  await expect(page.getByRole("heading", { name: `Welcome to ${programName}` })).toBeVisible();
-  await page.getByRole("button", { name: "View card" }).click();
+  await expect(page).toHaveURL(/\/card\/[^?]+\?wallet=prepare/u);
+  await expect(page.locator(".digital-card")).toHaveCount(0);
+  await expect(page.getByTestId("wallet-preparation")).toBeVisible();
+  const cardUrl = new URL(page.url());
+  const publicMembershipId = cardUrl.pathname.split("/").at(-1);
+  if (!publicMembershipId) throw new Error("Enrollment did not return a public membership ID.");
+  // The customer stays on preparation until the provider artifacts have been
+  // issued. Make that state explicit here before verifying the ready actions.
+  await prisma.walletPassInstance.updateMany({
+    where: { membership: { publicMembershipId } },
+    data: { status: "ISSUED", lastProviderErrorCode: null },
+  });
+  cardUrl.searchParams.delete("wallet");
+  await page.goto(cardUrl.toString());
   await expect(page.getByRole("heading", { name: programName })).toBeVisible();
   return page.url();
 }
@@ -421,6 +432,13 @@ test.describe
       await page.setViewportSize({ width: 1440, height: 1000 });
       await page.goto(`http://today.localhost:3002/join/${programSlug}?lang=en`);
       await expect(page.getByRole("heading", { name: programName })).toBeVisible();
+      await page.locator(".customer-terms summary").click();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({
+        path: "diagnostics/wallet-final-fixes/enrollment-form-en.png",
+        fullPage: true,
+      });
+      await page.setViewportSize({ width: 1440, height: 1000 });
       await screenshot(page, "04-english-join-page");
       await reviewScreenshot(page, "customer-today-desktop-en.png");
       await reviewScreenshot(page, "customer-enrollment.png");
@@ -433,17 +451,26 @@ test.describe
       }
       await page.setViewportSize({ width: 1440, height: 1000 });
 
-      await page.getByLabel("Language").selectOption("ar");
+      await page.goto(`http://today.localhost:3002/join/${programSlug}?lang=ar`);
       await expect(page.locator("main")).toHaveAttribute("dir", "rtl");
+      await page.locator(".customer-terms summary").click();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.screenshot({
+        path: "diagnostics/wallet-final-fixes/enrollment-form-ar.png",
+        fullPage: true,
+      });
+      await page.setViewportSize({ width: 1440, height: 1000 });
       await screenshot(page, "05-arabic-rtl-join-page");
       await reviewScreenshot(page, "customer-today-desktop-ar.png");
       await page.setViewportSize({ width: 390, height: 844 });
       await reviewScreenshot(page, "customer-today-mobile-ar.png");
       await page.setViewportSize({ width: 1440, height: 1000 });
 
-      await page.getByLabel("اللغة").selectOption("en");
+      await page.goto(`http://today.localhost:3002/join/${programSlug}?lang=en`);
       await page.getByLabel("Name on card").fill("Consent Check");
-      await expect(page.getByRole("button", { name: "Create my card" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Create my card" })).toBeEnabled();
+      await page.getByRole("button", { name: "Create my card" }).click();
+      await expect(page).toHaveURL(new RegExp(`/join/${programSlug}\\?lang=en$`));
       await screenshot(page, "06-consent-validation-error");
     });
 

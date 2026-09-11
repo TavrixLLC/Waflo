@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { classifyApplePushResponse } from "../../apps/wallet-worker/src/apple-push.js";
+import {
+  appleCampaignDeliveryUpdate,
+  applePassUpdateRequestHeaders,
+  classifyApplePushResponse,
+} from "../../apps/wallet-worker/src/apple-push.js";
 import { ExternalAuthService } from "../../apps/api/src/auth/external-auth.service.js";
 import type { EnvironmentService } from "../../apps/api/src/config/environment.service.js";
 import { CustomerSecurityService } from "../../apps/api/src/customer/customer-security.service.js";
@@ -219,6 +223,28 @@ describe("production environment and provider boundaries", () => {
     expect(classifyApplePushResponse(403, "ExpiredProviderToken")).toBe("REJECTED");
     expect(classifyApplePushResponse(429, "TooManyRequests")).toBe("RETRY");
     expect(classifyApplePushResponse(503, "Shutdown")).toBe("RETRY");
+  });
+
+  it("uses the documented Wallet pass update payload contract and only completes delivery after APNs", () => {
+    expect(applePassUpdateRequestHeaders("pass.com.waflo.loyalty")).toEqual({
+      "apns-topic": "pass.com.waflo.loyalty",
+      "content-type": "application/json",
+    });
+    expect(applePassUpdateRequestHeaders("pass.com.waflo.loyalty")).not.toHaveProperty(
+      "apns-push-type",
+    );
+    expect(appleCampaignDeliveryUpdate("SENT", new Date("2026-09-11T12:00:00.000Z"))).toMatchObject(
+      {
+        status: "SUCCEEDED",
+        safeFailureCode: null,
+      },
+    );
+    expect(
+      appleCampaignDeliveryUpdate("NO_ACTIVE_WALLET_HOLDER", new Date("2026-09-11T12:00:00.000Z")),
+    ).toMatchObject({
+      status: "SKIPPED",
+      safeSkipCode: "NO_ACTIVE_WALLET_HOLDER",
+    });
   });
 
   it("rejects insecure deployed origins and arbitrary OAuth callback origins", () => {

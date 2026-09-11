@@ -219,9 +219,11 @@ function membershipStateLabel(state: string, ar: boolean): string {
 export function CustomerCard({
   publicMembershipId,
   tenant,
+  walletJourney = false,
 }: {
   publicMembershipId: string;
   tenant?: string;
+  walletJourney?: boolean;
 }) {
   const [card, setCard] = useState<CardView | null>(null);
   const [qrUrl, setQrUrl] = useState("");
@@ -527,7 +529,11 @@ export function CustomerCard({
   const presentation = card.program.template?.presentation ?? defaultProgramTemplatePresentation;
   const identityArtworkDataUri = card.program.template?.identityArtworkDataUri ?? null;
   return (
-    <main className="customer-page card-page" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
+    <main
+      className={`customer-page card-page ${walletJourney ? "wallet-ready-page" : ""}`}
+      lang={ar ? "ar" : "en"}
+      dir={ar ? "rtl" : "ltr"}
+    >
       <header className="customer-header card-header">
         <CustomerMerchantIdentity
           locale={ar ? "ar" : "en"}
@@ -555,114 +561,140 @@ export function CustomerCard({
           </button>
         </div>
       </header>
-      <section
-        className={`digital-card ${active ? "" : "digital-card--inactive"}`}
-        lang={card.program.contentLocale}
-        dir={directionForCardLocale(card.program.contentLocale)}
-        data-composition={presentation.composition}
-        data-corner-treatment={presentation.cornerTreatment}
-        data-density={presentation.density}
-        data-motif-treatment={presentation.motifTreatment}
-        data-reward-treatment={presentation.rewardTreatment}
-        data-title-treatment={presentation.titleTreatment}
-        data-visual-role={presentation.visualRole}
-        style={
-          {
-            "--card-bg": card.theme.backgroundColor,
-            "--card-ink": card.theme.foregroundColor,
-            "--card-accent": card.theme.accentColor,
-            "--card-secondary": card.theme.secondaryColor,
-            fontFamily: fontStackForCardLocale(card.program.contentLocale),
-          } as React.CSSProperties
-        }
-      >
-        {identityArtworkDataUri ? (
-          <span className="digital-card__motif" aria-hidden="true">
-            <Image src={identityArtworkDataUri} alt="" width={96} height={96} unoptimized />
-          </span>
-        ) : null}
-        <div className="digital-card__brand">
-          <div className="digital-card__issuer">
-            <CustomerMerchantIdentity
-              locale={ar ? "ar" : "en"}
-              logoDataUri={card.merchant.brandLogoDataUri}
-              name={card.merchant.name}
-              showName={false}
-            />
-            <div>
-              <small>{card.merchant.name}</small>
-              <h1>{card.program.name}</h1>
-            </div>
-          </div>
+      {walletJourney ? (
+        <section className="wallet-ready-summary" data-testid="wallet-ready-summary">
           <Badge tone={active ? "success" : "warning"}>
             {membershipStateLabel(card.membership.state, ar)}
           </Badge>
-        </div>
-        {!active ? (
-          <Alert
-            tone={card.membership.state === "TRANSFERRED" ? "warning" : "info"}
-            title={
-              card.membership.state === "TRANSFERRED"
-                ? ar
-                  ? "تم نقل هذه البطاقة"
-                  : "This card was transferred"
-                : ar
-                  ? "البطاقة غير نشطة"
-                  : "Card unavailable"
-            }
-          >
-            {card.membership.state === "TRANSFERRED"
-              ? ar
-                ? "رمز QR القديم لم يعد صالحًا."
-                : "The old QR credential is no longer valid."
-              : card.program.pausedMessage ||
-                (ar ? "تواصل مع التاجر للمساعدة." : "Contact the merchant for help.")}
-          </Alert>
-        ) : null}
-        <div className="digital-card__member">
-          <span>{ar ? "العضو" : "MEMBER"}</span>
-          <strong>{card.customer.displayName}</strong>
-          {card.customer.maskedPhone ? <small>{card.customer.maskedPhone}</small> : null}
-        </div>
-        <Image
-          className="published-stamp-artwork"
-          src={card.progress.render.dataUri}
-          alt={`${card.progress.currentCycleStampCount} of ${card.progress.goal} stamps`}
-          width={card.progress.render.width}
-          height={card.progress.render.height}
-          unoptimized
-        />
-        <div className="progress-copy">
-          <strong dir="ltr" className="numeric-fraction">
-            {card.progress.currentCycleStampCount} / {card.progress.goal}
-          </strong>
-          <span>
-            {card.progress.rewardReady
-              ? ar
-                ? "المكافأة جاهزة"
-                : "Reward ready"
-              : card.program.rewardSummary}
-          </span>
-        </div>
-        {qrUrl && card.membershipQr ? (
-          <div className="membership-qr">
-            {/* The alt text intentionally describes purpose without exposing the payload. */}
-            <Image
-              src={qrUrl}
-              alt={ar ? "رمز بطاقة العضوية" : "Membership card QR"}
-              width={520}
-              height={520}
-              unoptimized
-            />
-            <p>
-              <ShieldCheck />{" "}
+          <div>
+            <span className="wallet-ready-summary__kicker">
+              <WalletCards size={17} aria-hidden="true" />
               {ar
-                ? "استخدم رمز QR هذا مع بطاقة الولاء."
-                : "Use this QR code with your loyalty card."}
+                ? "\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0645\u062d\u0641\u0638\u0629"
+                : "WALLET PASS"}
+            </span>
+            <h1>
+              {ar
+                ? "\u0628\u0637\u0627\u0642\u062a\u0643 \u062c\u0627\u0647\u0632\u0629 \u0644\u0644\u0645\u062d\u0641\u0638\u0629"
+                : "Your Wallet card is ready"}
+            </h1>
+            <p>
+              {ar
+                ? `\u0623\u0635\u0628\u062d\u062a \u0628\u0637\u0627\u0642\u0629 ${card.program.name} \u062c\u0627\u0647\u0632\u0629 \u0644\u0644\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0645\u062d\u0641\u0638\u0629 \u062c\u0647\u0627\u0632\u0643.`
+                : `${card.program.name} is ready to add to your device Wallet.`}
             </p>
           </div>
-        ) : null}
-      </section>
+        </section>
+      ) : (
+        <section
+          className={`digital-card ${active ? "" : "digital-card--inactive"}`}
+          lang={card.program.contentLocale}
+          dir={directionForCardLocale(card.program.contentLocale)}
+          data-composition={presentation.composition}
+          data-corner-treatment={presentation.cornerTreatment}
+          data-density={presentation.density}
+          data-motif-treatment={presentation.motifTreatment}
+          data-reward-treatment={presentation.rewardTreatment}
+          data-title-treatment={presentation.titleTreatment}
+          data-visual-role={presentation.visualRole}
+          style={
+            {
+              "--card-bg": card.theme.backgroundColor,
+              "--card-ink": card.theme.foregroundColor,
+              "--card-accent": card.theme.accentColor,
+              "--card-secondary": card.theme.secondaryColor,
+              fontFamily: fontStackForCardLocale(card.program.contentLocale),
+            } as React.CSSProperties
+          }
+        >
+          {identityArtworkDataUri ? (
+            <span className="digital-card__motif" aria-hidden="true">
+              <Image src={identityArtworkDataUri} alt="" width={96} height={96} unoptimized />
+            </span>
+          ) : null}
+          <div className="digital-card__brand">
+            <div className="digital-card__issuer">
+              <CustomerMerchantIdentity
+                locale={ar ? "ar" : "en"}
+                logoDataUri={card.merchant.brandLogoDataUri}
+                name={card.merchant.name}
+                showName={false}
+              />
+              <div>
+                <small>{card.merchant.name}</small>
+                <h1>{card.program.name}</h1>
+              </div>
+            </div>
+            <Badge tone={active ? "success" : "warning"}>
+              {membershipStateLabel(card.membership.state, ar)}
+            </Badge>
+          </div>
+          {!active ? (
+            <Alert
+              tone={card.membership.state === "TRANSFERRED" ? "warning" : "info"}
+              title={
+                card.membership.state === "TRANSFERRED"
+                  ? ar
+                    ? "تم نقل هذه البطاقة"
+                    : "This card was transferred"
+                  : ar
+                    ? "البطاقة غير نشطة"
+                    : "Card unavailable"
+              }
+            >
+              {card.membership.state === "TRANSFERRED"
+                ? ar
+                  ? "رمز QR القديم لم يعد صالحًا."
+                  : "The old QR credential is no longer valid."
+                : card.program.pausedMessage ||
+                  (ar ? "تواصل مع التاجر للمساعدة." : "Contact the merchant for help.")}
+            </Alert>
+          ) : null}
+          <div className="digital-card__member">
+            <span>{ar ? "العضو" : "MEMBER"}</span>
+            <strong>{card.customer.displayName}</strong>
+            {card.customer.maskedPhone ? <small>{card.customer.maskedPhone}</small> : null}
+          </div>
+          <Image
+            className="published-stamp-artwork"
+            src={card.progress.render.dataUri}
+            alt={`${card.progress.currentCycleStampCount} of ${card.progress.goal} stamps`}
+            width={card.progress.render.width}
+            height={card.progress.render.height}
+            unoptimized
+          />
+          <div className="progress-copy">
+            <strong dir="ltr" className="numeric-fraction">
+              {card.progress.currentCycleStampCount} / {card.progress.goal}
+            </strong>
+            <span>
+              {card.progress.rewardReady
+                ? ar
+                  ? "المكافأة جاهزة"
+                  : "Reward ready"
+                : card.program.rewardSummary}
+            </span>
+          </div>
+          {qrUrl && card.membershipQr ? (
+            <div className="membership-qr">
+              {/* The alt text intentionally describes purpose without exposing the payload. */}
+              <Image
+                src={qrUrl}
+                alt={ar ? "رمز بطاقة العضوية" : "Membership card QR"}
+                width={520}
+                height={520}
+                unoptimized
+              />
+              <p>
+                <ShieldCheck />{" "}
+                {ar
+                  ? "استخدم رمز QR هذا مع بطاقة الولاء."
+                  : "Use this QR code with your loyalty card."}
+              </p>
+            </div>
+          ) : null}
+        </section>
+      )}
       {!waitingForWallet && platform !== null ? (
         <section className="card-actions">
           <Card>

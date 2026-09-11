@@ -6,12 +6,17 @@ function source(path: string): string {
 }
 
 describe("customer Wallet readiness presentation", () => {
-  it("keeps enrollment confirmation independent of provider outbox preparation", () => {
+  it("sends enrollment straight into the dedicated Wallet preparation journey", () => {
     const enrollment = source("apps/customer-web/app/join/[programSlug]/enrollment-form.tsx");
-    expect(enrollment).toContain('"View card"');
-    expect(enrollment).not.toContain("View card while Wallet prepares");
-    expect(enrollment).not.toContain("wallet-readiness");
-    expect(enrollment).not.toContain("walletReadiness");
+    const styles = source("apps/customer-web/app/globals.css");
+    expect(enrollment).toContain('new URLSearchParams({ wallet: "prepare" })');
+    expect(enrollment).toContain("window.location.assign(");
+    expect(enrollment).not.toContain("enrollment-success");
+    expect(enrollment).toContain("enrollment-terms");
+    expect(enrollment).not.toContain("wafloPrivacyAccepted: true");
+    expect(enrollment).toContain("...(phone.trim() ? { phone: phone.trim() } : {})");
+    expect(styles).toContain(".join-layout--compact .enrollment-summary");
+    expect(styles).toContain(".enrollment-summary .program-story__progress");
   });
 
   it("uses adaptive canonical readiness revalidation without a manual refresh escape hatch", () => {
@@ -45,6 +50,9 @@ describe("customer Wallet readiness presentation", () => {
     expect(card).toContain("Ready to add");
     expect(card).toContain('role="progressbar"');
     expect(card).toContain("if (waitingForWallet) {");
+    expect(card).toContain("walletJourney ? (");
+    expect(card).toContain('data-testid="wallet-ready-summary"');
+    expect(card).toContain("Your Wallet card is ready");
     expect(card).not.toContain("window.setInterval");
     expect(styles).toContain(".wallet-preparation__checkpoints");
     expect(styles).toContain(".wallet-preparation__orbit--outer");

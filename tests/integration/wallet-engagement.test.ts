@@ -625,7 +625,14 @@ describe.sequential("Wallet Engagement durable integration", () => {
       {} as never,
       environment.values,
       new Map([
-        ["APPLE", { provider: "APPLE", mode: "TEST_ADAPTER" } as unknown as WalletProvider],
+        [
+          "APPLE",
+          {
+            provider: "APPLE",
+            mode: "TEST_ADAPTER",
+            updateMembershipPass: vi.fn().mockResolvedValue({ state: "ACTIVE" }),
+          } as unknown as WalletProvider,
+        ],
       ]),
     );
     await expect(worker.processOneWalletCampaign(campaign.id)).resolves.toMatchObject({
@@ -639,6 +646,35 @@ describe.sequential("Wallet Engagement durable integration", () => {
       orderBy: { provider: "asc" },
     });
     expect(commands.map((command) => command.provider)).toEqual(["APPLE", "GOOGLE"]);
+    const applePromotion = commands.find((command) => command.provider === "APPLE");
+    if (!applePromotion) throw new Error("Apple campaign command was not created.");
+    await expect(worker.processCommandById(applePromotion.id)).resolves.toBe(true);
+    await expect(
+      prisma.client.walletCommand.findUniqueOrThrow({ where: { id: applePromotion.id } }),
+    ).resolves.toMatchObject({ status: "COMPLETED", safeErrorCode: null });
+    const appleUpdate = await prisma.client.walletCommand.findFirstOrThrow({
+      where: {
+        commandType: "UPDATE",
+        provider: "APPLE",
+        campaignDelivery: { campaignId: campaign.id },
+      },
+    });
+    await expect(worker.processCommandById(appleUpdate.id)).resolves.toBe(true);
+    const applePush = await prisma.client.walletCommand.findFirstOrThrow({
+      where: {
+        commandType: "APPLE_PUSH",
+        provider: "APPLE",
+        campaignDelivery: { campaignId: campaign.id },
+      },
+      select: { id: true, campaignDeliveryId: true },
+    });
+    expect(applePush.campaignDeliveryId).not.toBeNull();
+    await expect(worker.processCommandById(applePush.id)).resolves.toBe(true);
+    await expect(
+      prisma.client.walletCampaignDelivery.findFirstOrThrow({
+        where: { campaignId: campaign.id, provider: "APPLE" },
+      }),
+    ).resolves.toMatchObject({ status: "SUCCEEDED", safeFailureCode: null });
     await prisma.client.walletCampaignDelivery.updateMany({
       where: { campaignId: campaign.id, status: "QUEUED" },
       data: { status: "SKIPPED", safeSkipCode: "TEST_SETUP", completedAt: new Date() },

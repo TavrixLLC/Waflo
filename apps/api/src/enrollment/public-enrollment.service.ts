@@ -467,7 +467,7 @@ export class PublicEnrollmentService {
               granted: true,
               documentFingerprint: this.environment.values.LEGAL_PRIVACY_VERSION,
               locale: input.preferredLocale === "ar" ? "AR" : "EN",
-              safeMetadata: { riskSignals },
+              safeMetadata: { captureMethod: "ENROLLMENT_IMPLICIT", riskSignals },
             },
             {
               organizationId,

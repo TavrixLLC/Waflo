@@ -103,10 +103,15 @@ interface CampaignHistory {
     status: string;
     counts: {
       eligible: number;
+      appleEligiblePasses: number;
+      appleRegisteredDevices: number;
+      googleEligibleObjects: number;
       queued: number;
       succeeded: number;
       skipped: number;
       failed: number;
+      throttled: number;
+      unknown: number;
     };
     creator: string;
   }>;
@@ -125,6 +130,27 @@ function CampaignCount({ label, value }: { label: string; value: number }) {
       <small>{label}</small>
     </span>
   );
+}
+
+function campaignStatusTone(status: string) {
+  if (status === "COMPLETED" || status === "SUCCEEDED") return "success" as const;
+  if (status === "PARTIAL_FAILURE" || status === "THROTTLED") return "warning" as const;
+  if (status === "FAILED") return "danger" as const;
+  return "brand" as const;
+}
+
+function campaignStatusLabel(status: string, ar: boolean) {
+  if (status === "COMPLETED" || status === "SUCCEEDED")
+    return ar ? "\u0645\u0643\u062a\u0645\u0644" : "Completed";
+  if (status === "PARTIAL_FAILURE")
+    return ar
+      ? "\u064a\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u0645\u0631\u0627\u062c\u0639\u0629"
+      : "Needs attention";
+  if (status === "THROTTLED") return ar ? "\u0645\u0624\u062c\u0644" : "Scheduled to retry";
+  if (status === "FAILED") return ar ? "\u0644\u0645 \u064a\u064f\u0631\u0633\u0644" : "Not sent";
+  if (status === "DISPATCHED")
+    return ar ? "\u062c\u0627\u0631\u064d \u0627\u0644\u0625\u0631\u0633\u0627\u0644" : "Sending";
+  return ar ? "\u0642\u064a\u062f \u0627\u0644\u062c\u062f\u0648\u0644\u0629" : "Scheduled";
 }
 
 export function WalletEngagementPanel({
@@ -747,7 +773,11 @@ export function WalletEngagementPanel({
             {history.items.length ? (
               <div className="wallet-history-list">
                 {history.items.map((campaign) => (
-                  <article key={campaign.id}>
+                  <article
+                    key={campaign.id}
+                    className="wallet-history-item"
+                    data-status={campaign.status.toLowerCase()}
+                  >
                     <header>
                       <div>
                         <strong>{campaign.title}</strong>
@@ -759,20 +789,50 @@ export function WalletEngagementPanel({
                           · {campaign.creator}
                         </small>
                       </div>
-                      <Badge
-                        tone={
-                          campaign.status === "SUCCEEDED"
-                            ? "success"
-                            : campaign.status === "FAILED"
-                              ? "danger"
-                              : "brand"
-                        }
-                      >
-                        {campaign.status.replaceAll("_", " ")}
+                      <Badge tone={campaignStatusTone(campaign.status)}>
+                        {campaignStatusLabel(campaign.status, ar)}
                       </Badge>
                     </header>
                     <p dir={contentDirection(campaign.locale)}>{campaign.body}</p>
-                    <footer>
+                    <div
+                      className="wallet-history-item__providers"
+                      aria-label={
+                        ar
+                          ? "\u062e\u0644\u0627\u0635\u0629 \u0627\u0644\u062a\u0633\u0644\u064a\u0645"
+                          : "Delivery summary"
+                      }
+                    >
+                      <div>
+                        <span className="wallet-history-item__provider-mark" aria-hidden="true">
+                          A
+                        </span>
+                        <div>
+                          <strong>Apple Wallet</strong>
+                          <small>
+                            {ar
+                              ? `${campaign.counts.appleEligiblePasses} \u0628\u0637\u0627\u0642\u0627\u062a \u0645\u0624\u0647\u0644\u0629 \u00b7 ${campaign.counts.appleRegisteredDevices} \u0623\u062c\u0647\u0632\u0629 \u0645\u0633\u062c\u0644\u0629`
+                              : `${campaign.counts.appleEligiblePasses} eligible passes · ${campaign.counts.appleRegisteredDevices} registered devices`}
+                          </small>
+                        </div>
+                      </div>
+                      <div>
+                        <span
+                          className="wallet-history-item__provider-mark wallet-history-item__provider-mark--google"
+                          aria-hidden="true"
+                        >
+                          G
+                        </span>
+                        <div>
+                          <strong>Google Wallet</strong>
+                          <small>
+                            {ar
+                              ? `${campaign.counts.googleEligibleObjects} \u0628\u0637\u0627\u0642\u0627\u062a \u0645\u062d\u0641\u0648\u0638\u0629 \u0645\u0624\u0647\u0644\u0629`
+                              : `${campaign.counts.googleEligibleObjects} eligible saved passes`}
+                          </small>
+                        </div>
+                      </div>
+                    </div>
+                    <footer className="wallet-history-item__outcomes">
                       <CampaignCount
                         label={ar ? "مؤهل" : "eligible"}
                         value={campaign.counts.eligible}
@@ -786,6 +846,22 @@ export function WalletEngagementPanel({
                         value={campaign.counts.skipped}
                       />
                       <CampaignCount label={ar ? "فشل" : "failed"} value={campaign.counts.failed} />
+                      {campaign.counts.queued ? (
+                        <CampaignCount
+                          label={
+                            ar
+                              ? "\u0642\u064a\u062f \u0627\u0644\u0625\u0631\u0633\u0627\u0644"
+                              : "sending"
+                          }
+                          value={campaign.counts.queued}
+                        />
+                      ) : null}
+                      {campaign.counts.throttled ? (
+                        <CampaignCount
+                          label={ar ? "\u0645\u0624\u062c\u0644" : "retrying"}
+                          value={campaign.counts.throttled}
+                        />
+                      ) : null}
                     </footer>
                   </article>
                 ))}

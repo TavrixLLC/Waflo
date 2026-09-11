@@ -36,10 +36,14 @@ function customerWalletStampRender() {
   };
 }
 
-function cardFixture(googleStatus: string, appleStatus = "READY") {
+function cardFixture(
+  googleStatus: string,
+  appleStatus = "READY",
+  preferredLocale: "en" | "ar" = "en",
+) {
   return {
     publicMembershipId: "wallet-readiness-member",
-    customer: { displayName: "Wallet Member", preferredLocale: "en", maskedPhone: null },
+    customer: { displayName: "Wallet Member", preferredLocale, maskedPhone: null },
     merchant: { name: "Wallet Coffee", slug: "wallet-coffee" },
     program: {
       defaultLocale: "en",
@@ -93,7 +97,11 @@ async function fulfillCard(route: Route, data: unknown): Promise<void> {
   });
 }
 
-async function routeCard(page: Page, next: () => { google: string; apple: string }) {
+async function routeCard(
+  page: Page,
+  next: () => { google: string; apple: string },
+  preferredLocale: "en" | "ar" = "en",
+) {
   await page.route("**/api/waflo/v1/customer/card/wallet-readiness-member**", (route) => {
     const state = next();
     if (/\/wallet-readiness(?:\?|$)/u.test(route.request().url())) {
@@ -114,7 +122,7 @@ async function routeCard(page: Page, next: () => { google: string; apple: string
         updatedAt: "2026-09-11T12:00:00.000Z",
       });
     }
-    return fulfillCard(route, cardFixture(state.google, state.apple));
+    return fulfillCard(route, cardFixture(state.google, state.apple, preferredLocale));
   });
 }
 
@@ -143,7 +151,7 @@ test("converges Wallet readiness during original Android navigation from the pre
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads <= 4 ? "PREPARING" : "READY", apple: "READY" }));
   try {
-    await page.goto("http://localhost:3002/card/wallet-readiness-member");
+    await page.goto("http://localhost:3002/card/wallet-readiness-member?wallet=prepare");
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible({
       timeout: 8_000,
     });
@@ -268,14 +276,14 @@ test("shows staged, full-space Wallet preparation and captures its transition to
     apple: "READY",
   }));
   try {
-    await page.goto("http://localhost:3002/card/wallet-readiness-member");
+    await page.goto("http://localhost:3002/card/wallet-readiness-member?wallet=prepare");
     await expect(page.getByTestId("wallet-preparation")).toBeVisible();
     await expect(
       page.locator(".wallet-preparation__current").getByText("Preparing your Wallet pass"),
     ).toBeVisible();
     await expect(page.locator(".digital-card")).toHaveCount(0);
     await page.screenshot({
-      path: "diagnostics/wallet-notification-ux/customer-waiting-early.png",
+      path: "diagnostics/wallet-final-fixes/customer-preparing-early.png",
       fullPage: true,
     });
 
@@ -284,7 +292,7 @@ test("shows staged, full-space Wallet preparation and captures its transition to
       page.locator(".wallet-preparation__current").getByText("Applying final details"),
     ).toBeVisible();
     await page.screenshot({
-      path: "diagnostics/wallet-notification-ux/customer-waiting-mid.png",
+      path: "diagnostics/wallet-final-fixes/customer-preparing-mid.png",
       fullPage: true,
     });
 
@@ -294,7 +302,7 @@ test("shows staged, full-space Wallet preparation and captures its transition to
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
     await page.screenshot({
-      path: "diagnostics/wallet-notification-ux/customer-waiting-final.png",
+      path: "diagnostics/wallet-final-fixes/customer-preparing-final.png",
       fullPage: true,
     });
 
@@ -306,8 +314,35 @@ test("shows staged, full-space Wallet preparation and captures its transition to
     await page.clock.fastForward(20_000);
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
     await expect(page.getByTestId("wallet-preparation")).toHaveCount(0);
+    await expect(page.getByTestId("wallet-ready-summary")).toBeVisible();
+    await expect(page.locator(".digital-card")).toHaveCount(0);
     await page.screenshot({
-      path: "diagnostics/wallet-notification-ux/customer-wallet-ready-cta.png",
+      path: "diagnostics/wallet-final-fixes/customer-wallet-ready-en.png",
+      fullPage: true,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
+test("renders the Wallet-ready action in Arabic without restoring the large web card", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await routeCard(page, () => ({ google: "READY", apple: "READY" }), "ar");
+  try {
+    await page.goto("http://localhost:3002/card/wallet-readiness-member?wallet=prepare");
+    await expect(page.getByTestId("wallet-ready-summary")).toBeVisible();
+    await expect(page.locator(".digital-card")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
+    await page.screenshot({
+      path: "diagnostics/wallet-final-fixes/customer-wallet-ready-ar.png",
       fullPage: true,
     });
   } finally {

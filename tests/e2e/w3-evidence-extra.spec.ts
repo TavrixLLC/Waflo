@@ -149,9 +149,11 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     await page.goto(`http://localhost:3002/join/${program.publicSlug}?tenant=today`);
     await page.getByLabel("Name on card").fill("Replacement Version Member");
     await page.getByLabel(new RegExp(`I accept the ${program.internalName}`)).check();
-    await page.getByLabel(/I accept the Waflo privacy notice/).check();
     await page.getByRole("button", { name: "Create my card" }).click();
-    await page.locator('a[href^="/card/"]').click();
+    await expect(page).toHaveURL(/\/card\/[^?]+\?wallet=prepare/u);
+    const enrollmentCardUrl = new URL(page.url());
+    enrollmentCardUrl.searchParams.delete("wallet");
+    await page.goto(enrollmentCardUrl.toString());
     await expect(page.getByRole("heading", { name: program.internalName })).toBeVisible();
     await screenshot(page, "30-new-version-enrollment");
     await expect(

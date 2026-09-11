@@ -152,6 +152,16 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   if (tenant && !upstream.searchParams.has("tenant")) {
     upstream.searchParams.set("tenant", tenant);
   }
+  // The local API deliberately does not trust forwarded-host headers. Preserve
+  // the canonical local merchant identity as its development-only override so
+  // browser commands use the same tenant as the server-rendered page.
+  if (
+    hostTenant &&
+    (normalizedHost.endsWith(".localhost") || normalizedHost.endsWith(".lvh.me")) &&
+    !upstream.searchParams.has("tenant")
+  ) {
+    upstream.searchParams.set("tenant", hostTenant);
+  }
   requestHeaders.set("host", directHost);
   const response = await fetch(upstream, {
     method: request.method,

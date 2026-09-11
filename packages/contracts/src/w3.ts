@@ -29,7 +29,10 @@ export const enrollmentInputSchema = z
     phone: z.string().trim().min(5).max(30).optional(),
     preferredLocale: z.enum(["en", "ar"]),
     programTermsAccepted: z.literal(true),
-    wafloPrivacyAccepted: z.literal(true),
+    // Enrollment accepts the privacy notice implicitly. Keep the normalized
+    // value in the parsed command so the server can retain its versioned audit
+    // record while older clients that still send the field remain compatible.
+    wafloPrivacyAccepted: z.literal(true).optional().default(true),
     marketingPhoneConsent: z.boolean().default(false),
     formStartedAt: z.number().int().positive(),
     website: z.string().max(0).default(""),

@@ -2247,3 +2247,161 @@ body {
     width: 100%;
   }
 }
+
+/* Enrollment introduces the program without presenting a web card as the Wallet result. */
+.join-page .join-layout--compact {
+  grid-template-columns: minmax(0, 0.72fr) minmax(20rem, 0.88fr);
+  gap: clamp(1rem, 3vw, 2.5rem);
+}
+
+.join-page .join-layout--compact .enrollment-summary {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 0.75rem;
+  padding: clamp(1.2rem, 2.5vw, 1.85rem);
+  color: var(--waflo-ink);
+  border: 1px solid var(--waflo-border);
+  border-radius: 22px;
+  background: var(--waflo-soft);
+  box-shadow: none;
+}
+
+.join-page .join-layout--compact .enrollment-summary .program-story__motif,
+.join-page .join-layout--compact .enrollment-summary .program-story__progress,
+.join-page .join-layout--compact .enrollment-summary > .reward-card,
+.join-page .join-layout--compact .enrollment-summary > .program-details {
+  display: none;
+}
+
+.join-page .join-layout--compact .enrollment-summary .program-story__header {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.join-page .join-layout--compact .enrollment-summary h1 {
+  max-width: 24ch;
+  margin: 0;
+  font-size: clamp(1.55rem, 2.4vw, 2.25rem);
+  line-height: 1.14;
+}
+
+.join-page .join-layout--compact .enrollment-summary .customer-lead {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--waflo-muted);
+  font-size: 0.96rem;
+  line-height: 1.6;
+}
+
+.enrollment-summary__kicker,
+.wallet-ready-summary__kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--waflo-brick);
+  font-size: 0.71rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.enrollment-terms {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--waflo-soft) 72%, transparent);
+}
+
+.join-page .enrollment-terms .wf-check {
+  padding: 0;
+  text-align: start;
+}
+
+.join-page .enrollment-terms .customer-terms {
+  border: 1px solid color-mix(in srgb, var(--waflo-border) 86%, transparent);
+  border-radius: 10px;
+  background: var(--waflo-cloud);
+}
+
+.join-page .enrollment-terms .customer-terms summary {
+  min-height: 2.7rem;
+  padding-block: 0.7rem;
+  text-align: start;
+}
+
+.join-page .enrollment-terms .customer-terms p {
+  max-height: none;
+  padding-block: 0.75rem 0.85rem;
+  overflow: visible;
+  color: var(--waflo-muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.wallet-ready-page .wallet-ready-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.9rem;
+  margin-block: 1.1rem 1rem;
+  padding: clamp(1rem, 3vw, 1.4rem);
+  border: 1px solid var(--waflo-border);
+  border-inline-start: 4px solid var(--waflo-brick);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--waflo-soft) 62%, transparent);
+}
+
+.wallet-ready-summary > div {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.wallet-ready-summary h1,
+.wallet-ready-summary p {
+  margin: 0;
+}
+
+.wallet-ready-summary h1 {
+  font-size: clamp(1.25rem, 4vw, 1.65rem);
+  line-height: 1.2;
+}
+
+.wallet-ready-summary p {
+  color: var(--waflo-muted);
+  line-height: 1.55;
+}
+
+.wallet-ready-page .card-actions > .wf-card {
+  border-color: color-mix(in srgb, var(--waflo-brick) 32%, var(--waflo-border));
+  box-shadow: 0 1rem 2.5rem rgb(36 25 22 / 9%);
+}
+
+@media (max-width: 980px) {
+  .join-page .join-layout--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .join-page .join-layout--compact .enrollment-summary {
+    width: min(100%, 42rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .join-page .join-layout--compact .enrollment-summary {
+    padding: 1rem;
+    border-radius: 18px;
+  }
+
+  .enrollment-terms {
+    padding: 0.75rem;
+  }
+
+  .wallet-ready-page .wallet-ready-summary {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+    border-radius: 15px;
+  }
+}

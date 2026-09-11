@@ -3253,6 +3253,117 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
   text-align: center;
 }
 
+/* Keep the campaign composer and its delivery record in the shared Waflo control rhythm. */
+.wallet-form-row > .wf-field {
+  display: grid;
+  align-content: start;
+}
+
+.wallet-form-row .wallet-campaign-select {
+  width: 100%;
+  min-height: 2.9rem;
+  border-color: var(--waflo-border);
+  border-radius: 12px;
+  background: var(--waflo-cloud);
+}
+
+.wallet-form-row .wallet-campaign-select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--waflo-coral) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.wallet-history-list {
+  gap: 0.85rem;
+}
+
+.wallet-history-list .wallet-history-item {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-inline-start: 4px solid var(--waflo-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--waflo-soft) 34%, transparent);
+}
+
+.wallet-history-list .wallet-history-item[data-status="completed"],
+.wallet-history-list .wallet-history-item[data-status="succeeded"] {
+  border-inline-start-color: var(--waflo-success);
+}
+
+.wallet-history-list .wallet-history-item[data-status="partial_failure"],
+.wallet-history-list .wallet-history-item[data-status="throttled"] {
+  border-inline-start-color: var(--waflo-warning);
+}
+
+.wallet-history-list .wallet-history-item[data-status="failed"] {
+  border-inline-start-color: var(--waflo-danger);
+}
+
+.wallet-history-list .wallet-history-item > p {
+  margin: -0.15rem 0 0;
+}
+
+.wallet-history-item__providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.wallet-history-item__providers > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--waflo-border) 84%, transparent);
+  border-radius: 12px;
+  background: var(--waflo-cloud);
+}
+
+.wallet-history-item__providers strong,
+.wallet-history-item__providers small {
+  display: block;
+}
+
+.wallet-history-item__providers small {
+  margin-top: 0.18rem;
+  color: var(--waflo-muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wallet-history-item__provider-mark {
+  display: grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: white;
+  border-radius: 0.5rem;
+  background: var(--waflo-ink);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.wallet-history-item__provider-mark--google {
+  background: var(--waflo-brick);
+}
+
+.wallet-history-list .wallet-history-item__outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-top: 0.05rem;
+}
+
+.wallet-history-item__outcomes .wallet-campaign-count {
+  min-height: 1.9rem;
+  padding-inline: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--waflo-border) 86%, transparent);
+  background: transparent;
+}
+
 .wallet-send-confirmation {
   position: fixed;
   inset: 0;
@@ -3340,6 +3451,9 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
   .wallet-form-row,
   .wallet-message-preview,
   .wallet-confirmation-summary dl {
+    grid-template-columns: 1fr;
+  }
+  .wallet-history-item__providers {
     grid-template-columns: 1fr;
   }
   .wallet-provider-rail ul {

@@ -57,7 +57,11 @@ import {
 import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
-import { classifyApplePushResponse } from "./apple-push.js";
+import {
+  appleCampaignDeliveryUpdate,
+  applePassUpdateRequestHeaders,
+  classifyApplePushResponse,
+} from "./apple-push.js";
 import {
   GOOGLE_WALLET_LOGO_SIZE,
   googleProgressAssetNeedsOwnershipRepair,
@@ -1357,7 +1361,13 @@ export class WalletWorker {
         });
       } else if (command.commandType === "APPLE_PUSH") {
         if (!command.walletPassInstanceId) throw new Error("Apple push has no pass instance.");
-        await this.sendApplePush(command.walletPassInstanceId, provider.mode);
+        const outcome = await this.sendApplePush(command.walletPassInstanceId, provider.mode);
+        if (command.campaignDeliveryId) {
+          await this.prisma.walletCampaignDelivery.update({
+            where: { id: command.campaignDeliveryId },
+            data: appleCampaignDeliveryUpdate(outcome, new Date()),
+          });
+        }
       } else if (command.commandType === "SEND_PROMOTION") {
         providerRequestId = await this.executePromotionalMessage(command, provider);
       } else {
@@ -1460,17 +1470,6 @@ export class WalletWorker {
             },
           });
           if (pass.provider === "APPLE") await this.queueApplePush(pass, command);
-          if (pass.provider === "APPLE" && command.campaignDeliveryId) {
-            await this.prisma.walletCampaignDelivery.update({
-              where: { id: command.campaignDeliveryId },
-              data: {
-                status: "SUCCEEDED",
-                logicalSentAt: new Date(),
-                completedAt: new Date(),
-                safeFailureCode: null,
-              },
-            });
-          }
         } else if (command.commandType === "INVALIDATE") {
           const result = await provider.invalidateMembershipPass(
             input,
@@ -1737,6 +1736,14 @@ export class WalletWorker {
       // pass with a changeMessage field, then queues a background Wallet APNs
       // signal; it never sends an arbitrary application alert.
       await this.prisma.$transaction(async (transaction) => {
+        // A delivery is intentionally owned by exactly one durable command.
+        // Hand it from SEND_PROMOTION to UPDATE before assigning the update,
+        // otherwise the unique relation dead-letters an otherwise valid Apple
+        // campaign before a pass update can be generated.
+        await transaction.walletCommand.update({
+          where: { id: command.id },
+          data: { campaignDeliveryId: null },
+        });
         await transaction.walletPassInstance.update({
           where: { id: delivery.walletPassInstanceId },
           data: {
@@ -1868,36 +1875,48 @@ export class WalletWorker {
     }
     const sequence = pass.appleUpdateSequence.toString();
     const idempotencyKey = `wallet:apple:push:${pass.id}:s${sequence}`;
-    await this.prisma.walletCommand.upsert({
-      where: { idempotencyKey },
-      create: {
-        organizationId: pass.organizationId,
-        membershipId: pass.membershipId,
-        walletPassInstanceId: pass.id,
-        provider: "APPLE",
-        commandType: "APPLE_PUSH",
-        idempotencyKey,
-        payloadFingerprint: createHash("sha256")
-          .update(`${idempotencyKey}:${source.id}`)
-          .digest("hex"),
-        safePayload: {
-          appleUpdateSequence: sequence,
-          sourceCommandType: source.commandType,
+    await this.prisma.$transaction(async (transaction) => {
+      // Continue the one-command ownership handoff so APNs, rather than pass
+      // regeneration, is the event that completes the campaign delivery.
+      if (source.campaignDeliveryId) {
+        await transaction.walletCommand.update({
+          where: { id: source.id },
+          data: { campaignDeliveryId: null },
+        });
+      }
+      await transaction.walletCommand.upsert({
+        where: { idempotencyKey },
+        create: {
+          organizationId: pass.organizationId,
+          membershipId: pass.membershipId,
+          walletPassInstanceId: pass.id,
+          provider: "APPLE",
+          commandType: "APPLE_PUSH",
+          idempotencyKey,
+          payloadFingerprint: createHash("sha256")
+            .update(`${idempotencyKey}:${source.id}`)
+            .digest("hex"),
+          ...(source.campaignDeliveryId ? { campaignDeliveryId: source.campaignDeliveryId } : {}),
+          safePayload: {
+            appleUpdateSequence: sequence,
+            sourceCommandType: source.commandType,
+          },
         },
-      },
-      update: {},
+        update: {},
+      });
     });
   }
 
   private async sendApplePush(
     walletPassInstanceId: string,
     mode: "DISABLED" | "TEST_ADAPTER" | "REAL",
-  ) {
+  ): Promise<"SENT" | "NO_ACTIVE_WALLET_HOLDER"> {
     const registrations = await this.prisma.applePassRegistration.findMany({
       where: { walletPassInstanceId, unregisteredAt: null },
       include: { walletPassInstance: true },
     });
-    if (mode === "TEST_ADAPTER" || registrations.length === 0) return;
+    if (registrations.length === 0) return "NO_ACTIVE_WALLET_HOLDER";
+    if (mode === "TEST_ADAPTER") return "SENT";
     const apnsCertificateSource =
       this.environment.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 ??
       this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64;
@@ -1920,6 +1939,7 @@ export class WalletWorker {
       pfx: bytesFromSource(apnsCertificateSource),
       passphrase: apnsCertificatePassword,
     });
+    let delivered = 0;
     try {
       for (const registration of registrations) {
         const token = decryptCustomerValue(registration.pushTokenEncrypted, {
@@ -1933,10 +1953,9 @@ export class WalletWorker {
             const push = client.request({
               ":method": "POST",
               ":path": `/3/device/${encodeURIComponent(token)}`,
-              "apns-topic": this.environment.APPLE_PASS_TYPE_IDENTIFIER as string,
-              "apns-push-type": "background",
-              "apns-priority": "5",
-              "content-type": "application/json",
+              ...applePassUpdateRequestHeaders(
+                this.environment.APPLE_PASS_TYPE_IDENTIFIER as string,
+              ),
             });
             let responseStatus = 0;
             const responseBody: Buffer[] = [];
@@ -1977,7 +1996,9 @@ export class WalletWorker {
           error.status = disposition === "RETRY" ? response.status || 503 : response.status || 400;
           throw error;
         }
+        delivered += 1;
       }
+      return delivered > 0 ? "SENT" : "NO_ACTIVE_WALLET_HOLDER";
     } finally {
       client.close();
     }

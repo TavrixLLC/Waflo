@@ -7,10 +7,17 @@ export default async function CustomerCardPage({
   searchParams,
 }: {
   params: Promise<{ publicMembershipId: string }>;
-  searchParams: Promise<{ tenant?: string | string[] }>;
+  searchParams: Promise<{ tenant?: string | string[]; wallet?: string | string[] }>;
 }) {
   const { publicMembershipId } = await params;
   const query = await searchParams;
   const tenant = typeof query.tenant === "string" ? query.tenant : undefined;
-  return <CustomerCard publicMembershipId={publicMembershipId} {...(tenant ? { tenant } : {})} />;
+  const walletJourney = query.wallet === "prepare";
+  return (
+    <CustomerCard
+      publicMembershipId={publicMembershipId}
+      walletJourney={walletJourney}
+      {...(tenant ? { tenant } : {})}
+    />
+  );
 }

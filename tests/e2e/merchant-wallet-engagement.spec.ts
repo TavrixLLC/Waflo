@@ -45,7 +45,7 @@ test("configures provider-native nearby relevance and confirms one unified Walle
   await expect(campaignForm).not.toContainText("Google Wallet");
   await expect(campaignForm.locator("select.wf-select")).toHaveCount(2);
   await page.screenshot({
-    path: "diagnostics/wallet-notification-ux/notification-composer-clean.png",
+    path: "diagnostics/wallet-final-fixes/notification-composer-clean.png",
     fullPage: true,
   });
   const messageLanguage = page.getByRole("combobox", { name: "Message language" });
@@ -83,7 +83,7 @@ test("configures provider-native nearby relevance and confirms one unified Walle
   );
   await expect(dialog).toContainText("A new visit message");
   await dialog.screenshot({
-    path: "diagnostics/wallet-notification-ux/notification-confirmation-clean.png",
+    path: "diagnostics/wallet-final-fixes/notification-confirmation-clean.png",
   });
   const centered = await dialog.evaluate((element) => {
     const rect = element.getBoundingClientRect();
@@ -102,8 +102,15 @@ test("configures provider-native nearby relevance and confirms one unified Walle
   expect((await campaignRequest).postDataJSON()).not.toHaveProperty("providers");
   await expect(page.getByText("Campaign created safely.", { exact: false })).toBeVisible();
   await expect(page.getByTestId("wallet-campaign-history")).toContainText("A new visit message");
+  await expect(page.getByTestId("wallet-campaign-history")).toContainText("Completed");
+  await expect(page.getByTestId("wallet-campaign-history")).toContainText("Apple Wallet");
+  await expect(page.getByTestId("wallet-campaign-history")).toContainText("Google Wallet");
   await page.screenshot({
-    path: "diagnostics/wallet-notification-ux/notification-campaign-history.png",
+    path: "diagnostics/wallet-final-fixes/notification-history-clean.png",
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: "diagnostics/wallet-final-fixes/notification-history-success.png",
     fullPage: true,
   });
   await page.screenshot({

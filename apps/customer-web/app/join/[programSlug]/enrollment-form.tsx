@@ -1,22 +1,13 @@
 "use client";
 
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  FormField,
-  SearchableSelect,
-  TextInput,
-} from "@waflo/ui";
+import { Alert, Button, Card, Checkbox, FormField, SearchableSelect, TextInput } from "@waflo/ui";
 import {
   cardLocaleMetadata,
   defaultProgramTemplatePresentation,
   directionForCardLocale,
   fontStackForCardLocale,
 } from "@waflo/contracts";
-import { Check, MapPin, ShieldCheck, WalletCards } from "lucide-react";
+import { MapPin, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
@@ -40,17 +31,10 @@ export function EnrollmentForm({
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
   const [terms, setTerms] = useState(false);
-  const [privacy, setPrivacy] = useState(false);
   const [marketing, setMarketing] = useState(false);
   const [website, setWebsite] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [completed, setCompleted] = useState<{
-    membership: {
-      publicMembershipId: string;
-      cardUrl: string;
-    };
-  } | null>(null);
   const startedAt = useRef(Date.now());
   const idempotencyKey = useRef(customerCommandId("enroll"));
   const ar = interfaceLocale === "ar";
@@ -86,12 +70,8 @@ export function EnrollmentForm({
           ? "يمكنك العودة لاحقًا أو التواصل مع التاجر."
           : "Return later or contact the merchant.";
   const canSubmit = useMemo(
-    () =>
-      displayName.trim().length > 0 &&
-      terms &&
-      privacy &&
-      (!phoneRequired || phone.trim().length > 0),
-    [displayName, phone, phoneRequired, privacy, terms],
+    () => displayName.trim().length > 0 && terms && (!phoneRequired || phone.trim().length > 0),
+    [displayName, phone, phoneRequired, terms],
   );
 
   useEffect(() => {
@@ -116,23 +96,26 @@ export function EnrollmentForm({
     setError("");
     try {
       const query = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
-      const result = await customerApi<
-        typeof completed extends null ? never : NonNullable<typeof completed>
-      >(`/v1/public/programs/${encodeURIComponent(program.slug)}/enroll${query}`, {
+      const result = await customerApi<{
+        membership: { publicMembershipId: string; cardUrl: string };
+      }>(`/v1/public/programs/${encodeURIComponent(program.slug)}/enroll${query}`, {
         method: "POST",
         headers: { "x-idempotency-key": idempotencyKey.current },
         body: JSON.stringify({
           displayName,
-          ...(program.policy.phoneCollectionMode === "HIDDEN" ? {} : { phone }),
+          ...(phone.trim() ? { phone: phone.trim() } : {}),
           preferredLocale: interfaceLocale,
           programTermsAccepted: true,
-          wafloPrivacyAccepted: true,
           marketingPhoneConsent: marketing,
           formStartedAt: startedAt.current,
           website,
         }),
       });
-      setCompleted(result);
+      const cardQuery = new URLSearchParams({ wallet: "prepare" });
+      if (tenant) cardQuery.set("tenant", tenant);
+      window.location.assign(
+        `/card/${encodeURIComponent(result.membership.publicMembershipId)}?${cardQuery.toString()}`,
+      );
     } catch (caught) {
       setError(
         caught instanceof CustomerApiError
@@ -146,41 +129,10 @@ export function EnrollmentForm({
     }
   }
 
-  if (completed) {
-    const cardHref = `/card/${completed.membership.publicMembershipId}${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`;
-    return (
-      <section className="enrollment-success" aria-live="polite">
-        <span className="success-icon">
-          <Check />
-        </span>
-        <Badge tone="success">
-          {ar
-            ? "\u062a\u0645 \u0625\u0646\u0634\u0627\u0621 \u0628\u0637\u0627\u0642\u062a\u0643"
-            : "Your card is ready"}
-        </Badge>
-        <h1>
-          {(ar ? "\u0623\u0647\u0644\u064b\u0627 \u0628\u0643 \u0641\u064a " : "Welcome to ") +
-            copy?.programName}
-        </h1>
-        <p>
-          {ar
-            ? "\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0648\u0644\u0627\u0621 \u062c\u0627\u0647\u0632\u0629 \u0644\u0644\u0639\u0631\u0636 \u0648\u0627\u0644\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u062c\u0647\u0627\u0632."
-            : "Your loyalty card is ready to view and use on this device."}
-        </p>
-        {error ? <Alert tone="danger" title={error} /> : null}
-        <a href={cardHref}>
-          <Button>
-            {ar ? "\u0639\u0631\u0636 \u0627\u0644\u0628\u0637\u0627\u0642\u0629" : "View card"}
-          </Button>
-        </a>
-      </section>
-    );
-  }
-
   return (
-    <div className="join-layout">
+    <div className="join-layout join-layout--compact">
       <section
-        className="program-story"
+        className="program-story enrollment-summary"
         lang={cardLocale}
         dir={directionForCardLocale(cardLocale)}
         data-composition={presentation.composition}
@@ -211,6 +163,12 @@ export function EnrollmentForm({
             logoDataUri={merchant.brandLogoDataUri}
             name={merchant.name}
           />
+          <span className="enrollment-summary__kicker">
+            <WalletCards size={16} aria-hidden="true" />
+            {ar
+              ? "\u0628\u0637\u0627\u0642\u0629 \u0648\u0644\u0627\u0621 \u0631\u0642\u0645\u064a\u0629"
+              : "DIGITAL LOYALTY CARD"}
+          </span>
           <h1>{copy?.programName}</h1>
           <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>
         </div>
@@ -317,26 +275,23 @@ export function EnrollmentForm({
                 />
               </FormField>
             ) : null}
-            <Checkbox
-              checked={terms}
-              onChange={(event) => setTerms(event.target.checked)}
-              label={
-                ar
-                  ? `أوافق على شروط برنامج ${copy?.programName}`
-                  : `I accept the ${copy?.programName} program terms`
-              }
-              required
-            />
-            <details className="customer-terms">
-              <summary>{ar ? "عرض شروط البرنامج" : "View program terms"}</summary>
-              <p>{copy?.termsAndConditions}</p>
-            </details>
-            <Checkbox
-              checked={privacy}
-              onChange={(event) => setPrivacy(event.target.checked)}
-              label={ar ? "أوافق على إشعار خصوصية Waflo" : "I accept the Waflo privacy notice"}
-              required
-            />
+            <div className="enrollment-terms" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
+              <Checkbox
+                checked={terms}
+                onChange={(event) => setTerms(event.target.checked)}
+                label={
+                  ar
+                    ? `أوافق على شروط برنامج ${copy?.programName}`
+                    : `I accept the ${copy?.programName} program terms`
+                }
+                required
+              />
+              <details className="customer-terms">
+                <summary>{ar ? "عرض شروط البرنامج" : "View program terms"}</summary>
+                <p>{copy?.termsAndConditions}</p>
+              </details>
+            </div>
+            {/* Privacy acceptance is captured implicitly at enrollment. */}
             {program.policy.marketingConsentVisible && phone ? (
               <Checkbox
                 checked={marketing}
