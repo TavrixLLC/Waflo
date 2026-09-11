@@ -794,7 +794,7 @@ export function WalletEngagementPanel({
                       </Badge>
                     </header>
                     <p dir={contentDirection(campaign.locale)}>{campaign.body}</p>
-                    <div
+                    <section
                       className="wallet-history-item__providers"
                       aria-label={
                         ar
@@ -831,7 +831,7 @@ export function WalletEngagementPanel({
                           </small>
                         </div>
                       </div>
-                    </div>
+                    </section>
                     <footer className="wallet-history-item__outcomes">
                       <CampaignCount
                         label={ar ? "مؤهل" : "eligible"}

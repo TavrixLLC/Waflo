@@ -112,7 +112,7 @@ describe("Customer Web tenant forwarding", () => {
     const local = await GET(customerRequest("hamzacafe.lvh.me:3002"), context);
     expect(local.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    expect(url.searchParams.has("tenant")).toBe(false);
+    expect(url.searchParams.get("tenant")).toBe("hamzacafe");
     expect(new Headers(init.headers).get("x-forwarded-host")).toBe("hamzacafe.lvh.me:3002");
 
     const localWithMatchingLegacyQuery = await GET(
@@ -121,6 +121,6 @@ describe("Customer Web tenant forwarding", () => {
     );
     expect(localWithMatchingLegacyQuery.status).toBe(200);
     const [localUrl] = fetchMock.mock.calls[1] as [URL, RequestInit];
-    expect(localUrl.searchParams.has("tenant")).toBe(false);
+    expect(localUrl.searchParams.get("tenant")).toBe("hamzacafe");
   });
 });

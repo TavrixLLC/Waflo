@@ -40,25 +40,6 @@ function cookie(response: { headers: Record<string, unknown> }, name: string): s
   return match?.trim().split(";")[0] ?? "";
 }
 
-async function setConsent(granted: boolean) {
-  return app.inject({
-    method: "POST",
-    url: "/v1/customer/wallet-engagement/consent",
-    headers: {
-      host: fixture.merchantHost,
-      origin: new URL(environment.values.CUSTOMER_WEB_URL).origin,
-      cookie: `${customerSessionCookie}; ${customerCsrfCookie}`,
-      "x-csrf-token": customerCsrfToken,
-      "content-type": "application/json",
-    },
-    payload: {
-      granted,
-      locale: "EN",
-      noticeVersion: "wallet-promotions-v1-LEGAL_REVIEW_REQUIRED",
-    },
-  });
-}
-
 function campaignInput(title: string) {
   return {
     idempotencyKey: randomUUID(),
