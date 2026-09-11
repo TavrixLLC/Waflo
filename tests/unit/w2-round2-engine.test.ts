@@ -181,8 +181,8 @@ describe("W2 Round 2 visual pipeline", () => {
 
     expect(new Set([customer.digest, apple.digest, google.digest]).size).toBe(3);
     expect(customer.svg).toContain("Customer Web preview");
-    expect(apple.svg).toContain("Apple legacy Wallet preview");
-    expect(apple.svg).toContain('data-apple-preview-variant="LEGACY"');
+    expect(apple.svg).toContain("Apple Store Card preview");
+    expect(apple.svg).toContain('data-apple-preview-variant="STORE_CARD"');
     expect(google.svg).toContain("Google Wallet preview");
     expect(customer.svg).toContain("مكافآت وافلو");
     expect(apple.width).not.toBe(customer.width);

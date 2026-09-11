@@ -189,9 +189,9 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       expect(raw.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
     }
     for (const [name, dimensions] of [
-      ["strip.png", [375, 123]],
-      ["strip@2x.png", [750, 246]],
-      ["strip@3x.png", [1_125, 369]],
+      ["strip.png", [375, 144]],
+      ["strip@2x.png", [750, 288]],
+      ["strip@3x.png", [1_125, 432]],
     ] as const) {
       await expect(sharp(Buffer.from(files[name] ?? [])).metadata()).resolves.toMatchObject({
         width: dimensions[0],
