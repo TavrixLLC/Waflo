@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-test("configures provider-native nearby relevance and confirms a Google Wallet campaign", async ({
+test("configures provider-native nearby relevance and confirms one unified Wallet campaign", async ({
   page,
 }) => {
   await mockTemplateGalleryApi(page, {
@@ -39,17 +39,35 @@ test("configures provider-native nearby relevance and confirms a Google Wallet c
   await expect(page.locator(".wallet-nearby-preview")).toContainText("next coffee visit");
 
   await expect(page.locator(".wallet-audience-strip")).toContainText("12");
+  const campaignForm = page.locator(".wallet-campaign-form");
+  await expect(campaignForm.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(campaignForm).not.toContainText("Apple Wallet");
+  await expect(campaignForm).not.toContainText("Google Wallet");
+  await expect(campaignForm.locator("select.wf-select")).toHaveCount(2);
+  await page.screenshot({
+    path: "diagnostics/wallet-notification-ux/notification-composer-clean.png",
+    fullPage: true,
+  });
   const messageLanguage = page.getByRole("combobox", { name: "Message language" });
+  const branchSelect = page.getByRole("combobox", { name: "Branch" });
   await messageLanguage.selectOption({ label: "English" });
   await expect(messageLanguage).toHaveValue("EN");
+  await expect(messageLanguage).toHaveClass(/wf-select/u);
+  await expect(branchSelect).toHaveClass(/wf-select/u);
+  await expect(
+    page.getByText("Optional: recorded transaction at branch", { exact: true }),
+  ).toHaveCount(0);
+  const [languageBox, branchBox] = await Promise.all([
+    messageLanguage.boundingBox(),
+    branchSelect.boundingBox(),
+  ]);
+  expect(languageBox?.height).toBe(branchBox?.height);
   await page.getByLabel("Title").fill("A new visit message");
   await page
     .getByRole("textbox", { name: /^Message /u })
     .fill("Your loyalty card is ready for your next visit.");
-  await expect(page.getByText("MESSAGE CONTENT STORED IN GOOGLE WALLET")).toBeVisible();
-  await expect(
-    page.getByText("Google controls the system notification presentation"),
-  ).toBeVisible();
+  await expect(page.getByText("WALLET MESSAGE PREVIEW")).toBeVisible();
+  await expect(page.getByText("Your message will be delivered through Wallet")).toBeVisible();
   await page.getByRole("button", { name: "Review and send" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Confirm Wallet message" });
@@ -57,8 +75,16 @@ test("configures provider-native nearby relevance and confirms a Google Wallet c
   await expect(dialog).toContainText("Classic Roast");
   await expect(dialog).toContainText("Eligible audience");
   await expect(dialog).toContainText("12");
-  await expect(dialog).toContainText("Google Wallet");
+  await expect(dialog).toContainText("Audience scope");
+  await expect(dialog).toContainText("Entire program");
+  await expect(dialog.getByText("Provider", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("Provider-controlled presentation", { exact: true })).toHaveCount(
+    0,
+  );
   await expect(dialog).toContainText("A new visit message");
+  await dialog.screenshot({
+    path: "diagnostics/wallet-notification-ux/notification-confirmation-clean.png",
+  });
   const centered = await dialog.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return {
@@ -68,9 +94,18 @@ test("configures provider-native nearby relevance and confirms a Google Wallet c
   });
   expect(centered.x).toBeLessThanOrEqual(2);
   expect(centered.y).toBeLessThanOrEqual(2);
+  const campaignRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" && request.url().endsWith("/wallet-engagement/campaigns"),
+  );
   await dialog.getByRole("button", { name: "Send now" }).click();
+  expect((await campaignRequest).postDataJSON()).not.toHaveProperty("providers");
   await expect(page.getByText("Campaign created safely.", { exact: false })).toBeVisible();
   await expect(page.getByTestId("wallet-campaign-history")).toContainText("A new visit message");
+  await page.screenshot({
+    path: "diagnostics/wallet-notification-ux/notification-campaign-history.png",
+    fullPage: true,
+  });
   await page.screenshot({
     path: "test-results/wallet-engagement-desktop.png",
     fullPage: true,

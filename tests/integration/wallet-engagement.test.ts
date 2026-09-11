@@ -556,7 +556,11 @@ describe.sequential("Wallet Engagement durable integration", () => {
     expect(firstClaim).toMatchObject({ queued: 1, skipped: 0, finished: true });
     expect(secondClaim).toBeNull();
     const command = await prisma.client.walletCommand.findFirstOrThrow({
-      where: { commandType: "SEND_PROMOTION", campaignDelivery: { campaignId: created.id } },
+      where: {
+        commandType: "SEND_PROMOTION",
+        provider: "GOOGLE",
+        campaignDelivery: { campaignId: created.id },
+      },
     });
     expect(await worker.processCommandById(command.id)).toBe(true);
     expect(await worker.processCommandById(command.id)).toBe(false);
@@ -570,7 +574,83 @@ describe.sequential("Wallet Engagement durable integration", () => {
     );
     expect(
       await prisma.client.walletEngagementCampaign.findUniqueOrThrow({ where: { id: created.id } }),
-    ).toMatchObject({ status: "COMPLETED", succeededCount: 1, failedCount: 0 });
+    ).toMatchObject({
+      status: "COMPLETED",
+      intendedProviders: ["APPLE", "GOOGLE"],
+      succeededCount: 1,
+      failedCount: 0,
+    });
+    worker.close();
+  });
+
+  it("fans every campaign out to Apple and Google promotion commands", async () => {
+    const membership = await prisma.client.membership.findUniqueOrThrow({
+      where: { id: membershipId },
+      include: { walletPassInstances: true },
+    });
+    const applePass = membership.walletPassInstances.find((pass) => pass.provider === "APPLE");
+    if (!applePass) throw new Error("Apple Wallet fixture pass was not created.");
+    await prisma.client.walletPassInstance.update({
+      where: { id: applePass.id },
+      data: { status: "ACTIVE" },
+    });
+    await prisma.client.applePassRegistration.upsert({
+      where: {
+        walletPassInstanceId_deviceLibraryIdentifierHash: {
+          walletPassInstanceId: applePass.id,
+          deviceLibraryIdentifierHash: "f".repeat(64),
+        },
+      },
+      create: {
+        walletPassInstanceId: applePass.id,
+        deviceLibraryIdentifierHash: "f".repeat(64),
+        pushTokenEncrypted: "test-apple-push-token",
+        encryptionKeyVersion: 1,
+      },
+      update: { unregisteredAt: null },
+    });
+    const campaign = await engagement.createCampaign(
+      fixture.ownerId,
+      fixture.organizationId,
+      fixture.programId,
+      campaignInput("Both Wallet delivery paths"),
+      requestContext,
+    );
+    await prisma.client.walletEngagementCampaign.update({
+      where: { id: campaign.id },
+      data: { scheduledAt: new Date(0) },
+    });
+    const worker = new WalletWorker(
+      prisma.client,
+      {} as never,
+      environment.values,
+      new Map([
+        ["APPLE", { provider: "APPLE", mode: "TEST_ADAPTER" } as unknown as WalletProvider],
+      ]),
+    );
+    await expect(worker.processOneWalletCampaign(campaign.id)).resolves.toMatchObject({
+      queued: 2,
+      skipped: 0,
+      finished: true,
+    });
+    const commands = await prisma.client.walletCommand.findMany({
+      where: { commandType: "SEND_PROMOTION", campaignDelivery: { campaignId: campaign.id } },
+      select: { id: true, provider: true },
+      orderBy: { provider: "asc" },
+    });
+    expect(commands.map((command) => command.provider)).toEqual(["APPLE", "GOOGLE"]);
+    await prisma.client.walletCampaignDelivery.updateMany({
+      where: { campaignId: campaign.id, status: "QUEUED" },
+      data: { status: "SKIPPED", safeSkipCode: "TEST_SETUP", completedAt: new Date() },
+    });
+    await prisma.client.applePassRegistration.updateMany({
+      where: { walletPassInstanceId: applePass.id },
+      data: { unregisteredAt: new Date() },
+    });
+    await prisma.client.walletPassInstance.update({
+      where: { id: applePass.id },
+      data: { status: "PENDING" },
+    });
     worker.close();
   });
 
@@ -607,7 +687,11 @@ describe.sequential("Wallet Engagement durable integration", () => {
     );
     await worker.processOneWalletCampaign(campaign.id);
     const command = await prisma.client.walletCommand.findFirstOrThrow({
-      where: { campaignDelivery: { campaignId: campaign.id } },
+      where: {
+        commandType: "SEND_PROMOTION",
+        provider: "GOOGLE",
+        campaignDelivery: { campaignId: campaign.id },
+      },
     });
     expect(await worker.processCommandById(command.id)).toBe(true);
     await expect(
@@ -661,7 +745,11 @@ describe.sequential("Wallet Engagement durable integration", () => {
     );
     await worker.processOneWalletCampaign(revokeCampaign.id);
     const revokeCommand = await prisma.client.walletCommand.findFirstOrThrow({
-      where: { campaignDelivery: { campaignId: revokeCampaign.id } },
+      where: {
+        commandType: "SEND_PROMOTION",
+        provider: "GOOGLE",
+        campaignDelivery: { campaignId: revokeCampaign.id },
+      },
     });
     await worker.processCommandById(revokeCommand.id);
     expect(noSend).toHaveBeenCalledTimes(1);
@@ -699,7 +787,11 @@ describe.sequential("Wallet Engagement durable integration", () => {
     );
     await successWorker.processOneWalletCampaign(secondSend.id);
     const secondCommand = await prisma.client.walletCommand.findFirstOrThrow({
-      where: { campaignDelivery: { campaignId: secondSend.id } },
+      where: {
+        commandType: "SEND_PROMOTION",
+        provider: "GOOGLE",
+        campaignDelivery: { campaignId: secondSend.id },
+      },
     });
     await successWorker.processCommandById(secondCommand.id);
 
@@ -757,7 +849,11 @@ describe.sequential("Wallet Engagement durable integration", () => {
     );
     await quotaWorker.processOneWalletCampaign(quotaCampaign.id);
     const quotaCommand = await prisma.client.walletCommand.findFirstOrThrow({
-      where: { campaignDelivery: { campaignId: quotaCampaign.id } },
+      where: {
+        commandType: "SEND_PROMOTION",
+        provider: "GOOGLE",
+        campaignDelivery: { campaignId: quotaCampaign.id },
+      },
     });
     await quotaWorker.processCommandById(quotaCommand.id);
     const failedCommand = await prisma.client.walletCommand.findUniqueOrThrow({

@@ -1,4 +1,40 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
+import { artworkFor } from "../../apps/api/src/programs/library-artwork.js";
+import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
+
+function customerWalletStampRender() {
+  const filled = artworkFor("COFFEE_CUP_FILLED");
+  const empty = artworkFor("COFFEE_CUP_EMPTY");
+  if (!filled || !empty) throw new Error("Customer Wallet stamp fixture artwork is unavailable.");
+
+  const rendered = renderStampSvg({
+    goal: 8,
+    progress: 0,
+    layout: "GRID",
+    layoutConfiguration: { columns: 4 },
+    filledColor: "#C2410C",
+    emptyColor: "#F59E0B",
+    accentColor: "#C2410C",
+    backgroundColor: "#FFF8EE",
+    foregroundColor: "#4A2818",
+    stampSize: 48,
+    spacing: 8,
+    filledArtwork: { kind: "svg", content: filled.content, trusted: true },
+    emptyArtwork: { kind: "svg", content: empty.content, trusted: true },
+    outputProfile: "CUSTOMER_WEB",
+    rewardReady: false,
+    progressLabelVisible: false,
+    rewardLabelVisible: false,
+  });
+
+  return {
+    dataUri: `data:image/svg+xml;base64,${Buffer.from(rendered.svg, "utf8").toString("base64")}`,
+    contentDigest: "wallet-readiness",
+    configurationDigest: "wallet-readiness",
+    width: rendered.width,
+    height: rendered.height,
+  };
+}
 
 function cardFixture(googleStatus: string, appleStatus = "READY") {
   return {
@@ -27,15 +63,7 @@ function cardFixture(googleStatus: string, appleStatus = "READY") {
       goal: 8,
       stamps: ["EMPTY", "EMPTY", "EMPTY", "EMPTY", "EMPTY", "EMPTY", "EMPTY", "EMPTY"],
       render: {
-        dataUri:
-          "data:image/svg+xml;base64," +
-          Buffer.from(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="520" height="180"/>',
-          ).toString("base64"),
-        contentDigest: "wallet-readiness",
-        configurationDigest: "wallet-readiness",
-        width: 520,
-        height: 180,
+        ...customerWalletStampRender(),
       },
     },
     theme: {
@@ -98,7 +126,7 @@ async function exhaustWalletRetries(page: Page, reads: () => number): Promise<vo
   }
 }
 
-test("converges Wallet readiness during original Android navigation without exposing preparation", async ({
+test("converges Wallet readiness during original Android navigation from the preparation experience", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -119,7 +147,7 @@ test("converges Wallet readiness during original Android navigation without expo
     // the button must still arrive without a browser refresh.
     expect(reads).toBeGreaterThanOrEqual(5);
     await expect(page.getByRole("link", { name: "Add to Apple Wallet" })).toHaveCount(0);
-    await expect(page.getByText(/Google Wallet.*Preparing/u)).toHaveCount(0);
+    await expect(page.getByTestId("wallet-preparation")).toHaveCount(0);
     await expect(page.getByText("Your card is ready to add to Wallet.")).toBeVisible();
     const googleBadge = page.getByRole("button", { name: "Add to Google Wallet" }).locator("img");
     await expect(googleBadge).toHaveAttribute("src", "/wallet-buttons/google-add-to-wallet-en.svg");
@@ -200,11 +228,84 @@ test("keeps the Wallet action surface hidden while readiness is unresolved", asy
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
     await expect(page.getByRole("heading", { name: "Add to Wallet" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
+    await expect(page.getByTestId("wallet-preparation")).toBeVisible();
+    await expect(
+      page.locator(".wallet-preparation__current").getByText("Preparing your Wallet pass"),
+    ).toBeVisible();
+    await expect(page.locator(".digital-card")).toHaveCount(0);
+    await expect(
+      page.getByRole("progressbar", { name: "Wallet pass preparation progress" }),
+    ).toHaveAttribute("aria-valuenow", "18");
     await page.clock.fastForward(250);
     await expect.poll(() => reads).toBe(2);
     await expect(page.getByRole("heading", { name: "Add to Wallet" })).toHaveCount(0);
     await page.clock.fastForward(500);
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("shows staged, full-space Wallet preparation and captures its transition to the real CTA", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await page.clock.install();
+  let reads = 0;
+  let allowReady = false;
+  await routeCard(page, () => ({
+    google: (++reads, allowReady ? "READY" : "PREPARING"),
+    apple: "READY",
+  }));
+  try {
+    await page.goto("http://localhost:3002/card/wallet-readiness-member");
+    await expect(page.getByTestId("wallet-preparation")).toBeVisible();
+    await expect(
+      page.locator(".wallet-preparation__current").getByText("Preparing your Wallet pass"),
+    ).toBeVisible();
+    await expect(page.locator(".digital-card")).toHaveCount(0);
+    await page.screenshot({
+      path: "diagnostics/wallet-notification-ux/customer-waiting-early.png",
+      fullPage: true,
+    });
+
+    await page.clock.fastForward(5_000);
+    await expect(
+      page.locator(".wallet-preparation__current").getByText("Applying final details"),
+    ).toBeVisible();
+    await page.screenshot({
+      path: "diagnostics/wallet-notification-ux/customer-waiting-mid.png",
+      fullPage: true,
+    });
+
+    await page.clock.fastForward(11_000);
+    await expect(
+      page.locator(".wallet-preparation__current").getByText("Checking device compatibility"),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
+    await page.screenshot({
+      path: "diagnostics/wallet-notification-ux/customer-waiting-final.png",
+      fullPage: true,
+    });
+
+    // Hold the canonical response in PREPARING through the final waiting
+    // checkpoint, then let the next scheduled verification prove readiness.
+    allowReady = true;
+    // The canonical readiness cadence tops out at a 15s retry delay; allow
+    // enough virtual time for that request and its React update to settle.
+    await page.clock.fastForward(20_000);
+    await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
+    await expect(page.getByTestId("wallet-preparation")).toHaveCount(0);
+    await page.screenshot({
+      path: "diagnostics/wallet-notification-ux/customer-wallet-ready-cta.png",
+      fullPage: true,
+    });
   } finally {
     await context.close();
   }

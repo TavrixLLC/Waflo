@@ -1,11 +1,11 @@
 import type { Page, Route } from "@playwright/test";
 import { artworkFor } from "../../apps/api/src/programs/library-artwork.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
-import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import {
   renderTemplateGalleryPreviews,
   renderTemplateGalleryThumbnail,
 } from "../../apps/api/src/programs/template-gallery-preview.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import { createBuilderDraft } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
 import type { TemplateItem } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { apiDraft } from "../../apps/merchant-dashboard/components/program-studio-types.js";
@@ -870,7 +870,7 @@ export async function mockTemplateGalleryApi(
         title: body.title,
         body: body.body,
         locale: body.locale,
-        providers: ["GOOGLE"],
+        providers: ["APPLE", "GOOGLE"],
         audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
         status: "PENDING",
         counts: { eligible: 12, queued: 0, succeeded: 0, skipped: 0, failed: 0 },
