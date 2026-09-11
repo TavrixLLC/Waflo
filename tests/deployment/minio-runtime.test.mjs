@@ -5,9 +5,9 @@ import { join, resolve } from "node:path";
 
 const repository = resolve(import.meta.dirname, "../..");
 const mcImage =
-  "minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727";
+  "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
 const minioImage =
-  "minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
+  "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
 const identifier = `waflo-minio-runtime-${process.pid}-${Date.now()}`;
 const network = `${identifier}-network`;
 const server = `${identifier}-server`;

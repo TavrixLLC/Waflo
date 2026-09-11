@@ -2,7 +2,7 @@
 set -eu
 
 if [ "${WAFLO_CONTAINER_SMOKE:-}" != '1' ]; then
-  printf '%s\n' 'Run this isolated smoke in the pinned minio/mc container.' >&2
+  printf '%s\n' 'Run this isolated smoke in the pinned MinIO client image.' >&2
   exit 2
 fi
 
