@@ -11,16 +11,10 @@ export const requiredPassBuilderImageSlots = [
   "strip",
 ] as const;
 
-export const optionalPassBuilderImageSlots = ["thumbnail"] as const;
-
-export const passBuilderImageSlots = [
-  ...requiredPassBuilderImageSlots,
-  ...optionalPassBuilderImageSlots,
-] as const;
+export const passBuilderImageSlots = requiredPassBuilderImageSlots;
 
 export type PassBuilderImageSlot = (typeof passBuilderImageSlots)[number];
 export type RequiredPassBuilderImageSlot = (typeof requiredPassBuilderImageSlots)[number];
-export type OptionalPassBuilderImageSlot = (typeof optionalPassBuilderImageSlots)[number];
 
 export interface ImageVariants {
   readonly times1: string;
@@ -70,10 +64,7 @@ export interface PassBuilderRequest {
       readonly operator: string;
     };
   };
-  readonly images: Readonly<
-    Record<RequiredPassBuilderImageSlot, ImageVariants> &
-      Partial<Record<OptionalPassBuilderImageSlot, ImageVariants>>
-  >;
+  readonly images: Readonly<Record<RequiredPassBuilderImageSlot, ImageVariants>>;
 }
 
 export interface SigningIdentity {
@@ -121,6 +112,15 @@ export function parsePassBuilderRequest(value: unknown): PassBuilderRequest {
   const barcode = record(pass.barcode, "pass.barcode");
   const fields = record(pass.fieldValues, "pass.fieldValues");
   const images = record(input.images, "images");
+  // The current iOS 26-and-earlier fallback is a native Store Card. Its
+  // theme artwork is the required Strip image set, so reject the retired
+  // Generic-only thumbnail payload instead of silently accepting a request
+  // that can never be represented by this template.
+  if ("thumbnail" in images) {
+    throw new RequestValidationError(
+      "images.thumbnail is unsupported by the Store Card template; use images.strip.",
+    );
+  }
   const id = (name: string, candidate: unknown) =>
     stringValue(candidate, name, { min: 1, max: 128, pattern: identifierPattern });
   const text = (name: string, candidate: unknown, max: number, min = 0) =>
@@ -148,17 +148,12 @@ export function parsePassBuilderRequest(value: unknown): PassBuilderRequest {
     throw new RequestValidationError("pass.voided must be a boolean.");
   }
 
-  const parsedImages: Record<RequiredPassBuilderImageSlot, ImageVariants> &
-    Partial<Record<OptionalPassBuilderImageSlot, ImageVariants>> = Object.fromEntries(
+  const parsedImages: Record<RequiredPassBuilderImageSlot, ImageVariants> = Object.fromEntries(
     requiredPassBuilderImageSlots.map((slot) => [
       slot,
       imageVariants(images[slot], `images.${slot}`),
     ]),
   ) as Record<RequiredPassBuilderImageSlot, ImageVariants>;
-  if ("thumbnail" in images) {
-    parsedImages.thumbnail = imageVariants(images.thumbnail, "images.thumbnail");
-  }
-
   return {
     operationId: id("operationId", input.operationId),
     merchantId: id("merchantId", input.merchantId),

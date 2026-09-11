@@ -1,35 +1,19 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
   parsePassBuilderRequest,
   parseSigningIdentities,
 } from "../../apps/apple-pass-builder-service/src/contracts.js";
-import {
-  createPersonalizationProtobuf,
-  expectedImageSizes,
-} from "../../apps/apple-pass-builder-service/src/protobuf.js";
+import { expectedImageSizes } from "../../apps/apple-pass-builder-service/src/protobuf.js";
 import {
   ApplePassBuilderGenerator,
   adoptedApplePassBuilderRevision,
-  mapAppleGenericPass,
   mapAppleStoreCard,
+  mapAppleStoreCardPosterPass,
   parseAppleSigningKeyMap,
 } from "../../packages/wallet-apple/src/index.js";
 import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
-
-const serviceRequire = createRequire(
-  new URL("../../apps/apple-pass-builder-service/package.json", import.meta.url),
-);
-const protobuf = serviceRequire("protobufjs") as {
-  load(path: string): Promise<{
-    lookupType(name: string): { decode(bytes: Uint8Array): unknown };
-  }>;
-};
 
 const baseMembership: WalletMembershipInput = {
   organizationId: "00000000-0000-4000-8000-000000000001",
@@ -99,26 +83,6 @@ const configuration = {
   webServiceUrl: "https://api.waflo.app/v1/apple-wallet",
 };
 
-async function thumbnailImages() {
-  const png = (scale: 1 | 2 | 3) =>
-    sharp({
-      create: {
-        width: 90 * scale,
-        height: 90 * scale,
-        channels: 4,
-        background: { r: 228, g: 87, b: 46, alpha: 1 },
-      },
-    })
-      .png()
-      .toBuffer();
-  const [times1, times2, times3] = await Promise.all([png(1), png(2), png(3)]);
-  return {
-    "thumbnail.png": times1,
-    "thumbnail@2x.png": times2,
-    "thumbnail@3x.png": times3,
-  } as const;
-}
-
 async function requestForMembership(membership: WalletMembershipInput) {
   let requestBody: unknown;
   const artifact = Buffer.alloc(1_024, 1);
@@ -168,13 +132,13 @@ describe("Apple Pass Builder migration", () => {
     const rewardSummary = "A classic grooming service";
     const input = { ...baseMembership, rewardSummary };
     const legacy = mapAppleStoreCard(input, configuration, "a".repeat(43));
-    const migrated = mapAppleGenericPass(input, configuration, "a".repeat(43));
+    const migrated = mapAppleStoreCardPosterPass(input, configuration, "a".repeat(43));
     expect(legacy.storeCard.primaryFields).toEqual([]);
     expect(legacy.storeCard.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),
     );
-    expect(migrated.generic.primaryFields).toEqual([]);
-    expect(migrated.generic.secondaryFields).toContainEqual(
+    expect(migrated.storeCard.primaryFields).toEqual([]);
+    expect(migrated.storeCard.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: rewardSummary }),
     );
     expect(migrated.posterGeneric.backFields).toContainEqual(
@@ -182,10 +146,10 @@ describe("Apple Pass Builder migration", () => {
     );
   });
 
-  it("preserves installed-pass identity, update authentication, QR payload, colors, and legacy Generic semantics", () => {
+  it("preserves installed-pass identity, update authentication, QR payload, colors, and Store Card semantics", () => {
     const token = "a".repeat(43);
     const legacy = mapAppleStoreCard(baseMembership, configuration, token);
-    const migrated = mapAppleGenericPass(baseMembership, configuration, token);
+    const migrated = mapAppleStoreCardPosterPass(baseMembership, configuration, token);
     expect(migrated).toMatchObject({
       passTypeIdentifier: legacy.passTypeIdentifier,
       serialNumber: legacy.serialNumber,
@@ -198,8 +162,8 @@ describe("Apple Pass Builder migration", () => {
       labelColor: legacy.labelColor,
       voided: legacy.voided,
     });
-    // Pass Builder is opt-in and intentionally uses Generic/Poster field placement;
-    // preserve the installed-pass identity while keeping the legacy Store Card default intact.
+    // Pass Builder preserves the installed-pass identity and uses the same
+    // native Store Card front field mapping as the standalone generator.
     expect(allFieldValues(legacy.storeCard)).toMatchObject({
       program: baseMembership.programName,
       status: "Active",
@@ -208,7 +172,7 @@ describe("Apple Pass Builder migration", () => {
     expect(legacy.storeCard.secondaryFields).toContainEqual(
       expect.objectContaining({ key: "reward", value: baseMembership.rewardSummary }),
     );
-    expect(allFieldValues(migrated.generic)).toMatchObject({
+    expect(allFieldValues(migrated.storeCard)).toMatchObject({
       progress: "3/8",
       member: baseMembership.displayName,
       program: baseMembership.programName,
@@ -217,10 +181,10 @@ describe("Apple Pass Builder migration", () => {
     });
   });
 
-  it("emits Poster Generic and Generic fallback from the same personalization", () => {
-    const pass = mapAppleGenericPass(baseMembership, configuration, "a".repeat(43));
+  it("emits Poster Generic and Store Card fallback from the same personalization", () => {
+    const pass = mapAppleStoreCardPosterPass(baseMembership, configuration, "a".repeat(43));
     expect(pass.posterGeneric).toBeDefined();
-    expect(pass.generic).toBeDefined();
+    expect(pass.storeCard).toBeDefined();
     expect(allFieldValues(pass.posterGeneric)).toMatchObject({
       progress_detail: "3/8",
       program: "Cedar Circle",
@@ -272,17 +236,17 @@ describe("Apple Pass Builder migration", () => {
       },
     ];
     for (const golden of cases) {
-      const pass = mapAppleGenericPass(
+      const pass = mapAppleStoreCardPosterPass(
         golden.input,
         golden.config ?? configuration,
         "a".repeat(43),
       );
       expect(pass.serialNumber, golden.name).toBe(golden.input.providerIdentity);
       expect(pass.barcodes[0].message, golden.name).toBe(golden.input.credentialPayload);
-      expect(pass.generic, golden.name).toBeDefined();
+      expect(pass.storeCard, golden.name).toBeDefined();
       expect(pass.posterGeneric, golden.name).toBeDefined();
       if (golden.name === "arabic") {
-        expect(allFieldValues(pass.generic)).toMatchObject({
+        expect(allFieldValues(pass.storeCard)).toMatchObject({
           member: "سارة",
           program: "بطاقة الوفاء",
           reward: "مشروب مجاني",
@@ -301,7 +265,6 @@ describe("Apple Pass Builder migration", () => {
     let requestBody: unknown;
     const artifact = Buffer.alloc(1_024, 1);
     artifact.set(Buffer.from("PK"), 0);
-    const merchantThumbnailImages = await thumbnailImages();
     const generator = new ApplePassBuilderGenerator({
       serviceUrl: "http://pass-builder.internal:8080",
       authToken: "s".repeat(43),
@@ -319,7 +282,7 @@ describe("Apple Pass Builder migration", () => {
     });
     await expect(
       generator.generatePass({
-        membership: { ...baseMembership, applePassImages: merchantThumbnailImages },
+        membership: baseMembership,
         configuration,
         authenticationToken: "a".repeat(43),
       }),
@@ -337,19 +300,16 @@ describe("Apple Pass Builder migration", () => {
     ).toThrow("caption");
     expect(parsed.pass.fieldValues.member).toBe("Amina");
     expect(parsed.pass.fieldValues.progress_detail).toBe("3/8");
-    const parsedThumbnail = parsed.images.thumbnail;
-    expect(parsedThumbnail).toBeDefined();
-    if (!parsedThumbnail)
-      throw new Error("Expected the Pass Builder request to include a thumbnail.");
-    expect(Buffer.from(parsedThumbnail.times1, "base64")).toEqual(
-      merchantThumbnailImages["thumbnail.png"],
-    );
-    expect(Buffer.from(parsedThumbnail.times2, "base64")).toEqual(
-      merchantThumbnailImages["thumbnail@2x.png"],
-    );
-    expect(Buffer.from(parsedThumbnail.times3, "base64")).toEqual(
-      merchantThumbnailImages["thumbnail@3x.png"],
-    );
+    expect(parsed.images).not.toHaveProperty("thumbnail");
+    expect(() =>
+      parsePassBuilderRequest({
+        ...parsed,
+        images: {
+          ...parsed.images,
+          thumbnail: parsed.images.strip,
+        },
+      }),
+    ).toThrow("images.thumbnail is unsupported");
     expect(() =>
       parsePassBuilderRequest({
         ...parsed,
@@ -366,7 +326,6 @@ describe("Apple Pass Builder migration", () => {
           primaryLogo: [126, 30],
           artwork: [358, 448],
           strip: [375, 144],
-          thumbnail: [90, 90],
         } as const;
         expect(metadata.width, `${slot}.${scaleName}`).toBe(
           sizes[slot as keyof typeof sizes][0] * scale,
@@ -378,172 +337,12 @@ describe("Apple Pass Builder migration", () => {
     }
   });
 
-  it("keeps thumbnails optional and rejects incomplete optional image sets", async () => {
-    const withoutThumbnail = await requestForMembership(baseMembership);
-    expect(withoutThumbnail.images).not.toHaveProperty("thumbnail");
-
-    const completeThumbnail = await thumbnailImages();
-    const completeRequest = {
-      ...withoutThumbnail,
-      images: {
-        ...withoutThumbnail.images,
-        thumbnail: {
-          times1: completeThumbnail["thumbnail.png"].toString("base64"),
-          times2: completeThumbnail["thumbnail@2x.png"].toString("base64"),
-          times3: completeThumbnail["thumbnail@3x.png"].toString("base64"),
-        },
-      },
-    };
-    expect(parsePassBuilderRequest(completeRequest).images.thumbnail).toBeDefined();
-    expect(() =>
-      parsePassBuilderRequest({
-        ...completeRequest,
-        images: {
-          ...completeRequest.images,
-          thumbnail: { ...completeRequest.images.thumbnail, times3: undefined },
-        },
-      }),
-    ).toThrow("images.thumbnail.times3");
-    expect(() =>
-      parsePassBuilderRequest({
-        ...completeRequest,
-        images: {
-          ...completeRequest.images,
-          thumbnail: { ...completeRequest.images.thumbnail, times1: "not base64" },
-        },
-      }),
-    ).toThrow("images.thumbnail.times1");
-
-    await expect(
-      requestForMembership({
-        ...baseMembership,
-        applePassImages: { "thumbnail.png": completeThumbnail["thumbnail.png"] },
-      }),
-    ).rejects.toThrow("1x, 2x, and 3x");
-  });
-
-  it("serializes complete thumbnails into Apple's thumbnail protobuf field and reserved filenames", async () => {
-    const request = await requestForMembership({
-      ...baseMembership,
-      applePassImages: await thumbnailImages(),
-    });
-    const workDirectory = await mkdtemp(join(tmpdir(), "waflo-thumbnail-protobuf-"));
-    try {
-      await writeFile(
-        join(workDirectory, "PassPackage.proto"),
-        `syntax = "proto3";
-         package pass;
-         message PassImageFile { string image_path = 1; }
-         message PassImageSet {
-           optional PassImageFile times1 = 1;
-           optional PassImageFile times2 = 2;
-           optional PassImageFile times3 = 3;
-         }
-         message Pass { string serial_number = 1; }
-         message PassPackage {
-           Pass pass = 1;
-           optional PassImageSet icon = 5;
-           optional PassImageSet logo = 6;
-           optional PassImageSet primary_logo = 7;
-           optional PassImageSet artwork = 3;
-           optional PassImageSet strip = 9;
-           optional PassImageSet thumbnail = 10;
-         }`,
-      );
-      const protobufPath = await createPersonalizationProtobuf({
-        request,
-        protobufRoot: workDirectory,
-        workDirectory,
-      });
-      const expectedFiles = ["thumbnail.png", "thumbnail@2x.png", "thumbnail@3x.png"];
-      const writtenThumbnails = await Promise.all(
-        expectedFiles.map((file) => readFile(join(workDirectory, "assets", file))),
-      );
-      await Promise.all(
-        writtenThumbnails.map(async (bytes, index) => {
-          const metadata = await sharp(bytes).metadata();
-          const scale = index + 1;
-          expect(metadata.format).toBe("png");
-          expect(metadata.width).toBe(90 * scale);
-          expect(metadata.height).toBe(90 * scale);
-        }),
-      );
-      const schema = await protobuf.load(join(workDirectory, "PassPackage.proto"));
-      const passPackage = schema.lookupType("pass.PassPackage");
-      const decoded = passPackage.decode(await readFile(protobufPath)) as {
-        thumbnail?: {
-          times1?: { imagePath?: string };
-          times2?: { imagePath?: string };
-          times3?: { imagePath?: string };
-        };
-      };
-      expect(decoded.thumbnail?.times1?.imagePath).toBe(
-        join(workDirectory, "assets", "thumbnail.png"),
-      );
-      expect(decoded.thumbnail?.times2?.imagePath).toBe(
-        join(workDirectory, "assets", "thumbnail@2x.png"),
-      );
-      expect(decoded.thumbnail?.times3?.imagePath).toBe(
-        join(workDirectory, "assets", "thumbnail@3x.png"),
-      );
-      expect(expectedImageSizes.thumbnail).toEqual([90, 90]);
-    } finally {
-      await rm(workDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("rejects malformed and incorrectly sized thumbnail PNG variants before protobuf emission", async () => {
-    const request = await requestForMembership({
-      ...baseMembership,
-      applePassImages: await thumbnailImages(),
-    });
-    const incorrectSize = await sharp({
-      create: {
-        width: 89,
-        height: 90,
-        channels: 4,
-        background: { r: 228, g: 87, b: 46, alpha: 1 },
-      },
-    })
-      .png()
-      .toBuffer();
-    const invalidVariants = [
-      {
-        name: "malformed",
-        times1: Buffer.from("not a PNG").toString("base64"),
-        expectedError: "PASS_IMAGE_INVALID:thumbnail:1",
-      },
-      {
-        name: "wrong-size",
-        times1: incorrectSize.toString("base64"),
-        expectedError: "PASS_IMAGE_DIMENSIONS_INVALID:thumbnail:1",
-      },
-    ];
-    const requestThumbnail = request.images.thumbnail;
-    expect(requestThumbnail).toBeDefined();
-    if (!requestThumbnail)
-      throw new Error("Expected the Pass Builder request to include a thumbnail.");
-    for (const invalid of invalidVariants) {
-      const workDirectory = await mkdtemp(join(tmpdir(), `waflo-thumbnail-${invalid.name}-`));
-      try {
-        await expect(
-          createPersonalizationProtobuf({
-            request: {
-              ...request,
-              images: {
-                ...request.images,
-                thumbnail: { ...requestThumbnail, times1: invalid.times1 },
-              },
-            },
-            protobufRoot: workDirectory,
-            workDirectory,
-          }),
-        ).rejects.toThrow(invalid.expectedError);
-      } finally {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        await rm(workDirectory, { recursive: true, force: true });
-      }
-    }
+  it("uses the Store Card strip transport and has no thumbnail dependency", async () => {
+    const request = await requestForMembership(baseMembership);
+    expect(request.images).toHaveProperty("strip");
+    expect(request.images).not.toHaveProperty("thumbnail");
+    expect(expectedImageSizes.strip).toEqual([375, 144]);
+    expect(expectedImageSizes).not.toHaveProperty("thumbnail");
   });
 
   it("fails closed on adapter errors and reports pinned-service health", async () => {

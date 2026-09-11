@@ -2225,50 +2225,37 @@ export class WalletWorker {
   private async merchantApplePassImages(
     pass: PassRecord,
   ): Promise<Readonly<Record<string, Uint8Array>> | undefined> {
-    const bytes =
+    const logoBytes =
       (await this.readBrandLogoBytes(
         pass.membership.enrollmentProgramVersion.visualTheme?.logoAsset,
       )) ?? (await this.readBrandLogoBytes(pass.membership.organization.brandLogoAsset));
-    if (!bytes) return undefined;
     const appleLogo = (scale: 1 | 2 | 3) =>
-      sharp(bytes)
-        .resize(144 * scale, 36 * scale, {
-          fit: "contain",
-          background: { r: 255, g: 255, b: 255, alpha: 0 },
-          withoutEnlargement: false,
-        })
-        .extend({
-          top: 7 * scale,
-          bottom: 7 * scale,
-          left: 8 * scale,
-          right: 8 * scale,
-          background: { r: 255, g: 255, b: 255, alpha: 0 },
-        })
-        .png()
-        .toBuffer();
-    const appleThumbnail = (scale: 1 | 2 | 3) =>
-      sharp(bytes)
-        .resize(90 * scale, 90 * scale, {
-          fit: "contain",
-          background: { r: 255, g: 255, b: 255, alpha: 0 },
-        })
-        .png()
-        .toBuffer();
-    const [logo, logo2x, logo3x, thumbnail, thumbnail2x, thumbnail3x] = await Promise.all([
-      appleLogo(1),
-      appleLogo(2),
-      appleLogo(3),
-      appleThumbnail(1),
-      appleThumbnail(2),
-      appleThumbnail(3),
-    ]);
+      logoBytes
+        ? sharp(logoBytes)
+            .resize(144 * scale, 36 * scale, {
+              fit: "contain",
+              background: { r: 255, g: 255, b: 255, alpha: 0 },
+              withoutEnlargement: false,
+            })
+            .extend({
+              top: 7 * scale,
+              bottom: 7 * scale,
+              left: 8 * scale,
+              right: 8 * scale,
+              background: { r: 255, g: 255, b: 255, alpha: 0 },
+            })
+            .png()
+            .toBuffer()
+        : undefined;
+    const [logo, logo2x, logo3x] = await Promise.all([appleLogo(1), appleLogo(2), appleLogo(3)]);
     return {
-      "logo.png": logo,
-      "logo@2x.png": logo2x,
-      "logo@3x.png": logo3x,
-      "thumbnail.png": thumbnail,
-      "thumbnail@2x.png": thumbnail2x,
-      "thumbnail@3x.png": thumbnail3x,
+      ...(logo && logo2x && logo3x
+        ? {
+            "logo.png": logo,
+            "logo@2x.png": logo2x,
+            "logo@3x.png": logo3x,
+          }
+        : {}),
     };
   }
 

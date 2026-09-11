@@ -350,7 +350,7 @@ describe("W2 Round 3 platform, preview cache, and truthful assets", () => {
     expect(customer.svg).toContain('opacity=".84"');
     expect(apple.svg).not.toContain(backgroundDataUri);
     expect(google.svg).not.toContain(backgroundDataUri);
-    expect(apple.svg).toContain('data-production-wallet-artwork="APPLE_LEGACY_STRIP"');
+    expect(apple.svg).toContain('data-production-wallet-artwork="APPLE_STORE_CARD_STRIP"');
     expect(apple.warnings.map((warning) => warning.code)).not.toContain(
       "APPLE_BACKGROUND_ARTWORK_UNSUPPORTED",
     );

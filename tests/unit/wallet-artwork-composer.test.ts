@@ -9,18 +9,17 @@ import {
 } from "@waflo/stamp-engine";
 import {
   APPLE_POSTER_LAYOUT,
-  composeAppleGenericStripArtwork,
-  composeAppleLegacyStripArtwork,
   composeApplePosterArtwork,
+  composeAppleStoreCardStripArtwork,
   composeWalletArtwork,
   GOOGLE_HERO_LAYOUT,
+  legacyAppleStampGridRows,
   measureRenderedStampArtwork,
   validateWalletArtworkPng,
   walletArtworkArabicTypeface,
   walletArtworkDimensions,
-  walletArtworkInputFromStampRender,
   walletArtworkIdentityTitleLines,
-  legacyAppleStampGridRows,
+  walletArtworkInputFromStampRender,
   walletArtworkPanelCorners,
 } from "@waflo/wallet-artwork";
 import sharp from "sharp";
@@ -161,6 +160,7 @@ describe("Wallet artwork composition", () => {
       const input = compositionInput(template, rendered);
       const outputs = await Promise.all([
         composeWalletArtwork(input, "APPLE_POSTER"),
+        composeWalletArtwork(input, "APPLE_STORE_CARD_STRIP"),
         composeWalletArtwork(input, "APPLE_GENERIC_STRIP"),
         composeWalletArtwork(input, "APPLE_LEGACY_STRIP"),
         composeWalletArtwork(input, "GOOGLE_HERO"),
@@ -365,7 +365,7 @@ describe("Wallet artwork composition", () => {
     }
   });
 
-  it("renders exact Apple 1x/2x/3x assets and an Arabic reward-ready state", async () => {
+  it("renders exact Store Card 1x/2x/3x strip assets and an Arabic reward-ready state", async () => {
     const template = programTemplateCatalog.find(
       (candidate) => candidate.code === "SALON" && candidate.version === 2,
     );
@@ -381,15 +381,13 @@ describe("Wallet artwork composition", () => {
       current: template.recommendedStampGoal,
       rewardReady: true,
     });
-    const [poster, generic, legacy] = await Promise.all([
+    const [poster, storeCard] = await Promise.all([
       composeApplePosterArtwork(input),
-      composeAppleGenericStripArtwork(input),
-      composeAppleLegacyStripArtwork(input),
+      composeAppleStoreCardStripArtwork(input),
     ]);
     for (const [variants, base] of [
       [poster, [358, 448]],
-      [generic, [375, 144]],
-      [legacy, [375, 123]],
+      [storeCard, [375, 144]],
     ] as const) {
       expect([variants.times1.width, variants.times1.height]).toEqual(base);
       expect([variants.times2.width, variants.times2.height]).toEqual([base[0] * 2, base[1] * 2]);
@@ -412,6 +410,32 @@ describe("Wallet artwork composition", () => {
     expect(poster.times1.stampPlacement).toEqual(englishPoster.stampPlacement);
     expect(poster.times1.stampPanelRegion).toEqual(englishPoster.stampPanelRegion);
     expect(poster.times1.contentDigest).not.toBe(englishPoster.contentDigest);
+  }, 30_000);
+
+  it("derives distinct wide Store Card strips from each selected theme artwork", async () => {
+    const templates = ["COFFEE", "SALON", "RETAIL", "RESTAURANT"]
+      .map((code) => programTemplateCatalog.find((candidate) => candidate.code === code))
+      .filter((template): template is ProgramTemplateDefinition => Boolean(template));
+    expect(templates).toHaveLength(4);
+
+    const strips = await Promise.all(
+      templates.map(async (template) => {
+        const rendered = renderTemplate(template, { outputProfile: "APPLE_WALLET" });
+        return composeAppleStoreCardStripArtwork(compositionInput(template, rendered));
+      }),
+    );
+
+    for (const variants of strips) {
+      for (const [index, strip] of Object.values(variants).entries()) {
+        const scale = (index + 1) as 1 | 2 | 3;
+        const metadata = await sharp(strip.bytes).metadata();
+        expect([strip.width, strip.height]).toEqual([375 * scale, 144 * scale]);
+        expect([metadata.width, metadata.height]).toEqual([375 * scale, 144 * scale]);
+        expect(metadata.format).toBe("png");
+        expect(strip.bytes.length).toBeGreaterThan(100);
+      }
+    }
+    expect(new Set(strips.map((variants) => variants.times1.contentDigest)).size).toBe(4);
   }, 30_000);
 
   it("renders identity on the image-first face and a decodable QR with no caption region", async () => {
@@ -466,7 +490,7 @@ describe("Wallet artwork composition", () => {
     }
   }, 30_000);
 
-  it("keeps legacy Apple reward copy out of both strip artwork variants", async () => {
+  it("keeps native Store Card reward copy out of the strip artwork", async () => {
     const template = programTemplateCatalog.find(
       (candidate) => candidate.code === "SALON" && candidate.version === 2,
     );
@@ -474,26 +498,23 @@ describe("Wallet artwork composition", () => {
     const rendered = renderTemplate(template, { outputProfile: "APPLE_WALLET" });
     const input = compositionInput(template, rendered);
     const changed = { ...input, rewardLabel: "A completely different reward detail" };
-    const [legacy, changedLegacy, generic, changedGeneric] = await Promise.all([
-      composeAppleLegacyStripArtwork(input),
-      composeAppleLegacyStripArtwork(changed),
-      composeAppleGenericStripArtwork(input),
-      composeAppleGenericStripArtwork(changed),
+    const [storeCard, changedStoreCard] = await Promise.all([
+      composeAppleStoreCardStripArtwork(input),
+      composeAppleStoreCardStripArtwork(changed),
     ]);
-    expect(legacy.times1.contentDigest).toBe(changedLegacy.times1.contentDigest);
-    expect(generic.times1.contentDigest).toBe(changedGeneric.times1.contentDigest);
+    expect(storeCard.times1.contentDigest).toBe(changedStoreCard.times1.contentDigest);
   }, 30_000);
 
-  it("uses a visual-only Grid for legacy Apple strips and fails obsolete layouts closed", async () => {
+  it("uses a visual-only Grid for Store Card strips and fails obsolete layouts closed", async () => {
     const template = programTemplateCatalog.find(
       (candidate) => candidate.code === "COFFEE" && candidate.version === 2,
     );
     if (!template) throw new Error("Coffee v2 template is required.");
     const rendered = renderTemplate(template, { outputProfile: "CUSTOMER_WEB" });
     const input = compositionInput(template, rendered);
-    const [legacy, changedText] = await Promise.all([
-      composeAppleLegacyStripArtwork(input),
-      composeAppleLegacyStripArtwork({
+    const [storeCard, changedText] = await Promise.all([
+      composeAppleStoreCardStripArtwork(input),
+      composeAppleStoreCardStripArtwork({
         ...input,
         organizationName: "Different merchant",
         programName: "Different program",
@@ -502,12 +523,12 @@ describe("Wallet artwork composition", () => {
         credentialPayload: "different-opaque-credential",
       }),
     ]);
-    expect(legacy.times1.stampGridRows).toEqual([4, 4]);
+    expect(storeCard.times1.stampGridRows).toBeUndefined();
     expect(legacyAppleStampGridRows(8)).toEqual([4, 4]);
     expect(layoutStampPositions(8, "RING").map(({ x, y }) => ({ x, y }))).toEqual(
       layoutStampPositions(8, "GRID").map(({ x, y }) => ({ x, y })),
     );
-    expect(legacy.times1.contentDigest).toBe(changedText.times1.contentDigest);
+    expect(storeCard.times1.contentDigest).toBe(changedText.times1.contentDigest);
     const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");
     expect(source).toContain('data-text="none"');
     expect(source).toContain("Legacy Apple stamp artwork must not contain text glyphs.");
@@ -555,6 +576,13 @@ describe("Wallet artwork composition", () => {
     );
     expect(readFileSync("deploy/vps/Dockerfile", "utf8")).toContain("fonts-noto-core");
   }, 30_000);
+
+  it("ships the Arabic-capable font stack in the API image used by template gallery rasters", () => {
+    const dockerfile = readFileSync("deploy/vps/Dockerfile", "utf8");
+    expect(dockerfile).toMatch(
+      /FROM runtime AS api\s+USER root\s+RUN apt-get update && \\\s+apt-get install --yes --no-install-recommends fontconfig fonts-noto-core/u,
+    );
+  });
 
   it("uses shaped RTL text semantics and canonical logical reward geometry", () => {
     const source = readFileSync("packages/wallet-artwork/src/index.ts", "utf8");

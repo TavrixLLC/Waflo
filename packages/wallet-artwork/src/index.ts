@@ -8,49 +8,52 @@ import {
 } from "@waflo/stamp-engine";
 import sharp from "sharp";
 import {
-  applePosterTopAmbientSvg as renderPlanApplePosterTopAmbientSvg,
-  applePosterGoogleMasterTransform as sharedApplePosterGoogleMasterTransform,
-  createWalletArtworkApplePosterRenderPlan as createSharedApplePosterRenderPlan,
-  createLegacyWalletStampGridPlan,
-  createWalletArtworkRenderPlan,
-  googleMasterContentBounds as sharedGoogleMasterContentBounds,
-  measureWalletArtworkVisibleBounds,
-  type WalletArtworkRenderPlanInput,
-  walletArtworkLegacySurfaceSvg,
-} from "./render-plan.js";
-import {
   APPLE_GENERIC_LAYOUT,
   APPLE_LEGACY_LAYOUT,
   APPLE_POSTER_LAYOUT,
+  APPLE_STORE_CARD_LAYOUT,
   GOOGLE_HERO_LAYOUT,
-  walletArtworkArabicTypeface,
-  walletArtworkDimensions,
-  walletArtworkLayouts,
-  walletArtworkPanelCorners,
   type WalletArtworkLayout,
   type WalletArtworkPlacement,
   type WalletArtworkScale,
   type WalletArtworkTarget,
-} from "./model.js";
-
-export {
-  APPLE_GENERIC_LAYOUT,
-  APPLE_LEGACY_LAYOUT,
-  APPLE_POSTER_LAYOUT,
-  GOOGLE_HERO_LAYOUT,
   walletArtworkArabicTypeface,
   walletArtworkDimensions,
   walletArtworkLayouts,
   walletArtworkPanelCorners,
-};
+} from "./model.js";
+import {
+  createLegacyWalletStampGridPlan,
+  createWalletArtworkApplePosterRenderPlan as createSharedApplePosterRenderPlan,
+  createWalletArtworkRenderPlan,
+  measureWalletArtworkVisibleBounds,
+  applePosterTopAmbientSvg as renderPlanApplePosterTopAmbientSvg,
+  applePosterGoogleMasterTransform as sharedApplePosterGoogleMasterTransform,
+  googleMasterContentBounds as sharedGoogleMasterContentBounds,
+  type WalletArtworkRenderPlanInput,
+  walletArtworkLegacySurfaceSvg,
+} from "./render-plan.js";
+
+export type { WalletArtworkRenderPlan, WalletArtworkRenderPlanInput } from "./render-plan.js";
 export type {
   WalletArtworkLayout,
   WalletArtworkPlacement,
   WalletArtworkScale,
   WalletArtworkTarget,
 };
-export { createWalletArtworkRenderPlan, measureWalletArtworkVisibleBounds };
-export type { WalletArtworkRenderPlan, WalletArtworkRenderPlanInput } from "./render-plan.js";
+export {
+  APPLE_GENERIC_LAYOUT,
+  APPLE_LEGACY_LAYOUT,
+  APPLE_POSTER_LAYOUT,
+  APPLE_STORE_CARD_LAYOUT,
+  createWalletArtworkRenderPlan,
+  GOOGLE_HERO_LAYOUT,
+  measureWalletArtworkVisibleBounds,
+  walletArtworkArabicTypeface,
+  walletArtworkDimensions,
+  walletArtworkLayouts,
+  walletArtworkPanelCorners,
+};
 
 /* Legacy local declarations were moved to model.ts so client and server use one source of geometry.
 type LegacyWalletArtworkTarget =
@@ -1646,13 +1649,24 @@ export async function composeApplePosterArtwork(
 export async function composeAppleLegacyStripArtwork(
   input: WalletArtworkCompositionInput,
 ): Promise<Readonly<Record<"times1" | "times2" | "times3", ComposedWalletArtwork>>> {
+  return composeAppleStoreCardStripArtwork(input);
+}
+
+/**
+ * The Apple Store Card strip is the iOS 26-and-earlier theme presentation.
+ * Native Store Card fields carry copy, so the strip only renders the selected
+ * card theme and its current filled/empty stamp state.
+ */
+export async function composeAppleStoreCardStripArtwork(
+  input: WalletArtworkCompositionInput,
+): Promise<Readonly<Record<"times1" | "times2" | "times3", ComposedWalletArtwork>>> {
   // Legacy Apple faces are native-data-heavy. Reward copy belongs to the
   // details/back fields and is deliberately unavailable to the strip renderer.
   const stripInput = { ...input, rewardLabel: "" };
   const [times1, times2, times3] = await Promise.all([
-    composeWalletArtwork(stripInput, "APPLE_LEGACY_STRIP", 1),
-    composeWalletArtwork(stripInput, "APPLE_LEGACY_STRIP", 2),
-    composeWalletArtwork(stripInput, "APPLE_LEGACY_STRIP", 3),
+    composeWalletArtwork(stripInput, "APPLE_STORE_CARD_STRIP", 1),
+    composeWalletArtwork(stripInput, "APPLE_STORE_CARD_STRIP", 2),
+    composeWalletArtwork(stripInput, "APPLE_STORE_CARD_STRIP", 3),
   ] as const);
   return { times1, times2, times3 };
 }
@@ -1660,15 +1674,9 @@ export async function composeAppleLegacyStripArtwork(
 export async function composeAppleGenericStripArtwork(
   input: WalletArtworkCompositionInput,
 ): Promise<Readonly<Record<"times1" | "times2" | "times3", ComposedWalletArtwork>>> {
-  // Generic is the iOS 26-and-earlier fallback for Poster Generic. Keep its
-  // front strip artwork-only; reward copy remains in native back fields.
-  const stripInput = { ...input, rewardLabel: "" };
-  const [times1, times2, times3] = await Promise.all([
-    composeWalletArtwork(stripInput, "APPLE_GENERIC_STRIP", 1),
-    composeWalletArtwork(stripInput, "APPLE_GENERIC_STRIP", 2),
-    composeWalletArtwork(stripInput, "APPLE_GENERIC_STRIP", 3),
-  ] as const);
-  return { times1, times2, times3 };
+  // Retained only as a non-thumbnail compatibility export for callers that
+  // previously asked for a Generic strip. New Apple passes use Store Card.
+  return composeAppleStoreCardStripArtwork(input);
 }
 
 export function walletArtworkInputFromStampRender(

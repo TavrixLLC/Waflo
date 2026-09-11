@@ -1,8 +1,8 @@
 import { cardLocalePresentation } from "@waflo/contracts";
 import type { StampPosition } from "@waflo/stamp-engine";
 import {
-  composeAppleLegacyStripArtwork,
   composeApplePosterArtwork,
+  composeAppleStoreCardStripArtwork,
   composeWalletArtwork,
   type WalletArtworkTarget,
 } from "@waflo/wallet-artwork";
@@ -67,7 +67,7 @@ export async function composeDashboardWalletArtwork(input: {
       ? await composeWalletArtwork(artworkInput, "GOOGLE_HERO")
       : input.appleWalletVariant === "POSTER"
         ? (await composeApplePosterArtwork(artworkInput)).times1
-        : (await composeAppleLegacyStripArtwork(artworkInput)).times1;
+        : (await composeAppleStoreCardStripArtwork(artworkInput)).times1;
   return {
     target: composed.target,
     dataUri: `data:image/png;base64,${composed.bytes.toString("base64")}`,

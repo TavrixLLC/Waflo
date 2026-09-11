@@ -321,7 +321,7 @@ describe("renderer-backed template gallery previews", () => {
           const preview = await renderTemplateGalleryPreview(template, profile, locale);
           if (profile !== "CUSTOMER_WEB") {
             expect(preview.svg).toContain(
-              `data-production-wallet-artwork="${profile === "APPLE_WALLET" ? "APPLE_LEGACY_STRIP" : "GOOGLE_HERO"}"`,
+              `data-production-wallet-artwork="${profile === "APPLE_WALLET" ? "APPLE_STORE_CARD_STRIP" : "GOOGLE_HERO"}"`,
             );
             expect(preview.svg).not.toContain('data-visual-state="MILESTONE"');
             continue;

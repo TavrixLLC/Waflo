@@ -6,13 +6,13 @@ import {
   type StampPosition,
 } from "@waflo/stamp-engine";
 import {
+  type WalletArtworkPlacement,
+  type WalletArtworkScale,
+  type WalletArtworkTarget,
   walletArtworkArabicTypeface,
   walletArtworkDimensions,
   walletArtworkLayouts,
   walletArtworkPanelCorners,
-  type WalletArtworkPlacement,
-  type WalletArtworkScale,
-  type WalletArtworkTarget,
 } from "./model.js";
 
 /**
@@ -357,13 +357,11 @@ function calibratedGoogleHeroRewardRegion(
   input: WalletArtworkRenderPlanInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
-  // APPLE_POSTER is a calibrated crop of the Google master. Its lower safe
-  // region is narrower than a full Google Hero reward panel; preserving the
-  // full-width panel makes long RTL reward lines enter the poster QR column.
+  // APPLE_POSTER is a calibrated crop of the Google master. The transformed
+  // reward rectangle is shared by every locale; text direction must not alter
+  // its physical width or its safe relationship with the QR region.
   // These coordinates are the inverse projection of Apple Poster’s canonical
   // lower-left reward region into the shared master coordinate system.
-  if (input.applePosterRefinement && cardLocalePresentation(input.locale).isRtl)
-    return { ...region, left: 114, width: 430 };
   return region.width > 500 && !input.applePosterRefinement
     ? { ...region, top: region.top + 2 }
     : region;
@@ -405,7 +403,7 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
   const inset = isGoogle ? (approvedGoogleHero ? 15 : 18) : 8;
   // Apple Poster is a cropped Google-master composition. Reserve the mapped
   // trailing edge for RTL glyph overhang: browser/font combinations can paint
-  // Arabic glyphs slightly beyond their SVG end anchor. Keeping this reserve
+  // Arabic glyphs slightly beyond their logical-start anchor. Keeping this reserve
   // in the canonical master plan prevents those glyphs escaping the poster
   // viewport without changing Google Hero or the Apple card geometry.
   const applePosterRtlTrailingReserve = input.applePosterRefinement && isRtl ? 48 : 0;
@@ -465,14 +463,18 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
   const title = titleLines
     .map((line, index) => {
       const x = isGoogle ? textX : isRtl ? region.left + region.width - inset : region.left + inset;
-      const anchor = isRtl ? "end" : "start";
+      // `start` is direction-aware: it is the physical right edge in RTL and
+      // the physical left edge in LTR. The corresponding x coordinates above
+      // already select that leading edge, so `end` would make Arabic paint out
+      // through the right side of its clipped region.
+      const anchor = "start";
       return `<text x="${x}" y="${titleY + index * titleLineGap}" text-anchor="${anchor}" font-family="${walletArtworkArabicTypeface}" font-size="${titleSize}" font-weight="900" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`;
     })
     .join("");
   const organizationMarkup = isGoogle
-    ? `<text x="${textX}" y="${organizationY}" text-anchor="${isRtl ? "end" : "start"}" font-family="${walletArtworkArabicTypeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isRtl ? 0 : 2}" fill="${textColor}" opacity="0.82" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(organization)}</text>`
+    ? `<text x="${textX}" y="${organizationY}" text-anchor="start" font-family="${walletArtworkArabicTypeface}" font-size="${organizationSize}" font-weight="800" letter-spacing="${isRtl ? 0 : 2}" fill="${textColor}" opacity="0.82" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(organization)}</text>`
     : "";
-  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/>${organizationMarkup}${title}<text x="${textX}" y="${memberY}" text-anchor="${isRtl ? "end" : "start"}" font-family="${walletArtworkArabicTypeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(member)}</text></g>`;
+  return `<defs><clipPath id="${clipId}"><rect x="${region.left}" y="${region.top - 4}" width="${region.width}" height="${region.height + 8}"/></clipPath></defs><g clip-path="url(#${clipId})"><rect x="${markerX}" y="${region.top}" width="4" height="${region.height}" rx="2" fill="${input.theme.accentColor}" opacity="0.82"/>${organizationMarkup}${title}<text x="${textX}" y="${memberY}" text-anchor="start" font-family="${walletArtworkArabicTypeface}" font-size="${memberSize}" font-weight="700" fill="${textColor}" opacity="0.9" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(member)}</text></g>`;
 }
 
 function giftIconSvg(x: number, y: number, size: number, color: string): string {
@@ -532,7 +534,10 @@ function rewardPanelSvg(
   const lineGap = isGoogle ? 34 : compactApple ? 14 : 18;
   const clipId = `reward-${visualRegion.left}-${visualRegion.top}`;
   const clipInset = compactApple ? 4 : 8;
-  const textAnchor = isRtl ? "end" : "start";
+  // The logical start edge is the edge beside the reward icon in either text
+  // direction. `end` reverses that relationship in an RTL SVG and clips the
+  // text into the icon/right edge.
+  const textAnchor = "start";
   return `<rect x="${visualRegion.left}" y="${visualRegion.top + 6}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="#000000" opacity="${darkTheme ? 0.18 : 0.08}"/><rect x="${visualRegion.left}" y="${visualRegion.top}" width="${visualRegion.width}" height="${visualRegion.height}" rx="${isGoogle ? 30 : 18}" fill="${fill}" fill-opacity="${input.rewardReady ? 0.96 : darkTheme ? 0.12 : 0.68}" stroke="${stroke}" stroke-width="${isGoogle ? 3 : 1.5}" stroke-opacity="${input.rewardReady ? 0.42 : 0.28}"/>${giftIconSvg(iconX, iconY, iconSize, textColor)}<defs><clipPath id="${clipId}"><rect x="${visualRegion.left + 10}" y="${visualRegion.top + clipInset}" width="${visualRegion.width - 20}" height="${visualRegion.height - clipInset * 2}" rx="${isGoogle ? 22 : 12}"/></clipPath></defs><g clip-path="url(#${clipId})"><text x="${textX}" y="${eyebrowY}" text-anchor="${textAnchor}" font-family="${walletArtworkArabicTypeface}" font-size="${isGoogle ? 16 : 8.5}" font-weight="800" letter-spacing="${isRtl ? 0 : isGoogle ? 2.2 : 1.2}" fill="${textColor}" opacity="0.76" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(eyebrow)}</text>${lines.map((line, index) => `<text x="${textX}" y="${bodyY + index * lineGap}" text-anchor="${textAnchor}" font-family="${walletArtworkArabicTypeface}" font-size="${bodySize}" font-weight="800" fill="${textColor}" direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}">${escapeXml(line)}</text>`).join("")}</g><circle cx="${isRtl ? visualRegion.left + (isGoogle ? 32 : 16) : visualRegion.left + visualRegion.width - (isGoogle ? 32 : 16)}" cy="${visualRegion.top + visualRegion.height / 2}" r="${isGoogle ? 8 : 4}" fill="${secondaryColor}" opacity="0.6"/>`;
 }
 
@@ -624,7 +629,7 @@ function canvasSvg(
   if (target === "APPLE_POSTER") {
     const regions = requiredRegions(target);
     foreground = `${imageFirstStampPanelSvg(layout.stampPanelRegion, accentColor, backgroundColor, input.theme.foregroundColor, false)}${qrFrameSvg(regions.qrRegion, accentColor, backgroundColor, false)}`;
-  } else if (target === "APPLE_GENERIC_STRIP") {
+  } else if (target === "APPLE_STORE_CARD_STRIP" || target === "APPLE_GENERIC_STRIP") {
     foreground = `<rect x="5" y="5" width="365" height="134" rx="25" fill="#000000" opacity="0.07" transform="translate(0 2)"/><rect x="5" y="5" width="365" height="134" rx="25" fill="#FFFFFF" opacity="0.5" stroke="${input.rewardReady ? secondaryColor : accentColor}" stroke-width="${input.rewardReady ? 4 : 1.5}" stroke-opacity="${input.rewardReady ? 0.72 : 0.18}"/>`;
   } else if (target === "APPLE_LEGACY_STRIP") {
     foreground = `<rect x="5" y="4" width="365" height="115" rx="23" fill="#000000" opacity="0.07" transform="translate(0 2)"/><rect x="5" y="4" width="365" height="115" rx="23" fill="#FFFFFF" opacity="0.5" stroke="${input.rewardReady ? secondaryColor : accentColor}" stroke-width="${input.rewardReady ? 4 : 1.5}" stroke-opacity="${input.rewardReady ? 0.72 : 0.18}"/>`;

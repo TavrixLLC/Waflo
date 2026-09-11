@@ -6,10 +6,11 @@ import {
 } from "@waflo/contracts";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
-  composeAppleLegacyStripArtwork,
+  composeAppleStoreCardStripArtwork,
   walletArtworkInputFromStampRender,
 } from "@waflo/wallet-artwork";
 import {
+  resolveWalletLoyaltyPresentation,
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
@@ -19,7 +20,6 @@ import {
   type WalletProvider,
   type WalletProviderHealth,
   type WalletProviderMode,
-  resolveWalletLoyaltyPresentation,
   type WalletReconcileResult,
   type WalletUpdateReason,
   type WalletUpdateResult,
@@ -28,7 +28,7 @@ import { zipSync } from "fflate";
 import forge from "node-forge";
 import sharp from "sharp";
 import {
-  mapAppleGenericPass,
+  mapAppleStoreCardPosterPass,
   mapLegacyApplePresentation,
   type WalletPassGenerationInput,
   type WalletPassGenerator,
@@ -36,11 +36,11 @@ import {
 } from "./pass-builder.js";
 
 export {
-  type AppleGenericPassDocument,
   ApplePassBuilderGenerator,
   type ApplePassBuilderGeneratorOptions,
+  type AppleStoreCardPosterPassDocument,
   adoptedApplePassBuilderRevision,
-  mapAppleGenericPass,
+  mapAppleStoreCardPosterPass,
   mapLegacyApplePresentation,
   parseAppleSigningKeyMap,
   type WalletPassGenerationInput,
@@ -296,18 +296,14 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${markSize}" height="${height}" rx="${Math.max(4, height * 0.18)}" fill="#E4572E"/><path d="M${markSize * 0.2} ${height * 0.28}l${markSize * 0.16} ${height * 0.46} ${markSize * 0.14}-${height * 0.27} ${markSize * 0.14} ${height * 0.27} ${markSize * 0.16}-${height * 0.46}" fill="none" stroke="#fff" stroke-width="${Math.max(2, markSize * 0.09)}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   };
-  const [icon, icon2x, icon3x, logo, logo2x, logo3x, thumbnail, thumbnail2x, thumbnail3x] =
-    await Promise.all([
-      image(38, 38),
-      image(76, 76),
-      image(114, 114),
-      image(38, 38),
-      image(76, 76),
-      image(114, 114),
-      image(90, 90),
-      image(180, 180),
-      image(270, 270),
-    ]);
+  const [icon, icon2x, icon3x, logo, logo2x, logo3x] = await Promise.all([
+    image(38, 38),
+    image(76, 76),
+    image(114, 114),
+    image(38, 38),
+    image(76, 76),
+    image(114, 114),
+  ]);
   return {
     "icon.png": icon,
     "icon@2x.png": icon2x,
@@ -315,9 +311,6 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
     "logo.png": logo,
     "logo@2x.png": logo2x,
     "logo@3x.png": logo3x,
-    "thumbnail.png": thumbnail,
-    "thumbnail@2x.png": thumbnail2x,
-    "thumbnail@3x.png": thumbnail3x,
   };
 }
 
@@ -330,7 +323,7 @@ async function progressStripImages(
     ...stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
-  const composed = await composeAppleLegacyStripArtwork(
+  const composed = await composeAppleStoreCardStripArtwork(
     walletArtworkInputFromStampRender(
       {
         stampRenderInput,
@@ -776,7 +769,7 @@ export class AppleWalletProvider implements WalletProvider {
     const authenticationToken = this.options.authenticationToken(input);
     const pass =
       this.generator?.kind === "apple-pass-builder"
-        ? mapAppleGenericPass(input, configuration, authenticationToken)
+        ? mapAppleStoreCardPosterPass(input, configuration, authenticationToken)
         : mapAppleStoreCard(input, configuration, authenticationToken);
     const artifact = await this.generator?.generatePass({
       membership: input,

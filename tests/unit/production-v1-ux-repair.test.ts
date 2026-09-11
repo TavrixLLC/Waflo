@@ -122,8 +122,8 @@ describe("production-v1 UX and billing repair", () => {
     expect(worker).toContain("merchantApplePassImages");
     expect(worker).toContain('"logo@2x.png"');
     expect(worker).toContain('"logo@3x.png"');
-    expect(worker).toContain('"thumbnail.png"');
-    expect(worker).toContain('"thumbnail@3x.png"');
+    expect(worker).not.toContain('"thumbnail.png"');
+    expect(worker).not.toContain('"thumbnail@3x.png"');
     expect(worker).toContain("defaultGoogleProgramLogo()");
     expect(previews).toContain("merchantBrandLogoDataUri");
     expect(previews).toContain('data-issuer-brand="${issuerBrand}"');
@@ -356,7 +356,7 @@ describe("production-v1 UX and billing repair", () => {
     expect(onboarding).toContain('className="wf-sr-only"');
     expect(onboarding).toContain('aria-current={number === step ? "step" : undefined}');
     const mobilePlanRule =
-      /@media \(max-width: 47\.5rem\) \{\s*\.onboarding-plan-grid \{(?<rule>[\s\S]*?)\n  \}/u.exec(
+      /@media \(max-width: 47\.5rem\) \{\s*\.onboarding-plan-grid \{(?<rule>[\s\S]*?)\n {2}\}/u.exec(
         styles,
       )?.groups?.rule ?? "";
     expect(mobilePlanRule).toContain("grid-template-columns: minmax(0, 1fr);");

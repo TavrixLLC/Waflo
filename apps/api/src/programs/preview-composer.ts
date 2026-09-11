@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   cardLocalePresentation,
-  walletStructuralCopyForLocale,
   type ProgramTemplatePresentation,
+  walletStructuralCopyForLocale,
 } from "@waflo/contracts";
 import { createQrPreviewMarkup } from "@waflo/qr-core";
 import type { StampOutputProfile } from "@waflo/stamp-engine";
@@ -17,6 +17,10 @@ export interface ProgramPreviewCompositionInput {
   locale: string;
   organizationName: string;
   programName: string;
+  /** Representative legacy Apple field value; production passes use the member record. */
+  memberName?: string;
+  /** Representative legacy Apple field value; production passes use canonical membership status. */
+  status?: string;
   shortDescription: string;
   rewardSummary: string;
   terms: string;
@@ -511,7 +515,7 @@ function _composeAppleLegacyWithProductionArtwork(
   );
   const strip = productionArtworkImage(
     input.walletArtwork,
-    "APPLE_LEGACY_STRIP",
+    "APPLE_STORE_CARD_STRIP",
     24,
     87,
     412,
@@ -612,7 +616,7 @@ export function composeProgramPreview(
       : input.profile === "APPLE_WALLET"
         ? input.appleWalletVariant === "POSTER"
           ? "APPLE_POSTER"
-          : "APPLE_LEGACY_STRIP"
+          : "APPLE_STORE_CARD_STRIP"
         : undefined;
   if (requiredArtworkTarget && input.walletArtwork?.target !== requiredArtworkTarget) {
     throw new Error(
@@ -640,6 +644,10 @@ export function composeProgramPreview(
           locale: calibratedProviderInput.locale,
           organizationName: calibratedProviderInput.organizationName,
           programName: calibratedProviderInput.programName,
+          ...(calibratedProviderInput.memberName
+            ? { memberName: calibratedProviderInput.memberName }
+            : {}),
+          ...(calibratedProviderInput.status ? { status: calibratedProviderInput.status } : {}),
           rewardSummary: calibratedProviderInput.rewardSummary,
           progress: calibratedProviderInput.progress,
           goal: calibratedProviderInput.goal,

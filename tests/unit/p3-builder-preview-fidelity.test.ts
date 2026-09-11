@@ -86,6 +86,8 @@ async function preview(
     locale,
     organizationName,
     programName,
+    memberName: "Demo customer",
+    status: "Active",
     shortDescription: "A warm reward for regular coffee visits.",
     rewardSummary,
     terms: "One stamp per qualifying purchase.",
@@ -276,25 +278,24 @@ describe("P3 Builder preview fidelity", () => {
     expect(composition.svg).not.toContain('data-google-barcode-region="provider-managed"');
   });
 
-  it("keeps Apple Legacy front fields minimal and renders its provider-managed back fields separately", async () => {
+  it("keeps Apple Legacy native front fields together without inventing a second details preview", async () => {
     const composition = await preview("APPLE_WALLET", 4);
     expect(composition.svg).toContain('data-apple-front-surface="true"');
     expect(composition.svg).toContain('data-apple-native-fields="true"');
-    expect(composition.svg).toContain('data-apple-strip-aspect="375:123"');
+    expect(composition.svg).toContain('data-apple-strip-aspect="375:144"');
     expect(composition.svg).toContain('data-apple-header-field="stamps"');
     expect(composition.svg).toContain('data-apple-secondary-field="reward"');
+    expect(composition.svg).toContain('data-apple-auxiliary-field="member"');
+    expect(composition.svg).toContain('data-apple-auxiliary-field="status"');
     expect(composition.svg).toContain(
-      'data-apple-field-groups="header:stamps;primary:empty;secondary:reward;back:member,status,program"',
+      'data-apple-field-groups="header:stamps;primary:empty;secondary:reward;auxiliary:member,status;back:program,security,operator"',
     );
-    expect(composition.svg).toContain('data-apple-back-details-preview="true"');
-    expect(composition.svg).toContain('data-apple-pass-face="back"');
-    expect(composition.svg).toContain('data-apple-back-field="program"');
-    expect(composition.svg).toContain('data-apple-back-field="member"');
-    expect(composition.svg).toContain('data-apple-back-field="status"');
-    expect(composition.svg).toContain("Preview member");
-    expect(composition.svg).toContain("Active");
-    expect(composition.svg).not.toContain('data-apple-field-role="primary"');
+    expect(composition.svg).not.toContain('data-apple-back-details-preview="true"');
+    expect(composition.svg).not.toContain('data-apple-pass-face="back"');
+    expect(composition.svg).not.toContain("data-apple-back-field=");
     expect(composition.svg).toContain(rewardSummary);
+    expect(composition.svg).toContain("Demo customer");
+    expect(composition.svg).toContain("Active");
     expect(
       composition.svg.indexOf('data-apple-progress-artwork="production-compositor"'),
     ).toBeLessThan(composition.svg.indexOf('data-apple-secondary-field="reward"'));
@@ -343,7 +344,12 @@ describe("P3 Builder preview fidelity", () => {
       expect(composition.svg).toContain(
         `data-barcode-format="${profile === "APPLE_WALLET" ? "QR" : "QR_CODE"}"`,
       );
-      expect(composition.svg).not.toContain("Demo customer");
+      if (profile === "APPLE_WALLET") {
+        expect(composition.svg).toContain("Demo customer");
+        expect(composition.svg).toContain('data-apple-auxiliary-field="status"');
+      } else {
+        expect(composition.svg).not.toContain("Demo customer");
+      }
     },
   );
 
@@ -384,35 +390,24 @@ describe("P3 Builder preview fidelity", () => {
       expect(pass.storeCard.secondaryFields).toContainEqual(
         expect.objectContaining({ key: "reward", value: input.rewardSummary }),
       );
-      expect(pass.storeCard.backFields).toEqual(
+      expect(pass.storeCard.auxiliaryFields).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ key: "program" }),
           expect.objectContaining({ key: "member", value: input.displayName }),
           expect.objectContaining({ key: "status" }),
         ]),
       );
       expect(composition.svg).toContain(String(reward.value));
-      // A program preview has no real customer record, so it uses the
-      // representative member placeholder while showing the same legacy
-      // back-field slots as the installed Store Card.
-      expect(composition.svg).toContain('data-apple-back-field="member"');
-      expect(composition.svg).toContain('data-apple-back-field="status"');
-      expect(composition.svg).toContain("Preview member");
-      expect(composition.svg).toContain(
-        String(
-          required(
-            pass.storeCard.backFields.find((field) => field.key === "status"),
-            "Apple status back field",
-          ).value,
-        ),
-      );
-      expect(composition.svg).not.toContain(input.displayName);
+      expect(composition.svg).not.toContain("data-apple-back-field=");
+      expect(composition.svg).toContain("auxiliary:member,status");
+      expect(composition.svg).toContain(input.displayName);
+      expect(composition.svg).toContain("Active");
       expect(composition.svg).toContain('data-barcode-format="QR"');
       expect(composition.svg).not.toContain("data-barcode-fallback");
       expect(composition.svg).toContain('data-apple-progress-artwork="production-compositor"');
       expect(composition.svg).toContain('data-apple-header-field="stamps"');
       expect(composition.svg).toContain('data-apple-secondary-field="reward"');
-      expect(composition.svg).not.toContain('data-apple-field-role="primary"');
+      expect(composition.svg).toContain('data-apple-auxiliary-field="member"');
+      expect(composition.svg).toContain('data-apple-auxiliary-field="status"');
       expect(composition.svg).not.toMatch(/wallet-role|wallet-motif|hero-field/u);
     },
   );
@@ -504,7 +499,7 @@ describe("P3 Builder preview fidelity", () => {
     const variants = [
       ["GOOGLE_WALLET", undefined, "GOOGLE_HERO", "data-google-native-identity"],
       ["APPLE_WALLET", "POSTER", "APPLE_POSTER", "data-poster-artwork"],
-      ["APPLE_WALLET", "LEGACY", "APPLE_LEGACY_STRIP", "data-apple-progress-strip"],
+      ["APPLE_WALLET", "LEGACY", "APPLE_STORE_CARD_STRIP", "data-apple-progress-strip"],
     ] as const;
 
     for (const [profile, appleWalletVariant, target, platformMarker] of variants) {

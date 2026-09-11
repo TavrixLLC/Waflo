@@ -54,7 +54,7 @@ describe("Wallet rendering repair completion", () => {
     const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
     expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(5);
-    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 11");
+    expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 12");
     expect(enrollment).toContain("ensure-template:v");
     expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
     expect(worker).toContain("enqueuePresentationRepairs");
@@ -177,14 +177,7 @@ describe("Wallet rendering repair completion", () => {
       unusableProgramLogo,
       organizationLogo,
     ]);
-    expect(Object.keys(result ?? {})).toEqual([
-      "logo.png",
-      "logo@2x.png",
-      "logo@3x.png",
-      "thumbnail.png",
-      "thumbnail@2x.png",
-      "thumbnail@3x.png",
-    ]);
+    expect(Object.keys(result ?? {})).toEqual(["logo.png", "logo@2x.png", "logo@3x.png"]);
     await expect(sharp(Buffer.from(result?.["logo.png"] ?? [])).metadata()).resolves.toMatchObject({
       width: 160,
       height: 50,
@@ -193,9 +186,9 @@ describe("Wallet rendering repair completion", () => {
     await expect(
       sharp(Buffer.from(result?.["logo@3x.png"] ?? [])).metadata(),
     ).resolves.toMatchObject({ width: 480, height: 150, format: "png" });
-    await expect(
-      sharp(Buffer.from(result?.["thumbnail@3x.png"] ?? [])).metadata(),
-    ).resolves.toMatchObject({ width: 270, height: 270, format: "png" });
+    expect(result).not.toHaveProperty("thumbnail.png");
+    expect(result).not.toHaveProperty("thumbnail@2x.png");
+    expect(result).not.toHaveProperty("thumbnail@3x.png");
     expect(storage.get).not.toHaveBeenCalled();
   });
 });

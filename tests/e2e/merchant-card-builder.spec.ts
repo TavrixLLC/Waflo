@@ -703,7 +703,7 @@ test("renders truthful 0/8, 4/8, and 8/8 Grid-only Wallet Builder previews", asy
         label === "Apple iOS 27+"
           ? "APPLE_POSTER"
           : profile === "APPLE_WALLET"
-            ? "APPLE_LEGACY_STRIP"
+            ? "APPLE_STORE_CARD_STRIP"
             : "GOOGLE_HERO";
       await expect
         .poll(() => media.innerHTML())
@@ -1111,7 +1111,10 @@ test("keeps deliberately long Arabic iOS 27+ content inside its canonical artwor
     /\u0628\u0631\u0646\u0627\u0645\u062c|\u0645\u0643\u0627\u0641\u0623\u0629/u.test(content),
   );
   expect(rtlContent.length).toBeGreaterThan(0);
-  expect(rtlContent.every(({ anchor }) => anchor === "end")).toBe(true);
+  // SVG's logical start is the physical right edge in RTL. The canonical plan
+  // positions Arabic x coordinates at that leading edge so text remains in
+  // its own clipped region instead of escaping through the right side.
+  expect(rtlContent.every(({ anchor }) => anchor === "start")).toBe(true);
   expect(desktop.rootAspect).toBeGreaterThan(0.7);
   expect(desktop.rootAspect).toBeLessThan(1.1);
 

@@ -102,6 +102,10 @@ RUN groupadd --system --gid 10001 waflo && \
     useradd --system --uid 10001 --gid waflo --home-dir /app --shell /usr/sbin/nologin waflo
 
 FROM runtime AS api
+USER root
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends fontconfig fonts-noto-core && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=api-package --chown=waflo:waflo /output/api /app
 WORKDIR /app
 USER waflo

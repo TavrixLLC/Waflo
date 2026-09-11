@@ -9,7 +9,7 @@
   "foregroundColor": "rgb(36,25,22)",
   "backgroundColor": "rgb(247,244,238)",
   "labelColor": "rgb(36,25,22)",
-  "generic": {
+  "storeCard": {
     "headerFields": [
       {
         "key": "progress",

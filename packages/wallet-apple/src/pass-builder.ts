@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { cardLocalePresentation } from "@waflo/contracts";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
-  composeAppleGenericStripArtwork,
   composeApplePosterArtwork,
+  composeAppleStoreCardStripArtwork,
   walletArtworkInputFromStampRender,
 } from "@waflo/wallet-artwork";
 import { type WalletMembershipInput, WalletProviderError } from "@waflo/wallet-core";
@@ -47,7 +47,7 @@ export interface WalletPassGenerator {
   healthCheck(configuration: ApplePassGeneratorConfiguration): Promise<WalletPassGeneratorHealth>;
 }
 
-export interface AppleGenericPassDocument {
+export interface AppleStoreCardPosterPassDocument {
   readonly formatVersion: 1;
   readonly passTypeIdentifier: string;
   readonly serialNumber: string;
@@ -68,7 +68,7 @@ export interface AppleGenericPassDocument {
       readonly messageEncoding: "iso-8859-1";
     },
   ];
-  readonly generic: ApplePassFields;
+  readonly storeCard: ApplePassFields;
   readonly posterGeneric: ApplePassFields;
 }
 
@@ -107,14 +107,13 @@ function membershipStatus(input: WalletMembershipInput): string {
 }
 
 /**
- * Native field hierarchy for the iOS 26-and-earlier Generic/Store Card face.
+ * Native field hierarchy for the iOS 26-and-earlier Store Card face.
  *
  * Keep merchant identity in logoText and reserve the compact header tier for
- * progress. Apple places a legacy primary field on top of the strip artwork,
- * so the reward deliberately uses the secondary tier below it. Program,
- * member, and status are useful details, but overwhelm the compact legacy
- * face, so they deliberately live on the back. The Poster Generic mapping
- * intentionally does not consume this helper.
+ * progress. The iOS 26-and-earlier face exposes the reward in Apple's native
+ * secondary tier and the member/status pair in its auxiliary tier. Program
+ * remains a back detail. The Poster Generic mapping intentionally does not
+ * consume this helper.
  */
 export function mapLegacyApplePresentation(input: WalletMembershipInput): ApplePassFields {
   return {
@@ -126,8 +125,6 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
         textAlignment: naturalTextAlignment,
       },
     ],
-    // On pre-Poster Apple Wallet, primary fields are composited over strip
-    // artwork. Keep this empty so native text cannot obscure the stamps.
     primaryFields: [],
     secondaryFields: [
       {
@@ -137,23 +134,26 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
         textAlignment: naturalTextAlignment,
       },
     ],
-    auxiliaryFields: [],
-    backFields: [
-      {
-        key: "program",
-        label: "PROGRAM",
-        value: input.programName.slice(0, 80),
-      },
+    auxiliaryFields: [
       {
         key: "member",
         label: "MEMBER",
         value: input.displayName.slice(0, 80),
+        textAlignment: naturalTextAlignment,
       },
       {
         key: "status",
         label: "STATUS",
         value: membershipStatus(input),
         changeMessage: "%@",
+        textAlignment: naturalTextAlignment,
+      },
+    ],
+    backFields: [
+      {
+        key: "program",
+        label: "PROGRAM",
+        value: input.programName.slice(0, 80),
       },
       {
         key: "security",
@@ -170,11 +170,11 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
   };
 }
 
-export function mapAppleGenericPass(
+export function mapAppleStoreCardPosterPass(
   input: WalletMembershipInput,
   configuration: ApplePassGeneratorConfiguration,
   authenticationToken: string,
-): AppleGenericPassDocument {
+): AppleStoreCardPosterPassDocument {
   const posterProgress = `${input.currentStampCount}/${input.requiredStampCount}`;
   const inactive =
     input.transferred ||
@@ -235,7 +235,7 @@ export function mapAppleGenericPass(
         messageEncoding: "iso-8859-1",
       },
     ],
-    generic: mapLegacyApplePresentation(input),
+    storeCard: mapLegacyApplePresentation(input),
     posterGeneric: {
       // Identity, progress, reward, and the QR are image-first on Poster Generic.
       // Semantic values remain on the back/details side for accessibility.
@@ -286,8 +286,7 @@ interface PassBuilderServiceRequest {
     readonly fieldValues: Readonly<Record<string, string>>;
   };
   readonly images: Readonly<
-    Record<"icon" | "logo" | "primaryLogo" | "artwork" | "strip", ImageVariants> &
-      Partial<Record<"thumbnail", ImageVariants>>
+    Record<"icon" | "logo" | "primaryLogo" | "artwork" | "strip", ImageVariants>
   >;
 }
 
@@ -351,7 +350,7 @@ async function brandVariants(width: number, height: number, includeText: boolean
 function defaultBrandImages() {
   immutableBrandImages ??= Promise.all([
     brandVariants(38, 38, false),
-    // Legacy Generic already renders merchant identity through logoText. A
+    // Store Card renders merchant identity through logoText. A
     // compact mark-only logo prevents a second wordmark from consuming the
     // header row. Poster Generic uses the separate primaryLogo slot below.
     brandVariants(38, 38, false),
@@ -381,9 +380,9 @@ async function personalizedVariants(
     },
     rendered,
   );
-  const [poster, genericStrip] = await Promise.all([
+  const [poster, storeCardStrip] = await Promise.all([
     composeApplePosterArtwork(compositionInput),
-    composeAppleGenericStripArtwork(compositionInput),
+    composeAppleStoreCardStripArtwork(compositionInput),
   ]);
   const variants = (
     composed: Awaited<ReturnType<typeof composeApplePosterArtwork>>,
@@ -393,29 +392,8 @@ async function personalizedVariants(
     times3: composed.times3.bytes.toString("base64"),
   });
   return {
-    strip: variants(genericStrip),
+    strip: variants(storeCardStrip),
     artwork: variants(poster),
-  };
-}
-
-function merchantThumbnailVariants(input: WalletMembershipInput): ImageVariants | undefined {
-  const images = input.applePassImages;
-  if (!images) return undefined;
-  const times1 = images["thumbnail.png"];
-  const times2 = images["thumbnail@2x.png"];
-  const times3 = images["thumbnail@3x.png"];
-  const supplied = [times1, times2, times3].filter((value) => value !== undefined).length;
-  if (supplied === 0) return undefined;
-  if (supplied !== 3 || !times1 || !times2 || !times3) {
-    throw new Error("Apple thumbnail image set must include 1x, 2x, and 3x variants.");
-  }
-  if ([times1, times2, times3].some((value) => value.byteLength === 0)) {
-    throw new Error("Apple thumbnail image set contains an empty variant.");
-  }
-  return {
-    times1: Buffer.from(times1).toString("base64"),
-    times2: Buffer.from(times2).toString("base64"),
-    times3: Buffer.from(times3).toString("base64"),
   };
 }
 
@@ -543,7 +521,7 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
   }
 
   private async request(input: WalletPassGenerationInput): Promise<PassBuilderServiceRequest> {
-    const pass = mapAppleGenericPass(
+    const pass = mapAppleStoreCardPosterPass(
       input.membership,
       input.configuration,
       input.authenticationToken,
@@ -552,7 +530,6 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
       defaultBrandImages(),
       personalizedVariants(input.membership),
     ]);
-    const thumbnail = merchantThumbnailVariants(input.membership);
     const field = (style: ApplePassFields, key: string) => {
       const result = [
         ...(style.headerFields ?? []),
@@ -589,14 +566,14 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
           messageEncoding: pass.barcodes[0].messageEncoding,
         },
         fieldValues: {
-          progress: field(pass.generic, "progress"),
+          progress: field(pass.storeCard, "progress"),
           progress_detail: field(pass.posterGeneric, "progress_detail"),
-          program: field(pass.generic, "program"),
-          member: field(pass.generic, "member"),
-          status: field(pass.generic, "status"),
-          reward: field(pass.generic, "reward"),
-          security: field(pass.generic, "security"),
-          operator: field(pass.generic, "operator"),
+          program: field(pass.storeCard, "program"),
+          member: field(pass.storeCard, "member"),
+          status: field(pass.storeCard, "status"),
+          reward: field(pass.storeCard, "reward"),
+          security: field(pass.storeCard, "security"),
+          operator: field(pass.storeCard, "operator"),
         },
       },
       images: {
@@ -605,7 +582,6 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
         primaryLogo: brand.primaryLogo,
         artwork: personalized.artwork,
         strip: personalized.strip,
-        ...(thumbnail ? { thumbnail } : {}),
       },
     };
   }

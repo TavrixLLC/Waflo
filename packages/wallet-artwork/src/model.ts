@@ -1,6 +1,7 @@
 /** Browser-safe Wallet artwork geometry shared by local previews and Sharp composition. */
 export type WalletArtworkTarget =
   | "APPLE_POSTER"
+  | "APPLE_STORE_CARD_STRIP"
   | "APPLE_GENERIC_STRIP"
   | "APPLE_LEGACY_STRIP"
   | "GOOGLE_HERO";
@@ -27,6 +28,8 @@ export interface WalletArtworkLayout {
 
 export const walletArtworkDimensions = {
   APPLE_POSTER: { width: 358, height: 448, maxBytes: 4_000_000 },
+  // Apple reserves this 375 by 144 point region for Store Card strips.
+  APPLE_STORE_CARD_STRIP: { width: 375, height: 144, maxBytes: 4_000_000 },
   APPLE_GENERIC_STRIP: { width: 375, height: 144, maxBytes: 4_000_000 },
   APPLE_LEGACY_STRIP: { width: 375, height: 123, maxBytes: 4_000_000 },
   GOOGLE_HERO: { width: 1_032, height: 812, maxBytes: 5_000_000 },
@@ -54,6 +57,9 @@ export const APPLE_GENERIC_LAYOUT: WalletArtworkLayout = {
   centerToleranceRatio: 0.02,
 };
 
+/** The Store Card strip is a wide, artwork-only Apple-native region. */
+export const APPLE_STORE_CARD_LAYOUT: WalletArtworkLayout = APPLE_GENERIC_LAYOUT;
+
 export const APPLE_LEGACY_LAYOUT: WalletArtworkLayout = {
   safeArea: { left: 5, top: 4, width: 365, height: 115 },
   stampPanelRegion: { left: 5, top: 4, width: 365, height: 115 },
@@ -76,6 +82,7 @@ export const GOOGLE_HERO_LAYOUT: WalletArtworkLayout = {
 
 export const walletArtworkLayouts = {
   APPLE_POSTER: APPLE_POSTER_LAYOUT,
+  APPLE_STORE_CARD_STRIP: APPLE_STORE_CARD_LAYOUT,
   APPLE_GENERIC_STRIP: APPLE_GENERIC_LAYOUT,
   APPLE_LEGACY_STRIP: APPLE_LEGACY_LAYOUT,
   GOOGLE_HERO: GOOGLE_HERO_LAYOUT,

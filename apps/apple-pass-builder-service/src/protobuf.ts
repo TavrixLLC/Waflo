@@ -18,7 +18,6 @@ const expectedImageSizes: Readonly<
   primaryLogo: [126, 30],
   artwork: [358, 448],
   strip: [375, 144],
-  thumbnail: [90, 90],
 };
 
 const barcodeFormats: Readonly<Record<PassBuilderRequest["pass"]["barcode"]["format"], number>> = {

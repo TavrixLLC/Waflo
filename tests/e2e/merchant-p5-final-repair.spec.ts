@@ -132,6 +132,15 @@ async function screenshot(page: Page, filename: string, fullPage = true): Promis
   });
 }
 
+async function stableLocatorScreenshot(target: Locator): Promise<Buffer> {
+  let image: Buffer | undefined;
+  await expect(async () => {
+    await expect(target).toBeVisible();
+    image = await target.screenshot({ animations: "disabled" });
+  }).toPass({ timeout: 10_000 });
+  return image as Buffer;
+}
+
 async function labeledPanel(
   source: Buffer,
   label: string,
@@ -240,7 +249,7 @@ test("selects Arabic customer content for the Arabic editor and preview", async 
   await expectBuilderPreviewReady(preview, "ar");
   await expect(
     preview.locator(
-      '[data-preview-ready="true"][data-wallet-profile="APPLE_LEGACY"] [data-wallet-artwork-render-plan="v1"][data-production-wallet-artwork="APPLE_LEGACY_STRIP"]',
+      '[data-preview-ready="true"][data-wallet-profile="APPLE_LEGACY"] [data-wallet-artwork-render-plan="v1"][data-production-wallet-artwork="APPLE_STORE_CARD_STRIP"]',
     ),
   ).toHaveAttribute("lang", "ar");
   expect(previewRequests).toEqual([]);
@@ -445,7 +454,7 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   await expect(summaryAnchor).toBeVisible();
   semanticPanels.push(
     await labeledPanel(
-      await summaryAnchor.screenshot({ animations: "disabled" }),
+      await stableLocatorScreenshot(summaryAnchor),
       "Launch · operational summary",
       500,
       430,

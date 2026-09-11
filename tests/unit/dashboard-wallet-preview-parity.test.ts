@@ -174,7 +174,7 @@ describe("Dashboard Wallet shared preview shell", () => {
       };
       const serverInput =
         profile === "APPLE_IOS27" ? applePosterGoogleMasterRenderInput(backendInput) : backendInput;
-      const target = profile === "APPLE_LEGACY" ? "APPLE_LEGACY_STRIP" : "GOOGLE_HERO";
+      const target = profile === "APPLE_LEGACY" ? "APPLE_STORE_CARD_STRIP" : "GOOGLE_HERO";
       const serverPlan = createWalletArtworkCompositionPlan(serverInput, target);
 
       // JSON guards worker serialization; strict equality guards all nested
@@ -201,7 +201,7 @@ describe("Dashboard Wallet shared preview shell", () => {
       const { browser, server } = await renderPair(locale, profile);
       const target =
         profile === "APPLE_LEGACY"
-          ? "APPLE_LEGACY_STRIP"
+          ? "APPLE_STORE_CARD_STRIP"
           : profile === "APPLE_IOS27"
             ? "APPLE_POSTER"
             : "GOOGLE_HERO";
@@ -230,7 +230,7 @@ describe("Dashboard Wallet shared preview shell", () => {
     expect(server.svg.match(/data-google-native-title="true"/u)).toHaveLength(1);
   });
 
-  it("uses shaped Arabic provider chrome and logical start anchors without changing English", async () => {
+  it("uses shaped Arabic provider chrome with direction-aware start anchors without changing English", async () => {
     const [{ browser: arabicGoogle }, { browser: arabicPoster }] = await Promise.all([
       renderPair("ar", "GOOGLE_WALLET"),
       renderPair("ar", "APPLE_IOS27"),
@@ -262,24 +262,46 @@ describe("Dashboard Wallet shared preview shell", () => {
     );
   });
 
-  it("shows Legacy back fields separately while preserving the compact Apple front", async () => {
-    const { browserInput } = await renderPair("en", "APPLE_LEGACY");
-    const preview = renderDashboardWalletPreviewSvg({
-      ...browserInput,
-      memberName: "Amina Hassan",
-      status: "Active",
-    });
+  it("keeps the iOS 27 reward panel geometry stable across English and Arabic", async () => {
+    const [{ browserInput: englishInput }, { browserInput: arabicInput }] = await Promise.all([
+      renderPair("en", "APPLE_IOS27"),
+      renderPair("ar", "APPLE_IOS27"),
+    ]);
+    const english = createDashboardWalletPreviewArtworkPlan(englishInput).posterPlan;
+    const arabic = createDashboardWalletPreviewArtworkPlan(arabicInput).posterPlan;
+    if (!english || !arabic) throw new Error("Apple Poster plans are required.");
 
-    expect([preview.width, preview.height]).toEqual([460, 760]);
+    // The transformed Google master supplies the iOS 27 reward box. Its
+    // physical rectangle is locale-independent; only its text direction may vary.
+    const rewardPanel = '<rect x="84" y="560" width="676" height="146"';
+    expect(english.master.plan.overlaySvg).toContain(rewardPanel);
+    expect(arabic.master.plan.overlaySvg).toContain(rewardPanel);
+  });
+
+  it("keeps Apple Legacy as one native front with member and status, without a companion panel", async () => {
+    const { browserInput } = await renderPair("en", "APPLE_LEGACY");
+    const preview = renderDashboardWalletPreviewSvg(browserInput);
+
+    expect([preview.width, preview.height]).toEqual([460, 621]);
     expect(preview.svg).toContain('data-apple-front-surface="true" x="24" y="20"');
-    expect(preview.svg).toContain('data-apple-back-details-preview="true"');
-    expect(preview.svg).toContain('data-apple-pass-face="back"');
-    expect(preview.svg).toContain('data-apple-back-field="program"');
-    expect(preview.svg).toContain('data-apple-back-field="member"');
-    expect(preview.svg).toContain('data-apple-back-field="status"');
-    expect(preview.svg).toContain("Amina Hassan");
+    expect(preview.svg).not.toContain('data-apple-back-details-preview="true"');
+    expect(preview.svg).not.toContain('data-apple-pass-face="back"');
+    expect(preview.svg).not.toContain("data-apple-back-field=");
+    expect(preview.svg).toContain('data-apple-secondary-field="reward"');
+    expect(preview.svg).toContain('data-apple-auxiliary-field="member"');
+    expect(preview.svg).toContain('data-apple-auxiliary-field="status"');
+    expect(preview.svg).toContain("Preview member");
     expect(preview.svg).toContain("Active");
-    expect(preview.svg).toContain('y="633" width="412" height="107"');
+    expect(preview.svg).toContain(
+      "header:stamps;primary:empty;secondary:reward;auxiliary:member,status;back:program,security,operator",
+    );
+    // Match the installed iOS <=26 front: reward is the left main block;
+    // member is immediately below it and status occupies the opposing slot.
+    expect(preview.svg).toMatch(/data-apple-secondary-field="reward"><text[^>]+x="40" y="263"/u);
+    expect(preview.svg).toMatch(/data-apple-auxiliary-field="member"><text[^>]+x="40" y="344"/u);
+    expect(preview.svg).toMatch(/data-apple-auxiliary-field="status"><text[^>]+x="240" y="344"/u);
+    expect(preview.svg).toContain('x="145" y="405" width="170" height="170"');
+    expect(preview.svg).not.toContain('data-apple-secondary-field="program"');
   });
 
   it("uses a deterministic readable Google native foreground on dark and light surfaces", async () => {
@@ -334,7 +356,7 @@ describe("Dashboard Wallet shared preview shell", () => {
       );
       expect(preview.svg).toContain('clip-path="url(#apple-poster-card-clip)"');
       expect(preview.svg).not.toMatch(/<text[^>]+x="-/u);
-      if (locale === "ar") expect(preview.svg).toContain('text-anchor="end"');
+      if (locale === "ar") expect(preview.svg).toContain('text-anchor="start"');
     },
   );
 
