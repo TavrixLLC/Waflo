@@ -66,15 +66,33 @@ async function fulfillCard(route: Route, data: unknown): Promise<void> {
 }
 
 async function routeCard(page: Page, next: () => { google: string; apple: string }) {
-  await page.route("**/v1/customer/card/wallet-readiness-member**", (route) => {
+  await page.route("**/api/waflo/v1/customer/card/wallet-readiness-member**", (route) => {
     const state = next();
+    if (/\/wallet-readiness(?:\?|$)/u.test(route.request().url())) {
+      return fulfillCard(route, {
+        cardId: "wallet-readiness-member",
+        apple: {
+          mode: "REAL",
+          status: state.apple,
+          testAdapter: false,
+          safeErrorCode: null,
+        },
+        google: {
+          mode: "REAL",
+          status: state.google,
+          testAdapter: false,
+          safeErrorCode: null,
+        },
+        updatedAt: "2026-09-11T12:00:00.000Z",
+      });
+    }
     return fulfillCard(route, cardFixture(state.google, state.apple));
   });
 }
 
 async function exhaustWalletRetries(page: Page, reads: () => number): Promise<void> {
   await expect.poll(reads).toBe(1);
-  for (const [index, delay] of [250, 500, 1_000, 2_000, 4_000, 8_000, 8_000].entries()) {
+  for (const [index, delay] of [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000].entries()) {
     await page.clock.fastForward(delay);
     await expect.poll(reads).toBe(index + 2);
   }
@@ -113,7 +131,7 @@ test("converges Wallet readiness during original Android navigation without expo
   }
 });
 
-test("shows the CTA when Wallet becomes ready on the final bounded revalidation", async ({
+test("shows the CTA when Wallet becomes ready during adaptive revalidation", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -140,7 +158,7 @@ test("shows the CTA when Wallet becomes ready on the final bounded revalidation"
   }
 });
 
-test("recovers from exhaustion when Check again observes a ready Wallet pass", async ({
+test("continues adaptive readiness verification without a manual refresh control", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -156,43 +174,16 @@ test("recovers from exhaustion when Check again observes a ready Wallet pass", a
   try {
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
     await exhaustWalletRetries(page, () => reads);
-    await page.getByRole("button", { name: "Check again" }).click();
+    await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);
+    await page.clock.fastForward(15_000);
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
     expect(reads).toBe(9);
-    await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);
   } finally {
     await context.close();
   }
 });
 
-test("starts one fresh bounded cycle when Check again remains preparing", async ({ browser }) => {
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
-    viewport: { width: 320, height: 720 },
-    isMobile: true,
-    hasTouch: true,
-  });
-  const page = await context.newPage();
-  await page.clock.install();
-  let reads = 0;
-  await routeCard(page, () => ({ google: ++reads === 10 ? "READY" : "PREPARING", apple: "READY" }));
-  try {
-    await page.goto("http://localhost:3002/card/wallet-readiness-member");
-    await exhaustWalletRetries(page, () => reads);
-    await page.getByRole("button", { name: "Check again" }).click();
-    await expect.poll(() => reads).toBe(9);
-    await expect(
-      page.getByText("The Google Wallet button will appear automatically when your pass is ready."),
-    ).toBeVisible();
-    await page.clock.fastForward(250);
-    await expect.poll(() => reads).toBe(10);
-    await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
-  } finally {
-    await context.close();
-  }
-});
-
-test("guards rapid Check again activation so it makes one canonical request", async ({
+test("keeps the Wallet action surface hidden while readiness is unresolved", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -204,34 +195,53 @@ test("guards rapid Check again activation so it makes one canonical request", as
   const page = await context.newPage();
   await page.clock.install();
   let reads = 0;
-  let releaseManualResponse: (() => void) | undefined;
-  await page.route("**/v1/customer/card/wallet-readiness-member**", async (route) => {
-    reads += 1;
-    if (reads === 9) {
-      await new Promise<void>((resolve) => {
-        releaseManualResponse = resolve;
-      });
-    }
-    await fulfillCard(route, cardFixture(reads === 9 ? "READY" : "PREPARING", "READY"));
-  });
+  await routeCard(page, () => ({ google: ++reads === 3 ? "READY" : "PREPARING", apple: "READY" }));
   try {
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
-    await exhaustWalletRetries(page, () => reads);
-    await page.getByRole("button", { name: "Check again" }).evaluate((button) => {
-      button.click();
-      button.click();
-    });
-    await expect.poll(() => reads).toBe(9);
-    expect(releaseManualResponse).toBeDefined();
-    releaseManualResponse?.();
+    await expect(page.getByRole("heading", { name: "Add to Wallet" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
+    await page.clock.fastForward(250);
+    await expect.poll(() => reads).toBe(2);
+    await expect(page.getByRole("heading", { name: "Add to Wallet" })).toHaveCount(0);
+    await page.clock.fastForward(500);
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toBeVisible();
-    expect(reads).toBe(9);
   } finally {
     await context.close();
   }
 });
 
-test("stops when Check again returns a terminal Wallet state", async ({ browser }) => {
+test("uses the adaptive cadence without excessive concurrent readiness reads", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
+    viewport: { width: 320, height: 720 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  await page.clock.install();
+  let reads = 0;
+  await routeCard(page, () => ({ google: ++reads ? "PREPARING" : "PREPARING", apple: "READY" }));
+  try {
+    await page.goto("http://localhost:3002/card/wallet-readiness-member");
+    await expect.poll(() => reads).toBe(1);
+    await page.clock.fastForward(249);
+    expect(reads).toBe(1);
+    await page.clock.fastForward(1);
+    await expect.poll(() => reads).toBe(2);
+    await page.clock.fastForward(499);
+    expect(reads).toBe(2);
+    await page.clock.fastForward(1);
+    await expect.poll(() => reads).toBe(3);
+  } finally {
+    await context.close();
+  }
+});
+
+test("stops polling when a readiness check returns a terminal Wallet state", async ({
+  browser,
+}) => {
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
     viewport: { width: 320, height: 720 },
@@ -242,25 +252,23 @@ test("stops when Check again returns a terminal Wallet state", async ({ browser 
   await page.clock.install();
   let reads = 0;
   await routeCard(page, () => ({
-    google: ++reads === 9 ? "UNAVAILABLE" : "PREPARING",
+    google: ++reads === 2 ? "UNAVAILABLE" : "PREPARING",
     apple: "READY",
   }));
   try {
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
-    await exhaustWalletRetries(page, () => reads);
-    await page.getByRole("button", { name: "Check again" }).click();
+    await page.clock.fastForward(250);
     await expect(
       page.getByText("This card cannot be added to Google Wallet right now."),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);
-    await page.clock.fastForward(8_500);
-    expect(reads).toBe(9);
+    await page.clock.fastForward(16_000);
+    expect(reads).toBe(2);
   } finally {
     await context.close();
   }
 });
 
-test("stops after the final bounded revalidation while Wallet remains preparing", async ({
+test("continues low-frequency verification while Wallet remains preparing without a CTA panel", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -280,20 +288,13 @@ test("stops after the final bounded revalidation while Wallet remains preparing"
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
     await exhaustWalletRetries(page, () => reads);
     await expect(page.getByRole("button", { name: "Add to Google Wallet" })).toHaveCount(0);
-    await expect(
-      page.getByText(
-        "Your Wallet pass is taking longer than expected. Check again to see if it's ready.",
-      ),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Check again" })).toBeVisible();
-    await expect(
-      page.getByText("The Google Wallet button will appear automatically when your pass is ready."),
-    ).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Add to Wallet" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Check again" })).toHaveCount(0);
 
-    // The next automatic read would be due within eight seconds if this ever
-    // became an unbounded chain.
-    await page.clock.fastForward(8_500);
-    expect(reads).toBe(8);
+    // The cadence settles at 15 seconds: it keeps converging without
+    // hammering the readiness API or requiring customer action.
+    await page.clock.fastForward(15_000);
+    await expect.poll(() => reads).toBe(9);
   } finally {
     await context.close();
   }
@@ -314,9 +315,7 @@ test("cancels a scheduled readiness read when the card page unmounts", async ({ 
   });
   try {
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
-    await expect(
-      page.getByText("The Google Wallet button will appear automatically when your pass is ready."),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Add to Wallet" })).toHaveCount(0);
     await page.goto("http://localhost:3002/privacy");
     const readsAtUnmount = reads;
     await page.waitForTimeout(800);
@@ -336,7 +335,7 @@ test("abandons an in-flight card request when navigation supersedes it", async (
   const page = await context.newPage();
   let reads = 0;
   let releaseOlderResponse: (() => void) | undefined;
-  await page.route("**/v1/customer/card/wallet-readiness-member**", async (route) => {
+  await page.route("**/api/waflo/v1/customer/card/wallet-readiness-member**", async (route) => {
     reads += 1;
     if (reads === 1) {
       await new Promise<void>((resolve) => {

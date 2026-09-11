@@ -488,10 +488,19 @@ describe("Wallet Engagement input safety", () => {
     ).toThrow();
   });
 
-  it("accepts only one selectable v1 provider and at most 10 unique nearby locations", () => {
+  it("accepts Apple, Google, or both Wallet providers and rejects duplicate selections", () => {
     expect(() =>
       walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["APPLE"] }),
+    ).not.toThrow();
+    expect(() =>
+      walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["APPLE", "GOOGLE"] }),
+    ).not.toThrow();
+    expect(() =>
+      walletCampaignCreateSchema.parse({ ...validCampaign, providers: ["GOOGLE", "GOOGLE"] }),
     ).toThrow();
+  });
+
+  it("rejects invalid nearby location selections", () => {
     expect(() =>
       walletNearbyUpdateSchema.parse({
         enabled: true,

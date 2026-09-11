@@ -605,7 +605,38 @@ export class GoogleWalletProvider implements WalletProvider {
 
   async reconcileMembershipPass(input: WalletMembershipInput): Promise<WalletReconcileResult> {
     await this.issueMembershipPass(input);
-    return { state: "ACTIVE", changed: false };
+    // Object creation is not evidence that a customer saved the pass. Google
+    // exposes hasUsers as the supported object-level signal, so keep it as a
+    // time-stamped, safe provider-state cache for bounded audience checks.
+    if (this.mode !== "REAL" || !this.client) {
+      return {
+        state: "ACTIVE",
+        changed: false,
+        safeMetadata: {
+          mode: this.mode,
+          hasUsers: null,
+          eligibilityState: "UNKNOWN",
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    }
+    const current = await this.client.request<{ hasUsers?: boolean; state?: string }>(
+      `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
+    );
+    const hasUsers = current.value.hasUsers;
+    return {
+      state: current.value.state === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+      changed: false,
+      ...(current.requestId ? { providerRequestId: current.requestId } : {}),
+      safeMetadata: {
+        mode: this.mode,
+        hasUsers: typeof hasUsers === "boolean" ? hasUsers : null,
+        eligibilityState:
+          hasUsers === true ? "READY" : hasUsers === false ? "NO_ACTIVE_WALLET_HOLDER" : "UNKNOWN",
+        checkedAt: new Date().toISOString(),
+        objectState: current.value.state ?? "ACTIVE",
+      },
+    };
   }
 
   async sendPromotionalMessage(

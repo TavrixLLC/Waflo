@@ -46,7 +46,7 @@ interface WalletEngagementView {
       nearbyRelevance: CapabilityState;
       customNearbyText: true;
       providerControlsNearbyText: false;
-      selectableForManualPromotion: false;
+      selectableForManualPromotion: boolean;
     };
     google: {
       configured: boolean;
@@ -83,8 +83,11 @@ interface WalletEngagementView {
 }
 
 interface AudienceEstimate {
-  total: number;
-  providers: { apple: number; google: number };
+  total: number | null;
+  providers: {
+    apple: { status: string; eligiblePasses: number; registeredDevices: number };
+    google: { status: string; eligibleObjects: number; checking: number };
+  };
   capped: boolean;
 }
 
@@ -151,6 +154,8 @@ export function WalletEngagementPanel({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [destinationUrl, setDestinationUrl] = useState("");
+  const [selectedBranchId, setSelectedBranchId] = useState("");
+  const [selectedProviders, setSelectedProviders] = useState<Array<"APPLE" | "GOOGLE">>(["GOOGLE"]);
   const [messageLocale, setMessageLocale] = useState<"EN" | "AR">(ar ? "AR" : "EN");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const campaignIdempotencyKey = useRef("");
@@ -162,7 +167,9 @@ export function WalletEngagementPanel({
     try {
       const [nextView, nextAudience, nextHistory] = await Promise.all([
         apiFetch<WalletEngagementView>(base),
-        apiFetch<AudienceEstimate>(`${base}/audience-estimate`),
+        apiFetch<AudienceEstimate>(
+          `${base}/audience-estimate${selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : ""}`,
+        ),
         apiFetch<CampaignHistory>(`${base}/campaigns?limit=20`),
       ]);
       setView(nextView);
@@ -177,7 +184,7 @@ export function WalletEngagementPanel({
     } finally {
       setLoading(false);
     }
-  }, [base]);
+  }, [base, selectedBranchId]);
 
   useEffect(() => {
     void load();
@@ -241,7 +248,8 @@ export function WalletEngagementPanel({
           title,
           body,
           destinationUrl: destinationUrl.trim() || null,
-          providers: ["GOOGLE"],
+          providers: selectedProviders,
+          branchId: selectedBranchId || null,
           audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
         }),
       });
@@ -256,7 +264,9 @@ export function WalletEngagementPanel({
           : "Campaign created safely. The Wallet worker will dispatch it outside this browser request.",
       );
       const [nextAudience, nextHistory] = await Promise.all([
-        apiFetch<AudienceEstimate>(`${base}/audience-estimate`),
+        apiFetch<AudienceEstimate>(
+          `${base}/audience-estimate${selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : ""}`,
+        ),
         apiFetch<CampaignHistory>(`${base}/campaigns?limit=20`),
       ]);
       setAudience(nextAudience);
@@ -563,12 +573,13 @@ export function WalletEngagementPanel({
                 <h3>{ar ? "إرسال إشعار" : "Send notification"}</h3>
                 <p>
                   {ar
-                    ? "تُرسل فقط إلى حاملي Google Wallet النشطين الذين منحوا موافقة ترويجية حالية."
-                    : "Only active Google Wallet holders with current promotional consent are eligible."}
+                    ? "تعتمد الأهلية على حالة البطاقة المحفوظة وأجهزة Wallet المسجلة، وليس على مربع موافقة Waflo."
+                    : "Eligibility uses native saved-pass state and registered Wallet devices, not a Waflo consent checkbox."}
                 </p>
               </div>
             </div>
-            {!view.capabilities.google.selectableForManualPromotion ? (
+            {!view.capabilities.google.selectableForManualPromotion &&
+            !view.capabilities.apple.selectableForManualPromotion ? (
               <Alert
                 tone="warning"
                 title={ar ? "Google Wallet يحتاج إلى إعداد" : "Google Wallet setup required"}
@@ -577,15 +588,29 @@ export function WalletEngagementPanel({
             <div className="wallet-audience-strip">
               <ShieldCheck />
               <div>
-                <strong>{audience?.total ?? 0}</strong>
+                <strong>{audience?.total ?? "—"}</strong>
                 <small>{ar ? "مستلم مؤهل الآن" : "eligible recipients now"}</small>
               </div>
               <span>
                 {ar
-                  ? "الموافقة قابلة للإلغاء · لا توجد قائمة عملاء من المتصفح"
-                  : "Revocable consent · no browser-supplied customer list"}
+                  ? "تحدد Wallet وإعدادات الجهاز تسليم الإشعارات"
+                  : "Wallet and device settings control notification delivery"}
               </span>
             </div>
+            {audience ? (
+              <div className="wallet-audience-provider-counts" role="status">
+                <small>
+                  {ar
+                    ? `Apple Wallet: ${audience.providers.apple.status} · ${audience.providers.apple.eligiblePasses} بطاقات مؤهلة · ${audience.providers.apple.registeredDevices} أجهزة مسجلة`
+                    : `Apple Wallet: ${audience.providers.apple.status} · ${audience.providers.apple.eligiblePasses} eligible passes · ${audience.providers.apple.registeredDevices} registered devices`}
+                </small>
+                <small>
+                  {ar
+                    ? `Google Wallet: ${audience.providers.google.status} · ${audience.providers.google.eligibleObjects} بطاقات محفوظة مؤهلة`
+                    : `Google Wallet: ${audience.providers.google.status} · ${audience.providers.google.eligibleObjects} saved-pass recipients eligible`}
+                </small>
+              </div>
+            ) : null}
             <form className="wallet-campaign-form" onSubmit={openConfirmation}>
               <div className="wallet-form-row">
                 <FormField label={ar ? "اللغة" : "Message language"} required>
@@ -603,19 +628,74 @@ export function WalletEngagementPanel({
                 </FormField>
                 <fieldset className="wallet-provider-choice">
                   <legend className="sr-only">{ar ? "المزود" : "Provider"}</legend>
-                  <span>Google Wallet</span>
-                  <Badge tone="success">TEXT_AND_NOTIFY</Badge>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedProviders.includes("APPLE")}
+                      disabled={!canManage || !view.capabilities.apple.selectableForManualPromotion}
+                      onChange={(event) =>
+                        setSelectedProviders((current) =>
+                          event.target.checked
+                            ? [...new Set<"APPLE" | "GOOGLE">([...current, "APPLE"])]
+                            : current.filter((provider) => provider !== "APPLE"),
+                        )
+                      }
+                    />
+                    Apple Wallet
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedProviders.includes("GOOGLE")}
+                      disabled={
+                        !canManage || !view.capabilities.google.selectableForManualPromotion
+                      }
+                      onChange={(event) =>
+                        setSelectedProviders((current) =>
+                          event.target.checked
+                            ? [...new Set<"APPLE" | "GOOGLE">([...current, "GOOGLE"])]
+                            : current.filter((provider) => provider !== "GOOGLE"),
+                        )
+                      }
+                    />
+                    Google Wallet <Badge tone="success">TEXT_AND_NOTIFY</Badge>
+                  </label>
                 </fieldset>
               </div>
               <FormField
+                label={ar ? "الفرع" : "Branch"}
+                hint={
+                  ar ? "اختياري: عملية مسجلة في الفرع" : "Optional: recorded transaction at branch"
+                }
+              >
+                <Select
+                  value={selectedBranchId}
+                  disabled={!canManage}
+                  onChange={(event) => {
+                    campaignIdempotencyKey.current = "";
+                    setSelectedBranchId(event.target.value);
+                  }}
+                >
+                  <option value="">{ar ? "كل فروع البرنامج" : "Entire program"}</option>
+                  {view.eligibleLocations
+                    .filter((location) => location.participatesInThisCard)
+                    .map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                        {location.city ? ` — ${location.city}` : ""}
+                      </option>
+                    ))}
+                </Select>
+              </FormField>
+              <FormField
                 label={ar ? "العنوان" : "Title"}
-                hint={`${Array.from(title).length}/60`}
+                hint={`${Array.from(title).length}/28`}
                 required
               >
                 <TextInput
                   value={title}
                   minLength={1}
-                  maxLength={60}
+                  maxLength={28}
                   required
                   disabled={!canManage}
                   dir={contentDirection(messageLocale)}
@@ -627,13 +707,13 @@ export function WalletEngagementPanel({
               </FormField>
               <FormField
                 label={ar ? "الرسالة" : "Message"}
-                hint={`${Array.from(body).length}/240`}
+                hint={`${Array.from(body).length}/80`}
                 required
               >
                 <TextArea
                   value={body}
                   minLength={1}
-                  maxLength={240}
+                  maxLength={80}
                   required
                   disabled={!canManage}
                   dir={contentDirection(messageLocale)}
@@ -692,11 +772,7 @@ export function WalletEngagementPanel({
               <div className="wallet-engagement-actions">
                 <Button
                   type="submit"
-                  disabled={
-                    !canManage ||
-                    !audience?.total ||
-                    !view.capabilities.google.selectableForManualPromotion
-                  }
+                  disabled={!canManage || !audience?.total || selectedProviders.length === 0}
                 >
                   <Send size={16} />
                   {ar ? "مراجعة وإرسال" : "Review and send"}

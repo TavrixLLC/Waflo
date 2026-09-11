@@ -759,7 +759,7 @@ export async function mockTemplateGalleryApi(
             nearbyRelevance: "AVAILABLE",
             customNearbyText: true,
             providerControlsNearbyText: false,
-            selectableForManualPromotion: false,
+            selectableForManualPromotion: true,
           },
           google: {
             configured: true,
@@ -847,9 +847,12 @@ export async function mockTemplateGalleryApi(
       await fulfill(route, {
         audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
         total: 12,
-        providers: { apple: 0, google: 12 },
+        providers: {
+          apple: { status: "READY", eligiblePasses: 0, registeredDevices: 0 },
+          google: { status: "READY", eligibleObjects: 12, checking: 0 },
+        },
         capped: false,
-        exclusions: ["NO_CURRENT_CONSENT", "NO_ELIGIBLE_WALLET_PASS"],
+        exclusions: ["NO_ELIGIBLE_WALLET_PASS"],
       });
       return;
     }

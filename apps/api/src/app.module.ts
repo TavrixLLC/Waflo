@@ -80,8 +80,8 @@ import { WalletController } from "./wallet/wallet.controller.js";
 import { WalletService } from "./wallet/wallet.service.js";
 import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
 import {
-  CustomerWalletEngagementController,
   MerchantWalletEngagementController,
+  MerchantWalletNotificationController,
 } from "./wallet-engagement/wallet-engagement.controller.js";
 import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.service.js";
 
@@ -120,7 +120,7 @@ import { WalletEngagementService } from "./wallet-engagement/wallet-engagement.s
     StaffOperationsController,
     MerchantOperationsController,
     MerchantWalletEngagementController,
-    CustomerWalletEngagementController,
+    MerchantWalletNotificationController,
   ],
   providers: [
     AdminAnalyticsService,

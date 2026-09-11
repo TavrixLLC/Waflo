@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { mockTemplateGalleryApi } from "./template-gallery-fixtures";
 
-test("configures provider-native nearby relevance and confirms a consented Google Wallet campaign", async ({
+test("configures provider-native nearby relevance and confirms a Google Wallet campaign", async ({
   page,
 }) => {
   await mockTemplateGalleryApi(page, {

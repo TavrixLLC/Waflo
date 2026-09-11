@@ -318,6 +318,18 @@ describe("production-v1 UX and billing repair", () => {
     expect(source).toContain('platform === "android"');
   });
 
+  it("does not render a customer-facing membership transfer entry point", () => {
+    const source = readFileSync(
+      "apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx",
+      "utf8",
+    );
+    // The transfer domain/audit model remains intact, but this customer card
+    // deliberately has no link, menu action, or overflow entry point.
+    expect(source).not.toContain('className="transfer-action"');
+    expect(source).not.toContain("/transfer?");
+    expect(source).not.toContain("Transfer to another device");
+  });
+
   it("uses direct crop manipulation without horizontal or vertical position sliders", () => {
     const source = readFileSync(
       "apps/merchant-dashboard/components/program-asset-uploader.tsx",

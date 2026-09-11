@@ -3144,6 +3144,21 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
   justify-self: end;
   text-align: end;
 }
+.wallet-audience-provider-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.75rem;
+  margin-top: -0.35rem;
+  padding: 0.7rem 1rem 0.85rem;
+  color: white;
+  border-radius: 0 0 14px 14px;
+  background: var(--waflo-ink);
+  border-top: 1px solid color-mix(in srgb, white 20%, transparent);
+}
+.wallet-audience-provider-counts small {
+  color: #d7cfcc;
+  font-size: 0.72rem;
+}
 .wallet-provider-choice {
   display: flex;
   margin: 0;
@@ -3352,6 +3367,9 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
     grid-column: 1 / -1;
     justify-self: start;
     text-align: start;
+  }
+  .wallet-audience-provider-counts {
+    grid-template-columns: 1fr;
   }
   .wallet-engagement-actions {
     flex-direction: column-reverse;

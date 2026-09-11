@@ -1,10 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
-import {
-  walletCampaignCreateSchema,
-  walletNearbyUpdateSchema,
-  walletPromotionConsentSchema,
-} from "@waflo/contracts";
-import { CurrentUser, CustomerCsrf, Public, RateLimit } from "../common/decorators.js";
+import { walletCampaignCreateSchema, walletNearbyUpdateSchema } from "@waflo/contracts";
+import { CurrentUser, RateLimit } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import { parseInput, parseUuid } from "../common/validation.js";
 import { WalletEngagementService } from "./wallet-engagement.service.js";
@@ -48,11 +44,13 @@ export class MerchantWalletEngagementController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("organizationId") organizationId: string,
     @Param("programId") programId: string,
+    @Query("branchId") branchId?: string,
   ) {
     return this.engagement.audienceEstimate(
       user.id,
       parseUuid(organizationId),
       parseUuid(programId),
+      branchId ? parseUuid(branchId) : undefined,
     );
   }
 
@@ -107,29 +105,105 @@ export class MerchantWalletEngagementController {
   }
 }
 
-@Controller("v1/customer/wallet-engagement")
-@Public()
-export class CustomerWalletEngagementController {
+/** Mobile-ready application API. It shares the same service, permission gate,
+ * eligibility cache, and durable campaign pipeline as Merchant Dashboard. */
+@Controller("v1/organizations/:organizationId/wallet-notifications")
+export class MerchantWalletNotificationController {
   constructor(private readonly engagement: WalletEngagementService) {}
 
-  @Get("consent")
-  @RateLimit(60)
-  consent(@Req() request: WafloRequest, @Query("tenant") tenant?: string) {
-    return this.engagement.customerConsent(request, tenant);
+  @Get("programs")
+  programs(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+  ) {
+    return this.engagement.notificationPrograms(user.id, parseUuid(organizationId));
   }
 
-  @Post("consent")
-  @CustomerCsrf()
-  @RateLimit(10, 3600)
-  setConsent(
-    @Req() request: WafloRequest,
-    @Body() body: unknown,
-    @Query("tenant") tenant?: string,
+  @Get("branches")
+  branches(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Query("programId") programId?: string,
   ) {
-    return this.engagement.setCustomerConsent(
+    return this.engagement.notificationBranches(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(programId ?? ""),
+    );
+  }
+
+  @Post("eligibility")
+  eligibility(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: { programId?: unknown; branchId?: unknown },
+  ) {
+    return this.engagement.audienceEstimate(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(typeof body?.programId === "string" ? body.programId : ""),
+      typeof body?.branchId === "string" ? parseUuid(body.branchId) : undefined,
+    );
+  }
+
+  @Post("validate")
+  validate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: { programId?: unknown; branchId?: unknown },
+  ) {
+    return this.engagement.audienceEstimate(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(typeof body?.programId === "string" ? body.programId : ""),
+      typeof body?.branchId === "string" ? parseUuid(body.branchId) : undefined,
+    );
+  }
+
+  @Post("campaigns")
+  @RateLimit(10, 3600)
+  campaigns(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Body() body: unknown,
+    @Req() request: WafloRequest,
+  ) {
+    const payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const { programId, ...campaign } = payload;
+    return this.engagement.createCampaign(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(typeof programId === "string" ? programId : ""),
+      parseInput(walletCampaignCreateSchema, campaign),
       request,
-      parseInput(walletPromotionConsentSchema, body),
-      tenant,
+    );
+  }
+
+  @Get("campaigns")
+  campaignsHistory(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Query("programId") programId?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.engagement.history(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(programId ?? ""),
+      Math.min(50, Math.max(1, Number(limit) || 20)),
+    );
+  }
+
+  @Get("campaigns/:campaignId")
+  campaignDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("organizationId") organizationId: string,
+    @Param("campaignId") campaignId: string,
+  ) {
+    return this.engagement.campaignDetail(
+      user.id,
+      parseUuid(organizationId),
+      parseUuid(campaignId),
     );
   }
 }

@@ -116,6 +116,19 @@ function membershipStatus(input: WalletMembershipInput): string {
  * consume this helper.
  */
 export function mapLegacyApplePresentation(input: WalletMembershipInput): ApplePassFields {
+  const merchantMessage = input.merchantMessage
+    ? {
+        key: "merchant_message",
+        label: input.merchantMessage.title.slice(0, 60),
+        value: [input.merchantMessage.body.slice(0, 240), input.merchantMessage.destinationUrl]
+          .filter(Boolean)
+          .join("\n"),
+        // Wallet replaces %@ with the new field value when it presents the
+        // native pass-update notification. This is deliberately a pass field,
+        // not an app APNs alert payload.
+        changeMessage: "%@",
+      }
+    : null;
   return {
     headerFields: [
       {
@@ -166,6 +179,7 @@ export function mapLegacyApplePresentation(input: WalletMembershipInput): AppleP
         label: "WAFLO",
         value: "Waflo is owned and operated by Tavrix LLC.",
       },
+      ...(merchantMessage ? [merchantMessage] : []),
     ],
   };
 }
@@ -213,6 +227,18 @@ export function mapAppleStoreCardPosterPass(
       label: "WAFLO",
       value: "Waflo is owned and operated by Tavrix LLC.",
     },
+    ...(input.merchantMessage
+      ? [
+          {
+            key: "merchant_message",
+            label: input.merchantMessage.title.slice(0, 60),
+            value: [input.merchantMessage.body.slice(0, 240), input.merchantMessage.destinationUrl]
+              .filter(Boolean)
+              .join("\n"),
+            changeMessage: "%@",
+          },
+        ]
+      : []),
   ];
   return {
     formatVersion: 1,

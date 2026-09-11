@@ -288,6 +288,14 @@ export interface WalletPromotionalMessageResult {
   readonly providerRequestId?: string;
 }
 
+/** Content intentionally rendered as a pass detail for an Apple Wallet update. */
+export interface WalletMerchantMessage {
+  readonly title: string;
+  readonly body: string;
+  readonly destinationUrl?: string;
+  readonly locale: string;
+}
+
 export interface WalletMembershipInput extends WalletProgramInput {
   readonly walletPassInstanceId: string;
   readonly providerIdentity: string;
@@ -313,6 +321,12 @@ export interface WalletMembershipInput extends WalletProgramInput {
   readonly stampRenderInput: PublishedMembershipStampRenderInput;
   /** Provider-correct, generated branding images for an Apple pass package. */
   readonly applePassImages?: Readonly<Record<string, Uint8Array>>;
+  /**
+   * Apple Wallet has no arbitrary application-notification channel.  A
+   * merchant campaign becomes a signed pass update whose changed detail field
+   * carries this content and its Apple changeMessage.
+   */
+  readonly merchantMessage?: WalletMerchantMessage;
 }
 
 export const walletProviderPresentationCapabilities = {
@@ -440,6 +454,8 @@ export interface WalletReconcileResult {
   readonly state: string;
   readonly changed: boolean;
   readonly providerRequestId?: string;
+  /** Non-secret provider state suitable for a bounded local reconciliation cache. */
+  readonly safeMetadata?: Record<string, unknown>;
 }
 
 export interface WalletProvider {
@@ -543,5 +559,5 @@ export function walletCommandIdempotencyKey(input: {
 }
 
 /** Bump when provider-side class/pass presentation must be reconciled in place. */
-export const WALLET_PRESENTATION_SCHEMA_VERSION = 5;
+export const WALLET_PRESENTATION_SCHEMA_VERSION = 6;
 import type { PublishedMembershipStampRenderInput } from "@waflo/stamp-engine";

@@ -1,7 +1,10 @@
 import { z } from "zod";
 
-export const walletCampaignTitleMaxLength = 60;
-export const walletCampaignBodyMaxLength = 240;
+// Google Wallet's current push-notification guidance recommends these compact
+// limits. Applying them to a mixed-provider campaign avoids a silent provider
+// downgrade or truncation; Apple renders the same content in its pass detail.
+export const walletCampaignTitleMaxLength = 28;
+export const walletCampaignBodyMaxLength = 80;
 export const walletNearbyTextMaxLength = 120;
 export const walletNearbyLocationLimit = 10;
 export const walletPromotionNoticeVersion = "wallet-promotions-v1-LEGAL_REVIEW_REQUIRED";
@@ -80,11 +83,22 @@ export const walletCampaignCreateSchema = z
     title: walletPlainTextSchema(walletCampaignTitleMaxLength),
     body: walletPlainTextSchema(walletCampaignBodyMaxLength),
     destinationUrl: z.string().url().max(2048).nullable().optional(),
-    providers: z.array(z.literal("GOOGLE")).min(1).max(1),
+    providers: z
+      .array(z.enum(["APPLE", "GOOGLE"]))
+      .min(1)
+      .max(2),
+    branchId: z.string().uuid().nullable().optional(),
     audienceRule: z.literal("ALL_ELIGIBLE_WALLET_HOLDERS"),
   })
   .strict()
   .superRefine((value, context) => {
+    if (new Set(value.providers).size !== value.providers.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["providers"],
+        message: "Choose each Wallet provider only once.",
+      });
+    }
     for (const field of ["title", "body"] as const) {
       if (/[{}]/u.test(value[field])) {
         context.addIssue({

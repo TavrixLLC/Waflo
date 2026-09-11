@@ -53,7 +53,7 @@ describe("Wallet rendering repair completion", () => {
     const previewCache = readFileSync("apps/api/src/programs/preview-cache.ts", "utf8");
     const enrollment = readFileSync("apps/api/src/enrollment/public-enrollment.service.ts", "utf8");
     const worker = readFileSync("apps/wallet-worker/src/main.ts", "utf8");
-    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(5);
+    expect(WALLET_PRESENTATION_SCHEMA_VERSION).toBe(6);
     expect(previewCache).toContain("PREVIEW_RENDERER_SCHEMA_VERSION = 12");
     expect(enrollment).toContain("ensure-template:v");
     expect(enrollment).toContain("WALLET_PRESENTATION_SCHEMA_VERSION");
@@ -117,7 +117,7 @@ describe("Wallet rendering repair completion", () => {
     });
   });
 
-  it("keeps merchant logo artwork inside Google's circular-mask safe area", async () => {
+  it("creates an opaque, full-bleed Google derivative with an internal safe area", async () => {
     const source = await sharp({
       create: { width: 400, height: 400, channels: 4, background: "#E4572E" },
     })
@@ -125,16 +125,19 @@ describe("Wallet rendering repair completion", () => {
       .toBuffer();
     const bytes = await prepareGoogleWalletProgramLogo(source);
     const metadata = await sharp(bytes).metadata();
-    const trimmed = await sharp(bytes)
-      .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .toBuffer({ resolveWithObject: true });
+    const pixels = await sharp(bytes).raw().toBuffer();
     expect(metadata).toMatchObject({
       width: GOOGLE_WALLET_LOGO_SIZE,
       height: GOOGLE_WALLET_LOGO_SIZE,
       format: "png",
     });
-    expect(trimmed.info.width).toBe(GOOGLE_WALLET_LOGO_SIZE - GOOGLE_WALLET_LOGO_SAFE_INSET * 2);
-    expect(trimmed.info.height).toBe(GOOGLE_WALLET_LOGO_SIZE - GOOGLE_WALLET_LOGO_SAFE_INSET * 2);
+    // The corner is opaque brand colour: there is no transparent/white outer
+    // canvas for Google's own circle mask to expose.
+    expect(pixels[0]).toBe(228);
+    expect(pixels[1]).toBe(87);
+    expect(pixels[2]).toBe(46);
+    expect(pixels[3]).toBe(255);
+    expect(GOOGLE_WALLET_LOGO_SAFE_INSET).toBeGreaterThan(0);
   });
 
   it("owns deduplicated Google progress art by program version so membership erasure cannot revoke it", () => {

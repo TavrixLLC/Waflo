@@ -110,7 +110,15 @@ describe.sequential("Wallet Engagement durable integration", () => {
     if (!googlePass) throw new Error("Google Wallet fixture pass was not created.");
     await prisma.client.walletPassInstance.update({
       where: { id: googlePass.id },
-      data: { status: "ACTIVE", providerState: { testFixture: true } },
+      data: {
+        status: "ACTIVE",
+        providerState: {
+          // Test adapter fixtures explicitly model Google's provider-owned
+          // hasUsers signal; object creation alone is not treated as saved.
+          hasUsers: true,
+          checkedAt: new Date().toISOString(),
+        },
+      },
     });
     await prisma.client.location.update({
       where: { id: fixture.locationId },
@@ -129,27 +137,13 @@ describe.sequential("Wallet Engagement durable integration", () => {
     await app.close();
   });
 
-  it("defaults consent off and supports opt-in, revoke, and re-opt-in without changing loyalty or Wallet state", async () => {
+  it("retires the customer Wallet-promotion consent endpoint without changing loyalty or Wallet state", async () => {
     const initial = await app.inject({
       method: "GET",
       url: "/v1/customer/wallet-engagement/consent",
       headers: { host: fixture.merchantHost, cookie: customerSessionCookie },
     });
-    expect(initial.statusCode).toBe(200);
-    expect(
-      data<{ granted: boolean; requiredForLoyalty: boolean; prechecked: boolean }>(initial),
-    ).toMatchObject({ granted: false, requiredForLoyalty: false, prechecked: false });
-
-    const optedIn = await setConsent(true);
-    expect(optedIn.statusCode).toBe(201);
-    expect(data<{ granted: boolean; grantedAt: string }>(optedIn)).toMatchObject({ granted: true });
-    const revoked = await setConsent(false);
-    expect(revoked.statusCode).toBe(201);
-    expect(data<{ granted: boolean; revokedAt: string }>(revoked)).toMatchObject({
-      granted: false,
-    });
-    const reOpted = await setConsent(true);
-    expect(reOpted.statusCode).toBe(201);
+    expect(initial.statusCode).toBe(404);
 
     const membership = await prisma.client.membership.findUniqueOrThrow({
       where: { id: membershipId },
@@ -160,7 +154,7 @@ describe.sequential("Wallet Engagement durable integration", () => {
     expect(membership.walletPassInstances.some((pass) => pass.status === "ACTIVE")).toBe(true);
     expect(
       membership.consents.filter((consent) => consent.consentType === "WALLET_PROMOTIONS"),
-    ).toHaveLength(3);
+    ).toHaveLength(0);
   });
 
   it("enforces merchant authorization and tenant isolation for nearby and campaign changes", async () => {
@@ -265,8 +259,7 @@ describe.sequential("Wallet Engagement durable integration", () => {
     ).toBe(3);
   });
 
-  it("applies Nearby to consent-off and consent-on holders while manual promotion targets only consent-on", async () => {
-    expect((await setConsent(false)).statusCode).toBe(201);
+  it("applies Nearby and manual promotion based on provider-native saved-pass state", async () => {
     const secondEnrollment = await app.inject({
       method: "POST",
       url: `/v1/public/programs/${fixture.programSlug}/enroll`,
@@ -295,17 +288,9 @@ describe.sequential("Wallet Engagement durable integration", () => {
     if (!secondGooglePass) throw new Error("Second Google Wallet fixture pass was not created.");
     await prisma.client.walletPassInstance.update({
       where: { id: secondGooglePass.id },
-      data: { status: "ACTIVE", providerState: { testFixture: true } },
-    });
-    await prisma.client.customerConsent.create({
       data: {
-        organizationId: fixture.organizationId,
-        customerId: secondMembership.customerId,
-        membershipId: secondMembership.id,
-        consentType: "WALLET_PROMOTIONS",
-        granted: true,
-        documentFingerprint: "wallet-promotions-v1-LEGAL_REVIEW_REQUIRED",
-        locale: "EN",
+        status: "ACTIVE",
+        providerState: { hasUsers: true, checkedAt: new Date().toISOString() },
       },
     });
     const secondEligibilityState = await prisma.client.membership.findUniqueOrThrow({
@@ -314,7 +299,6 @@ describe.sequential("Wallet Engagement durable integration", () => {
         customer: true,
         credentials: true,
         walletPassInstances: true,
-        consents: { orderBy: [{ capturedAt: "desc" }, { id: "desc" }] },
       },
     });
     expect(secondEligibilityState).toMatchObject({
@@ -323,13 +307,6 @@ describe.sequential("Wallet Engagement durable integration", () => {
       credentials: [expect.objectContaining({ status: "ACTIVE" })],
       walletPassInstances: expect.arrayContaining([
         expect.objectContaining({ provider: "GOOGLE", status: "ACTIVE" }),
-      ]),
-      consents: expect.arrayContaining([
-        expect.objectContaining({
-          consentType: "WALLET_PROMOTIONS",
-          granted: true,
-          revokedAt: null,
-        }),
       ]),
     });
 
@@ -368,7 +345,7 @@ describe.sequential("Wallet Engagement durable integration", () => {
 
     await expect(
       engagement.audienceEstimate(fixture.ownerId, fixture.organizationId, fixture.programId),
-    ).resolves.toMatchObject({ total: 1, providers: { apple: 0, google: 1 } });
+    ).resolves.toMatchObject({ total: 2, providers: { google: { eligibleObjects: 2 } } });
     const manualCampaign = await engagement.createCampaign(
       fixture.ownerId,
       fixture.organizationId,
@@ -385,34 +362,17 @@ describe.sequential("Wallet Engagement durable integration", () => {
       where: { campaignId: manualCampaign.id },
       select: { membershipId: true, status: true, safeSkipCode: true },
     });
-    expect(deliveries).toContainEqual({
-      membershipId,
-      status: "SKIPPED",
-      safeSkipCode: "CONSENT_REVOKED",
-    });
+    expect(deliveries).toContainEqual({ membershipId, status: "QUEUED", safeSkipCode: null });
     expect(deliveries).toContainEqual({
       membershipId: secondMembership.id,
       status: "QUEUED",
       safeSkipCode: null,
     });
 
-    await prisma.client.customerConsent.create({
-      data: {
-        organizationId: fixture.organizationId,
-        customerId: secondMembership.customerId,
-        membershipId: secondMembership.id,
-        consentType: "WALLET_PROMOTIONS",
-        granted: false,
-        revokedAt: new Date(),
-        documentFingerprint: "wallet-promotions-v1-LEGAL_REVIEW_REQUIRED",
-        locale: "EN",
-      },
-    });
     await prisma.client.membership.update({
       where: { id: secondMembership.id },
       data: { status: "REVOKED" },
     });
-    expect((await setConsent(true)).statusCode).toBe(201);
     worker.close();
   });
 
@@ -666,7 +626,13 @@ describe.sequential("Wallet Engagement durable integration", () => {
     worker.close();
   });
 
-  it("rechecks revoked consent, enforces two sends per pass per day, and stores quota retry state", async () => {
+  it("ignores legacy consent records, enforces Google's three sends per pass per day, and stores quota retry state", async () => {
+    // Prior tests intentionally leave a campaign queued to exercise durable
+    // dispatch. It must not contaminate this isolated per-pass quota scenario.
+    await prisma.client.walletCampaignDelivery.updateMany({
+      where: { membershipId, status: "QUEUED" },
+      data: { status: "SKIPPED", safeSkipCode: "TEST_SETUP", completedAt: new Date() },
+    });
     const revokeCampaign = await engagement.createCampaign(
       fixture.ownerId,
       fixture.organizationId,
@@ -674,15 +640,14 @@ describe.sequential("Wallet Engagement durable integration", () => {
       campaignInput("Consent recheck"),
       requestContext,
     );
-    expect((await setConsent(false)).statusCode).toBe(201);
     await expect(
       engagement.audienceEstimate(fixture.ownerId, fixture.organizationId, fixture.programId),
-    ).resolves.toMatchObject({ total: 0, providers: { apple: 0, google: 0 } });
+    ).resolves.toMatchObject({ providers: { google: { eligibleObjects: 1 } } });
     await prisma.client.walletEngagementCampaign.update({
       where: { id: revokeCampaign.id },
       data: { scheduledAt: new Date(0) },
     });
-    const noSend = vi.fn();
+    const noSend = vi.fn().mockResolvedValue({ state: "STORED_AND_NOTIFIED" });
     const provider = {
       provider: "GOOGLE",
       mode: "TEST_ADAPTER",
@@ -695,14 +660,16 @@ describe.sequential("Wallet Engagement durable integration", () => {
       new Map([["GOOGLE", provider]]),
     );
     await worker.processOneWalletCampaign(revokeCampaign.id);
-    expect(noSend).not.toHaveBeenCalled();
+    const revokeCommand = await prisma.client.walletCommand.findFirstOrThrow({
+      where: { campaignDelivery: { campaignId: revokeCampaign.id } },
+    });
+    await worker.processCommandById(revokeCommand.id);
+    expect(noSend).toHaveBeenCalledTimes(1);
     expect(
       await prisma.client.walletCampaignDelivery.findFirstOrThrow({
         where: { campaignId: revokeCampaign.id },
       }),
-    ).toMatchObject({ status: "SKIPPED", safeSkipCode: "CONSENT_REVOKED" });
-
-    expect((await setConsent(true)).statusCode).toBe(201);
+    ).toMatchObject({ status: "SUCCEEDED", safeSkipCode: null });
     const secondSend = await engagement.createCampaign(
       fixture.ownerId,
       fixture.organizationId,
@@ -752,7 +719,7 @@ describe.sequential("Wallet Engagement durable integration", () => {
       await prisma.client.walletCampaignDelivery.findFirstOrThrow({
         where: { campaignId: limited.id },
       }),
-    ).toMatchObject({ status: "SKIPPED", safeSkipCode: "WAFLO_PASS_LIMIT_24H" });
+    ).toMatchObject({ status: "SKIPPED", safeSkipCode: "GOOGLE_PROVIDER_QUOTA_24H" });
 
     await prisma.client.walletCampaignDelivery.updateMany({
       where: { membershipId, status: "SUCCEEDED" },

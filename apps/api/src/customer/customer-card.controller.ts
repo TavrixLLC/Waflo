@@ -48,6 +48,16 @@ export class CustomerCardController {
     return this.cards.walletStatus(request, tenant);
   }
 
+  @Get("card/:publicMembershipId/wallet-readiness")
+  @RateLimit(90)
+  walletReadiness(
+    @Req() request: WafloRequest,
+    @Param("publicMembershipId") publicMembershipId: string,
+    @Query("tenant") tenant?: string,
+  ) {
+    return this.cards.walletReadiness(request, publicMembershipId, tenant);
+  }
+
   @Get("csrf")
   @RateLimit(60)
   async csrf(

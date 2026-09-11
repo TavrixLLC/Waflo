@@ -14,20 +14,21 @@ describe("customer Wallet readiness presentation", () => {
     expect(enrollment).not.toContain("walletReadiness");
   });
 
-  it("uses bounded canonical card revalidation rather than a repeating preparation poll", () => {
+  it("uses adaptive canonical readiness revalidation without a manual refresh escape hatch", () => {
     const card = source("apps/customer-web/app/card/[publicMembershipId]/customer-card.tsx");
     expect(card).toContain(
-      "const walletConvergenceDelays = [250, 500, 1_000, 2_000, 4_000, 8_000, 8_000]",
+      "const walletConvergenceDelays = [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000]",
     );
     expect(card).toContain("walletConvergenceAttempts");
     expect(card).not.toContain("window.setInterval");
     expect(card).toContain("walletDescription");
     expect(card).toContain("walletIsPreparing");
-    expect(card).toContain("walletRetryExhausted");
-    expect(card).toContain("Check again");
+    expect(card).toContain("walletReadinessGeneration");
+    expect(card).toContain("wallet-readiness");
+    expect(card).not.toContain(">Check again<");
     expect(card).toContain("activeCardRequest.current?.abort()");
     expect(card).toContain("cardRequestGeneration");
-    expect(card).toContain("walletRefreshInFlightRef");
+    expect(card).toContain("activeReadinessRequest.current?.abort()");
     expect(card).toContain('aria-live="polite"');
   });
 

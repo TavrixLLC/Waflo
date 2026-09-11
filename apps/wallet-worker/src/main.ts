@@ -411,6 +411,18 @@ function mapPass(
     transferred: pass.membershipCredential.status === "TRANSFERRED",
     stampRenderInput,
     ...(applePassImages ? { applePassImages } : {}),
+    ...(pass.appleMerchantMessageTitle && pass.appleMerchantMessageBody
+      ? {
+          merchantMessage: {
+            title: pass.appleMerchantMessageTitle,
+            body: pass.appleMerchantMessageBody,
+            locale: pass.appleMerchantMessageLocale === "AR" ? "ar" : "en",
+            ...(pass.appleMerchantMessageUrl
+              ? { destinationUrl: pass.appleMerchantMessageUrl }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -715,7 +727,10 @@ export class WalletWorker {
         await this.recordHeartbeat(false, "DISPATCH_LOOP_FAILED").catch(() => undefined);
         workerLog("dispatch_loop_failed", { safeFailureCode: "DISPATCH_LOOP_FAILED" });
       }
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      // Commands remain durable in Postgres; this only bounds discovery time
+      // after the transaction commits. The former 2s scan was the dominant
+      // avoidable PREPARING delay on a healthy worker.
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
 
@@ -1043,19 +1058,42 @@ export class WalletWorker {
             programId: campaign.programId,
             status: "ACTIVE",
             customer: { status: "ACTIVE" },
-            consents: {
-              some: { consentType: "WALLET_PROMOTIONS", granted: true },
-            },
           },
+          OR: [
+            { provider: "GOOGLE" },
+            { provider: "APPLE", appleRegistrations: { some: { unregisteredAt: null } } },
+          ],
           ...(campaign.cursorPassInstanceId ? { id: { gt: campaign.cursorPassInstanceId } } : {}),
         },
         select: { id: true, membershipId: true, provider: true },
         orderBy: { id: "asc" },
         take: 250,
       });
+      // A branch target is intentionally based on an explicit, recorded
+      // ledger event at that branch. Memberships have no invented "home
+      // branch" field, so a branch selection can never degrade to program-wide
+      // delivery.
+      const branchMemberships = campaign.branchId
+        ? new Set(
+            (
+              await this.prisma.loyaltyLedgerEntry.findMany({
+                where: {
+                  organizationId: campaign.organizationId,
+                  locationId: campaign.branchId,
+                  membershipId: { in: passes.map((pass) => pass.membershipId) },
+                },
+                select: { membershipId: true },
+                distinct: ["membershipId"],
+              })
+            ).map((entry) => entry.membershipId),
+          )
+        : null;
+      const scopedPasses = branchMemberships
+        ? passes.filter((pass) => branchMemberships.has(pass.membershipId))
+        : passes;
       let queued = 0;
       let skipped = 0;
-      for (const pass of passes) {
+      for (const pass of scopedPasses) {
         const deliveryId = randomUUID();
         const providerMessageId = `wfl_${campaign.id.replaceAll("-", "")}_${pass.id.replaceAll("-", "")}`;
         const outcome = await this.prisma.$transaction(async (transaction) => {
@@ -1063,14 +1101,9 @@ export class WalletWorker {
           await transaction.$queryRaw<Array<{ locked: string }>>`
             SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS "locked"
           `;
-          const consent = await transaction.customerConsent.findFirst({
-            where: { membershipId: pass.membershipId, consentType: "WALLET_PROMOTIONS" },
-            orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-          });
-          const consentActive = consent?.granted === true && consent.revokedAt === null;
-          const [lastDay, lastWeek] = consentActive
-            ? await Promise.all([
-                transaction.walletCampaignDelivery.count({
+          const lastDay =
+            pass.provider === "GOOGLE"
+              ? await transaction.walletCampaignDelivery.count({
                   where: {
                     membershipId: pass.membershipId,
                     provider: pass.provider,
@@ -1085,32 +1118,9 @@ export class WalletWorker {
                       },
                     ],
                   },
-                }),
-                transaction.walletCampaignDelivery.count({
-                  where: {
-                    membershipId: pass.membershipId,
-                    provider: pass.provider,
-                    OR: [
-                      {
-                        status: "SUCCEEDED",
-                        logicalSentAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
-                      },
-                      {
-                        status: "QUEUED",
-                        createdAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
-                      },
-                    ],
-                  },
-                }),
-              ])
-            : [0, 0];
-          const safeSkipCode = !consentActive
-            ? "CONSENT_REVOKED"
-            : lastDay >= 2
-              ? "WAFLO_PASS_LIMIT_24H"
-              : lastWeek >= 5
-                ? "WAFLO_PASS_LIMIT_7D"
-                : null;
+                })
+              : 0;
+          const safeSkipCode = lastDay >= 3 ? "GOOGLE_PROVIDER_QUOTA_24H" : null;
           const delivery = await transaction.walletCampaignDelivery.upsert({
             where: {
               campaignId_walletPassInstanceId: {
@@ -1263,6 +1273,13 @@ export class WalletWorker {
   }
 
   private async execute(command: WalletCommand) {
+    const processingStartedAt = Date.now();
+    workerLog("wallet_command_processing_started", {
+      commandId: command.id,
+      provider: command.provider,
+      commandType: command.commandType,
+      queueLatencyMs: Math.max(0, processingStartedAt - command.createdAt.getTime()),
+    });
     if (["ENSURE_TEMPLATE", "ISSUE", "SEND_PROMOTION"].includes(command.commandType)) {
       const profile = await this.prisma.organizationBillingProfile.findUnique({
         where: { organizationId: command.organizationId },
@@ -1444,6 +1461,17 @@ export class WalletWorker {
             },
           });
           if (pass.provider === "APPLE") await this.queueApplePush(pass, command);
+          if (pass.provider === "APPLE" && command.campaignDeliveryId) {
+            await this.prisma.walletCampaignDelivery.update({
+              where: { id: command.campaignDeliveryId },
+              data: {
+                status: "SUCCEEDED",
+                logicalSentAt: new Date(),
+                completedAt: new Date(),
+                safeFailureCode: null,
+              },
+            });
+          }
         } else if (command.commandType === "INVALIDATE") {
           const result = await provider.invalidateMembershipPass(
             input,
@@ -1475,6 +1503,9 @@ export class WalletWorker {
             },
             data: {
               status: input.transferred ? "INVALIDATED" : "ACTIVE",
+              ...(result.safeMetadata
+                ? { providerState: result.safeMetadata as Prisma.InputJsonValue }
+                : {}),
               lastProviderSyncAt: new Date(),
               lastProviderErrorCode: null,
             },
@@ -1492,7 +1523,7 @@ export class WalletWorker {
           ...(providerRequestId ? { providerRequestId } : {}),
         },
       });
-      if (command.commandType === "SEND_PROMOTION" && command.campaignDeliveryId) {
+      if (command.campaignDeliveryId) {
         const delivery = await this.prisma.walletCampaignDelivery.findUnique({
           where: { id: command.campaignDeliveryId },
           select: { campaignId: true },
@@ -1503,12 +1534,14 @@ export class WalletWorker {
         commandId: command.id,
         provider: command.provider,
         commandType: command.commandType,
+        processingDurationMs: Date.now() - processingStartedAt,
       });
     } catch (error) {
       workerLog("command_failed", {
         commandId: command.id,
         provider: command.provider,
         commandType: command.commandType,
+        processingDurationMs: Date.now() - processingStartedAt,
       });
       if (error instanceof HistoricalWalletStampSourceError) {
         await this.deadLetter(command, error.safeErrorCode);
@@ -1559,11 +1592,28 @@ export class WalletWorker {
             : {}),
         },
       }),
-      ...(command.walletPassInstanceId && command.commandType !== "SEND_PROMOTION"
+      ...(command.walletPassInstanceId &&
+      command.commandType !== "SEND_PROMOTION" &&
+      command.commandType !== "RECONCILE"
         ? [
             this.prisma.walletPassInstance.update({
               where: { id: command.walletPassInstanceId },
               data: { status: "ERROR", lastProviderErrorCode: error.category },
+            }),
+          ]
+        : []),
+      ...(command.walletPassInstanceId && command.commandType === "RECONCILE"
+        ? [
+            this.prisma.walletPassInstance.update({
+              where: { id: command.walletPassInstanceId },
+              data: {
+                providerState: {
+                  eligibilityState: "PROVIDER_UNAVAILABLE",
+                  checkedAt: new Date().toISOString(),
+                },
+                lastProviderSyncAt: new Date(),
+                lastProviderErrorCode: error.category,
+              },
             }),
           ]
         : []),
@@ -1623,7 +1673,7 @@ export class WalletWorker {
             this.prisma.walletCampaignDelivery.update({
               where: { id: command.campaignDeliveryId },
               data: {
-                status: "FAILED",
+                status: safeErrorCode === "RATE_LIMITED" ? "THROTTLED" : "FAILED",
                 safeFailureCode: safeErrorCode,
                 completedAt: new Date(),
                 ...(providerRequestId ? { providerRequestId } : {}),
@@ -1656,15 +1706,10 @@ export class WalletWorker {
       throw new Error("Promotional Wallet delivery is unavailable.");
     }
     if (delivery.status !== "QUEUED") return delivery.providerRequestId ?? undefined;
-    const consent = await this.prisma.customerConsent.findFirst({
-      where: { membershipId: delivery.membershipId, consentType: "WALLET_PROMOTIONS" },
-      orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-    });
-    const consentActive = consent?.granted === true && consent.revokedAt === null;
     const now = new Date();
-    const [lastDay, lastWeek] = consentActive
-      ? await Promise.all([
-          this.prisma.walletCampaignDelivery.count({
+    const lastDay =
+      delivery.provider === "GOOGLE"
+        ? await this.prisma.walletCampaignDelivery.count({
             where: {
               id: { not: delivery.id },
               membershipId: delivery.membershipId,
@@ -1672,31 +1717,47 @@ export class WalletWorker {
               status: "SUCCEEDED",
               logicalSentAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
             },
-          }),
-          this.prisma.walletCampaignDelivery.count({
-            where: {
-              id: { not: delivery.id },
-              membershipId: delivery.membershipId,
-              provider: delivery.provider,
-              status: "SUCCEEDED",
-              logicalSentAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
-            },
-          }),
-        ])
-      : [0, 0];
-    const safeSkipCode = !consentActive
-      ? "CONSENT_REVOKED"
-      : lastDay >= 2
-        ? "WAFLO_PASS_LIMIT_24H"
-        : lastWeek >= 5
-          ? "WAFLO_PASS_LIMIT_7D"
-          : delivery.campaign.status === "CANCELED"
-            ? "CAMPAIGN_CANCELED"
-            : null;
+          })
+        : 0;
+    const safeSkipCode =
+      delivery.campaign.status === "CANCELED"
+        ? "CAMPAIGN_CANCELED"
+        : lastDay >= 3
+          ? "GOOGLE_PROVIDER_QUOTA_24H"
+          : null;
     if (safeSkipCode) {
       await this.prisma.walletCampaignDelivery.update({
         where: { id: delivery.id },
         data: { status: "SKIPPED", safeSkipCode, completedAt: now },
+      });
+      return undefined;
+    }
+    if (delivery.provider === "APPLE") {
+      // Apple Wallet campaigns are canonical signed-pass updates. The durable
+      // UPDATE command allocates a new update tag/sequence, regenerates the
+      // pass with a changeMessage field, then queues a background Wallet APNs
+      // signal; it never sends an arbitrary application alert.
+      await this.prisma.$transaction(async (transaction) => {
+        await transaction.walletPassInstance.update({
+          where: { id: delivery.walletPassInstanceId },
+          data: {
+            appleMerchantMessageTitle: delivery.campaign.title,
+            appleMerchantMessageBody: delivery.campaign.body,
+            appleMerchantMessageUrl: delivery.campaign.destinationUrl,
+            appleMerchantMessageLocale: delivery.campaign.locale,
+          },
+        });
+        const queued = await queueWalletPassStateChange(transaction, {
+          walletPassInstanceId: delivery.walletPassInstanceId,
+          commandType: "UPDATE",
+          reason: "MERCHANT_WALLET_MESSAGE",
+          eventKey: `campaign:${delivery.campaignId}:delivery:${delivery.id}`,
+          safePayload: { campaignId: delivery.campaignId, campaignDeliveryId: delivery.id },
+        });
+        await transaction.walletCommand.update({
+          where: { id: queued.command.id },
+          data: { campaignDeliveryId: delivery.id },
+        });
       });
       return undefined;
     }
@@ -1757,7 +1818,9 @@ export class WalletWorker {
         select: { status: true, dispatchedAt: true },
       }),
       Promise.all(
-        (["QUEUED", "SUCCEEDED", "SKIPPED", "FAILED"] as const).map((status) =>
+        (
+          ["QUEUED", "SUCCEEDED", "SKIPPED", "THROTTLED", "UNKNOWN", "INVALID", "FAILED"] as const
+        ).map((status) =>
           this.prisma.walletCampaignDelivery.count({ where: { campaignId, status } }),
         ),
       ),
@@ -1766,7 +1829,10 @@ export class WalletWorker {
     const queued = counts[0] ?? 0;
     const succeeded = counts[1] ?? 0;
     const skipped = counts[2] ?? 0;
-    const failed = counts[3] ?? 0;
+    const throttled = counts[3] ?? 0;
+    const unknown = counts[4] ?? 0;
+    const invalid = counts[5] ?? 0;
+    const failed = (counts[6] ?? 0) + throttled + unknown + invalid;
     const terminal = campaign.dispatchedAt !== null && queued === 0;
     const status = !campaign.dispatchedAt
       ? campaign.status
@@ -1784,6 +1850,8 @@ export class WalletWorker {
         succeededCount: succeeded,
         skippedCount: skipped,
         failedCount: failed,
+        throttledCount: throttled,
+        unknownCount: unknown,
         status,
         ...(terminal ? { completedAt: new Date() } : {}),
       },
@@ -2087,7 +2155,10 @@ export class WalletWorker {
     const source =
       (await this.readBrandLogoBytes(programLogo)) ?? (await this.readBrandLogoBytes(brandLogo));
     const bytes = source
-      ? await prepareGoogleWalletProgramLogo(source)
+      ? await prepareGoogleWalletProgramLogo(
+          source,
+          binding.programVersion.visualTheme?.accentColor ?? "#E4572E",
+        )
       : await this.defaultGoogleProgramLogo();
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
     const assetType = source
@@ -2218,7 +2289,7 @@ export class WalletWorker {
   }
 
   private async defaultGoogleProgramLogo() {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="0 0 660 660"><rect width="660" height="660" rx="132" fill="#E4572E"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="0 0 660 660"><rect width="660" height="660" fill="#E4572E"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   }
 

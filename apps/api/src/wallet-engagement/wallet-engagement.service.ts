@@ -1,20 +1,14 @@
 import { createHash } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
-import type {
-  WalletCampaignCreateInput,
-  WalletNearbyUpdateInput,
-  WalletPromotionConsentInput,
-} from "@waflo/contracts";
+import type { WalletCampaignCreateInput, WalletNearbyUpdateInput } from "@waflo/contracts";
 import {
   APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   resolveWalletNearbyText,
 } from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
-import { AccountAccessService } from "../account/account-access.service.js";
 import { AppError } from "../common/app-error.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import type { WafloRequest } from "../common/request-context.js";
-import { CustomerCardService } from "../customer/customer-card.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { TenantService } from "../tenancy/tenant.service.js";
@@ -101,9 +95,7 @@ export class WalletEngagementService {
     private readonly tenants: TenantService,
     private readonly audit: AuditService,
     private readonly providers: WalletProviderRegistry,
-    private readonly customerCards: CustomerCardService,
     private readonly environment: EnvironmentService,
-    private readonly accountAccess: AccountAccessService,
   ) {}
 
   private async program(userId: string, organizationId: string, programId: string, manage = false) {
@@ -149,11 +141,11 @@ export class WalletEngagementService {
           mode: adapter.mode,
           installedPasses: configured ? "AVAILABLE" : "NOT_CONFIGURED",
           operationalUpdates: configured ? "AVAILABLE" : "NOT_CONFIGURED",
-          manualPromotion: "PROVIDER_CONFIRMATION_REQUIRED",
+          manualPromotion: configured ? "AVAILABLE" : "NOT_CONFIGURED",
           nearbyRelevance: configured ? "AVAILABLE" : "NOT_CONFIGURED",
           customNearbyText: true,
           providerControlsNearbyText: false,
-          selectableForManualPromotion: false,
+          selectableForManualPromotion: configured,
         }
       : {
           configured,
@@ -166,6 +158,29 @@ export class WalletEngagementService {
           providerControlsNearbyText: true,
           selectableForManualPromotion: configured,
         };
+  }
+
+  async notificationPrograms(userId: string, organizationId: string) {
+    await this.tenants.requireMembership(userId, organizationId, "programs.engagement_manage");
+    const programs = await this.prisma.client.loyaltyProgram.findMany({
+      where: { organizationId, status: "PUBLISHED", currentPublishedVersionId: { not: null } },
+      select: { id: true, internalName: true, publicSlug: true, status: true },
+      orderBy: { internalName: "asc" },
+    });
+    return { items: programs.map((program) => ({ ...program, notificationCapable: true })) };
+  }
+
+  async notificationBranches(userId: string, organizationId: string, programId: string) {
+    const program = await this.program(userId, organizationId, programId, true);
+    const participating = new Set(
+      program.currentPublishedVersion?.locations.map((item) => item.locationId),
+    );
+    return {
+      items: program.organization.locations
+        .filter((location) => participating.has(location.id))
+        .map((location) => ({ id: location.id, name: location.name, city: location.city })),
+      semantics: "RECORDED_LEDGER_EVENT_AT_BRANCH" as const,
+    };
   }
 
   async getMerchantView(userId: string, organizationId: string, programId: string) {
@@ -442,14 +457,30 @@ export class WalletEngagementService {
     return { enabled: updated.enabled, revision: updated.revision, updateQueued: true };
   }
 
-  private async eligiblePasses(organizationId: string, programId: string) {
+  private async eligiblePasses(
+    organizationId: string,
+    programId: string,
+    branchId?: string | null,
+  ) {
     return this.prisma.client.$queryRaw<
-      Array<{ id: string; membershipId: string; provider: "GOOGLE" }>
+      Array<{
+        id: string;
+        membershipId: string;
+        provider: "APPLE" | "GOOGLE";
+        providerState: unknown;
+        lastProviderSyncAt: Date | null;
+        lastProviderErrorCode: string | null;
+        activeAppleRegistrations: bigint;
+      }>
     >`
       SELECT
         pass."id",
         pass."membership_id" AS "membershipId",
-        pass."provider"::text AS "provider"
+        pass."provider"::text AS "provider",
+        pass."provider_state" AS "providerState",
+        pass."last_provider_sync_at" AS "lastProviderSyncAt",
+        pass."last_provider_error_code" AS "lastProviderErrorCode",
+        COUNT(registration."id")::bigint AS "activeAppleRegistrations"
       FROM "wallet_pass_instances" AS pass
       INNER JOIN "membership_credentials" AS credential
         ON credential."id" = pass."membership_credential_id"
@@ -457,40 +488,141 @@ export class WalletEngagementService {
         ON membership."id" = pass."membership_id"
       INNER JOIN "customers" AS customer
         ON customer."id" = membership."customer_id"
-      INNER JOIN LATERAL (
-        SELECT consent."granted", consent."revoked_at"
-        FROM "customer_consents" AS consent
-        WHERE consent."membership_id" = membership."id"
-          AND consent."consent_type" = 'WALLET_PROMOTIONS'
-        ORDER BY consent."captured_at" DESC, consent."id" DESC
-        LIMIT 1
-      ) AS current_consent ON true
+      LEFT JOIN "apple_pass_registrations" AS registration
+        ON registration."wallet_pass_instance_id" = pass."id"
+        AND registration."unregistered_at" IS NULL
       WHERE pass."organization_id" = CAST(${organizationId} AS UUID)
         AND membership."organization_id" = CAST(${organizationId} AS UUID)
         AND customer."organization_id" = CAST(${organizationId} AS UUID)
         AND credential."organization_id" = CAST(${organizationId} AS UUID)
         AND membership."program_id" = CAST(${programId} AS UUID)
-        AND pass."provider" = 'GOOGLE'
+        AND pass."provider" IN ('APPLE', 'GOOGLE')
         AND pass."status" IN ('ISSUED', 'ACTIVE')
         AND credential."status" = 'ACTIVE'
         AND membership."status" = 'ACTIVE'
         AND customer."status" = 'ACTIVE'
-        AND current_consent."granted" = true
-        AND current_consent."revoked_at" IS NULL
+        AND (
+          ${branchId ?? null}::uuid IS NULL OR EXISTS (
+            SELECT 1
+            FROM "loyalty_ledger_entries" AS ledger
+            WHERE ledger."membership_id" = membership."id"
+              AND ledger."organization_id" = CAST(${organizationId} AS UUID)
+              AND ledger."location_id" = CAST(${branchId ?? null} AS UUID)
+          )
+        )
+      GROUP BY pass."id"
       ORDER BY pass."id" ASC
       LIMIT ${MAX_CAMPAIGN_ELIGIBLE_PASSES + 1}
     `;
   }
 
-  async audienceEstimate(userId: string, organizationId: string, programId: string) {
+  private googleEligibility(candidate: {
+    providerState: unknown;
+    lastProviderSyncAt: Date | null;
+    lastProviderErrorCode: string | null;
+  }) {
+    const state =
+      candidate.providerState && typeof candidate.providerState === "object"
+        ? (candidate.providerState as Record<string, unknown>)
+        : {};
+    const checkedAt = typeof state.checkedAt === "string" ? Date.parse(state.checkedAt) : NaN;
+    const fresh = Number.isFinite(checkedAt) && checkedAt >= Date.now() - 5 * 60_000;
+    if (fresh && state.hasUsers === true) return "READY" as const;
+    if (fresh && state.hasUsers === false) return "NO_RECIPIENTS" as const;
+    if (candidate.lastProviderErrorCode && candidate.lastProviderSyncAt) {
+      return "PROVIDER_UNAVAILABLE" as const;
+    }
+    return "CHECKING" as const;
+  }
+
+  private async queueGoogleEligibilityReconciliation(
+    organizationId: string,
+    candidates: Awaited<ReturnType<typeof this.eligiblePasses>>,
+  ) {
+    const bucket = Math.floor(Date.now() / (5 * 60_000));
+    const stale = candidates.filter(
+      (candidate) =>
+        candidate.provider === "GOOGLE" && this.googleEligibility(candidate) === "CHECKING",
+    );
+    await Promise.all(
+      stale.slice(0, 50).map((candidate) => {
+        const idempotencyKey = `wallet:google:eligibility:${candidate.id}:${bucket}`;
+        return this.prisma.client.walletCommand.upsert({
+          where: { idempotencyKey },
+          create: {
+            organizationId,
+            membershipId: candidate.membershipId,
+            walletPassInstanceId: candidate.id,
+            provider: "GOOGLE",
+            commandType: "RECONCILE",
+            idempotencyKey,
+            payloadFingerprint: fingerprint({ candidate: candidate.id, bucket }),
+            safePayload: { eligibilityReconciliation: true },
+          },
+          update: {},
+        });
+      }),
+    );
+  }
+
+  async audienceEstimate(
+    userId: string,
+    organizationId: string,
+    programId: string,
+    branchId?: string | null,
+  ) {
     await this.program(userId, organizationId, programId);
-    const eligible = await this.eligiblePasses(organizationId, programId);
+    const eligible = await this.eligiblePasses(organizationId, programId, branchId);
+    await this.queueGoogleEligibilityReconciliation(organizationId, eligible);
+    const googleConfigured = this.capability("GOOGLE").configured;
+    const appleConfigured = this.capability("APPLE").configured;
+    const google = eligible.filter((item) => item.provider === "GOOGLE");
+    const apple = eligible.filter((item) => item.provider === "APPLE");
+    const googleReady = google.filter((item) => this.googleEligibility(item) === "READY").length;
+    const googleChecking = google.filter(
+      (item) => this.googleEligibility(item) === "CHECKING",
+    ).length;
+    const googleUnavailable = google.some(
+      (item) => this.googleEligibility(item) === "PROVIDER_UNAVAILABLE",
+    );
+    const applePasses = apple.filter((item) => item.activeAppleRegistrations > 0n);
+    const appleDevices = applePasses.reduce(
+      (sum, item) => sum + Number(item.activeAppleRegistrations),
+      0,
+    );
     return {
       audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS" as const,
-      total: eligible.length,
-      providers: { apple: 0, google: eligible.length },
+      branchId: branchId ?? null,
+      // A zero is reserved for a positively verified empty audience. While a
+      // Google object is stale or the provider is unavailable, clients get a
+      // machine-readable provider state and an unknown total instead.
+      total: googleChecking > 0 || googleUnavailable ? null : googleReady + applePasses.length,
+      providers: {
+        apple: {
+          status: !appleConfigured
+            ? "MISCONFIGURED"
+            : applePasses.length > 0
+              ? "READY"
+              : "NO_RECIPIENTS",
+          eligiblePasses: applePasses.length,
+          registeredDevices: appleDevices,
+        },
+        google: {
+          status: !googleConfigured
+            ? "MISCONFIGURED"
+            : googleUnavailable
+              ? "PROVIDER_UNAVAILABLE"
+              : googleChecking > 0
+                ? "CHECKING"
+                : googleReady > 0
+                  ? "READY"
+                  : "NO_RECIPIENTS",
+          eligibleObjects: googleReady,
+          checking: googleChecking,
+        },
+      },
       capped: eligible.length > MAX_CAMPAIGN_ELIGIBLE_PASSES,
-      exclusions: ["NO_CURRENT_CONSENT", "INACTIVE_MEMBERSHIP", "NO_ELIGIBLE_WALLET_PASS"],
+      exclusions: ["INACTIVE_MEMBERSHIP", "NO_SAVED_GOOGLE_PASS", "NO_APPLE_DEVICE_REGISTRATION"],
     };
   }
 
@@ -524,10 +656,12 @@ export class WalletEngagementService {
     request: WafloRequest,
   ) {
     const program = await this.program(userId, organizationId, programId, true);
-    if (!this.capability("GOOGLE").selectableForManualPromotion) {
+    if (
+      input.providers.some((provider) => !this.capability(provider).selectableForManualPromotion)
+    ) {
       throw new AppError(
-        "GOOGLE_WALLET_NOT_CONFIGURED",
-        "Google Wallet manual notifications are not configured.",
+        "WALLET_PROVIDER_MISCONFIGURED",
+        "A selected Wallet provider is not configured for notifications.",
         HttpStatus.CONFLICT,
       );
     }
@@ -538,15 +672,54 @@ export class WalletEngagementService {
         HttpStatus.CONFLICT,
       );
     }
-    const eligible = await this.eligiblePasses(organizationId, programId);
-    if (eligible.length === 0) {
+    if (input.branchId) {
+      const branch = program.organization.locations.find(
+        (location) => location.id === input.branchId,
+      );
+      const publishedAtBranch =
+        program.currentPublishedVersion?.locations.some(
+          (location) => location.locationId === input.branchId,
+        ) === true;
+      if (!branch || !publishedAtBranch) {
+        throw new AppError(
+          "BRANCH_OUT_OF_SCOPE",
+          "This branch is not available for the selected Loyalty Card.",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+    }
+    const eligible = await this.eligiblePasses(organizationId, programId, input.branchId);
+    const googleCandidates = eligible.filter((candidate) => candidate.provider === "GOOGLE");
+    const appleCandidates = eligible.filter(
+      (candidate) => candidate.provider === "APPLE" && candidate.activeAppleRegistrations > 0n,
+    );
+    const googleEligible = googleCandidates.filter(
+      (candidate) => this.googleEligibility(candidate) === "READY",
+    );
+    const googleUnknown = googleCandidates.filter((candidate) => {
+      const state = this.googleEligibility(candidate);
+      return state === "CHECKING" || state === "PROVIDER_UNAVAILABLE";
+    });
+    await this.queueGoogleEligibilityReconciliation(organizationId, eligible);
+    if (input.providers.includes("GOOGLE") && googleUnknown.length > 0) {
       throw new AppError(
-        "WALLET_CAMPAIGN_NO_ELIGIBLE_AUDIENCE",
-        "No active, consented Google Wallet holders are eligible right now.",
+        "WALLET_PROVIDER_UNAVAILABLE",
+        "Google Wallet saved-pass state is still being verified. Try again shortly.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    const scopedEligible = [
+      ...(input.providers.includes("APPLE") ? appleCandidates : []),
+      ...(input.providers.includes("GOOGLE") ? googleEligible : []),
+    ];
+    if (scopedEligible.length === 0) {
+      throw new AppError(
+        "WALLET_NOTIFICATION_NO_RECIPIENTS",
+        "No saved Wallet passes are eligible for the selected scope.",
         HttpStatus.CONFLICT,
       );
     }
-    if (eligible.length > MAX_CAMPAIGN_ELIGIBLE_PASSES) {
+    if (scopedEligible.length > MAX_CAMPAIGN_ELIGIBLE_PASSES) {
       throw new AppError(
         "WALLET_CAMPAIGN_AUDIENCE_LIMIT",
         "This audience exceeds the current safe campaign limit.",
@@ -562,6 +735,7 @@ export class WalletEngagementService {
       body: input.body,
       destinationUrl,
       providers: input.providers,
+      branchId: input.branchId ?? null,
     });
     const now = new Date();
     const scheduledAt = nextPromotionalWindow(program.organization.timezone, now);
@@ -608,6 +782,7 @@ export class WalletEngagementService {
           where: {
             organizationId,
             programId,
+            ...(input.branchId ? { branchId: input.branchId } : {}),
             contentFingerprint,
             status: { notIn: ["CANCELED", "FAILED"] },
             createdAt: { gte: new Date(now.getTime() - DUPLICATE_COOLDOWN_MS) },
@@ -632,7 +807,18 @@ export class WalletEngagementService {
             audienceRule: input.audienceRule,
             contentFingerprint,
             idempotencyKey: input.idempotencyKey,
-            eligibleCount: eligible.length,
+            eligibleCount: scopedEligible.length,
+            appleEligiblePassCount: input.providers.includes("APPLE") ? appleCandidates.length : 0,
+            appleRegisteredDeviceCount: input.providers.includes("APPLE")
+              ? appleCandidates.reduce(
+                  (sum, candidate) => sum + Number(candidate.activeAppleRegistrations),
+                  0,
+                )
+              : 0,
+            googleEligibleObjectCount: input.providers.includes("GOOGLE")
+              ? googleEligible.length
+              : 0,
+            unknownCount: input.providers.includes("GOOGLE") ? googleUnknown.length : 0,
             createdByUserId: userId,
             scheduledAt,
           },
@@ -649,7 +835,8 @@ export class WalletEngagementService {
               programId,
               providers: input.providers,
               audienceRule: input.audienceRule,
-              eligibleCount: eligible.length,
+              eligibleCount: scopedEligible.length,
+              branchId: input.branchId ?? null,
               quietHoursApplied: scheduledAt > now,
             },
           },
@@ -676,18 +863,66 @@ export class WalletEngagementService {
         title: campaign.title,
         body: campaign.body,
         locale: campaign.locale,
+        branchId: campaign.branchId,
         providers: intendedProviders(campaign.intendedProviders),
         audienceRule: campaign.audienceRule,
         status: campaign.status,
         counts: {
           eligible: campaign.eligibleCount,
+          appleEligiblePasses: campaign.appleEligiblePassCount,
+          appleRegisteredDevices: campaign.appleRegisteredDeviceCount,
+          googleEligibleObjects: campaign.googleEligibleObjectCount,
           queued: campaign.queuedCount,
           succeeded: campaign.succeededCount,
           skipped: campaign.skippedCount,
           failed: campaign.failedCount,
+          throttled: campaign.throttledCount,
+          unknown: campaign.unknownCount,
         },
         creator: campaign.createdBy.displayName,
       })),
+    };
+  }
+
+  async campaignDetail(userId: string, organizationId: string, campaignId: string) {
+    await this.tenants.requireMembership(userId, organizationId, "programs.engagement_manage");
+    const campaign = await this.prisma.client.walletEngagementCampaign.findFirst({
+      where: { id: campaignId, organizationId },
+      include: {
+        deliveries: {
+          select: {
+            provider: true,
+            status: true,
+            safeSkipCode: true,
+            safeFailureCode: true,
+            completedAt: true,
+          },
+          orderBy: { createdAt: "asc" },
+          take: 200,
+        },
+      },
+    });
+    if (!campaign)
+      throw new AppError("CAMPAIGN_NOT_FOUND", "Wallet campaign not found.", HttpStatus.NOT_FOUND);
+    return {
+      id: campaign.id,
+      status: campaign.status,
+      programId: campaign.programId,
+      branchId: campaign.branchId,
+      providers: intendedProviders(campaign.intendedProviders),
+      counts: {
+        eligible: campaign.eligibleCount,
+        appleEligiblePasses: campaign.appleEligiblePassCount,
+        appleRegisteredDevices: campaign.appleRegisteredDeviceCount,
+        googleEligibleObjects: campaign.googleEligibleObjectCount,
+        queued: campaign.queuedCount,
+        succeeded: campaign.succeededCount,
+        skipped: campaign.skippedCount,
+        failed: campaign.failedCount,
+        throttled: campaign.throttledCount,
+        unknown: campaign.unknownCount,
+      },
+      deliveries: campaign.deliveries,
     };
   }
 
@@ -732,78 +967,5 @@ export class WalletEngagementService {
       return { id: campaignId, status: "CANCELED" as const };
     });
     return canceled;
-  }
-
-  async customerConsent(request: WafloRequest, developmentOverride?: string) {
-    const context = await this.customerCards.requireSession(request, developmentOverride);
-    const membership = context.session.membership;
-    const consent = await this.prisma.client.customerConsent.findFirst({
-      where: { membershipId: membership.id, consentType: "WALLET_PROMOTIONS" },
-      orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-    });
-    return {
-      scope: "WALLET_PROMOTIONS" as const,
-      granted: consent?.granted === true && consent.revokedAt === null,
-      grantedAt: consent?.granted && consent.revokedAt === null ? consent.capturedAt : null,
-      revokedAt: consent?.revokedAt ?? null,
-      noticeVersion: consent?.documentFingerprint ?? null,
-      legalReviewRequired: true,
-      requiredForLoyalty: false,
-      prechecked: false,
-    };
-  }
-
-  async setCustomerConsent(
-    request: WafloRequest,
-    input: WalletPromotionConsentInput,
-    developmentOverride?: string,
-  ) {
-    const context = await this.customerCards.requireSession(request, developmentOverride);
-    const membership = context.session.membership;
-    if (input.granted) {
-      await this.accountAccess.requireOperationalAccess(membership.organizationId, true);
-    }
-    const now = new Date();
-    const consent = await this.prisma.client.$transaction(async (transaction) => {
-      const created = await transaction.customerConsent.create({
-        data: {
-          organizationId: membership.organizationId,
-          customerId: membership.customerId,
-          membershipId: membership.id,
-          consentType: "WALLET_PROMOTIONS",
-          granted: input.granted,
-          documentFingerprint: input.noticeVersion,
-          locale: input.locale,
-          capturedAt: now,
-          revokedAt: input.granted ? null : now,
-          safeMetadata: {
-            source: "CUSTOMER_WEB_CARD_SETTINGS",
-            separatelyPresented: true,
-            prechecked: false,
-          },
-        },
-      });
-      await this.audit.recordInTransaction(
-        transaction,
-        {
-          organizationId: membership.organizationId,
-          action: input.granted
-            ? "customer.wallet_promotions_opted_in"
-            : "customer.wallet_promotions_opted_out",
-          targetType: "membership",
-          targetId: membership.id,
-          metadata: { consentId: created.id, noticeVersion: input.noticeVersion },
-        },
-        request,
-      );
-      return created;
-    });
-    return {
-      scope: "WALLET_PROMOTIONS" as const,
-      granted: consent.granted,
-      grantedAt: consent.granted ? consent.capturedAt : null,
-      revokedAt: consent.revokedAt,
-      noticeVersion: consent.documentFingerprint,
-    };
   }
 }

@@ -55,6 +55,7 @@ const customerCardMembershipInclude = {
       membershipCredentialId: true,
       lastProviderErrorCode: true,
       providerState: true,
+      updatedAt: true,
     },
   },
 } satisfies Prisma.MembershipInclude;
@@ -303,6 +304,48 @@ export class CustomerCardService {
     return { wallet: card.wallet, credentialStatus: card.membership.credentialStatus };
   }
 
+  /** Stable, lightweight readiness contract for Customer Web and mobile apps. */
+  async walletReadiness(
+    request: WafloRequest,
+    expectedPublicMembershipId?: string,
+    developmentOverride?: string,
+  ) {
+    const context = await this.requireSession(request, developmentOverride);
+    const membership = context.session.membership;
+    if (
+      expectedPublicMembershipId &&
+      membership.publicMembershipId !== expectedPublicMembershipId
+    ) {
+      throw new AppError(
+        "CUSTOMER_CARD_NOT_FOUND",
+        "This customer card is unavailable.",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const credential = context.session.membershipCredential;
+    const credentialActive =
+      credential?.status === "ACTIVE" &&
+      membership.status === "ACTIVE" &&
+      membership.customer.status === "ACTIVE";
+    const wallet = membership.walletPassInstances.filter(
+      (item) => item.membershipCredentialId === credential?.id,
+    );
+    return {
+      cardId: membership.publicMembershipId,
+      apple: this.walletState(
+        "APPLE",
+        wallet.find((item) => item.provider === "APPLE"),
+        credentialActive,
+      ),
+      google: this.walletState(
+        "GOOGLE",
+        wallet.find((item) => item.provider === "GOOGLE"),
+        credentialActive,
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
   private async publicAssetDataUri(
     asset: PreviewAsset | null,
     label: string,
@@ -548,23 +591,33 @@ export class CustomerCardService {
           status: string;
           lastProviderErrorCode: string | null;
           providerState: unknown;
+          updatedAt: Date;
         }
       | undefined,
     credentialActive: boolean,
   ) {
     const mode = this.walletProviders.get(provider).mode;
+    const artifactAvailable = instance?.status === "ACTIVE" || instance?.status === "ISSUED";
+    const configured = mode !== "DISABLED";
+    const status =
+      !credentialActive || !configured
+        ? ("UNAVAILABLE" as const)
+        : artifactAvailable
+          ? ("READY" as const)
+          : instance?.status === "ERROR"
+            ? ("UNAVAILABLE" as const)
+            : ("PREPARING" as const);
     return {
       mode,
-      status:
-        !credentialActive || mode === "DISABLED"
-          ? ("UNAVAILABLE" as const)
-          : instance?.status === "ACTIVE" || instance?.status === "ISSUED"
-            ? ("READY" as const)
-            : instance?.status === "ERROR"
-              ? ("UNAVAILABLE" as const)
-              : ("PREPARING" as const),
+      configured,
+      state: status,
+      status,
+      artifactAvailable,
+      installationAvailable: configured && artifactAvailable && credentialActive,
       testAdapter: mode === "TEST_ADAPTER",
       safeErrorCode: instance?.lastProviderErrorCode ?? null,
+      reason: instance?.lastProviderErrorCode ?? null,
+      updatedAt: instance?.updatedAt?.toISOString() ?? null,
     };
   }
 
