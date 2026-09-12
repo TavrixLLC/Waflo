@@ -123,12 +123,14 @@ function capabilityLabel(state: CapabilityState, ar: boolean) {
   return ar ? "بانتظار تأكيد المزود" : "Provider confirmation required";
 }
 
-function CampaignCount({ label, value }: { label: string; value: number }) {
+function CampaignMetric({ label, value }: { label: string; value: number }) {
   return (
-    <span className="wallet-campaign-count">
-      <strong>{value}</strong>
-      <small>{label}</small>
-    </span>
+    <div className="wallet-campaign-metric">
+      <dt>{label}</dt>
+      <dd>
+        <bdi dir="ltr">{value}</bdi>
+      </dd>
+    </div>
   );
 }
 
@@ -779,15 +781,18 @@ export function WalletEngagementPanel({
                     data-status={campaign.status.toLowerCase()}
                   >
                     <header>
-                      <div>
-                        <strong>{campaign.title}</strong>
-                        <small>
-                          {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          }).format(new Date(campaign.createdAt))}{" "}
-                          · {campaign.creator}
-                        </small>
+                      <div className="wallet-history-item__summary">
+                        <strong className="wallet-history-item__title">{campaign.title}</strong>
+                        <p className="wallet-history-item__metadata">
+                          <time dateTime={campaign.createdAt}>
+                            {new Intl.DateTimeFormat(ar ? "ar-IQ-u-nu-latn" : "en", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(new Date(campaign.createdAt))}
+                          </time>
+                          <span aria-hidden="true"> · </span>
+                          <bdi>{campaign.creator}</bdi>
+                        </p>
                       </div>
                       <Badge tone={campaignStatusTone(campaign.status)}>
                         {campaignStatusLabel(campaign.status, ar)}
@@ -802,67 +807,94 @@ export function WalletEngagementPanel({
                           : "Delivery summary"
                       }
                     >
-                      <div>
-                        <span className="wallet-history-item__provider-mark" aria-hidden="true">
-                          A
-                        </span>
-                        <div>
-                          <strong>Apple Wallet</strong>
-                          <small>
-                            {ar
-                              ? `${campaign.counts.appleEligiblePasses} \u0628\u0637\u0627\u0642\u0627\u062a \u0645\u0624\u0647\u0644\u0629 \u00b7 ${campaign.counts.appleRegisteredDevices} \u0623\u062c\u0647\u0632\u0629 \u0645\u0633\u062c\u0644\u0629`
-                              : `${campaign.counts.appleEligiblePasses} eligible passes · ${campaign.counts.appleRegisteredDevices} registered devices`}
-                          </small>
+                      <section
+                        className="wallet-history-item__provider-card"
+                        aria-label={ar ? "نتائج Apple Wallet" : "Apple Wallet results"}
+                      >
+                        <div className="wallet-history-item__provider-heading">
+                          <span className="wallet-history-item__provider-mark" aria-hidden="true">
+                            A
+                          </span>
+                          <strong>
+                            <bdi dir="ltr">Apple Wallet</bdi>
+                          </strong>
                         </div>
-                      </div>
-                      <div>
-                        <span
-                          className="wallet-history-item__provider-mark wallet-history-item__provider-mark--google"
-                          aria-hidden="true"
-                        >
-                          G
-                        </span>
-                        <div>
-                          <strong>Google Wallet</strong>
-                          <small>
-                            {ar
-                              ? `${campaign.counts.googleEligibleObjects} \u0628\u0637\u0627\u0642\u0627\u062a \u0645\u062d\u0641\u0648\u0638\u0629 \u0645\u0624\u0647\u0644\u0629`
-                              : `${campaign.counts.googleEligibleObjects} eligible saved passes`}
-                          </small>
+                        <dl className="wallet-history-item__provider-metrics">
+                          <div>
+                            <dt>{ar ? "بطاقات مؤهلة" : "Eligible passes"}</dt>
+                            <dd>
+                              <bdi dir="ltr">{campaign.counts.appleEligiblePasses}</bdi>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{ar ? "أجهزة مسجلة" : "Registered devices"}</dt>
+                            <dd>
+                              <bdi dir="ltr">{campaign.counts.appleRegisteredDevices}</bdi>
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+                      <section
+                        className="wallet-history-item__provider-card"
+                        aria-label={ar ? "نتائج Google Wallet" : "Google Wallet results"}
+                      >
+                        <div className="wallet-history-item__provider-heading">
+                          <span
+                            className="wallet-history-item__provider-mark wallet-history-item__provider-mark--google"
+                            aria-hidden="true"
+                          >
+                            G
+                          </span>
+                          <strong>
+                            <bdi dir="ltr">Google Wallet</bdi>
+                          </strong>
                         </div>
-                      </div>
+                        <dl className="wallet-history-item__provider-metrics">
+                          <div>
+                            <dt>{ar ? "بطاقات محفوظة مؤهلة" : "Eligible saved passes"}</dt>
+                            <dd>
+                              <bdi dir="ltr">{campaign.counts.googleEligibleObjects}</bdi>
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
                     </section>
-                    <footer className="wallet-history-item__outcomes">
-                      <CampaignCount
-                        label={ar ? "مؤهل" : "eligible"}
-                        value={campaign.counts.eligible}
-                      />
-                      <CampaignCount
-                        label={ar ? "نجح" : "succeeded"}
-                        value={campaign.counts.succeeded}
-                      />
-                      <CampaignCount
-                        label={ar ? "تم تخطيه" : "skipped"}
-                        value={campaign.counts.skipped}
-                      />
-                      <CampaignCount label={ar ? "فشل" : "failed"} value={campaign.counts.failed} />
-                      {campaign.counts.queued ? (
-                        <CampaignCount
-                          label={
-                            ar
-                              ? "\u0642\u064a\u062f \u0627\u0644\u0625\u0631\u0633\u0627\u0644"
-                              : "sending"
-                          }
-                          value={campaign.counts.queued}
+                    <section
+                      className="wallet-history-item__outcomes"
+                      aria-label={ar ? "نتائج الحملة" : "Campaign results"}
+                    >
+                      <h4>{ar ? "نتائج الحملة" : "Campaign results"}</h4>
+                      <dl>
+                        <CampaignMetric
+                          label={ar ? "مؤهل" : "Eligible"}
+                          value={campaign.counts.eligible}
                         />
-                      ) : null}
-                      {campaign.counts.throttled ? (
-                        <CampaignCount
-                          label={ar ? "\u0645\u0624\u062c\u0644" : "retrying"}
-                          value={campaign.counts.throttled}
+                        <CampaignMetric
+                          label={ar ? "تم الإرسال" : "Sent"}
+                          value={campaign.counts.succeeded}
                         />
-                      ) : null}
-                    </footer>
+                        <CampaignMetric
+                          label={ar ? "تم تخطيه" : "Skipped"}
+                          value={campaign.counts.skipped}
+                        />
+                        <CampaignMetric
+                          label={ar ? "فشل" : "Failed"}
+                          value={campaign.counts.failed}
+                        />
+                        {campaign.counts.queued ? (
+                          <CampaignMetric
+                            label={ar ? "قيد الإرسال" : "Sending"}
+                            value={campaign.counts.queued}
+                          />
+                        ) : null}
+                        {campaign.counts.throttled ? (
+                          <CampaignMetric
+                            label={ar ? "مؤجل" : "Retrying"}
+                            value={campaign.counts.throttled}
+                          />
+                        ) : null}
+                      </dl>
+                    </section>
                   </article>
                 ))}
               </div>

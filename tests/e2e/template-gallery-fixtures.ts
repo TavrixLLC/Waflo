@@ -215,7 +215,80 @@ export async function mockTemplateGalleryApi(
   let walletNearbyCustomAr: string | null = null;
   let organizationBusinessCategory = businessCategory;
   let organizationDefaultLocale = "EN";
-  const walletCampaigns: Array<Record<string, unknown>> = [];
+  const walletCampaigns: Array<Record<string, unknown>> = [
+    {
+      id: "wallet-campaign-completed",
+      createdAt: "2026-08-10T09:00:00.000Z",
+      scheduledAt: "2026-08-10T09:00:00.000Z",
+      title: "Morning coffee reminder",
+      body: "Your loyalty card is ready for your next coffee visit.",
+      locale: "EN",
+      providers: ["APPLE", "GOOGLE"],
+      audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+      status: "COMPLETED",
+      counts: {
+        eligible: 12,
+        appleEligiblePasses: 2,
+        appleRegisteredDevices: 2,
+        googleEligibleObjects: 10,
+        queued: 0,
+        succeeded: 12,
+        skipped: 0,
+        failed: 0,
+        throttled: 0,
+        unknown: 0,
+      },
+      creator: "Gallery Merchant",
+    },
+    {
+      id: "wallet-campaign-review",
+      createdAt: "2026-08-09T14:30:00.000Z",
+      scheduledAt: "2026-08-09T14:30:00.000Z",
+      title: "Weekend offer update",
+      body: "Your member offer is ready before the weekend.",
+      locale: "EN",
+      providers: ["APPLE", "GOOGLE"],
+      audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+      status: "PARTIAL_FAILURE",
+      counts: {
+        eligible: 12,
+        appleEligiblePasses: 2,
+        appleRegisteredDevices: 2,
+        googleEligibleObjects: 10,
+        queued: 0,
+        succeeded: 10,
+        skipped: 1,
+        failed: 1,
+        throttled: 0,
+        unknown: 0,
+      },
+      creator: "Gallery Merchant",
+    },
+    {
+      id: "wallet-campaign-failed",
+      createdAt: "2026-08-08T11:15:00.000Z",
+      scheduledAt: "2026-08-08T11:15:00.000Z",
+      title: "تحديث عضويتك",
+      body: "ستصل رسالتك بعد مراجعة إعدادات Wallet.",
+      locale: "AR",
+      providers: ["APPLE", "GOOGLE"],
+      audienceRule: "ALL_ELIGIBLE_WALLET_HOLDERS",
+      status: "FAILED",
+      counts: {
+        eligible: 7,
+        appleEligiblePasses: 2,
+        appleRegisteredDevices: 2,
+        googleEligibleObjects: 5,
+        queued: 0,
+        succeeded: 0,
+        skipped: 0,
+        failed: 7,
+        throttled: 0,
+        unknown: 0,
+      },
+      creator: "Gallery Merchant",
+    },
+  ];
 
   function currentArtwork() {
     if (!storedDraft) return null;

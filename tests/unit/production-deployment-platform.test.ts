@@ -26,6 +26,10 @@ const deploy = readFileSync(resolve(deploymentRoot, "scripts/deploy.sh"), "utf8"
 const prepareHost = readFileSync(resolve(deploymentRoot, "scripts/prepare-host.sh"), "utf8");
 const minioInit = readFileSync(resolve(deploymentRoot, "scripts/minio-init.sh"), "utf8");
 const publishImages = readFileSync(resolve(deploymentRoot, "scripts/publish-images.sh"), "utf8");
+const verifyReleaseImages = readFileSync(
+  resolve(deploymentRoot, "scripts/verify-release-images.sh"),
+  "utf8",
+);
 const smokeNodeReleaseImages = readFileSync(
   resolve(deploymentRoot, "scripts/smoke-node-release-images.sh"),
   "utf8",
@@ -64,6 +68,17 @@ const cloudflaredContainerGidVariable = "$" + "{CLOUDFLARED_CONTAINER_GID}";
 const tokenFileVariable = "$" + "{token_file}";
 const referenceVariable = "$" + "{reference}";
 const scriptDirectoryVariable = "$" + "{script_directory}";
+const shellDollar = "$";
+const shellTargetVariable = `${shellDollar}{target}`;
+const invariantTargetsVariable = `${shellDollar}{invariant_targets[@]}`;
+const missingFrontendTargetsVariable = `${shellDollar}{missing_frontend_targets[@]}`;
+const stagingTargetReferenceForTarget = `${shellDollar}{staging_target_references[${shellTargetVariable}]}`;
+const sourceReferenceVariable = `${shellDollar}{source_reference}`;
+const productionSourceReferenceVariable = `${shellDollar}{source_reference%-staging}`;
+const sourceDigestVariable = `${shellDollar}{source_digest}`;
+const destinationReferenceVariable = `${shellDollar}{destination_reference}`;
+const destinationDigestVariable = `${shellDollar}{destination_digest}`;
+const releaseScopeVariable = `${shellDollar}{release_scope}`;
 
 function deploymentFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -78,6 +93,14 @@ function workflowJob(jobId: string): string {
   const index = jobs.findIndex((job) => job[1] === jobId);
   if (index < 0) throw new Error(`Missing workflow job: ${jobId}`);
   return workflow.slice(jobs[index].index, jobs[index + 1]?.index);
+}
+
+function bashFunction(source: string, name: string): string {
+  const start = source.indexOf(`${name}() {`);
+  if (start < 0) throw new Error(`Missing Bash function: ${name}`);
+  const nextFunction = source.indexOf("\n}\n\n", start);
+  if (nextFunction < 0) throw new Error(`Unterminated Bash function: ${name}`);
+  return source.slice(start, nextFunction + 2);
 }
 
 type JobResult = "success" | "failure" | "cancelled" | "skipped";
@@ -522,6 +545,86 @@ describe("production deployment platform", () => {
     expect(bake).toContain('"type=provenance,mode=max"');
     expect(bake).toContain('"type=sbom"');
     expect(bake).not.toMatch(/SECRET|PASSWORD|PRIVATE_KEY|SERVICE_ACCOUNT/u);
+  });
+
+  it("promotes invariant production images by their staging OCI digest without rebuilding", () => {
+    const promotion = bashFunction(publishImages, "promote_invariant_image");
+    const productionPublication = bashFunction(publishImages, "publish_production_images");
+    const stagingPublication = bashFunction(publishImages, "publish_staging_images");
+    const invariantTargets = [
+      "migrate",
+      "api",
+      "apple-pass-builder",
+      "operational-worker",
+      "wallet-worker",
+    ];
+
+    expect(publishImages).toContain("declare -A staging_target_references");
+    expect(publishImages).toContain("declare -A production_frontend_references");
+    expect(stagingPublication).toContain(`"${invariantTargetsVariable}"`);
+    expect(stagingPublication).toContain(stagingTargetReferenceForTarget);
+    expect(stagingPublication).toContain("RELEASE_BASE_SHA");
+    expect(stagingPublication).toContain("verify-release-marker.sh");
+    expect(stagingPublication).toContain("docker buildx imagetools create");
+    expect(stagingPublication).toContain("build_missing_target");
+
+    expect(promotion).toContain(`local source_reference="${stagingTargetReferenceForTarget}"`);
+    expect(promotion).toContain(
+      `local destination_reference="${productionSourceReferenceVariable}-production"`,
+    );
+    expect(promotion).toContain(`source_digest="$(image_digest "${sourceReferenceVariable}")"`);
+    expect(promotion).toContain(`if image_exists "${destinationReferenceVariable}"; then`);
+    expect(promotion).toContain(
+      `if [[ "${destinationDigestVariable}" != "${sourceDigestVariable}" ]]; then`,
+    );
+    expect(promotion).toContain("Reusing promoted immutable image");
+    expect(promotion).toContain("docker buildx imagetools create");
+    expect(promotion).toContain(`"${sourceReferenceVariable}@${sourceDigestVariable}"`);
+    expect(promotion).toContain(
+      `destination_digest="$(image_digest "${destinationReferenceVariable}")"`,
+    );
+    expect(promotion).toContain("Conflicting immutable production image");
+    expect(promotion).toContain("Promoted immutable image digest mismatch");
+    expect(promotion).toContain("Missing immutable staging source for production promotion");
+    expect(promotion).not.toContain("docker buildx bake");
+    expect(promotion.indexOf("docker buildx imagetools create")).toBeGreaterThan(
+      promotion.indexOf(`if image_exists "${destinationReferenceVariable}"; then`),
+    );
+
+    expect(invariantTargets).toEqual([
+      "migrate",
+      "api",
+      "apple-pass-builder",
+      "operational-worker",
+      "wallet-worker",
+    ]);
+    expect(productionPublication).toContain(`for target in "${invariantTargetsVariable}"; do`);
+    expect(productionPublication).toContain(`promote_invariant_image "${shellTargetVariable}"`);
+    for (const target of [
+      "merchant-production",
+      "customer-production",
+      "admin-production",
+      "marketing-production",
+    ]) {
+      expect(productionPublication).toContain(target);
+    }
+    expect(productionPublication).toContain(
+      `for target in "${missingFrontendTargetsVariable}"; do`,
+    );
+    expect(productionPublication).toContain(`build_missing_target "${shellTargetVariable}"`);
+    expect(productionPublication).toContain("Selective image publication is staging-only.");
+    expect(publishImages).toContain(
+      `"${scriptDirectoryVariable}/verify-release-images.sh" "${releaseScopeVariable}" "${localReleaseShaVariable}"`,
+    );
+  });
+
+  it("requires the complete nine-image production set after promotion", () => {
+    expect(verifyReleaseImages).toContain(
+      "for package in migrate api apple-pass-builder merchant customer admin marketing operational-worker wallet-worker; do",
+    );
+    expect(verifyReleaseImages).toContain(`${localReleaseShaVariable}-${environmentVariable}`);
+    expect(verifyReleaseImages).toContain("Missing immutable release image:");
+    expect(verifyReleaseImages).toContain("Release image did not resolve to an OCI digest:");
   });
 
   it("exports the stable Apple Swift compile layer through the trusted GitHub Actions cache", () => {

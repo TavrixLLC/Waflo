@@ -104,13 +104,14 @@ apple_swift_source_fingerprint() {
 
 build_missing_target() {
   local target="$1"
+  local reference="$2"
   local build_log
   local compile_step
 
   if [[ "${target}" != "apple-pass-builder" ]]; then
     docker buildx bake \
       --file "${repository_root}/deploy/vps/docker-bake.hcl" \
-      --set "${target}.tags=${target_references[${target}]}" \
+      --set "${target}.tags=${reference}" \
       --push \
       "${target}"
     return
@@ -120,7 +121,7 @@ build_missing_target() {
   build_log="$(mktemp)"
   if ! docker buildx bake \
     --file "${repository_root}/deploy/vps/docker-bake.hcl" \
-    --set "${target}.tags=${target_references[${target}]}" \
+    --set "${target}.tags=${reference}" \
     --push \
     "${target}" 2>&1 | tee "${build_log}"; then
     rm -f "${build_log}"
@@ -140,8 +141,10 @@ build_missing_target() {
   rm -f "${build_log}"
 }
 
-declare -a missing_targets=()
-declare -A target_references=(
+declare -a invariant_targets=(
+  migrate api apple-pass-builder operational-worker wallet-worker
+)
+declare -A staging_target_references=(
   [migrate]="${registry}/waflo-migrate:${release_sha}-staging"
   [api]="${registry}/waflo-api:${release_sha}-staging"
   [apple-pass-builder]="${registry}/waflo-apple-pass-builder:${release_sha}-staging"
@@ -151,90 +154,173 @@ declare -A target_references=(
   [customer-staging]="${registry}/waflo-customer:${release_sha}-staging"
   [admin-staging]="${registry}/waflo-admin:${release_sha}-staging"
   [marketing-staging]="${registry}/waflo-marketing:${release_sha}-staging"
+)
+declare -A production_frontend_references=(
   [merchant-production]="${registry}/waflo-merchant:${release_sha}-production"
   [customer-production]="${registry}/waflo-customer:${release_sha}-production"
   [admin-production]="${registry}/waflo-admin:${release_sha}-production"
   [marketing-production]="${registry}/waflo-marketing:${release_sha}-production"
 )
 
-if [[ "${release_scope}" == "staging" ]]; then
-  targets=(
-    migrate api apple-pass-builder operational-worker wallet-worker
+publish_staging_images() {
+  local -a staging_targets=(
+    "${invariant_targets[@]}"
     merchant-staging customer-staging admin-staging marketing-staging
   )
-else
-  targets=(
-    migrate api apple-pass-builder operational-worker wallet-worker
-    merchant-production customer-production admin-production marketing-production
-  )
-fi
+  local -a missing_targets=()
+  local -a parsed_targets=()
+  local source_reference
+  local source_digest
+  local target
+  declare -A requested_targets=()
 
-if [[ -n "${release_build_targets}" && "${release_scope}" != "staging" ]]; then
-  printf 'Selective image publication is staging-only.\n' >&2
-  exit 2
-fi
-
-declare -A requested_targets=()
-if [[ -n "${release_build_targets}" ]]; then
-  [[ "${release_base_sha}" =~ ^[0-9a-f]{40}$ ]] || {
-    printf 'Selective image publication requires RELEASE_BASE_SHA.\n' >&2
-    exit 2
-  }
-  IFS=',' read -r -a parsed_targets <<<"${release_build_targets}"
-  for target in "${parsed_targets[@]}"; do
-    [[ -n "${target}" ]] || continue
-    requested_targets["${target}"]=1
-  done
-fi
-
-for target in "${!requested_targets[@]}"; do
-  if [[ ! " ${targets[*]} " =~ " ${target} " ]]; then
-    printf 'Selective image publication includes an unknown target: %s\n' "${target}" >&2
-    exit 2
+  if [[ -n "${release_build_targets}" ]]; then
+    [[ "${release_base_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+      printf 'Selective image publication requires RELEASE_BASE_SHA.\n' >&2
+      exit 2
+    }
+    IFS=',' read -r -a parsed_targets <<<"${release_build_targets}"
+    for target in "${parsed_targets[@]}"; do
+      [[ -n "${target}" ]] || continue
+      requested_targets["${target}"]=1
+    done
   fi
-done
 
-if (( ${#requested_targets[@]} == ${#targets[@]} )); then
-  # FULL is represented in workflow outputs as the complete target list for
-  # observability. It is not selective publication and must not rely on a
-  # previously verified base release.
-  requested_targets=()
-fi
+  for target in "${!requested_targets[@]}"; do
+    if [[ ! " ${staging_targets[*]} " =~ " ${target} " ]]; then
+      printf 'Selective image publication includes an unknown target: %s\n' "${target}" >&2
+      exit 2
+    fi
+  done
 
-if (( ${#requested_targets[@]} > 0 )); then
-  IMAGE_REGISTRY="${registry}" bash "${script_directory}/verify-release-marker.sh" \
-    "${release_scope}" "${release_base_sha}"
-fi
+  if (( ${#requested_targets[@]} == ${#staging_targets[@]} )); then
+    # FULL is represented in workflow outputs as the complete target list for
+    # observability. It is not selective publication and must not rely on a
+    # previously verified base release.
+    requested_targets=()
+  fi
 
-for target in "${targets[@]}"; do
-  if (( ${#requested_targets[@]} > 0 )) && [[ -z "${requested_targets[${target}]:-}" ]]; then
-    source_reference="${target_references[${target}]//${release_sha}/${release_base_sha}}"
-    source_digest="$(image_digest "${source_reference}")" || {
-      printf 'Trusted base image is unavailable for %s: %s\n' "${target}" "${source_reference}" >&2
+  if (( ${#requested_targets[@]} > 0 )); then
+    IMAGE_REGISTRY="${registry}" bash "${script_directory}/verify-release-marker.sh" \
+      staging "${release_base_sha}"
+  fi
+
+  for target in "${staging_targets[@]}"; do
+    if (( ${#requested_targets[@]} > 0 )) && [[ -z "${requested_targets[${target}]:-}" ]]; then
+      source_reference="${staging_target_references[${target}]//${release_sha}/${release_base_sha}}"
+      source_digest="$(image_digest "${source_reference}")" || {
+        printf 'Trusted base image is unavailable for %s: %s\n' "${target}" "${source_reference}" >&2
+        exit 4
+      }
+      docker buildx imagetools create \
+        --tag "${staging_target_references[${target}]}" \
+        "${source_reference}@${source_digest}"
+      printf 'Reused immutable image for %s from %s at %s\n' \
+        "${target}" "${source_reference}" "${source_digest}"
+      continue
+    fi
+    if image_exists "${staging_target_references[${target}]}"; then
+      printf 'Reusing existing immutable image for %s.\n' "${target}"
+    else
+      missing_targets+=("${target}")
+    fi
+  done
+
+  if (( ${#missing_targets[@]} > 0 )); then
+    printf 'Building missing release targets sequentially on one Buildx runner: %s\n' \
+      "${missing_targets[*]}"
+    for target in "${missing_targets[@]}"; do
+      build_missing_target "${target}" "${staging_target_references[${target}]}"
+    done
+  else
+    printf 'All SHA-qualified staging images already exist; no Docker build is required.\n'
+  fi
+}
+
+promote_invariant_image() {
+  local target="$1"
+  local source_reference="${staging_target_references[${target}]}"
+  local destination_reference="${source_reference%-staging}-production"
+  local source_digest
+  local destination_digest
+
+  source_digest="$(image_digest "${source_reference}")" || {
+    printf 'Missing immutable staging source for production promotion: %s\n' \
+      "${source_reference}" >&2
+    exit 4
+  }
+
+  if image_exists "${destination_reference}"; then
+    destination_digest="$(image_digest "${destination_reference}")" || {
+      printf 'Production immutable image did not resolve to an OCI digest: %s\n' \
+        "${destination_reference}" >&2
       exit 4
     }
-    docker buildx imagetools create \
-      --tag "${target_references[${target}]}" \
-      "${source_reference}@${source_digest}"
-    printf 'Reused immutable image for %s from %s at %s\n' \
-      "${target}" "${source_reference}" "${source_digest}"
-    continue
+    if [[ "${destination_digest}" != "${source_digest}" ]]; then
+      printf 'Conflicting immutable production image for %s: expected %s, found %s\n' \
+        "${destination_reference}" "${source_digest}" "${destination_digest}" >&2
+      exit 4
+    fi
+    printf 'Reusing promoted immutable image for %s at %s\n' "${target}" "${source_digest}"
+    return
   fi
-  if image_exists "${target_references[${target}]}"; then
-    printf 'Reusing existing immutable image for %s.\n' "${target}"
-  else
-    missing_targets+=("${target}")
-  fi
-done
 
-if (( ${#missing_targets[@]} > 0 )); then
-  printf 'Building missing release targets sequentially on one Buildx runner: %s\n' \
-    "${missing_targets[*]}"
-  for target in "${missing_targets[@]}"; do
-    build_missing_target "${target}"
+  docker buildx imagetools create \
+    --tag "${destination_reference}" \
+    "${source_reference}@${source_digest}"
+  destination_digest="$(image_digest "${destination_reference}")" || {
+    printf 'Promoted immutable image did not resolve to an OCI digest: %s\n' \
+      "${destination_reference}" >&2
+    exit 4
+  }
+  if [[ "${destination_digest}" != "${source_digest}" ]]; then
+    printf 'Promoted immutable image digest mismatch for %s: expected %s, found %s\n' \
+      "${destination_reference}" "${source_digest}" "${destination_digest}" >&2
+    exit 4
+  fi
+  printf 'Promoted immutable image for %s from %s to %s at %s\n' \
+    "${target}" "${source_reference}" "${destination_reference}" "${source_digest}"
+}
+
+publish_production_images() {
+  local -a production_frontend_targets=(
+    merchant-production customer-production admin-production marketing-production
+  )
+  local -a missing_frontend_targets=()
+  local target
+
+  if [[ -n "${release_build_targets}" ]]; then
+    printf 'Selective image publication is staging-only.\n' >&2
+    exit 2
+  fi
+
+  for target in "${invariant_targets[@]}"; do
+    promote_invariant_image "${target}"
   done
+
+  for target in "${production_frontend_targets[@]}"; do
+    if image_exists "${production_frontend_references[${target}]}"; then
+      printf 'Reusing existing immutable production frontend for %s.\n' "${target}"
+    else
+      missing_frontend_targets+=("${target}")
+    fi
+  done
+
+  if (( ${#missing_frontend_targets[@]} > 0 )); then
+    printf 'Building missing production frontend targets sequentially on one Buildx runner: %s\n' \
+      "${missing_frontend_targets[*]}"
+    for target in "${missing_frontend_targets[@]}"; do
+      build_missing_target "${target}" "${production_frontend_references[${target}]}"
+    done
+  else
+    printf 'All SHA-qualified production frontend images already exist; no Docker build is required.\n'
+  fi
+}
+
+if [[ "${release_scope}" == "staging" ]]; then
+  publish_staging_images
 else
-  printf 'All SHA-qualified images already exist; no Docker build is required.\n'
+  publish_production_images
 fi
 
 "${script_directory}/verify-release-images.sh" "${release_scope}" "${release_sha}"

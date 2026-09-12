@@ -39,13 +39,27 @@ test("configures provider-native nearby relevance and confirms one unified Walle
   await expect(page.locator(".wallet-nearby-preview")).toContainText("next coffee visit");
 
   await expect(page.locator(".wallet-audience-strip")).toContainText("12");
+  const initialHistory = page.getByTestId("wallet-campaign-history");
+  await expect(initialHistory.locator("article")).toHaveCount(3);
+  await expect(initialHistory).toContainText("Morning coffee reminder");
+  await expect(initialHistory).toContainText("Completed");
+  await expect(initialHistory).toContainText("Needs attention");
+  await expect(initialHistory).toContainText("Not sent");
+  await expect(initialHistory.getByRole("region", { name: "Apple Wallet results" })).toHaveCount(3);
+  await expect(initialHistory.getByRole("region", { name: "Google Wallet results" })).toHaveCount(
+    3,
+  );
+  await expect(initialHistory.getByRole("region", { name: "Campaign results" })).toHaveCount(3);
+  await expect(initialHistory.getByText("Eligible", { exact: true }).first()).toBeVisible();
+  await expect(initialHistory.locator(".wallet-campaign-count")).toHaveCount(0);
+  await expect(initialHistory.locator(".wallet-campaign-metric")).toHaveCount(12);
   const campaignForm = page.locator(".wallet-campaign-form");
   await expect(campaignForm.locator('input[type="checkbox"]')).toHaveCount(0);
   await expect(campaignForm).not.toContainText("Apple Wallet");
   await expect(campaignForm).not.toContainText("Google Wallet");
   await expect(campaignForm.locator("select.wf-select")).toHaveCount(2);
   await page.screenshot({
-    path: "diagnostics/wallet-final-fixes/notification-composer-clean.png",
+    path: "diagnostics/wallet-release-final/notification-composer-final.png",
     fullPage: true,
   });
   const messageLanguage = page.getByRole("combobox", { name: "Message language" });
@@ -83,7 +97,7 @@ test("configures provider-native nearby relevance and confirms one unified Walle
   );
   await expect(dialog).toContainText("A new visit message");
   await dialog.screenshot({
-    path: "diagnostics/wallet-final-fixes/notification-confirmation-clean.png",
+    path: "diagnostics/wallet-release-final/notification-confirmation-final.png",
   });
   const centered = await dialog.evaluate((element) => {
     const rect = element.getBoundingClientRect();
@@ -101,16 +115,15 @@ test("configures provider-native nearby relevance and confirms one unified Walle
   await dialog.getByRole("button", { name: "Send now" }).click();
   expect((await campaignRequest).postDataJSON()).not.toHaveProperty("providers");
   await expect(page.getByText("Campaign created safely.", { exact: false })).toBeVisible();
-  await expect(page.getByTestId("wallet-campaign-history")).toContainText("A new visit message");
-  await expect(page.getByTestId("wallet-campaign-history")).toContainText("Completed");
-  await expect(page.getByTestId("wallet-campaign-history")).toContainText("Apple Wallet");
-  await expect(page.getByTestId("wallet-campaign-history")).toContainText("Google Wallet");
+  const history = page.getByTestId("wallet-campaign-history");
+  await expect(history).toContainText("A new visit message");
+  await expect(history).toContainText("Completed");
+  await expect(history).toContainText("Apple Wallet");
+  await expect(history).toContainText("Google Wallet");
+  await expect(history.locator("article")).toHaveCount(4);
+  await expect(history.getByRole("region", { name: "Campaign results" })).toHaveCount(4);
   await page.screenshot({
-    path: "diagnostics/wallet-final-fixes/notification-history-clean.png",
-    fullPage: true,
-  });
-  await page.screenshot({
-    path: "diagnostics/wallet-final-fixes/notification-history-success.png",
+    path: "diagnostics/wallet-release-final/notification-history-en.png",
     fullPage: true,
   });
   await page.screenshot({
@@ -132,7 +145,7 @@ test("keeps Wallet Engagement usable in Arabic RTL on mobile", async ({ page }) 
     studioState: "LIVE",
     businessCategory: "Cafe",
   });
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/ar/dashboard/programs/created-program-id/engagement");
 
   await expect(page.locator(".studio-shell--p4")).toHaveAttribute("dir", "rtl");
@@ -143,12 +156,24 @@ test("keeps Wallet Engagement usable in Arabic RTL on mobile", async ({ page }) 
   await expect(
     page.getByText("بطاقة الولاء جاهزة لزيارتك القادمة", { exact: false }),
   ).toBeVisible();
+  const history = page.getByTestId("wallet-campaign-history");
+  await expect(history.locator("article")).toHaveCount(3);
+  await expect(history.getByRole("region", { name: "نتائج Apple Wallet" })).toHaveCount(3);
+  await expect(history.getByRole("region", { name: "نتائج Google Wallet" })).toHaveCount(3);
+  await expect(history.getByRole("region", { name: "نتائج الحملة" })).toHaveCount(3);
+  await expect(history.getByText("يحتاج إلى مراجعة", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: "diagnostics/wallet-release-final/notification-history-ar.png",
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
   );
   expect(noOverflow).toBe(true);
   await page.screenshot({
-    path: "test-results/wallet-engagement-mobile-ar.png",
+    path: "diagnostics/wallet-release-final/notification-history-mobile-ar.png",
     fullPage: true,
   });
 });

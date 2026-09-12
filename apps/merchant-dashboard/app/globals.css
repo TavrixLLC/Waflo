@@ -3227,23 +3227,6 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
   color: var(--waflo-muted);
   line-height: 1.5;
 }
-.wallet-history-list footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-.wallet-campaign-count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 99px;
-  background: var(--waflo-soft);
-}
-.wallet-campaign-count small {
-  color: var(--waflo-muted);
-  font-size: 0.65rem;
-}
 .wallet-history-empty {
   display: grid;
   justify-items: center;
@@ -3278,90 +3261,180 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
 
 .wallet-history-list .wallet-history-item {
   display: grid;
-  gap: 0.8rem;
-  padding: 1rem;
-  border-inline-start: 4px solid var(--waflo-border);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--waflo-soft) 34%, transparent);
+  gap: 1rem;
+  padding: clamp(1rem, 2vw, 1.2rem);
+  color: var(--waflo-text);
+  border: 1px solid var(--waflo-border);
+  border-inline-start: 4px solid var(--waflo-border-strong);
+  border-radius: var(--waflo-radius-md);
+  background: var(--waflo-surface);
 }
 
 .wallet-history-list .wallet-history-item[data-status="completed"],
 .wallet-history-list .wallet-history-item[data-status="succeeded"] {
+  border-color: color-mix(in srgb, var(--waflo-success) 24%, var(--waflo-border));
   border-inline-start-color: var(--waflo-success);
+  background: color-mix(in srgb, var(--waflo-success) 4%, var(--waflo-surface));
 }
 
 .wallet-history-list .wallet-history-item[data-status="partial_failure"],
 .wallet-history-list .wallet-history-item[data-status="throttled"] {
+  border-color: color-mix(in srgb, var(--waflo-warning) 30%, var(--waflo-border));
   border-inline-start-color: var(--waflo-warning);
+  background: color-mix(in srgb, var(--waflo-warning) 6%, var(--waflo-surface));
 }
 
 .wallet-history-list .wallet-history-item[data-status="failed"] {
+  border-color: color-mix(in srgb, var(--waflo-danger) 26%, var(--waflo-border));
   border-inline-start-color: var(--waflo-danger);
+  background: color-mix(in srgb, var(--waflo-danger) 5%, var(--waflo-surface));
+}
+
+.wallet-history-list .wallet-history-item header {
+  align-items: flex-start;
+}
+
+.wallet-history-item__summary {
+  min-width: 0;
+}
+
+.wallet-history-item__title {
+  color: var(--waflo-text);
+  font-size: 0.95rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.wallet-history-item__metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin: 0.3rem 0 0;
+  color: var(--waflo-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .wallet-history-list .wallet-history-item > p {
-  margin: -0.15rem 0 0;
+  margin: -0.1rem 0 0;
+  color: var(--waflo-text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .wallet-history-item__providers {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
+  gap: 0.75rem;
 }
 
-.wallet-history-item__providers > div {
+.wallet-history-item__provider-card {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-sm);
+  background: var(--waflo-surface-subtle);
+}
+
+.wallet-history-item__provider-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.55rem;
   min-width: 0;
-  padding: 0.7rem;
-  border: 1px solid color-mix(in srgb, var(--waflo-border) 84%, transparent);
-  border-radius: 12px;
-  background: var(--waflo-cloud);
 }
 
-.wallet-history-item__providers strong,
-.wallet-history-item__providers small {
-  display: block;
-}
-
-.wallet-history-item__providers small {
-  margin-top: 0.18rem;
-  color: var(--waflo-muted);
-  font-size: 0.7rem;
-  line-height: 1.45;
+.wallet-history-item__provider-heading strong {
+  min-width: 0;
+  color: var(--waflo-text);
+  font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
 
 .wallet-history-item__provider-mark {
   display: grid;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 1.65rem;
+  height: 1.65rem;
   flex: 0 0 auto;
   place-items: center;
   color: white;
-  border-radius: 0.5rem;
+  border-radius: calc(var(--waflo-radius-sm) - 2px);
   background: var(--waflo-ink);
   font-size: 0.72rem;
   font-weight: 900;
 }
 
 .wallet-history-item__provider-mark--google {
-  background: var(--waflo-brick);
+  color: var(--waflo-brick);
+  background: color-mix(in srgb, var(--waflo-brick) 14%, var(--waflo-surface));
 }
 
-.wallet-history-list .wallet-history-item__outcomes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  padding-top: 0.05rem;
+.wallet-history-item__provider-metrics,
+.wallet-history-item__outcomes dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0;
 }
 
-.wallet-history-item__outcomes .wallet-campaign-count {
-  min-height: 1.9rem;
-  padding-inline: 0.6rem;
-  border: 1px solid color-mix(in srgb, var(--waflo-border) 86%, transparent);
-  background: transparent;
+.wallet-history-item__provider-metrics > div,
+.wallet-campaign-metric {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--waflo-border) 76%, transparent);
+  border-radius: var(--waflo-radius-sm);
+  background: color-mix(in srgb, var(--waflo-soft) 42%, var(--waflo-surface));
+}
+
+.wallet-history-item__provider-metrics > div:only-child {
+  grid-column: 1 / -1;
+}
+
+.wallet-history-item__provider-metrics dt,
+.wallet-campaign-metric dt {
+  color: var(--waflo-text-muted);
+  font-size: 0.69rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.wallet-history-item__provider-metrics dd,
+.wallet-campaign-metric dd {
+  margin: 0;
+  color: var(--waflo-text);
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.wallet-history-item__outcomes {
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--waflo-border);
+}
+
+.wallet-history-item__outcomes h4 {
+  margin: 0;
+  color: var(--waflo-text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+[dir="rtl"] .wallet-history-item__outcomes h4 {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.wallet-history-item__outcomes dl {
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
 }
 
 .wallet-send-confirmation {
@@ -3500,6 +3573,50 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
     color: #f7f2ef;
     border-color: rgb(255 255 255 / 18%);
     background: #171312;
+  }
+  .wallet-history-list .wallet-history-item {
+    color: #f7f2ef;
+    border-color: rgb(255 255 255 / 16%);
+    background: #211b19;
+  }
+  .wallet-history-list .wallet-history-item[data-status="completed"],
+  .wallet-history-list .wallet-history-item[data-status="succeeded"] {
+    background: color-mix(in srgb, var(--waflo-success) 10%, #211b19);
+  }
+  .wallet-history-list .wallet-history-item[data-status="partial_failure"],
+  .wallet-history-list .wallet-history-item[data-status="throttled"] {
+    background: color-mix(in srgb, var(--waflo-warning) 11%, #211b19);
+  }
+  .wallet-history-list .wallet-history-item[data-status="failed"] {
+    background: color-mix(in srgb, var(--waflo-danger) 10%, #211b19);
+  }
+  .wallet-history-item__title,
+  .wallet-history-list .wallet-history-item > p,
+  .wallet-history-item__provider-heading strong,
+  .wallet-history-item__provider-metrics dd,
+  .wallet-campaign-metric dd {
+    color: #f7f2ef;
+  }
+  .wallet-history-item__metadata,
+  .wallet-history-item__provider-metrics dt,
+  .wallet-campaign-metric dt,
+  .wallet-history-item__outcomes h4 {
+    color: #d7cfcc;
+  }
+  .wallet-history-item__provider-card {
+    border-color: rgb(255 255 255 / 14%);
+    background: #171312;
+  }
+  .wallet-history-item__provider-metrics > div,
+  .wallet-campaign-metric {
+    border-color: rgb(255 255 255 / 12%);
+    background: rgb(255 255 255 / 5%);
+  }
+  .wallet-history-item__provider-mark--google {
+    background: color-mix(in srgb, var(--waflo-brick) 32%, #211b19);
+  }
+  .wallet-history-item__outcomes {
+    border-color: rgb(255 255 255 / 14%);
   }
 }
 
