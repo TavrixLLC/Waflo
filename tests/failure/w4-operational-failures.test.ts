@@ -251,4 +251,45 @@ describe.sequential("W4 Repair Round 1 operational failures", () => {
       }),
     ).toBe(1);
   });
+
+  it("blocks an already queued export when billing becomes restricted", async () => {
+    const command = await prisma.client.exportCommand.create({
+      data: {
+        organizationId: ORGANIZATION_ID,
+        requestedByUserId: OWNER_ID,
+        exportType: "MEMBERSHIP_SUMMARY",
+        filters: {},
+        filterFingerprint: createHash("sha256").update(randomUUID()).digest("hex"),
+        createdAt: new Date("1899-01-01T00:00:00.000Z"),
+      },
+    });
+    await prisma.client.organizationBillingProfile.update({
+      where: { organizationId: ORGANIZATION_ID },
+      data: { subscriptionStatus: "SUSPENDED" },
+    });
+    try {
+      const worker = new OperationalWorker(prisma.client, parseEnvironment(process.env));
+      await expect(worker.processOneExport()).resolves.toBe(true);
+      await expect(
+        prisma.client.exportCommand.findUniqueOrThrow({
+          where: { id: command.id },
+          select: { status: true, safeFailureCode: true, objectKey: true },
+        }),
+      ).resolves.toEqual({
+        status: "DEAD_LETTER",
+        safeFailureCode: "BILLING_ACTION_REQUIRED",
+        objectKey: null,
+      });
+      expect(
+        await prisma.client.auditLog.count({
+          where: { action: "export.blocked_billing", targetId: command.id },
+        }),
+      ).toBe(1);
+    } finally {
+      await prisma.client.organizationBillingProfile.update({
+        where: { organizationId: ORGANIZATION_ID },
+        data: { subscriptionStatus: "ACTIVE" },
+      });
+    }
+  });
 });

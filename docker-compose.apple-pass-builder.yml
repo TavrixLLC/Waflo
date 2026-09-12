@@ -1,0 +1,60 @@
+services:
+  apple-pass-builder:
+    build:
+      context: .
+      dockerfile: apps/apple-pass-builder-service/Dockerfile
+    image: waflo/apple-pass-builder:8908b955
+    restart: unless-stopped
+    environment:
+      PASS_BUILDER_AUTH_TOKEN_FILE: /run/secrets/apple-pass-builder-auth-token
+      PASS_BUILDER_IDENTITIES_CONFIG_FILE: /opt/waflo/config/signing-identities.json
+      PASS_BUILDER_MAX_CONCURRENCY: ${PASS_BUILDER_MAX_CONCURRENCY:-4}
+      PASS_BUILDER_PROCESS_TIMEOUT_MS: ${PASS_BUILDER_PROCESS_TIMEOUT_MS:-30000}
+      PASS_BUILDER_TEMP_ROOT: /tmp
+    secrets:
+      - apple-pass-builder-auth-token
+      - apple-pass-certificate
+      - apple-pass-certificate-password
+      - apple-wwdr-certificate
+    configs:
+      - source: apple-pass-builder-identities
+        target: /opt/waflo/config/signing-identities.json
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=0700,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    networks:
+      - apple-wallet-internal
+
+secrets:
+  apple-pass-builder-auth-token:
+    file: ${APPLE_PASS_BUILDER_AUTH_TOKEN_FILE:?set APPLE_PASS_BUILDER_AUTH_TOKEN_FILE}
+  apple-pass-certificate:
+    file: ${APPLE_PASS_CERTIFICATE_FILE:?set APPLE_PASS_CERTIFICATE_FILE}
+  apple-pass-certificate-password:
+    file: ${APPLE_PASS_CERTIFICATE_PASSWORD_FILE:?set APPLE_PASS_CERTIFICATE_PASSWORD_FILE}
+  apple-wwdr-certificate:
+    file: ${APPLE_WWDR_CERTIFICATE_FILE:?set APPLE_WWDR_CERTIFICATE_FILE}
+
+configs:
+  apple-pass-builder-identities:
+    file: ${APPLE_PASS_BUILDER_IDENTITIES_FILE:-./apps/apple-pass-builder-service/config/signing-identities.example.json}
+
+networks:
+  apple-wallet-internal:
+    internal: true

@@ -9,10 +9,12 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { parseEnvironment, parseVersionedSecretEntries, type Environment } from "@waflo/config";
+import { hasMerchantOperationalBillingAccess } from "@waflo/billing";
+import { type Environment, parseEnvironment, parseVersionedSecretEntries } from "@waflo/config";
+import { cardLocalePresentation, resolveCardLocale } from "@waflo/contracts";
 import {
-  decodeSecret,
   createCustomerDataKeyring,
+  decodeSecret,
   decryptCustomerValue,
   deriveAppleAuthenticationToken,
   deriveMembershipCredentialSecret,
@@ -20,40 +22,72 @@ import {
 import {
   createPrismaClient,
   lockApplePassUpdateSequence,
-  queueWalletPassStateChange,
   type Prisma,
   type PrismaClient,
   type PublicWalletAsset,
+  queueWalletPassStateChange,
   type WalletCommand,
 } from "@waflo/database";
-import { formatMembershipQrPayload } from "@waflo/qr-core";
+import { formatMembershipCredentialPayload } from "@waflo/qr-core";
 import {
+  type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
-  type PublishedMembershipStampRenderInput,
-  type StampArtwork,
 } from "@waflo/stamp-engine";
 import {
+  ApplePassBuilderGenerator,
+  type ApplePassSigner,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
+  parseAppleSigningKeyMap,
   TestApplePassSigner,
-  type ApplePassSigner,
 } from "@waflo/wallet-apple";
+import { composeWalletArtwork, walletArtworkInputFromStampRender } from "@waflo/wallet-artwork";
 import {
+  APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
   normalizeWalletProviderError,
+  resolveWalletNearbyText,
+  WALLET_PRESENTATION_SCHEMA_VERSION,
   type WalletMembershipInput,
   type WalletProgramInput,
   type WalletProvider,
   type WalletProviderCode,
   type WalletUpdateReason,
 } from "@waflo/wallet-core";
-import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
+import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { Redis } from "ioredis";
 import sharp from "sharp";
+import {
+  appleCampaignDeliveryUpdate,
+  applePassUpdateRequestHeaders,
+  classifyApplePushResponse,
+} from "./apple-push.js";
+import {
+  GOOGLE_WALLET_LOGO_SIZE,
+  googleProgressAssetNeedsOwnershipRepair,
+  googleProgressSharedAssetOwnership,
+  prepareGoogleWalletProgramLogo,
+} from "./google-wallet-assets.js";
+import {
+  HistoricalWalletStampSourceError,
+  loadHistoricalWalletStampSource,
+} from "./historical-wallet-stamp-source.js";
 
-const QUEUE_KEY = "waflo:wallet:commands";
+const OPERATIONAL_QUEUE_KEY = "waflo:wallet:commands:operational";
+const PROMOTIONAL_QUEUE_KEY = "waflo:wallet:commands:promotional";
 const SIGNAL_TTL_SECONDS = 180;
 const LEASE_SECONDS = 90;
+
+function walletPresentationIsCurrent(state: unknown, configurationFingerprint: string): boolean {
+  return Boolean(
+    state &&
+      typeof state === "object" &&
+      "presentationSchemaVersion" in state &&
+      state.presentationSchemaVersion === WALLET_PRESENTATION_SCHEMA_VERSION &&
+      "configurationFingerprint" in state &&
+      state.configurationFingerprint === configurationFingerprint,
+  );
+}
 
 function workerLog(event: string, metadata: Record<string, unknown> = {}) {
   process.stdout.write(
@@ -86,25 +120,40 @@ const passInclude = {
   membershipCredential: true,
   membership: {
     include: {
-      organization: true,
+      organization: {
+        include: {
+          brandLogoAsset: { include: { variants: true } },
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
+            },
+          },
+        },
+      },
       customer: true,
-      program: true,
+      program: { include: { walletNearbyProgramCopy: true } },
       progress: true,
       enrollmentProgramVersion: {
         include: {
           translations: true,
+          cardLocales: {
+            where: { enabled: true },
+            orderBy: [{ position: "asc" }, { locale: "asc" }],
+          },
           stampRule: true,
+          locations: { select: { locationId: true } },
           visualTheme: {
             include: {
               filledStampAsset: { include: { variants: true } },
               emptyStampAsset: { include: { variants: true } },
+              logoAsset: { include: { variants: true } },
             },
           },
         },
       },
     },
   },
-} as const;
+} satisfies Prisma.WalletPassInstanceInclude;
 
 type PassRecord = Prisma.WalletPassInstanceGetPayload<{ include: typeof passInclude }>;
 
@@ -141,6 +190,7 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
     signer = new TestApplePassSigner();
   } else if (
     environment.APPLE_WALLET_MODE === "REAL" &&
+    environment.APPLE_WALLET_GENERATOR === "legacy" &&
     environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 &&
     environment.APPLE_PASS_CERTIFICATE_PASSWORD &&
     environment.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
@@ -155,14 +205,42 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
       signer = undefined;
     }
   }
+  let appleGenerator: ApplePassBuilderGenerator | undefined;
+  if (
+    environment.APPLE_WALLET_MODE === "REAL" &&
+    environment.APPLE_WALLET_GENERATOR === "passbuilder" &&
+    environment.APPLE_PASS_BUILDER_URL &&
+    environment.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE
+  ) {
+    try {
+      appleGenerator = new ApplePassBuilderGenerator({
+        serviceUrl: environment.APPLE_PASS_BUILDER_URL,
+        authToken: readFileSync(environment.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE, "utf8").trim(),
+        signingKeyId: environment.APPLE_PASS_BUILDER_SIGNING_KEY_ID,
+        ...(environment.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE
+          ? {
+              signingKeyIdsByMerchant: parseAppleSigningKeyMap(
+                JSON.parse(
+                  readFileSync(environment.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE, "utf8"),
+                ),
+              ),
+            }
+          : {}),
+        templateId: environment.APPLE_PASS_BUILDER_TEMPLATE_ID,
+        timeoutMs: environment.APPLE_PASS_BUILDER_TIMEOUT_MS,
+      });
+    } catch {
+      appleGenerator = undefined;
+    }
+  }
   const appleReady =
     environment.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
     (environment.APPLE_WALLET_MODE === "REAL" &&
       Boolean(
-        signer &&
-          environment.APPLE_PASS_TYPE_IDENTIFIER &&
+        environment.APPLE_PASS_TYPE_IDENTIFIER &&
           environment.APPLE_TEAM_IDENTIFIER &&
-          environment.APPLE_PASS_WEB_SERVICE_URL,
+          environment.APPLE_PASS_WEB_SERVICE_URL &&
+          (environment.APPLE_WALLET_GENERATOR === "passbuilder" ? appleGenerator : signer),
       ));
   const appleMode = appleReady ? environment.APPLE_WALLET_MODE : "DISABLED";
   const appleSecrets = parseVersionedSecretEntries(
@@ -191,7 +269,8 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
               `${environment.API_PUBLIC_URL.replace(/\/+$/, "")}/v1/apple-wallet`,
           },
         }),
-    ...(signer ? { signer } : {}),
+    ...(appleGenerator ? { generator: appleGenerator } : signer ? { signer } : {}),
+    externallyCertified: environment.APPLE_WALLET_EXTERNALLY_CERTIFIED,
     authenticationToken: (input) =>
       deriveAppleAuthenticationToken(
         input.walletPassInstanceId,
@@ -234,7 +313,7 @@ function credentialPayload(pass: PassRecord, environment: Environment): string {
     version: pass.membershipCredential.secretVersion,
     secret: decodeSecret(secret),
   };
-  return formatMembershipQrPayload({
+  return formatMembershipCredentialPayload({
     publicCredentialId: pass.membershipCredential.publicCredentialId,
     secretVersion: pass.membershipCredential.secretVersion,
     secret: deriveMembershipCredentialSecret(
@@ -245,26 +324,60 @@ function credentialPayload(pass: PassRecord, environment: Environment): string {
   });
 }
 
+function resolvePassLocalizedContent(pass: PassRecord) {
+  const membership = pass.membership;
+  const version = membership.enrollmentProgramVersion;
+  const preferredLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+  const localizedContent = version.cardLocales.length
+    ? version.cardLocales.map((item) => ({
+        locale: item.locale,
+        programName: item.programName ?? membership.program.internalName,
+        description: item.shortDescription ?? "",
+        rewardSummary: item.rewardSummary ?? "",
+      }))
+    : version.translations.map((item) => ({
+        locale: item.locale === "AR" ? "ar" : "en",
+        programName: item.programName,
+        description: item.shortDescription,
+        rewardSummary: item.rewardSummary,
+      }));
+  const enabledLocales = localizedContent.map((item) => item.locale);
+  const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+    ? version.defaultCardLocale
+    : (enabledLocales[0] ?? "en");
+  const locale = resolveCardLocale({
+    enabledLocales,
+    defaultLocale,
+    explicitLocale: preferredLocale,
+  });
+  return {
+    localizedContent,
+    defaultLocale,
+    locale,
+    translation: localizedContent.find((item) => item.locale === locale) ?? localizedContent[0],
+  };
+}
+
 function mapPass(
   pass: PassRecord,
   environment: Environment,
   stampRenderInput: PublishedMembershipStampRenderInput,
-  progressAssetUrl?: string,
+  walletArtworkUrl?: string,
+  applePassImages?: Readonly<Record<string, Uint8Array>>,
+  qrCenterLogo?: Uint8Array,
 ): WalletMembershipInput {
   const membership = pass.membership;
   const version = membership.enrollmentProgramVersion;
-  const locale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
-  const translation =
-    version.translations.find((item) => item.locale === (locale === "ar" ? "AR" : "EN")) ??
-    version.translations.find((item) => item.locale === "EN") ??
-    version.translations[0];
+  const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+  const { localizedContent, defaultLocale, locale, translation } =
+    resolvePassLocalizedContent(pass);
   return {
     organizationId: membership.organizationId,
     organizationName: membership.organization.name,
     programId: membership.programId,
     programVersionId: version.id,
     programName: translation?.programName ?? membership.program.internalName,
-    description: translation?.shortDescription ?? "",
+    description: translation?.description ?? "",
     rewardSummary: translation?.rewardSummary ?? "",
     backgroundColor: version.visualTheme?.backgroundColor ?? "#F7F4EE",
     foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
@@ -273,7 +386,23 @@ function mapPass(
       version.renderFingerprint ??
       createHash("sha256").update(version.id).digest("hex"),
     locale,
-    ...(progressAssetUrl ? { publicAssetBaseUrl: progressAssetUrl } : {}),
+    defaultLocale,
+    localizedContent,
+    nearbyRelevance: nearbyRelevance({
+      enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
+      locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
+      allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
+      templateCode: version.baseTemplateCode,
+      businessCategory: membership.organization.businessCategory,
+      merchantName: membership.organization.name,
+      locale: nearbyLocale,
+      customText:
+        nearbyLocale === "ar"
+          ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
+          : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
+    }),
+    ...(walletArtworkUrl ? { walletArtworkUrl } : {}),
+    ...(qrCenterLogo ? { qrCenterLogo } : {}),
     walletPassInstanceId: pass.id,
     providerIdentity: pass.providerIdentity,
     publicMembershipId: membership.publicMembershipId,
@@ -286,39 +415,152 @@ function mapPass(
     programStatus: membership.program.status,
     transferred: pass.membershipCredential.status === "TRANSFERRED",
     stampRenderInput,
+    ...(applePassImages ? { applePassImages } : {}),
+    ...(pass.appleMerchantMessageTitle && pass.appleMerchantMessageBody
+      ? {
+          merchantMessage: {
+            title: pass.appleMerchantMessageTitle,
+            body: pass.appleMerchantMessageBody,
+            locale: pass.appleMerchantMessageLocale === "AR" ? "ar" : "en",
+            ...(pass.appleMerchantMessageUrl
+              ? { destinationUrl: pass.appleMerchantMessageUrl }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 
 function mapProgram(
   binding: Prisma.WalletProgramBindingGetPayload<{
     include: {
-      organization: true;
-      program: true;
-      programVersion: { include: { translations: true; visualTheme: true } };
+      organization: {
+        include: {
+          brandLogoAsset: { include: { variants: true } };
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }; orderBy: { sortOrder: "asc" } };
+            };
+          };
+        };
+      };
+      program: { include: { walletNearbyProgramCopy: true } };
+      programVersion: {
+        include: {
+          translations: true;
+          cardLocales: true;
+          visualTheme: {
+            include: { logoAsset: { include: { variants: true } } };
+          };
+          locations: { select: { locationId: true } };
+        };
+      };
     };
   }>,
   programLogoUrl?: string,
 ): WalletProgramInput {
-  const locale = binding.organization.defaultLocale === "AR" ? "ar" : "en";
+  const nearbyLocale = binding.organization.defaultLocale === "AR" ? "ar" : "en";
+  const localizedContent = binding.programVersion.cardLocales.length
+    ? binding.programVersion.cardLocales
+        .filter((item) => item.enabled)
+        .toSorted(
+          (left, right) =>
+            left.position - right.position || left.locale.localeCompare(right.locale),
+        )
+        .map((item) => ({
+          locale: item.locale,
+          programName: item.programName ?? binding.program.internalName,
+          description: item.shortDescription ?? "",
+          rewardSummary: item.rewardSummary ?? "",
+        }))
+    : binding.programVersion.translations.map((item) => ({
+        locale: item.locale === "AR" ? "ar" : "en",
+        programName: item.programName,
+        description: item.shortDescription,
+        rewardSummary: item.rewardSummary,
+      }));
+  const enabledLocales = localizedContent.map((item) => item.locale);
+  const defaultLocale = enabledLocales.includes(binding.programVersion.defaultCardLocale)
+    ? binding.programVersion.defaultCardLocale
+    : (enabledLocales[0] ?? "en");
   const translation =
-    binding.programVersion.translations.find(
-      (item) => item.locale === (locale === "ar" ? "AR" : "EN"),
-    ) ??
-    binding.programVersion.translations.find((item) => item.locale === "EN") ??
-    binding.programVersion.translations[0];
+    localizedContent.find((item) => item.locale === defaultLocale) ?? localizedContent[0];
   return {
     organizationId: binding.organizationId,
     organizationName: binding.organization.name,
     programId: binding.programId,
     programVersionId: binding.programVersionId,
     programName: translation?.programName ?? binding.program.internalName,
-    description: translation?.shortDescription ?? "",
+    description: translation?.description ?? "",
     rewardSummary: translation?.rewardSummary ?? "",
     backgroundColor: binding.programVersion.visualTheme?.backgroundColor ?? "#F7F4EE",
     foregroundColor: binding.programVersion.visualTheme?.foregroundColor ?? "#241916",
     configurationFingerprint: binding.configurationFingerprint,
-    locale,
+    locale: defaultLocale,
+    defaultLocale,
+    localizedContent,
+    nearbyRelevance: nearbyRelevance({
+      enabled: binding.organization.walletNearbyConfiguration?.enabled ?? false,
+      locations: binding.organization.walletNearbyConfiguration?.locations ?? [],
+      allowedLocationIds: new Set(binding.programVersion.locations.map((item) => item.locationId)),
+      templateCode: binding.programVersion.baseTemplateCode,
+      businessCategory: binding.organization.businessCategory,
+      merchantName: binding.organization.name,
+      locale: nearbyLocale,
+      customText:
+        nearbyLocale === "ar"
+          ? binding.program.walletNearbyProgramCopy?.appleCustomTextAr
+          : binding.program.walletNearbyProgramCopy?.appleCustomTextEn,
+    }),
     ...(programLogoUrl ? { programLogoUrl } : {}),
+  };
+}
+
+function nearbyRelevance(input: {
+  enabled: boolean;
+  allowedLocationIds: ReadonlySet<string>;
+  locations: ReadonlyArray<{
+    location: {
+      id: string;
+      name: string;
+      status: "ACTIVE" | "ARCHIVED";
+      latitude: unknown;
+      longitude: unknown;
+    };
+  }>;
+  templateCode?: string | null | undefined;
+  businessCategory?: string | null | undefined;
+  merchantName: string;
+  locale: "en" | "ar";
+  customText?: string | null | undefined;
+}) {
+  const locations = input.locations
+    .filter(
+      ({ location }) =>
+        input.allowedLocationIds.has(location.id) &&
+        location.status === "ACTIVE" &&
+        location.latitude !== null &&
+        location.longitude !== null,
+    )
+    .slice(0, 10)
+    .map(({ location }) => ({
+      locationId: location.id,
+      displayName: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      relevantText: resolveWalletNearbyText({
+        templateCode: input.templateCode,
+        businessCategory: input.businessCategory,
+        merchantName: input.merchantName,
+        locationName: location.name,
+        locale: input.locale,
+        customText: input.customText,
+      }).text,
+    }));
+  return {
+    enabled: input.enabled && locations.length > 0,
+    desiredAppleMaxDistanceMeters: APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+    locations,
   };
 }
 
@@ -388,23 +630,40 @@ export class WalletWorker {
   }
 
   async dispatch(limit = 100) {
-    const commands = await this.prisma.walletCommand.findMany({
+    const eligible: Prisma.WalletCommandWhereInput = {
+      OR: [
+        { status: { in: ["PENDING", "FAILED"] }, nextAttemptAt: { lte: new Date() } },
+        { status: "PROCESSING", leaseExpiresAt: { lt: new Date() } },
+      ],
+    };
+    const operational = await this.prisma.walletCommand.findMany({
       where: {
-        OR: [
-          { status: { in: ["PENDING", "FAILED"] }, nextAttemptAt: { lte: new Date() } },
-          { status: "PROCESSING", leaseExpiresAt: { lt: new Date() } },
-        ],
+        ...eligible,
+        commandType: { not: "SEND_PROMOTION" },
       },
-      select: { id: true },
-      orderBy: { nextAttemptAt: "asc" },
+      select: { id: true, commandType: true },
+      orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
       take: limit,
     });
+    const promotional =
+      operational.length < limit
+        ? await this.prisma.walletCommand.findMany({
+            where: { ...eligible, commandType: "SEND_PROMOTION" },
+            select: { id: true, commandType: true },
+            orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
+            take: limit - operational.length,
+          })
+        : [];
+    const commands = [...operational, ...promotional];
     let queued = 0;
     for (const command of commands) {
       const signal = `waflo:wallet:queued:${command.id}`;
       const reserved = await this.redis.set(signal, "1", "EX", SIGNAL_TTL_SECONDS, "NX");
       if (reserved !== "OK") continue;
-      await this.redis.lpush(QUEUE_KEY, command.id);
+      await this.redis.lpush(
+        command.commandType === "SEND_PROMOTION" ? PROMOTIONAL_QUEUE_KEY : OPERATIONAL_QUEUE_KEY,
+        command.id,
+      );
       queued += 1;
     }
     return queued;
@@ -419,6 +678,19 @@ export class WalletWorker {
         status: provider.status,
       })),
     });
+    try {
+      const queuedPresentationRepairs = await this.enqueuePresentationRepairs();
+      if (queuedPresentationRepairs > 0) {
+        workerLog("wallet_presentation_repairs_queued", {
+          count: queuedPresentationRepairs,
+          schemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+        });
+      }
+    } catch {
+      workerLog("wallet_presentation_repair_scan_failed", {
+        safeFailureCode: "PRESENTATION_REPAIR_SCAN_FAILED",
+      });
+    }
     const consumers = Array.from(
       { length: this.environment.WALLET_WORKER_CONCURRENCY },
       (_, index) => this.consume(index),
@@ -449,6 +721,8 @@ export class WalletWorker {
   private async dispatchLoop() {
     while (!this.stopping) {
       try {
+        const campaign = await this.processOneWalletCampaign();
+        if (campaign) workerLog("wallet_campaign_batch_processed", campaign);
         const synced = await this.processOneProgramSyncJob();
         if (synced) workerLog("program_wallet_sync_batch_processed", synced);
         const queued = await this.dispatch();
@@ -458,7 +732,10 @@ export class WalletWorker {
         await this.recordHeartbeat(false, "DISPATCH_LOOP_FAILED").catch(() => undefined);
         workerLog("dispatch_loop_failed", { safeFailureCode: "DISPATCH_LOOP_FAILED" });
       }
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      // Commands remain durable in Postgres; this only bounds discovery time
+      // after the transaction commits. The former 2s scan was the dominant
+      // avoidable PREPARING delay on a healthy worker.
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
 
@@ -485,6 +762,60 @@ export class WalletWorker {
         oldestBacklogAt: oldest?.createdAt ?? null,
       },
     });
+  }
+
+  private async enqueuePresentationRepairs(): Promise<number> {
+    let cursor: string | undefined;
+    let queued = 0;
+    do {
+      const passes = await this.prisma.walletPassInstance.findMany({
+        where: {
+          status: { in: ["ISSUED", "ACTIVE"] },
+          walletProgramBindingId: { not: null },
+          membershipCredential: { status: "ACTIVE" },
+          membership: { status: "ACTIVE" },
+          walletCommands: {
+            none: {
+              safePayload: {
+                path: ["presentationSchemaVersion"],
+                equals: WALLET_PRESENTATION_SCHEMA_VERSION,
+              },
+            },
+          },
+        },
+        select: { id: true, organizationId: true, membershipId: true, provider: true },
+        orderBy: { id: "asc" },
+        take: 250,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      for (const pass of passes) {
+        const provider = this.providerMap.get(pass.provider);
+        if (!provider || provider.mode === "DISABLED") continue;
+        const idempotencyKey = `wallet:${pass.provider.toLocaleLowerCase("en-US")}:presentation-v${WALLET_PRESENTATION_SCHEMA_VERSION}:${pass.id}`;
+        await this.prisma.walletCommand.upsert({
+          where: { idempotencyKey },
+          create: {
+            organizationId: pass.organizationId,
+            membershipId: pass.membershipId,
+            walletPassInstanceId: pass.id,
+            provider: pass.provider,
+            commandType: "UPDATE",
+            idempotencyKey,
+            payloadFingerprint: createHash("sha256").update(idempotencyKey).digest("hex"),
+            safePayload: {
+              reason: "RECONCILIATION",
+              trigger: "PRESENTATION_SCHEMA_UPGRADE",
+              presentationSchemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+            },
+          },
+          update: {},
+        });
+        queued += 1;
+      }
+      cursor = passes.at(-1)?.id;
+      if (passes.length < 250) break;
+    } while (cursor);
+    return queued;
   }
 
   async processOneProgramSyncJob(jobId?: string): Promise<Record<string, unknown> | null> {
@@ -520,6 +851,40 @@ export class WalletWorker {
       where: { id: candidate.id },
     });
     try {
+      if (job.reason === "NEARBY_RELEVANCE_CHANGED") {
+        const bindings = await this.prisma.walletProgramBinding.findMany({
+          where: {
+            organizationId: job.organizationId,
+            programId: job.programId,
+            provider: "GOOGLE",
+            status: { not: "DISABLED" },
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        });
+        const membership = await this.prisma.membership.findFirst({
+          where: { organizationId: job.organizationId, programId: job.programId },
+          select: { id: true },
+          orderBy: { createdAt: "asc" },
+        });
+        if (membership) {
+          for (const binding of bindings) {
+            const idempotencyKey = `wallet:google:nearby-template:${job.id}:${binding.id}`;
+            await this.prisma.walletCommand.upsert({
+              where: { idempotencyKey },
+              create: {
+                organizationId: job.organizationId,
+                membershipId: membership.id,
+                provider: "GOOGLE",
+                commandType: "ENSURE_TEMPLATE",
+                idempotencyKey,
+                payloadFingerprint: createHash("sha256").update(idempotencyKey).digest("hex"),
+                safePayload: { bindingId: binding.id, reason: "NEARBY_RELEVANCE_CHANGED" },
+              },
+              update: {},
+            });
+          }
+        }
+      }
       const passes = await this.prisma.walletPassInstance.findMany({
         where: {
           organizationId: job.organizationId,
@@ -649,12 +1014,236 @@ export class WalletWorker {
     }
   }
 
+  async processOneWalletCampaign(campaignId?: string): Promise<Record<string, unknown> | null> {
+    const now = new Date();
+    const candidate = await this.prisma.walletEngagementCampaign.findFirst({
+      where: {
+        ...(campaignId ? { id: campaignId } : {}),
+        scheduledAt: { lte: now },
+        OR: [
+          { status: "PENDING", nextAttemptAt: { lte: now } },
+          { status: "PROCESSING", leaseExpiresAt: { lt: now } },
+        ],
+      },
+      orderBy: [{ scheduledAt: "asc" }, { id: "asc" }],
+    });
+    if (!candidate) return null;
+    const claimed = await this.prisma.walletEngagementCampaign.updateMany({
+      where: {
+        id: candidate.id,
+        OR: [
+          { status: "PENDING", nextAttemptAt: { lte: now } },
+          { status: "PROCESSING", leaseExpiresAt: { lt: now } },
+        ],
+      },
+      data: {
+        status: "PROCESSING",
+        attemptCount: { increment: 1 },
+        leaseOwner: this.workerId,
+        leaseExpiresAt: new Date(now.getTime() + LEASE_SECONDS * 1_000),
+      },
+    });
+    if (claimed.count !== 1) return null;
+    const campaign = await this.prisma.walletEngagementCampaign.findUniqueOrThrow({
+      where: { id: candidate.id },
+    });
+    try {
+      // Campaigns created before the unified composer may carry a legacy
+      // one-provider value. Delivery is provider-neutral now, so resolve both
+      // native pass populations for every queued campaign.
+      const providerCodes: Array<"APPLE" | "GOOGLE"> = ["APPLE", "GOOGLE"];
+      const passes = await this.prisma.walletPassInstance.findMany({
+        where: {
+          organizationId: campaign.organizationId,
+          provider: { in: providerCodes },
+          status: { in: ["ISSUED", "ACTIVE"] },
+          membershipCredential: { status: "ACTIVE" },
+          membership: {
+            programId: campaign.programId,
+            status: "ACTIVE",
+            customer: { status: "ACTIVE" },
+          },
+          OR: [
+            { provider: "GOOGLE" },
+            { provider: "APPLE", appleRegistrations: { some: { unregisteredAt: null } } },
+          ],
+          ...(campaign.cursorPassInstanceId ? { id: { gt: campaign.cursorPassInstanceId } } : {}),
+        },
+        select: { id: true, membershipId: true, provider: true },
+        orderBy: { id: "asc" },
+        take: 250,
+      });
+      // A branch target is intentionally based on an explicit, recorded
+      // ledger event at that branch. Memberships have no invented "home
+      // branch" field, so a branch selection can never degrade to program-wide
+      // delivery.
+      const branchMemberships = campaign.branchId
+        ? new Set(
+            (
+              await this.prisma.loyaltyLedgerEntry.findMany({
+                where: {
+                  organizationId: campaign.organizationId,
+                  locationId: campaign.branchId,
+                  membershipId: { in: passes.map((pass) => pass.membershipId) },
+                },
+                select: { membershipId: true },
+                distinct: ["membershipId"],
+              })
+            ).map((entry) => entry.membershipId),
+          )
+        : null;
+      const scopedPasses = branchMemberships
+        ? passes.filter((pass) => branchMemberships.has(pass.membershipId))
+        : passes;
+      let queued = 0;
+      let skipped = 0;
+      for (const pass of scopedPasses) {
+        const deliveryId = randomUUID();
+        const providerMessageId = `wfl_${campaign.id.replaceAll("-", "")}_${pass.id.replaceAll("-", "")}`;
+        const outcome = await this.prisma.$transaction(async (transaction) => {
+          const lockKey = `wallet-promotion-rate:${pass.membershipId}:${pass.provider}`;
+          await transaction.$queryRaw<Array<{ locked: string }>>`
+            SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))::text AS "locked"
+          `;
+          const lastDay =
+            pass.provider === "GOOGLE"
+              ? await transaction.walletCampaignDelivery.count({
+                  where: {
+                    membershipId: pass.membershipId,
+                    provider: pass.provider,
+                    OR: [
+                      {
+                        status: "SUCCEEDED",
+                        logicalSentAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+                      },
+                      {
+                        status: "QUEUED",
+                        createdAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+                      },
+                    ],
+                  },
+                })
+              : 0;
+          const safeSkipCode = lastDay >= 3 ? "GOOGLE_PROVIDER_QUOTA_24H" : null;
+          const delivery = await transaction.walletCampaignDelivery.upsert({
+            where: {
+              campaignId_walletPassInstanceId: {
+                campaignId: campaign.id,
+                walletPassInstanceId: pass.id,
+              },
+            },
+            create: {
+              id: deliveryId,
+              organizationId: campaign.organizationId,
+              campaignId: campaign.id,
+              membershipId: pass.membershipId,
+              walletPassInstanceId: pass.id,
+              provider: pass.provider,
+              providerMessageId,
+              status: safeSkipCode ? "SKIPPED" : "QUEUED",
+              safeSkipCode,
+              ...(safeSkipCode ? { completedAt: now } : {}),
+            },
+            update: {},
+          });
+          if (!safeSkipCode && delivery.status === "QUEUED") {
+            const idempotencyKey = `wallet:${pass.provider.toLocaleLowerCase("en-US")}:promotion:${delivery.id}`;
+            await transaction.walletCommand.upsert({
+              where: { idempotencyKey },
+              create: {
+                organizationId: campaign.organizationId,
+                membershipId: pass.membershipId,
+                walletPassInstanceId: pass.id,
+                provider: pass.provider,
+                commandType: "SEND_PROMOTION",
+                idempotencyKey,
+                payloadFingerprint: campaign.contentFingerprint,
+                safePayload: { campaignId: campaign.id, campaignDeliveryId: delivery.id },
+                campaignDeliveryId: delivery.id,
+              },
+              update: {},
+            });
+          }
+          return { createdNew: delivery.id === deliveryId, skipped: Boolean(safeSkipCode) };
+        });
+        if (outcome.createdNew) {
+          if (outcome.skipped) skipped += 1;
+          else queued += 1;
+        }
+      }
+      const last = passes.at(-1);
+      const finished = passes.length < 250;
+      await this.prisma.walletEngagementCampaign.update({
+        where: { id: campaign.id },
+        data: {
+          queuedCount: { increment: queued },
+          skippedCount: { increment: skipped },
+          cursorPassInstanceId: last?.id ?? campaign.cursorPassInstanceId,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          ...(finished
+            ? {
+                status: queued + campaign.queuedCount > 0 ? "DISPATCHED" : "COMPLETED",
+                dispatchedAt: now,
+                ...(queued + campaign.queuedCount > 0 ? {} : { completedAt: now }),
+              }
+            : { status: "PENDING", nextAttemptAt: now }),
+        },
+      });
+      if (finished) {
+        await this.prisma.auditLog.create({
+          data: {
+            organizationId: campaign.organizationId,
+            actorUserId: campaign.createdByUserId,
+            action: "wallet.campaign_dispatched",
+            targetType: "wallet_engagement_campaign",
+            targetId: campaign.id,
+            requestId: "wallet-worker",
+            metadata: {
+              queued: queued + campaign.queuedCount,
+              skipped: skipped + campaign.skippedCount,
+            },
+          },
+        });
+      }
+      return { campaignId: campaign.id, queued, skipped, finished };
+    } catch {
+      const dead = campaign.attemptCount >= this.environment.WALLET_COMMAND_MAX_ATTEMPTS;
+      await this.prisma.walletEngagementCampaign.update({
+        where: { id: campaign.id },
+        data: dead
+          ? {
+              status: "FAILED",
+              safeFailureCode: "TARGET_RESOLUTION_FAILED",
+              completedAt: new Date(),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+            }
+          : {
+              status: "PENDING",
+              safeFailureCode: "TARGET_RESOLUTION_FAILED",
+              nextAttemptAt: new Date(Date.now() + 60_000),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+            },
+      });
+      return { campaignId: campaign.id, failed: true, dead };
+    }
+  }
+
+  async popNextQueuedCommand(): Promise<string | null> {
+    return (
+      (await this.redis.rpop(OPERATIONAL_QUEUE_KEY)) ??
+      (await this.redis.rpop(PROMOTIONAL_QUEUE_KEY))
+    );
+  }
+
   private async consume(slot: number) {
     while (!this.stopping) {
       // A blocking BRPOP monopolizes a Redis connection. Consumers share the
       // worker connection with the dispatcher, so use a short non-blocking
       // poll to keep queue publication and health checks responsive.
-      const commandId = await this.redis.rpop(QUEUE_KEY);
+      const commandId = await this.popNextQueuedCommand();
       if (!commandId) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         continue;
@@ -688,6 +1277,30 @@ export class WalletWorker {
   }
 
   private async execute(command: WalletCommand) {
+    const processingStartedAt = Date.now();
+    workerLog("wallet_command_processing_started", {
+      commandId: command.id,
+      provider: command.provider,
+      commandType: command.commandType,
+      queueLatencyMs: Math.max(0, processingStartedAt - command.createdAt.getTime()),
+    });
+    if (["ENSURE_TEMPLATE", "ISSUE", "SEND_PROMOTION"].includes(command.commandType)) {
+      const profile = await this.prisma.organizationBillingProfile.findUnique({
+        where: { organizationId: command.organizationId },
+        select: { subscriptionStatus: true, trialEnd: true, gracePeriodEnd: true },
+      });
+      if (
+        !profile ||
+        !hasMerchantOperationalBillingAccess({
+          status: profile.subscriptionStatus,
+          trialEnd: profile.trialEnd,
+          gracePeriodEnd: profile.gracePeriodEnd,
+        })
+      ) {
+        await this.deadLetter(command, "BILLING_ACTION_REQUIRED");
+        return;
+      }
+    }
     const provider = this.providerMap.get(command.provider);
     if (!provider || provider.mode === "DISABLED") {
       await this.fail(command, normalizeWalletProviderError(new Error("Provider disabled.")));
@@ -701,9 +1314,30 @@ export class WalletWorker {
           ? await this.prisma.walletProgramBinding.findUnique({
               where: { id: payload.bindingId },
               include: {
-                organization: true,
-                program: true,
-                programVersion: { include: { translations: true, visualTheme: true } },
+                organization: {
+                  include: {
+                    brandLogoAsset: { include: { variants: true } },
+                    walletNearbyConfiguration: {
+                      include: {
+                        locations: {
+                          include: { location: true },
+                          orderBy: { sortOrder: "asc" },
+                        },
+                      },
+                    },
+                  },
+                },
+                program: { include: { walletNearbyProgramCopy: true } },
+                programVersion: {
+                  include: {
+                    translations: true,
+                    cardLocales: true,
+                    visualTheme: {
+                      include: { logoAsset: { include: { variants: true } } },
+                    },
+                    locations: { select: { locationId: true } },
+                  },
+                },
               },
             })
           : null;
@@ -717,13 +1351,26 @@ export class WalletWorker {
           data: {
             providerTemplateId: result.providerTemplateId,
             status: "READY",
-            providerState: { state: result.state, mode: provider.mode },
+            providerState: {
+              state: result.state,
+              mode: provider.mode,
+              presentationSchemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+              configurationFingerprint: binding.configurationFingerprint,
+            },
             lastSyncedAt: new Date(),
           },
         });
       } else if (command.commandType === "APPLE_PUSH") {
         if (!command.walletPassInstanceId) throw new Error("Apple push has no pass instance.");
-        await this.sendApplePush(command.walletPassInstanceId, provider.mode);
+        const outcome = await this.sendApplePush(command.walletPassInstanceId, provider.mode);
+        if (command.campaignDeliveryId) {
+          await this.prisma.walletCampaignDelivery.update({
+            where: { id: command.campaignDeliveryId },
+            data: appleCampaignDeliveryUpdate(outcome, new Date()),
+          });
+        }
+      } else if (command.commandType === "SEND_PROMOTION") {
+        providerRequestId = await this.executePromotionalMessage(command, provider);
       } else {
         if (!command.walletPassInstanceId) throw new Error("Wallet pass command has no instance.");
         const pass = await this.prisma.walletPassInstance.findUnique({
@@ -731,15 +1378,56 @@ export class WalletWorker {
           include: passInclude,
         });
         if (!pass) throw new Error("Wallet pass instance is unavailable.");
+        if (pass.provider === "GOOGLE" && !pass.walletProgramBinding) {
+          throw new Error("Google Wallet pass has no program binding.");
+        }
+        if (
+          pass.provider === "GOOGLE" &&
+          pass.walletProgramBinding &&
+          !walletPresentationIsCurrent(
+            pass.walletProgramBinding.providerState,
+            pass.walletProgramBinding.configurationFingerprint,
+          )
+        ) {
+          await this.ensureGoogleTemplateCurrent(pass.walletProgramBinding.id, provider);
+        }
         const stampRenderInput = await this.stampRenderInput(
           pass,
           pass.provider === "GOOGLE" ? "GOOGLE_WALLET" : "APPLE_WALLET",
         );
-        const progressAssetUrl =
-          pass.provider === "GOOGLE"
-            ? await this.ensureGoogleProgressAsset(pass, stampRenderInput)
-            : undefined;
-        const input = mapPass(pass, this.environment, stampRenderInput, progressAssetUrl);
+        const qrCenterLogo = await this.loadQrCenterLogo(
+          pass.membership.enrollmentProgramVersion.visualTheme?.logoAsset,
+        );
+        const baseInput = mapPass(
+          pass,
+          this.environment,
+          stampRenderInput,
+          undefined,
+          undefined,
+          qrCenterLogo,
+        );
+        let walletArtworkUrl: string | undefined;
+        if (pass.provider === "GOOGLE") {
+          try {
+            walletArtworkUrl = await this.ensureGoogleHeroAsset(pass, baseInput);
+          } catch (error) {
+            // Preserve a usable native Google Wallet fallback when hero
+            // composition or storage is temporarily unavailable.
+            workerLog("google_hero_artwork_fallback", {
+              reason: error instanceof Error ? error.name : "unknown",
+            });
+          }
+        }
+        const applePassImages =
+          pass.provider === "APPLE" ? await this.merchantApplePassImages(pass) : undefined;
+        const input = mapPass(
+          pass,
+          this.environment,
+          stampRenderInput,
+          walletArtworkUrl,
+          applePassImages,
+          qrCenterLogo,
+        );
         if (command.commandType === "ISSUE") {
           if (pass.membershipCredential.status !== "ACTIVE") {
             await this.deadLetter(command, "CREDENTIAL_NOT_ACTIVE");
@@ -814,6 +1502,9 @@ export class WalletWorker {
             },
             data: {
               status: input.transferred ? "INVALIDATED" : "ACTIVE",
+              ...(result.safeMetadata
+                ? { providerState: result.safeMetadata as Prisma.InputJsonValue }
+                : {}),
               lastProviderSyncAt: new Date(),
               lastProviderErrorCode: null,
             },
@@ -831,17 +1522,30 @@ export class WalletWorker {
           ...(providerRequestId ? { providerRequestId } : {}),
         },
       });
+      if (command.campaignDeliveryId) {
+        const delivery = await this.prisma.walletCampaignDelivery.findUnique({
+          where: { id: command.campaignDeliveryId },
+          select: { campaignId: true },
+        });
+        if (delivery) await this.refreshCampaignAggregation(delivery.campaignId);
+      }
       workerLog("command_completed", {
         commandId: command.id,
         provider: command.provider,
         commandType: command.commandType,
+        processingDurationMs: Date.now() - processingStartedAt,
       });
     } catch (error) {
       workerLog("command_failed", {
         commandId: command.id,
         provider: command.provider,
         commandType: command.commandType,
+        processingDurationMs: Date.now() - processingStartedAt,
       });
+      if (error instanceof HistoricalWalletStampSourceError) {
+        await this.deadLetter(command, error.safeErrorCode);
+        return;
+      }
       if (error instanceof Error && error.message.includes("stamp artwork digest mismatch")) {
         await this.deadLetter(command, "RENDER_ASSET_DIGEST_MISMATCH");
         return;
@@ -869,7 +1573,10 @@ export class WalletWorker {
       await this.deadLetter(command, error.category, error.options.providerRequestId);
       return;
     }
-    const delaySeconds = Math.min(3_600, 5 * 2 ** Math.max(0, command.attemptCount - 1));
+    const delaySeconds =
+      error.category === "RATE_LIMITED"
+        ? 6 * 60 * 60
+        : Math.min(3_600, 5 * 2 ** Math.max(0, command.attemptCount - 1));
     await this.prisma.$transaction([
       this.prisma.walletCommand.update({
         where: { id: command.id },
@@ -884,11 +1591,41 @@ export class WalletWorker {
             : {}),
         },
       }),
-      ...(command.walletPassInstanceId
+      ...(command.walletPassInstanceId &&
+      command.commandType !== "SEND_PROMOTION" &&
+      command.commandType !== "RECONCILE"
         ? [
             this.prisma.walletPassInstance.update({
               where: { id: command.walletPassInstanceId },
               data: { status: "ERROR", lastProviderErrorCode: error.category },
+            }),
+          ]
+        : []),
+      ...(command.walletPassInstanceId && command.commandType === "RECONCILE"
+        ? [
+            this.prisma.walletPassInstance.update({
+              where: { id: command.walletPassInstanceId },
+              data: {
+                providerState: {
+                  eligibilityState: "PROVIDER_UNAVAILABLE",
+                  checkedAt: new Date().toISOString(),
+                },
+                lastProviderSyncAt: new Date(),
+                lastProviderErrorCode: error.category,
+              },
+            }),
+          ]
+        : []),
+      ...(command.campaignDeliveryId
+        ? [
+            this.prisma.walletCampaignDelivery.update({
+              where: { id: command.campaignDeliveryId },
+              data: {
+                safeFailureCode: error.category,
+                ...(error.options.providerRequestId
+                  ? { providerRequestId: error.options.providerRequestId }
+                  : {}),
+              },
             }),
           ]
         : []),
@@ -930,7 +1667,202 @@ export class WalletWorker {
           },
         },
       }),
+      ...(command.campaignDeliveryId
+        ? [
+            this.prisma.walletCampaignDelivery.update({
+              where: { id: command.campaignDeliveryId },
+              data: {
+                status: safeErrorCode === "RATE_LIMITED" ? "THROTTLED" : "FAILED",
+                safeFailureCode: safeErrorCode,
+                completedAt: new Date(),
+                ...(providerRequestId ? { providerRequestId } : {}),
+              },
+            }),
+          ]
+        : []),
     ]);
+    if (command.campaignDeliveryId) {
+      const delivery = await this.prisma.walletCampaignDelivery.findUnique({
+        where: { id: command.campaignDeliveryId },
+        select: { campaignId: true },
+      });
+      if (delivery) await this.refreshCampaignAggregation(delivery.campaignId);
+    }
+  }
+
+  private async executePromotionalMessage(
+    command: WalletCommand,
+    provider: WalletProvider,
+  ): Promise<string | undefined> {
+    if (!command.campaignDeliveryId || !command.walletPassInstanceId) {
+      throw new Error("Promotional Wallet command is missing its delivery identity.");
+    }
+    const delivery = await this.prisma.walletCampaignDelivery.findUnique({
+      where: { id: command.campaignDeliveryId },
+      include: { campaign: true, walletPassInstance: true },
+    });
+    if (!delivery || delivery.walletPassInstanceId !== command.walletPassInstanceId) {
+      throw new Error("Promotional Wallet delivery is unavailable.");
+    }
+    if (delivery.status !== "QUEUED") return delivery.providerRequestId ?? undefined;
+    const now = new Date();
+    const lastDay =
+      delivery.provider === "GOOGLE"
+        ? await this.prisma.walletCampaignDelivery.count({
+            where: {
+              id: { not: delivery.id },
+              membershipId: delivery.membershipId,
+              provider: delivery.provider,
+              status: "SUCCEEDED",
+              logicalSentAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+            },
+          })
+        : 0;
+    const safeSkipCode =
+      delivery.campaign.status === "CANCELED"
+        ? "CAMPAIGN_CANCELED"
+        : lastDay >= 3
+          ? "GOOGLE_PROVIDER_QUOTA_24H"
+          : null;
+    if (safeSkipCode) {
+      await this.prisma.walletCampaignDelivery.update({
+        where: { id: delivery.id },
+        data: { status: "SKIPPED", safeSkipCode, completedAt: now },
+      });
+      return undefined;
+    }
+    if (delivery.provider === "APPLE") {
+      // Apple Wallet campaigns are canonical signed-pass updates. The durable
+      // UPDATE command allocates a new update tag/sequence, regenerates the
+      // pass with a changeMessage field, then queues a background Wallet APNs
+      // signal; it never sends an arbitrary application alert.
+      await this.prisma.$transaction(async (transaction) => {
+        // A delivery is intentionally owned by exactly one durable command.
+        // Hand it from SEND_PROMOTION to UPDATE before assigning the update,
+        // otherwise the unique relation dead-letters an otherwise valid Apple
+        // campaign before a pass update can be generated.
+        await transaction.walletCommand.update({
+          where: { id: command.id },
+          data: { campaignDeliveryId: null },
+        });
+        await transaction.walletPassInstance.update({
+          where: { id: delivery.walletPassInstanceId },
+          data: {
+            appleMerchantMessageTitle: delivery.campaign.title,
+            appleMerchantMessageBody: delivery.campaign.body,
+            appleMerchantMessageUrl: delivery.campaign.destinationUrl,
+            appleMerchantMessageLocale: delivery.campaign.locale,
+          },
+        });
+        const queued = await queueWalletPassStateChange(transaction, {
+          walletPassInstanceId: delivery.walletPassInstanceId,
+          commandType: "UPDATE",
+          reason: "MERCHANT_WALLET_MESSAGE",
+          eventKey: `campaign:${delivery.campaignId}:delivery:${delivery.id}`,
+          safePayload: { campaignId: delivery.campaignId, campaignDeliveryId: delivery.id },
+        });
+        await transaction.walletCommand.update({
+          where: { id: queued.command.id },
+          data: { campaignDeliveryId: delivery.id },
+        });
+      });
+      return undefined;
+    }
+    if (!provider.sendPromotionalMessage) {
+      throw new Error("This Wallet provider has no approved promotional message adapter.");
+    }
+    const obsoleteDeliveries = await this.prisma.walletCampaignDelivery.findMany({
+      where: {
+        walletPassInstanceId: delivery.walletPassInstanceId,
+        status: "SUCCEEDED",
+        campaign: { status: "CANCELED" },
+      },
+      select: { providerMessageId: true },
+      orderBy: { createdAt: "asc" },
+    });
+    const result = await provider.sendPromotionalMessage(
+      { providerIdentity: delivery.walletPassInstance.providerIdentity },
+      {
+        messageId: delivery.providerMessageId,
+        locale: delivery.campaign.locale === "AR" ? "ar" : "en",
+        title: delivery.campaign.title,
+        body: delivery.campaign.body,
+        ...(delivery.campaign.destinationUrl
+          ? { destinationUrl: delivery.campaign.destinationUrl }
+          : {}),
+        obsoleteMessageIds: obsoleteDeliveries.map((item) => item.providerMessageId),
+      },
+    );
+    if (result.state === "NO_ACTIVE_WALLET_HOLDER") {
+      await this.prisma.walletCampaignDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "SKIPPED",
+          safeSkipCode: "NO_ACTIVE_WALLET_HOLDER",
+          completedAt: now,
+          ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
+        },
+      });
+      return result.providerRequestId;
+    }
+    await this.prisma.walletCampaignDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "SUCCEEDED",
+        logicalSentAt: now,
+        completedAt: now,
+        safeFailureCode: null,
+        ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
+      },
+    });
+    return result.providerRequestId;
+  }
+
+  private async refreshCampaignAggregation(campaignId: string) {
+    const [campaign, counts] = await Promise.all([
+      this.prisma.walletEngagementCampaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true, dispatchedAt: true },
+      }),
+      Promise.all(
+        (
+          ["QUEUED", "SUCCEEDED", "SKIPPED", "THROTTLED", "UNKNOWN", "INVALID", "FAILED"] as const
+        ).map((status) =>
+          this.prisma.walletCampaignDelivery.count({ where: { campaignId, status } }),
+        ),
+      ),
+    ]);
+    if (!campaign) return;
+    const queued = counts[0] ?? 0;
+    const succeeded = counts[1] ?? 0;
+    const skipped = counts[2] ?? 0;
+    const throttled = counts[3] ?? 0;
+    const unknown = counts[4] ?? 0;
+    const invalid = counts[5] ?? 0;
+    const failed = (counts[6] ?? 0) + throttled + unknown + invalid;
+    const terminal = campaign.dispatchedAt !== null && queued === 0;
+    const status = !campaign.dispatchedAt
+      ? campaign.status
+      : !terminal
+        ? "DISPATCHED"
+        : failed > 0 && succeeded > 0
+          ? "PARTIAL_FAILURE"
+          : failed > 0
+            ? "FAILED"
+            : "COMPLETED";
+    await this.prisma.walletEngagementCampaign.updateMany({
+      where: { id: campaignId, status: { not: "CANCELED" } },
+      data: {
+        queuedCount: queued,
+        succeededCount: succeeded,
+        skippedCount: skipped,
+        failedCount: failed,
+        throttledCount: throttled,
+        unknownCount: unknown,
+        status,
+        ...(terminal ? { completedAt: new Date() } : {}),
+      },
+    });
   }
 
   private reason(command: WalletCommand, fallback: WalletUpdateReason): WalletUpdateReason {
@@ -944,40 +1876,58 @@ export class WalletWorker {
     }
     const sequence = pass.appleUpdateSequence.toString();
     const idempotencyKey = `wallet:apple:push:${pass.id}:s${sequence}`;
-    await this.prisma.walletCommand.upsert({
-      where: { idempotencyKey },
-      create: {
-        organizationId: pass.organizationId,
-        membershipId: pass.membershipId,
-        walletPassInstanceId: pass.id,
-        provider: "APPLE",
-        commandType: "APPLE_PUSH",
-        idempotencyKey,
-        payloadFingerprint: createHash("sha256")
-          .update(`${idempotencyKey}:${source.id}`)
-          .digest("hex"),
-        safePayload: {
-          appleUpdateSequence: sequence,
-          sourceCommandType: source.commandType,
+    await this.prisma.$transaction(async (transaction) => {
+      // Continue the one-command ownership handoff so APNs, rather than pass
+      // regeneration, is the event that completes the campaign delivery.
+      if (source.campaignDeliveryId) {
+        await transaction.walletCommand.update({
+          where: { id: source.id },
+          data: { campaignDeliveryId: null },
+        });
+      }
+      await transaction.walletCommand.upsert({
+        where: { idempotencyKey },
+        create: {
+          organizationId: pass.organizationId,
+          membershipId: pass.membershipId,
+          walletPassInstanceId: pass.id,
+          provider: "APPLE",
+          commandType: "APPLE_PUSH",
+          idempotencyKey,
+          payloadFingerprint: createHash("sha256")
+            .update(`${idempotencyKey}:${source.id}`)
+            .digest("hex"),
+          ...(source.campaignDeliveryId ? { campaignDeliveryId: source.campaignDeliveryId } : {}),
+          safePayload: {
+            appleUpdateSequence: sequence,
+            sourceCommandType: source.commandType,
+          },
         },
-      },
-      update: {},
+        update: {},
+      });
     });
   }
 
   private async sendApplePush(
     walletPassInstanceId: string,
     mode: "DISABLED" | "TEST_ADAPTER" | "REAL",
-  ) {
+  ): Promise<"SENT" | "NO_ACTIVE_WALLET_HOLDER"> {
     const registrations = await this.prisma.applePassRegistration.findMany({
       where: { walletPassInstanceId, unregisteredAt: null },
       include: { walletPassInstance: true },
     });
-    if (mode === "TEST_ADAPTER" || registrations.length === 0) return;
+    if (registrations.length === 0) return "NO_ACTIVE_WALLET_HOLDER";
+    if (mode === "TEST_ADAPTER") return "SENT";
+    const apnsCertificateSource =
+      this.environment.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 ??
+      this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64;
+    const apnsCertificatePassword = this.environment.APPLE_APNS_CERTIFICATE_PASSWORD_FILE
+      ? readFileSync(this.environment.APPLE_APNS_CERTIFICATE_PASSWORD_FILE, "utf8").trim()
+      : this.environment.APPLE_PASS_CERTIFICATE_PASSWORD;
     if (
       mode !== "REAL" ||
-      !this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
-      !this.environment.APPLE_PASS_CERTIFICATE_PASSWORD ||
+      !apnsCertificateSource ||
+      !apnsCertificatePassword ||
       !this.environment.APPLE_PASS_TYPE_IDENTIFIER
     ) {
       throw new Error("APNs pass certificate configuration is unavailable.");
@@ -987,9 +1937,10 @@ export class WalletWorker {
         ? "https://api.push.apple.com"
         : "https://api.sandbox.push.apple.com";
     const client = connectHttp2(authority, {
-      pfx: bytesFromSource(this.environment.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64),
-      passphrase: this.environment.APPLE_PASS_CERTIFICATE_PASSWORD,
+      pfx: bytesFromSource(apnsCertificateSource),
+      passphrase: apnsCertificatePassword,
     });
+    let delivered = 0;
     try {
       for (const registration of registrations) {
         const token = decryptCustomerValue(registration.pushTokenEncrypted, {
@@ -998,47 +1949,90 @@ export class WalletWorker {
           purpose: "apple-push-token",
           keyring: this.customerKeyring,
         });
-        const status = await new Promise<number>((resolve, reject) => {
-          const push = client.request({
-            ":method": "POST",
-            ":path": `/3/device/${encodeURIComponent(token)}`,
-            "apns-topic": this.environment.APPLE_PASS_TYPE_IDENTIFIER as string,
-            "content-type": "application/json",
-          });
-          let responseStatus = 0;
-          push.on("response", (headers) => {
-            responseStatus = Number(headers[":status"] ?? 0);
-          });
-          push.on("error", reject);
-          push.on("end", () => resolve(responseStatus));
-          push.end("{}");
-        });
-        if (status === 410 || status === 400) {
+        const response = await new Promise<{ status: number; reason?: string }>(
+          (resolve, reject) => {
+            const push = client.request({
+              ":method": "POST",
+              ":path": `/3/device/${encodeURIComponent(token)}`,
+              ...applePassUpdateRequestHeaders(
+                this.environment.APPLE_PASS_TYPE_IDENTIFIER as string,
+              ),
+            });
+            let responseStatus = 0;
+            const responseBody: Buffer[] = [];
+            push.on("response", (headers) => {
+              responseStatus = Number(headers[":status"] ?? 0);
+            });
+            push.on("data", (chunk: Buffer | string) => {
+              responseBody.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            });
+            push.on("error", reject);
+            push.on("end", () => {
+              let reason: string | undefined;
+              try {
+                const body = JSON.parse(Buffer.concat(responseBody).toString("utf8")) as {
+                  reason?: unknown;
+                };
+                if (typeof body.reason === "string") reason = body.reason;
+              } catch {
+                // Successful APNs responses have no body; malformed error bodies stay redacted.
+              }
+              resolve({ status: responseStatus, ...(reason ? { reason } : {}) });
+            });
+            push.end("{}");
+          },
+        );
+        const disposition = classifyApplePushResponse(response.status, response.reason);
+        if (disposition === "INVALID_TOKEN") {
           await this.prisma.applePassRegistration.update({
             where: { id: registration.id },
             data: { unregisteredAt: new Date() },
           });
           continue;
         }
-        if (status < 200 || status >= 300) {
+        if (disposition !== "SUCCESS") {
           const error = new Error("APNs rejected the Wallet update.") as Error & {
             status?: number;
           };
-          error.status = status || 503;
+          error.status = disposition === "RETRY" ? response.status || 503 : response.status || 400;
           throw error;
         }
+        delivered += 1;
       }
+      return delivered > 0 ? "SENT" : "NO_ACTIVE_WALLET_HOLDER";
     } finally {
       client.close();
     }
   }
 
-  private async ensureGoogleProgressAsset(
+  private async ensureGoogleHeroAsset(
     pass: PassRecord,
-    stampRenderInput: PublishedMembershipStampRenderInput,
+    input: WalletMembershipInput,
   ): Promise<string> {
-    const visualDigest = publishedMembershipStampVisualDigest(stampRenderInput);
-    const assetType = `GOOGLE_PROGRESS_${visualDigest}`;
+    const programVersionId = input.programVersionId;
+    const sharedAssetOwnership = googleProgressSharedAssetOwnership(programVersionId);
+    const visualDigest = publishedMembershipStampVisualDigest(input.stampRenderInput);
+    const credentialDigest = createHash("sha256").update(input.credentialPayload).digest("hex");
+    const qrCenterLogoDigest = input.qrCenterLogo
+      ? createHash("sha256").update(input.qrCenterLogo).digest("hex")
+      : "none";
+    const compositionDigest = createHash("sha256")
+      .update(`waflo-wallet-artwork-v5:${visualDigest}:`)
+      .update(input.organizationName)
+      .update("\0")
+      .update(input.programName)
+      .update("\0")
+      .update(input.displayName)
+      .update("\0")
+      .update(input.rewardSummary)
+      .update("\0")
+      .update(input.locale)
+      .update("\0")
+      .update(qrCenterLogoDigest)
+      .update("\0")
+      .update(credentialDigest)
+      .digest("hex");
+    const assetType = `GOOGLE_HERO_V5_${compositionDigest}`;
     const cached = await this.prisma.publicWalletAsset.findFirst({
       where: { organizationId: pass.organizationId, assetType, revokedAt: null },
     });
@@ -1046,18 +2040,33 @@ export class WalletWorker {
       this.environment.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL ||
       this.environment.WALLET_PUBLIC_BASE_URL;
     if (cached) {
-      return `${base.replace(/\/+$/, "")}/${cached.publicToken}`;
+      const sharedAsset = googleProgressAssetNeedsOwnershipRepair(cached, programVersionId)
+        ? await this.prisma.publicWalletAsset.update({
+            where: { id: cached.id },
+            data: sharedAssetOwnership,
+          })
+        : cached;
+      return `${base.replace(/\/+$/, "")}/${sharedAsset.publicToken}`;
     }
+    const walletLocale = cardLocalePresentation(input.locale).locale;
+    const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
     const rendered = renderPublishedMembershipStampSvg(stampRenderInput);
-    const width = 1_032;
-    const height = 336;
-    const bytes = await sharp(Buffer.from(rendered.svg, "utf8"))
-      .resize(width, height, {
-        fit: "contain",
-        background: stampRenderInput.visualTheme.backgroundColor,
-      })
-      .png()
-      .toBuffer();
+    const composed = await composeWalletArtwork(
+      walletArtworkInputFromStampRender(
+        {
+          stampRenderInput,
+          rewardLabel: input.rewardSummary,
+          organizationName: input.organizationName,
+          programName: input.programName,
+          memberName: input.displayName,
+          credentialPayload: input.credentialPayload,
+          ...(input.qrCenterLogo ? { qrCenterLogo: { bytes: input.qrCenterLogo } } : {}),
+        },
+        rendered,
+      ),
+      "GOOGLE_HERO",
+    );
+    const { width, height, bytes } = composed;
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
     const objectKey = `wallet-public/${pass.organizationId}/${contentDigest}.png`;
     const publicToken = `wpa_${createHmac(
@@ -1094,8 +2103,7 @@ export class WalletWorker {
         },
         create: {
           organizationId: pass.organizationId,
-          programVersionId: pass.membership.enrollmentProgramVersionId,
-          membershipId: pass.membershipId,
+          ...sharedAssetOwnership,
           assetType,
           contentDigest,
           objectKey,
@@ -1104,7 +2112,14 @@ export class WalletWorker {
           width,
           height,
         },
-        update: {},
+        update: {
+          ...sharedAssetOwnership,
+          objectKey,
+          publicToken,
+          mimeType: "image/png",
+          width,
+          height,
+        },
       });
     } catch (error) {
       asset = await this.prisma.publicWalletAsset.findUnique({
@@ -1118,26 +2133,58 @@ export class WalletWorker {
       });
       if (!asset) throw error;
     }
+    if (googleProgressAssetNeedsOwnershipRepair(asset, programVersionId)) {
+      asset = await this.prisma.publicWalletAsset.update({
+        where: { id: asset.id },
+        data: sharedAssetOwnership,
+      });
+    }
     return `${base.replace(/\/+$/, "")}/${asset.publicToken}`;
   }
 
   private async ensureGoogleProgramLogo(
     binding: Prisma.WalletProgramBindingGetPayload<{
       include: {
-        organization: true;
-        program: true;
-        programVersion: { include: { translations: true; visualTheme: true } };
+        organization: {
+          include: {
+            brandLogoAsset: { include: { variants: true } };
+            walletNearbyConfiguration: {
+              include: {
+                locations: { include: { location: true }; orderBy: { sortOrder: "asc" } };
+              };
+            };
+          };
+        };
+        program: { include: { walletNearbyProgramCopy: true } };
+        programVersion: {
+          include: {
+            translations: true;
+            cardLocales: true;
+            visualTheme: {
+              include: { logoAsset: { include: { variants: true } } };
+            };
+            locations: { select: { locationId: true } };
+          };
+        };
       };
     }>,
   ): Promise<string> {
-    const background = binding.programVersion.visualTheme?.accentColor ?? "#E4572E";
-    const foreground = binding.programVersion.visualTheme?.backgroundColor ?? "#F7F4EE";
-    const width = 660;
-    const height = 660;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 660 660"><rect width="660" height="660" rx="132" fill="${background}"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="${foreground}" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    const bytes = await sharp(Buffer.from(svg, "utf8")).png().toBuffer();
+    const width = GOOGLE_WALLET_LOGO_SIZE;
+    const height = GOOGLE_WALLET_LOGO_SIZE;
+    const programLogo = binding.programVersion.visualTheme?.logoAsset;
+    const brandLogo = binding.organization.brandLogoAsset;
+    const source =
+      (await this.readBrandLogoBytes(programLogo)) ?? (await this.readBrandLogoBytes(brandLogo));
+    const bytes = source
+      ? await prepareGoogleWalletProgramLogo(
+          source,
+          binding.programVersion.visualTheme?.accentColor ?? "#E4572E",
+        )
+      : await this.defaultGoogleProgramLogo();
     const contentDigest = createHash("sha256").update(bytes).digest("hex");
-    const assetType = `GOOGLE_PROGRAM_LOGO_${binding.configurationFingerprint.slice(0, 24)}`;
+    const assetType = source
+      ? `GOOGLE_MERCHANT_LOGO_${contentDigest.slice(0, 24)}`
+      : `GOOGLE_PROGRAM_LOGO_${binding.configurationFingerprint.slice(0, 24)}`;
     const objectKey = `wallet-public/${binding.organizationId}/${contentDigest}.png`;
     const publicToken = `wpa_${createHmac(
       "sha256",
@@ -1202,6 +2249,155 @@ export class WalletWorker {
     return `${base.replace(/\/+$/, "")}/${asset.publicToken}`;
   }
 
+  private async ensureGoogleTemplateCurrent(
+    bindingId: string,
+    provider: WalletProvider,
+  ): Promise<void> {
+    const binding = await this.prisma.walletProgramBinding.findUnique({
+      where: { id: bindingId },
+      include: {
+        organization: {
+          include: {
+            brandLogoAsset: { include: { variants: true } },
+            walletNearbyConfiguration: {
+              include: {
+                locations: {
+                  include: { location: true },
+                  orderBy: { sortOrder: "asc" },
+                },
+              },
+            },
+          },
+        },
+        program: { include: { walletNearbyProgramCopy: true } },
+        programVersion: {
+          include: {
+            translations: true,
+            cardLocales: true,
+            visualTheme: {
+              include: { logoAsset: { include: { variants: true } } },
+            },
+            locations: { select: { locationId: true } },
+          },
+        },
+      },
+    });
+    if (binding?.provider !== "GOOGLE") {
+      throw new Error("Google Wallet program binding is unavailable.");
+    }
+    if (
+      walletPresentationIsCurrent(binding.providerState, binding.configurationFingerprint) &&
+      binding.status === "READY"
+    ) {
+      return;
+    }
+    const programLogoUrl = await this.ensureGoogleProgramLogo(binding);
+    const result = await provider.ensureProgramTemplate(mapProgram(binding, programLogoUrl));
+    await this.prisma.walletProgramBinding.update({
+      where: { id: binding.id },
+      data: {
+        providerTemplateId: result.providerTemplateId,
+        status: "READY",
+        providerState: {
+          state: result.state,
+          mode: provider.mode,
+          presentationSchemaVersion: WALLET_PRESENTATION_SCHEMA_VERSION,
+          configurationFingerprint: binding.configurationFingerprint,
+        },
+        lastSyncedAt: new Date(),
+      },
+    });
+  }
+
+  private async defaultGoogleProgramLogo() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="660" height="660" viewBox="0 0 660 660"><rect width="660" height="660" fill="#E4572E"/><path d="M126 178l106 304 98-184 98 184 106-304" fill="none" stroke="#FFFFFF" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
+  }
+
+  private async merchantApplePassImages(
+    pass: PassRecord,
+  ): Promise<Readonly<Record<string, Uint8Array>> | undefined> {
+    const logoBytes =
+      (await this.readBrandLogoBytes(
+        pass.membership.enrollmentProgramVersion.visualTheme?.logoAsset,
+      )) ?? (await this.readBrandLogoBytes(pass.membership.organization.brandLogoAsset));
+    const appleLogo = (scale: 1 | 2 | 3) =>
+      logoBytes
+        ? sharp(logoBytes)
+            .resize(144 * scale, 36 * scale, {
+              fit: "contain",
+              background: { r: 255, g: 255, b: 255, alpha: 0 },
+              withoutEnlargement: false,
+            })
+            .extend({
+              top: 7 * scale,
+              bottom: 7 * scale,
+              left: 8 * scale,
+              right: 8 * scale,
+              background: { r: 255, g: 255, b: 255, alpha: 0 },
+            })
+            .png()
+            .toBuffer()
+        : undefined;
+    const [logo, logo2x, logo3x] = await Promise.all([appleLogo(1), appleLogo(2), appleLogo(3)]);
+    return {
+      ...(logo && logo2x && logo3x
+        ? {
+            "logo.png": logo,
+            "logo@2x.png": logo2x,
+            "logo@3x.png": logo3x,
+          }
+        : {}),
+    };
+  }
+
+  private async readBrandLogoBytes(
+    asset:
+      | {
+          source: string;
+          processingStatus: string;
+          archivedAt: Date | null;
+          safeMetadata: unknown;
+          variants: Array<{
+            variantCode: string;
+            objectKey: string;
+            digest: string;
+            mimeType: string;
+          }>;
+        }
+      | null
+      | undefined,
+  ): Promise<Buffer | null> {
+    if (asset?.processingStatus !== "READY" || asset.archivedAt) {
+      return null;
+    }
+    const metadata = asset.safeMetadata;
+    if (
+      metadata &&
+      typeof metadata === "object" &&
+      "inlineSvg" in metadata &&
+      typeof metadata.inlineSvg === "string"
+    ) {
+      return Buffer.from(metadata.inlineSvg, "utf8");
+    }
+    const variant =
+      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE") ??
+      asset.variants.find((item) => item.variantCode === "STAMP_256");
+    if (!variant?.mimeType.startsWith("image/")) return null;
+    const result = await this.objectStorage.send(
+      new GetObjectCommand({
+        Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+        Key: variant.objectKey,
+      }),
+    );
+    if (!result.Body) throw new Error("Merchant logo object is unavailable.");
+    const bytes = Buffer.from(await result.Body.transformToByteArray());
+    if (createHash("sha256").update(bytes).digest("hex") !== variant.digest) {
+      throw new Error("Merchant logo digest mismatch.");
+    }
+    return bytes;
+  }
+
   private async stampRenderInput(
     pass: PassRecord,
     outputProfile: "APPLE_WALLET" | "GOOGLE_WALLET",
@@ -1209,48 +2405,27 @@ export class WalletWorker {
     const version = pass.membership.enrollmentProgramVersion;
     const theme = version.visualTheme;
     if (!theme) throw new Error("Published Wallet stamp artwork is unavailable.");
-    const [filledArtwork, emptyArtwork] = await Promise.all([
+    const [filledSource, emptySource] = await Promise.all([
       this.loadStampArtwork(theme.filledStampAsset),
       this.loadStampArtwork(theme.emptyStampAsset),
     ]);
-    const digest = (asset: typeof theme.filledStampAsset) =>
-      asset.variants.find((item) => item.variantCode === "STAMP_256")?.digest ??
-      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE")?.digest ??
-      asset.sha256Digest;
     const requiredStampCount = version.stampRule?.requiredStampCount ?? 8;
     const currentStampCount = pass.membership.progress?.currentCycleStampCount ?? 0;
-    const rawLayout =
-      theme.layoutConfiguration &&
-      typeof theme.layoutConfiguration === "object" &&
-      !Array.isArray(theme.layoutConfiguration)
-        ? theme.layoutConfiguration
-        : {};
-    const layoutConfiguration = {
-      ...("columns" in rawLayout && typeof rawLayout.columns === "number"
-        ? { columns: rawLayout.columns }
-        : {}),
-      ...("maxPerRow" in rawLayout && typeof rawLayout.maxPerRow === "number"
-        ? { maxPerRow: rawLayout.maxPerRow }
-        : {}),
-      ...("serpentine" in rawLayout && typeof rawLayout.serpentine === "boolean"
-        ? { serpentine: rawLayout.serpentine }
-        : {}),
-      ...("startAngle" in rawLayout && typeof rawLayout.startAngle === "number"
-        ? { startAngle: rawLayout.startAngle }
-        : {}),
-    };
+    const { locale, translation } = resolvePassLocalizedContent(pass);
     return {
       organizationId: pass.organizationId,
       programId: pass.membership.programId,
       programVersionId: version.id,
       membershipId: pass.membershipId,
-      rendererSchemaVersion: "waflo-stamp-render-v1",
-      locale: pass.membership.customer.preferredLocale === "AR" ? "ar" : "en",
+      rendererSchemaVersion: "waflo-stamp-render-v2",
+      locale,
+      rewardLabel: translation?.rewardSummary ?? "",
       requiredStampCount,
       currentStampCount,
       rewardReady: pass.membership.progress?.rewardReady ?? false,
-      layoutType: theme.layoutType,
-      ...(Object.keys(layoutConfiguration).length > 0 ? { layoutConfiguration } : {}),
+      // Published historical values are read for compatibility only.
+      layoutType: "GRID",
+      layoutPolicy: "BALANCED_WALLET_ROWS_V1",
       visualTheme: {
         filledColor: theme.accentColor,
         emptyColor: theme.secondaryColor,
@@ -1260,11 +2435,11 @@ export class WalletWorker {
         stampSize: theme.stampSize,
         spacing: theme.stampSpacing,
       },
-      filledArtwork,
-      emptyArtwork,
+      filledArtwork: filledSource.artwork,
+      emptyArtwork: emptySource.artwork,
       assetDigests: {
-        filled: digest(theme.filledStampAsset),
-        empty: digest(theme.emptyStampAsset),
+        filled: filledSource.identity.renderDigest,
+        empty: emptySource.identity.renderDigest,
       },
       outputProfile,
     };
@@ -1276,46 +2451,54 @@ export class WalletWorker {
         ? Asset
         : never
       : never,
-  ): Promise<StampArtwork> {
-    const metadata = asset.safeMetadata;
-    if (
-      metadata &&
-      typeof metadata === "object" &&
-      !Array.isArray(metadata) &&
-      "inlineSvg" in metadata &&
-      typeof metadata.inlineSvg === "string"
-    ) {
-      return { kind: "svg", content: metadata.inlineSvg, trusted: true };
-    }
+  ) {
+    return loadHistoricalWalletStampSource(asset, async (objectKey) => {
+      const result = await this.objectStorage.send(
+        new GetObjectCommand({
+          Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+          Key: objectKey,
+        }),
+      );
+      if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
+      return Buffer.from(await result.Body.transformToByteArray());
+    });
+  }
+
+  private async loadQrCenterLogo(
+    asset:
+      | NonNullable<
+          PassRecord["membership"]["enrollmentProgramVersion"]["visualTheme"]
+        >["logoAsset"]
+      | undefined,
+  ): Promise<Buffer | undefined> {
+    if (!asset) return undefined;
     const variant =
-      asset.variants.find((item) => item.variantCode === "STAMP_256") ??
-      asset.variants.find((item) => item.variantCode === "ORIGINAL_SAFE");
-    if (!variant?.mimeType.startsWith("image/")) {
-      throw new Error("Published Wallet stamp artwork has no processed variant.");
+      asset.variants.find((candidate) => candidate.variantCode === "ORIGINAL_SAFE") ??
+      asset.variants[0];
+    if (
+      !variant ||
+      !new Set(["image/png", "image/jpeg", "image/webp"]).has(variant.mimeType) ||
+      variant.fileSize < 32 ||
+      variant.fileSize > 512_000
+    ) {
+      return undefined;
     }
-    const result = await this.objectStorage.send(
-      new GetObjectCommand({
-        Bucket: this.environment.OBJECT_STORAGE_BUCKET,
-        Key: variant.objectKey,
-      }),
-    );
-    if (!result.Body) throw new Error("Published Wallet stamp artwork is unavailable.");
-    const bytes = Buffer.from(await result.Body.transformToByteArray());
-    if (createHash("sha256").update(bytes).digest("hex") !== variant.digest) {
-      throw new Error("Published Wallet stamp artwork digest mismatch.");
+    try {
+      const result = await this.objectStorage.send(
+        new GetObjectCommand({
+          Bucket: this.environment.OBJECT_STORAGE_BUCKET,
+          Key: variant.objectKey,
+        }),
+      );
+      if (!result.Body) return undefined;
+      const bytes = Buffer.from(await result.Body.transformToByteArray());
+      return bytes.length === variant.fileSize &&
+        createHash("sha256").update(bytes).digest("hex") === variant.digest
+        ? bytes
+        : undefined;
+    } catch {
+      return undefined;
     }
-    const mimeType = variant.mimeType as StampArtwork extends {
-      kind: "data-uri";
-      mimeType: infer Mime;
-    }
-      ? Mime
-      : never;
-    return {
-      kind: "data-uri",
-      value: `data:${mimeType};base64,${bytes.toString("base64")}`,
-      mimeType,
-      trusted: true,
-    };
   }
 
   private async objectStorageReady() {

@@ -1,13 +1,14 @@
 import "dotenv/config";
-import { mkdir } from "node:fs/promises";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 
-const screenshots = "artifacts/handoff-w4-round-1/screenshots";
+const screenshots = "test-results/evidence/handoff-w4-round-1/screenshots";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const disposableCustomerId = randomUUID();
 const disposableMembershipId = randomUUID();
 const disposableCustomerName = `W4 Erasure Evidence ${randomUUID().slice(0, 8)}`;
+const qrStaffName = "Omar Kareem";
 let wrongLocationPairingToken = "";
 let prisma: Awaited<ReturnType<typeof connectPrisma>>;
 
@@ -32,37 +33,35 @@ async function login(page: Page, email = "owner@waflo.local") {
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/en\/dashboard(?:\/|$)/);
   if (email === "owner@waflo.local") {
-    const organizationSwitcher = page.locator(".wf-org-switcher select");
-    await organizationSwitcher.selectOption(organizationId);
-    await expect(organizationSwitcher).toHaveValue(organizationId);
+    const organizationSwitcher = page.getByRole("button", { name: "Choose organization" });
+    await organizationSwitcher.click();
+    await page.getByRole("option", { name: "Today Coffee", exact: true }).click();
+    await expect(organizationSwitcher).toContainText("Today Coffee");
   }
 }
 
 async function searchCustomer(page: Page, query: string, name: string) {
-  const search = page.locator(".dashboard-form-card form input").first();
+  const search = page.getByRole("textbox", { name: /^(Search|ابحث)$/ });
   await search.fill(query);
   await page.getByRole("button", { name: /^(Search|بحث)$/ }).click();
   await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
 }
 
-async function openProgramTestMode(page: Page, programName: string) {
+async function openProgramLaunch(page: Page, programName: string) {
   const program = await prisma.loyaltyProgram.findFirstOrThrow({
     where: { organizationId, internalName: programName },
     select: { id: true },
   });
-  await page.goto(`/en/dashboard/programs/${program.id}/test`);
+  const removedTestRoute = await page.request.get(
+    `http://localhost:3001/en/dashboard/programs/${program.id}/test`,
+  );
+  expect(removedTestRoute.status()).toBe(404);
+  await page.goto(`/en/dashboard/programs/${program.id}/launch`);
   const studioNavigation = page.getByRole("navigation", { name: "Studio sections" });
-  const createUpdate = page.getByRole("button", { name: "Create update" });
-  const startDemoCustomer = page.getByRole("button", { name: "Start demo customer" });
-  await expect(createUpdate.or(startDemoCustomer)).toBeVisible();
-  if (await createUpdate.isVisible()) {
-    await createUpdate.click();
-    await expect(startDemoCustomer).toBeVisible();
-  }
-  await studioNavigation.getByRole("button", { name: /^Launch/u }).click();
-  await page.locator(".studio-launch-action").getByRole("button", { name: "Run checks" }).click();
+  await expect(page.getByText("Automated checks", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Setup, asset, and preview checks passed.")).toBeVisible();
-  await studioNavigation.getByRole("button", { name: /^Test/u }).click();
+  await expect(page.getByRole("button", { name: "Run checks" })).toHaveCount(0);
+  await expect(studioNavigation.getByRole("button", { name: /^Test/u })).toHaveCount(0);
 }
 
 test.describe
@@ -167,7 +166,7 @@ test.describe
       const pairingPublicId = randomUUID();
       const pairing = createPairingToken({
         publicId: pairingPublicId,
-        environmentId: process.env.NODE_ENV ?? "development",
+        environmentId: process.env.DEPLOYMENT_ENVIRONMENT ?? "development",
       });
       wrongLocationPairingToken = pairing.token;
       await prisma.devicePairingSession.create({
@@ -212,12 +211,12 @@ test.describe
       await prisma.$disconnect();
     });
 
-    test("Owner reviews customers, pinned progress, ledger details, rewards, and projection integrity", async ({
+    test("Owner reviews customers, pinned progress, friendly activity, and rewards", async ({
       page,
     }) => {
       await login(page);
       await page.goto("/en/dashboard/customers");
-      await expect(page.getByRole("heading", { name: "Customers and memberships" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Customers", exact: true })).toBeVisible();
       await expect(page.getByRole("table", { name: "Organization customers" })).toBeVisible();
       await capture(page, "01-customers-populated");
 
@@ -225,7 +224,10 @@ test.describe
       await capture(page, "02-customers-search");
       await page.getByRole("button", { name: "Noor Zero", exact: true }).click();
       await expect(page.getByRole("dialog")).toContainText("z***@e*****.test");
-      await page.getByRole("button", { name: "Close" }).click();
+      await page
+        .getByRole("dialog", { name: "Noor Zero" })
+        .getByRole("button", { name: "Close" })
+        .click();
 
       await searchCustomer(page, "Zaid Completed Cycle", "Zaid Completed Cycle");
       await page.getByRole("button", { name: "Zaid Completed Cycle", exact: true }).click();
@@ -237,71 +239,50 @@ test.describe
       await page.getByRole("button", { name: "Sara Milestone", exact: true }).click();
       await expect(page.getByRole("dialog")).toContainText("5 / 8");
       await capture(page, "28-membership-five-of-eight");
-      await page.getByRole("button", { name: "Open ledger" }).click();
-      await expect(page.getByRole("table", { name: "Membership ledger" })).toBeVisible();
+      await page.getByRole("button", { name: "Details", exact: true }).click();
+      await page.getByText("Activity and rewards", { exact: true }).click();
+      await expect(page.getByRole("table", { name: "Loyalty activity" })).toBeVisible();
       await expect(page.getByRole("table", { name: "Membership rewards" })).toBeVisible();
+      await expect(page.getByText("Stamp added").first()).toBeVisible();
+      await expect(page.getByText("STAMP_ISSUED", { exact: true })).toHaveCount(0);
       await capture(page, "04-membership-ledger");
-
-      await page.getByRole("button", { name: "STAMP_ISSUED", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Operation detail" })).toBeVisible();
-      await capture(page, "29-operation-detail");
-      await page.getByRole("button", { name: "Close" }).last().click();
-
-      const projectionDialog = page.waitForEvent("dialog");
-      await page.getByRole("button", { name: "Verify projection" }).click();
-      const projectionResult = await projectionDialog;
-      expect(projectionResult.message()).toContain("Ledger and projection match");
-      await projectionResult.accept();
       await capture(page, "30-projection-verification");
     });
 
-    test("Owner manages devices, manager approvals, risk review, analytics, and exports", async ({
+    test("Owner manages Staff QR access, contextual approvals, analytics, and exports", async ({
       page,
     }) => {
       await login(page);
       await page.goto("/en/dashboard/devices");
-      await expect(page.getByRole("table", { name: "Paired staff devices" })).toContainText(
-        "W4 deterministic Test Client",
-      );
-      await expect(page.getByRole("table", { name: "Paired staff devices" })).toContainText(
-        "Revoked counter tablet",
-      );
-      await capture(page, "31-active-and-revoked-devices");
-      await page.getByRole("button", { name: "Pair device" }).click();
-      await page.getByLabel("Device label").fill("W4 browser evidence device");
-      await page.getByRole("button", { name: "Create pairing code" }).click();
-      await expect(page.getByRole("dialog")).toContainText("Sensitive, short-lived pairing code");
-      await expect(page.getByRole("dialog").locator("img")).toHaveAttribute(
-        "alt",
-        /Pair Staff device/i,
-      );
-      await capture(page, "09-device-pairing-code");
-      await page.getByRole("button", { name: "Close" }).click();
+      await expect(page).toHaveURL(/\/en\/dashboard\/team$/);
+      await page.getByRole("button", { name: "Add staff" }).click();
+      await page.locator('input[name="name"]').fill(qrStaffName);
+      await page.getByRole("button", { name: "Create staff" }).click();
+      const staffRow = page.getByRole("row").filter({ hasText: qrStaffName });
+      await expect(staffRow).toContainText("QR sign-in · no email");
+      await capture(page, "31-staff-access-contexts");
+      await staffRow.getByRole("button", { name: "Pair phone" }).click();
+      await page.getByRole("button", { name: "Generate QR" }).click();
+      await expect(page.getByRole("dialog")).toContainText("This is the only valid code");
+      await expect(page.getByRole("dialog").locator("img")).toHaveAttribute("alt", /Pair/i);
+      await capture(page, "09-staff-sign-in-qr");
+      await page.getByRole("button", { name: "Done" }).click();
 
-      await page.goto("/en/dashboard/approvals");
-      const approvalTable = page.getByRole("table", { name: "Manager approval challenges" });
-      await expect(approvalTable).toContainText("PENDING");
-      await expect(approvalTable).toContainText("APPROVED");
-      await capture(page, "32-manager-approval-pending");
-      const pendingRow = approvalTable.getByRole("row").filter({ hasText: "Maha Reward Ready" });
-      page.once("dialog", (dialog) => dialog.accept("Verified in the W4 browser evidence flow."));
-      await pendingRow.getByRole("button", { name: "Approve" }).click();
-      await expect(pendingRow).toContainText("APPROVED");
-      await capture(page, "33-manager-approval-completed");
-
-      await page.goto("/en/dashboard/risk");
-      const riskTable = page.getByRole("table", { name: "Operational risk signals" });
-      await expect(riskTable).toContainText("UNUSUAL_REVERSAL_PATTERN");
-      await capture(page, "10-risk-signals");
-      await riskTable
-        .getByRole("row")
-        .filter({ hasText: "UNUSUAL_REVERSAL_PATTERN" })
-        .getByRole("button", { name: "Details" })
+      await page.goto("/en/dashboard/customers");
+      await searchCustomer(page, "Maha Reward Ready", "Maha Reward Ready");
+      await page.getByRole("button", { name: "Maha Reward Ready", exact: true }).click();
+      await page.getByRole("button", { name: "Details", exact: true }).click();
+      await expect(page.getByText("A reward redemption needs your decision")).toBeVisible();
+      await capture(page, "32-contextual-manager-approval");
+      await page
+        .getByRole("dialog", { name: "Cookie Card" })
+        .getByRole("button", { name: "Close" })
         .click();
-      await expect(page.getByRole("heading", { name: "Risk signal detail" })).toBeVisible();
-      await expect(page.getByRole("dialog")).toContainText("Safe evidence");
-      await capture(page, "34-risk-detail");
-      await page.getByRole("button", { name: "Close" }).click();
+
+      for (const removed of ["approvals", "risk", "audit"]) {
+        const response = await page.goto(`/en/dashboard/${removed}`);
+        expect(response?.status()).toBe(404);
+      }
 
       await page.goto("/en/dashboard/analytics");
       await expect(
@@ -323,14 +304,15 @@ test.describe
       await page.goto("/en/dashboard/customers");
       await searchCustomer(page, disposableCustomerName, disposableCustomerName);
       await page.getByRole("button", { name: disposableCustomerName, exact: true }).click();
+      await page.locator("summary").filter({ hasText: "Privacy options" }).click();
 
       page.once("dialog", (dialog) => dialog.accept("Customer data access request."));
-      await page.getByRole("button", { name: "Privacy export" }).click();
+      await page.getByRole("button", { name: "Request data copy" }).click();
       await expect(page.getByRole("dialog")).toContainText("EXPORT");
       await capture(page, "35-privacy-export-request");
 
       page.once("dialog", (dialog) => dialog.accept("Verified customer erasure request."));
-      await page.getByRole("button", { name: "Request erasure" }).click();
+      await page.getByRole("button", { name: "Request data deletion" }).click();
       await expect(page.getByRole("dialog")).toContainText("ERASURE");
       await expect
         .poll(
@@ -345,7 +327,7 @@ test.describe
         )
         .toBe("ARCHIVED");
       await page.getByRole("button", { name: "Close" }).click();
-      await page.locator(".dashboard-form-card form input").first().fill("Erased customer");
+      await page.getByRole("textbox", { name: "Search" }).fill("Erased customer");
       await page.getByRole("button", { name: "Search", exact: true }).click();
       const erasedCustomer = page.getByRole("button", { name: /^Erased customer/ }).first();
       await expect(erasedCustomer).toBeVisible();
@@ -359,52 +341,13 @@ test.describe
       expect(retainedLedgerEvents).toBeGreaterThan(0);
     });
 
-    test("Test Mode visibly enforces daily cap, purchase threshold, and currency", async ({
-      page,
-    }) => {
+    test("removes Test Mode and keeps server preflight automatic", async ({ page }) => {
       await login(page);
       await page.goto("/en/dashboard/programs");
-      await openProgramTestMode(page, "Daily Coffee");
-      await page.getByRole("button", { name: "Start demo customer" }).click();
-      await page.getByRole("button", { name: "+5 stamps" }).click();
-      await page.getByRole("button", { name: "Add a stamp" }).click();
-      await expect(
-        page.getByText(
-          "The demo customer reached the daily stamp limit. Real customers are unaffected. Change the simulated day or reset the demo customer.",
-        ),
-      ).toBeVisible();
-      await capture(page, "37-daily-cap-blocked");
-
-      await openProgramTestMode(page, "Qualifying Purchase");
-      await page.getByRole("button", { name: "Start demo customer" }).click();
-      await page.getByRole("button", { name: "Add a stamp" }).click();
-      await expect(
-        page.getByText(
-          "Enter a purchase amount to continue this demo. Real customers are unaffected.",
-        ),
-      ).toBeVisible();
-      await capture(page, "38-purchase-amount-required");
-
-      await page.getByText("Demo purchase details", { exact: true }).click();
-      await page.getByLabel("Purchase amount").fill("10000");
-      await page.getByLabel("Purchase currency").fill("USD");
-      await page.getByRole("button", { name: "Add a stamp" }).click();
-      await expect(
-        page.getByText(
-          "The demo purchase currency must match the card's configured currency. Real customers are unaffected.",
-        ),
-      ).toBeVisible();
-      await capture(page, "39-purchase-currency-mismatch");
-
-      await page.getByLabel("Purchase amount").fill("9999");
-      await page.getByLabel("Purchase currency").fill("IQD");
-      await page.getByRole("button", { name: "Add a stamp" }).click();
-      await expect(
-        page.getByText(
-          "The demo purchase does not meet the card's minimum amount. Real customers are unaffected.",
-        ),
-      ).toBeVisible();
-      await capture(page, "41-purchase-threshold-blocked");
+      await openProgramLaunch(page, "Daily Coffee");
+      await capture(page, "37-daily-coffee-automatic-preflight");
+      await openProgramLaunch(page, "Qualifying Purchase");
+      await capture(page, "38-qualifying-purchase-automatic-preflight");
     });
 
     test("Signed Staff Test Client visibly proves wrong-location blocking", async ({
@@ -540,8 +483,8 @@ test.describe
       const blockedBody = (await blockedResponse.json()) as {
         error: { code: string; message: string };
       };
-      expect(blockedResponse.status(), JSON.stringify(blockedBody)).toBe(403);
-      expect(blockedBody.error.code).toBe("LOCATION_NOT_AUTHORIZED");
+      expect(blockedResponse.status(), JSON.stringify(blockedBody)).toBe(401);
+      expect(blockedBody.error.code).toBe("STAFF_LOCATION_ASSIGNMENT_INVALID");
 
       await page.setContent(`
         <!doctype html>
@@ -584,24 +527,25 @@ test.describe
       await login(page);
       await page.goto("/ar/dashboard/customers");
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-      await expect(page.getByRole("heading", { name: "العملاء والعضويات" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "العملاء", exact: true })).toBeVisible();
       await searchCustomer(page, "Sara Milestone", "Sara Milestone");
       await page.getByRole("button", { name: "Sara Milestone", exact: true }).click();
       await expect(page.getByRole("dialog")).toContainText("5 / 8");
       await capture(page, "23-arabic-customer-detail");
-      await page.getByRole("button", { name: "Close" }).click();
+      await page.getByRole("button", { name: /^(Close|إغلاق)$/ }).click();
 
       await page.goto("/ar/dashboard/devices");
-      await page.getByRole("button", { name: "اقتران جهاز" }).click();
+      await expect(page).toHaveURL(/\/ar\/dashboard\/team$/);
+      await page.getByRole("button", { name: "إضافة موظف" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
-      await capture(page, "24-rtl-device-pairing");
+      await capture(page, "24-rtl-staff-creation");
 
       const staffContext = await browser.newContext();
       const staffPage = await staffContext.newPage();
       await login(staffPage, "staff@waflo.local");
       await staffPage.goto("/en/dashboard/customers");
       await expect(
-        staffPage.getByText("This section requires Manager or Owner permission."),
+        staffPage.getByText("You do not have permission to open this section."),
       ).toBeVisible();
       await expect(staffPage.getByRole("link", { name: "Customers" })).toHaveCount(0);
       await capture(staffPage, "26-staff-access-denied");

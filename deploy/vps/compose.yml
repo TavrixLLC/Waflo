@@ -27,10 +27,13 @@ x-build: &application-build
   dockerfile: deploy/vps/Dockerfile
   args:
     RELEASE_SHA: "${RELEASE_SHA:?RELEASE_SHA is required}"
+    DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT:?DEPLOYMENT_ENVIRONMENT is required}"
     NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}"
     NEXT_PUBLIC_DASHBOARD_URL: "${NEXT_PUBLIC_DASHBOARD_URL:?NEXT_PUBLIC_DASHBOARD_URL is required}"
     NEXT_PUBLIC_MARKETING_URL: "${NEXT_PUBLIC_MARKETING_URL:?NEXT_PUBLIC_MARKETING_URL is required}"
-    NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE: "${NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE:?NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE is required}"
+    NEXT_PUBLIC_CUSTOMER_URL: "${NEXT_PUBLIC_CUSTOMER_URL:-}"
+    NEXT_PUBLIC_ADMIN_URL: "${NEXT_PUBLIC_ADMIN_URL:?NEXT_PUBLIC_ADMIN_URL is required}"
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: "${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN:-}"
 
 services:
   postgres:
@@ -112,7 +115,7 @@ services:
     logging: *bounded-logging
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     stop_grace_period: 30s
     entrypoint: [/bin/sh, -ec]
@@ -142,7 +145,7 @@ services:
     logging: *bounded-logging
 
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: "no"
     depends_on:
       minio:
@@ -181,7 +184,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
     networks: [backend]
     environment:
       DATABASE_POOL_MAX: "2"
@@ -189,6 +193,49 @@ services:
       postgres:
         condition: service_healthy
     logging: *bounded-logging
+
+  apple-pass-builder:
+    image: "${IMAGE_REGISTRY:-local}/waflo-apple-pass-builder:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      context: ../..
+      dockerfile: apps/apple-pass-builder-service/Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    environment:
+      NODE_ENV: production
+      PASS_BUILDER_AUTH_TOKEN_FILE: /run/waflo-provider-secrets/apple-pass-builder-auth-token
+      PASS_BUILDER_IDENTITIES_CONFIG_FILE: /run/waflo-provider-secrets/apple-pass-builder-identities.json
+      PASS_BUILDER_TEMP_ROOT: /tmp
+      PASS_BUILDER_DIAGNOSTIC_ERRORS: "false"
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
+        target: /run/waflo-provider-secrets
+        read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=128m"
+    networks: [backend]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    mem_limit: "${APPLE_PASS_BUILDER_MEMORY_LIMIT:-512m}"
+    cpus: "${APPLE_PASS_BUILDER_CPU_LIMIT:-0.75}"
+    logging: *bounded-logging
+    labels:
+      app.waflo.service: apple-pass-builder
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
 
   api:
     <<: *application-runtime
@@ -199,7 +246,13 @@ services:
     environment:
       DATABASE_POOL_MAX: "${API_DATABASE_POOL_MAX:-10}"
       WAFLO_SERVICE: waflo-api
-    tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
+        target: /run/waflo-provider-secrets
+        read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=128m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -233,7 +286,9 @@ services:
     environment:
       WAFLO_SERVICE: waflo-merchant
     networks: [edge]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/merchant-dashboard/.next/cache:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/merchant-dashboard/.next/cache:rw,noexec,nosuid,size=64m"
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/en/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 20s
@@ -257,7 +312,9 @@ services:
       API_INTERNAL_URL: http://api:4000
       WAFLO_SERVICE: waflo-customer
     networks: [edge]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/customer-web/.next/cache:rw,noexec,nosuid,size=64m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/customer-web/.next/cache:rw,noexec,nosuid,size=64m"
     depends_on:
       api:
         condition: service_healthy
@@ -274,6 +331,31 @@ services:
       app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
       app.waflo.release: "${RELEASE_SHA}"
 
+  admin-web:
+    <<: *application-runtime
+    image: "${IMAGE_REGISTRY:-local}/waflo-admin:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
+    build:
+      <<: *application-build
+      target: admin-web
+    environment:
+      WAFLO_SERVICE: waflo-admin
+    networks: [edge]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/admin-dashboard/.next/cache:rw,noexec,nosuid,size=64m"
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3003/en/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    mem_limit: "${ADMIN_MEMORY_LIMIT:-288m}"
+    cpus: "${ADMIN_CPU_LIMIT:-0.50}"
+    labels:
+      app.waflo.service: admin-web
+      app.waflo.environment: "${DEPLOYMENT_ENVIRONMENT}"
+      app.waflo.release: "${RELEASE_SHA}"
+
   marketing-web:
     <<: *application-runtime
     image: "${IMAGE_REGISTRY:-local}/waflo-marketing:${RELEASE_SHA}-${DEPLOYMENT_ENVIRONMENT}"
@@ -281,9 +363,15 @@ services:
       <<: *application-build
       target: marketing-web
     environment:
+      API_INTERNAL_URL: http://api:4000
       WAFLO_SERVICE: waflo-marketing
-    networks: [edge]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m, /app/apps/marketing-web/.next/cache:rw,noexec,nosuid,size=64m]
+    networks: [edge, backend]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+      - "/app/apps/marketing-web/.next/cache:rw,noexec,nosuid,size=64m"
+    depends_on:
+      api:
+        condition: service_healthy
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/en').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 20s
@@ -306,7 +394,8 @@ services:
     environment:
       DATABASE_POOL_MAX: "${OPERATIONAL_WORKER_DATABASE_POOL_MAX:-5}"
       WAFLO_SERVICE: waflo-operational-worker
-    tmpfs: [/tmp:rw,noexec,nosuid,size=128m]
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=128m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -328,7 +417,13 @@ services:
     environment:
       DATABASE_POOL_MAX: "${WALLET_WORKER_DATABASE_POOL_MAX:-5}"
       WAFLO_SERVICE: waflo-wallet-worker
-    tmpfs: [/tmp:rw,noexec,nosuid,size=192m]
+    volumes:
+      - type: bind
+        source: "${PLATFORM_ROOT:-/opt/waflo-platform}/secrets/${DEPLOYMENT_ENVIRONMENT}/provider-files"
+        target: /run/waflo-provider-secrets
+        read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=192m"
     depends_on:
       postgres:
         condition: service_healthy
@@ -345,6 +440,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+    user: "65532:65532"
     restart: unless-stopped
     command:
       - tunnel
@@ -358,7 +454,7 @@ services:
       - /run/secrets/cloudflare_tunnel_token
     secrets:
       - source: cloudflare_tunnel_token
-        mode: 0400
+        mode: 0440
     networks: [edge]
     depends_on:
       api:
@@ -366,6 +462,8 @@ services:
       merchant-web:
         condition: service_healthy
       customer-web:
+        condition: service_healthy
+      admin-web:
         condition: service_healthy
       marketing-web:
         condition: service_healthy

@@ -62,9 +62,20 @@ async function createOrganization(
       defaultLocale: "EN",
       timezone: "UTC",
       selectedPlan: plan,
+      onboardingState: "COMPLETE",
+      onboardingCompletedAt: new Date(),
       members: { create: { userId: ownerId, role: "OWNER" } },
       billingProfile: {
-        create: { selectedPlan: plan, subscriptionStatus: "PENDING_ACTIVATION" },
+        create: { selectedPlan: plan, subscriptionStatus: "ACTIVE" },
+      },
+      locations: {
+        create: {
+          name: "Primary",
+          countryCode: "IQ",
+          timezone: "Asia/Baghdad",
+          latitude: 33.3152,
+          longitude: 44.3661,
+        },
       },
     },
   });
@@ -75,6 +86,17 @@ function codes(results: PromiseSettledResult<unknown>[]): string[] {
   return results
     .filter((result): result is PromiseRejectedResult => result.status === "rejected")
     .map((result) => String((result.reason as { code?: string }).code));
+}
+
+function exactLocation(name: string, offset = 0) {
+  return {
+    name,
+    countryCode: "IQ" as const,
+    timezone: "Asia/Baghdad",
+    latitude: 33.3152 + offset,
+    longitude: 44.3661 + offset,
+    coordinatesConfirmed: true as const,
+  };
 }
 
 describe.sequential("Waflo W1 database concurrency invariants", () => {
@@ -295,12 +317,14 @@ describe.sequential("Waflo W1 database concurrency invariants", () => {
   it("serializes location create, restore, and final-location archive invariants", async () => {
     const ownerId = await createUser("location-owner");
     const createOrganizationId = await createOrganization(ownerId, "GROWTH");
-    await prisma.client.location.create({
-      data: { organizationId: createOrganizationId, name: "Existing", timezone: "UTC" },
-    });
     const creates = await Promise.allSettled(
       Array.from({ length: 5 }, (_, index) =>
-        locations.create(ownerId, createOrganizationId, { name: `Concurrent ${index}` }, request),
+        locations.create(
+          ownerId,
+          createOrganizationId,
+          exactLocation(`Concurrent ${index}`, index / 10_000),
+          request,
+        ),
       ),
     );
     expect(creates.filter((result) => result.status === "fulfilled")).toHaveLength(2);
@@ -311,11 +335,8 @@ describe.sequential("Waflo W1 database concurrency invariants", () => {
     ).toBe(3);
 
     const restoreOrganizationId = await createOrganization(ownerId, "GROWTH");
-    await prisma.client.location.createMany({
-      data: [
-        { organizationId: restoreOrganizationId, name: "Active 1", timezone: "UTC" },
-        { organizationId: restoreOrganizationId, name: "Active 2", timezone: "UTC" },
-      ],
+    await prisma.client.location.create({
+      data: { organizationId: restoreOrganizationId, name: "Active 2", timezone: "UTC" },
     });
     const archived = await Promise.all(
       ["Archived 1", "Archived 2"].map((name) =>
@@ -323,7 +344,9 @@ describe.sequential("Waflo W1 database concurrency invariants", () => {
           data: {
             organizationId: restoreOrganizationId,
             name,
-            timezone: "UTC",
+            timezone: "Asia/Baghdad",
+            latitude: 33.3152,
+            longitude: 44.3661,
             status: "ARCHIVED",
             archivedAt: new Date(),
           },
@@ -339,13 +362,12 @@ describe.sequential("Waflo W1 database concurrency invariants", () => {
     expect(codes(restores)).toEqual(["LOCATION_LIMIT_REACHED"]);
 
     const archiveOrganizationId = await createOrganization(ownerId, "GROWTH");
-    const activeLocations = await Promise.all(
-      ["Archive A", "Archive B"].map((name) =>
-        prisma.client.location.create({
-          data: { organizationId: archiveOrganizationId, name, timezone: "UTC" },
-        }),
-      ),
-    );
+    await prisma.client.location.create({
+      data: { organizationId: archiveOrganizationId, name: "Archive B", timezone: "UTC" },
+    });
+    const activeLocations = await prisma.client.location.findMany({
+      where: { organizationId: archiveOrganizationId, status: "ACTIVE" },
+    });
     const archives = await Promise.allSettled(
       activeLocations.map((location) =>
         locations.archive(ownerId, archiveOrganizationId, location.id, request),

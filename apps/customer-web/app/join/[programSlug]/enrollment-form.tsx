@@ -1,74 +1,93 @@
 "use client";
 
+import { Alert, Button, Card, Checkbox, FormField, SearchableSelect, TextInput } from "@waflo/ui";
 import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  EmailInput,
-  FormField,
-  Select,
-  TextInput,
-} from "@waflo/ui";
-import { Check, MapPin, ShieldCheck, WalletCards } from "lucide-react";
+  cardLocaleMetadata,
+  defaultProgramTemplatePresentation,
+  directionForCardLocale,
+  fontStackForCardLocale,
+} from "@waflo/contracts";
+import { MapPin, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
 import { customerApi, CustomerApiError, customerCommandId } from "../../client-api";
-import type { PublicProgram } from "../../server-api";
+import type { PublicMerchant, PublicProgram } from "../../server-api";
 
 export function EnrollmentForm({
   merchant,
   program,
   initialLocale,
+  interfaceLocale,
   tenant,
 }: {
-  merchant: { name: string; slug: string };
+  merchant: PublicMerchant;
   program: PublicProgram;
-  initialLocale: "en" | "ar";
+  initialLocale: string;
+  interfaceLocale: "en" | "ar";
   tenant?: string;
 }) {
-  const [locale, setLocale] = useState(initialLocale);
+  const [cardLocale, setCardLocale] = useState(initialLocale);
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [terms, setTerms] = useState(false);
-  const [privacy, setPrivacy] = useState(false);
   const [marketing, setMarketing] = useState(false);
   const [website, setWebsite] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [completed, setCompleted] = useState<{
-    membership: {
-      publicMembershipId: string;
-      cardUrl: string;
-    };
-    providerStates: {
-      apple: { status: string; testAdapter: boolean };
-      google: { status: string; testAdapter: boolean };
-    };
-  } | null>(null);
   const startedAt = useRef(Date.now());
   const idempotencyKey = useRef(customerCommandId("enroll"));
-  const ar = locale === "ar";
-  const copy = program.translations[locale] ?? program.translations.en;
-  const reward = program.rewards[program.rewards.length - 1]?.translations[locale];
-  const stampPreview = program.stampPreviews[locale] ?? program.stampPreview;
-  const emailRequired = program.policy.emailCollectionMode === "REQUIRED";
+  const ar = interfaceLocale === "ar";
+  const copy = program.translations[cardLocale] ?? program.translations[program.defaultLocale];
+  const reward = program.rewards[program.rewards.length - 1]?.translations[cardLocale];
+  const stampPreview = program.stampPreviews[cardLocale] ?? program.stampPreview;
+  const presentation = program.template?.presentation ?? defaultProgramTemplatePresentation;
+  const identityArtworkDataUri = program.template?.identityArtworkDataUri ?? null;
+  const phoneRequired = program.policy.phoneCollectionMode === "REQUIRED";
   const enrollable = program.enrollmentStatus === "OPEN";
+  const unavailableTitle =
+    program.enrollmentStatus === "MERCHANT_UNAVAILABLE"
+      ? ar
+        ? "برنامج الولاء غير متاح مؤقتًا"
+        : "This loyalty program is temporarily unavailable"
+      : program.enrollmentStatus === "PROGRAM_UNAVAILABLE"
+        ? ar
+          ? "بطاقة الولاء غير متاحة مؤقتًا"
+          : "This loyalty card is temporarily unavailable"
+        : ar
+          ? "التسجيل غير متاح الآن"
+          : "Enrollment is not open";
+  const unavailableBody =
+    program.enrollmentStatus === "MERCHANT_UNAVAILABLE"
+      ? ar
+        ? "يمكنك عرض بطاقتك الحالية، لكن لا يمكن إنشاء عضوية جديدة الآن. حاول مرة أخرى لاحقًا."
+        : "Existing members can still view their cards, but new memberships are unavailable right now. Try again later."
+      : program.enrollmentStatus === "PROGRAM_UNAVAILABLE"
+        ? ar
+          ? "حاول مرة أخرى لاحقًا أو تواصل مع التاجر."
+          : "Try again later or contact the merchant."
+        : ar
+          ? "يمكنك العودة لاحقًا أو التواصل مع التاجر."
+          : "Return later or contact the merchant.";
   const canSubmit = useMemo(
-    () =>
-      displayName.trim().length > 0 &&
-      terms &&
-      privacy &&
-      (!emailRequired || email.trim().length > 0),
-    [displayName, email, emailRequired, privacy, terms],
+    () => displayName.trim().length > 0 && terms && (!phoneRequired || phone.trim().length > 0),
+    [displayName, phone, phoneRequired, terms],
   );
 
   useEffect(() => {
-    const page = document.querySelector("main.join-page");
-    page?.setAttribute("lang", locale);
-    page?.setAttribute("dir", locale === "ar" ? "rtl" : "ltr");
-  }, [locale]);
+    const storageKey = `waflo:card-locale:${program.slug}`;
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved && program.enabledLocales.includes(saved)) setCardLocale(saved);
+  }, [program.enabledLocales, program.slug]);
+
+  function chooseCardLocale(nextLocale: string) {
+    if (!program.enabledLocales.includes(nextLocale)) return;
+    setCardLocale(nextLocale);
+    window.localStorage.setItem(`waflo:card-locale:${program.slug}`, nextLocale);
+    const url = new URL(window.location.href);
+    url.searchParams.set("lang", nextLocale);
+    window.history.replaceState(null, "", url);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -77,23 +96,26 @@ export function EnrollmentForm({
     setError("");
     try {
       const query = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
-      const result = await customerApi<
-        typeof completed extends null ? never : NonNullable<typeof completed>
-      >(`/v1/public/programs/${encodeURIComponent(program.slug)}/enroll${query}`, {
+      const result = await customerApi<{
+        membership: { publicMembershipId: string; cardUrl: string };
+      }>(`/v1/public/programs/${encodeURIComponent(program.slug)}/enroll${query}`, {
         method: "POST",
         headers: { "x-idempotency-key": idempotencyKey.current },
         body: JSON.stringify({
           displayName,
-          ...(program.policy.emailCollectionMode === "HIDDEN" ? {} : { email }),
-          preferredLocale: locale,
+          ...(phone.trim() ? { phone: phone.trim() } : {}),
+          preferredLocale: interfaceLocale,
           programTermsAccepted: true,
-          wafloPrivacyAccepted: true,
-          marketingEmailConsent: marketing,
+          marketingPhoneConsent: marketing,
           formStartedAt: startedAt.current,
           website,
         }),
       });
-      setCompleted(result);
+      const cardQuery = new URLSearchParams({ wallet: "prepare" });
+      if (tenant) cardQuery.set("tenant", tenant);
+      window.location.assign(
+        `/card/${encodeURIComponent(result.membership.publicMembershipId)}?${cardQuery.toString()}`,
+      );
     } catch (caught) {
       setError(
         caught instanceof CustomerApiError
@@ -107,50 +129,66 @@ export function EnrollmentForm({
     }
   }
 
-  if (completed) {
-    return (
-      <section className="enrollment-success" aria-live="polite">
-        <span className="success-icon">
-          <Check />
-        </span>
-        <Badge tone="success">{ar ? "تم إنشاء بطاقتك" : "Your card is ready"}</Badge>
-        <h1>{ar ? `أهلًا بك في ${copy?.programName}` : `Welcome to ${copy?.programName}`}</h1>
-        <p>
-          {ar
-            ? "حُفظت بطاقتك على هذا الجهاز. يمكنك فتحها الآن ومتابعة تجهيز Wallet."
-            : "Your card is saved on this device. Open it now while Wallet prepares in the background."}
-        </p>
-        <a
-          href={`/card/${completed.membership.publicMembershipId}${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`}
-        >
-          <Button>{ar ? "فتح بطاقتي" : "Open my card"}</Button>
-        </a>
-        <div className="wallet-readiness">
-          <span>Apple Wallet · {completed.providerStates.apple.status}</span>
-          <span>Google Wallet · {completed.providerStates.google.status}</span>
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <div className="join-layout">
-      <section className="program-story">
-        <Badge tone="brand">{merchant.name}</Badge>
-        <h1>{copy?.programName}</h1>
-        <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>
-        <Image
-          className="published-stamp-artwork published-stamp-artwork--preview"
-          src={stampPreview.dataUri}
-          alt={ar ? `0 من ${program.goal} أختام` : `0 of ${program.goal} stamps`}
-          width={stampPreview.width}
-          height={stampPreview.height}
-          unoptimized
-          priority
-        />
-        <p className="stamp-preview-count">
-          <strong>0 / {program.goal}</strong> {ar ? "أختام عند الانضمام" : "stamps when you join"}
-        </p>
+    <div className="join-layout join-layout--compact">
+      <section
+        className="program-story enrollment-summary"
+        lang={cardLocale}
+        dir={directionForCardLocale(cardLocale)}
+        data-composition={presentation.composition}
+        data-corner-treatment={presentation.cornerTreatment}
+        data-density={presentation.density}
+        data-motif-treatment={presentation.motifTreatment}
+        data-reward-treatment={presentation.rewardTreatment}
+        data-title-treatment={presentation.titleTreatment}
+        data-visual-role={presentation.visualRole}
+        style={{ fontFamily: fontStackForCardLocale(cardLocale) }}
+      >
+        {identityArtworkDataUri ? (
+          <span className="program-story__motif" aria-hidden="true">
+            <Image
+              className="program-story__motif-art"
+              src={identityArtworkDataUri}
+              alt=""
+              width={96}
+              height={96}
+              unoptimized
+            />
+          </span>
+        ) : null}
+        <div className="program-story__header">
+          <CustomerMerchantIdentity
+            className="program-story__merchant"
+            locale={interfaceLocale}
+            logoDataUri={merchant.brandLogoDataUri}
+            name={merchant.name}
+          />
+          <span className="enrollment-summary__kicker">
+            <WalletCards size={16} aria-hidden="true" />
+            {ar
+              ? "\u0628\u0637\u0627\u0642\u0629 \u0648\u0644\u0627\u0621 \u0631\u0642\u0645\u064a\u0629"
+              : "DIGITAL LOYALTY CARD"}
+          </span>
+          <h1>{copy?.programName}</h1>
+          <p className="customer-lead">{copy?.fullDescription || copy?.shortDescription}</p>
+        </div>
+        <div className="program-story__progress">
+          <Image
+            className="published-stamp-artwork published-stamp-artwork--preview"
+            src={stampPreview.dataUri}
+            alt={ar ? `0 من ${program.goal} أختام` : `0 of ${program.goal} stamps`}
+            width={stampPreview.width}
+            height={stampPreview.height}
+            unoptimized
+            priority
+          />
+          <p className="stamp-preview-count">
+            <bdi dir="ltr" className="numeric-fraction">
+              0 / {program.goal}
+            </bdi>{" "}
+            {ar ? "أختام عند الانضمام" : "stamps when you join"}
+          </p>
+        </div>
         <Card className="reward-card">
           <span>{program.goal}</span>
           <div>
@@ -169,10 +207,7 @@ export function EnrollmentForm({
             <MapPin /> {program.locations.length} {ar ? "موقع مشارك" : "participating locations"}
           </li>
           <li>
-            <ShieldCheck />{" "}
-            {ar
-              ? "بياناتك مشفرة ولا تظهر في رمز QR"
-              : "Your data is encrypted and never placed in the QR"}
+            <ShieldCheck /> {ar ? "بطاقتك جاهزة للاستخدام." : "Your card is ready to use."}
           </li>
         </ul>
       </section>
@@ -181,36 +216,26 @@ export function EnrollmentForm({
           <span className="customer-kicker">{ar ? "انضم الآن" : "JOIN NOW"}</span>
           <h2>{ar ? "أنشئ بطاقة الولاء" : "Create your loyalty card"}</h2>
           {program.policy.allowLocaleSelection ? (
-            <Select
-              aria-label={ar ? "اللغة" : "Language"}
-              value={locale}
-              onChange={(event) => setLocale(event.target.value as "en" | "ar")}
-            >
-              <option value="en">English</option>
-              <option value="ar">العربية</option>
-            </Select>
+            <SearchableSelect
+              ariaLabel={ar ? "لغة محتوى البطاقة" : "Card content language"}
+              value={cardLocale}
+              onValueChange={chooseCardLocale}
+              options={program.enabledLocales.map((enabledLocale) => {
+                const metadata = cardLocaleMetadata(enabledLocale);
+                return {
+                  value: enabledLocale,
+                  label: metadata
+                    ? `${metadata.englishName} · ${metadata.nativeName}`
+                    : enabledLocale,
+                  ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+                };
+              })}
+            />
           ) : null}
         </div>
         {!enrollable ? (
-          <Alert
-            tone="warning"
-            title={
-              program.status === "ARCHIVED"
-                ? ar
-                  ? "تمت أرشفة بطاقة الولاء هذه"
-                  : "This loyalty card is archived"
-                : ar
-                  ? "التسجيل غير متاح الآن"
-                  : "Enrollment is not open"
-            }
-          >
-            {program.status === "ARCHIVED"
-              ? ar
-                ? "لا يمكن إنشاء عضويات جديدة لهذا البرنامج."
-                : "New memberships cannot be created for this program."
-              : ar
-                ? "يمكنك العودة لاحقًا أو التواصل مع التاجر."
-                : "Return later or contact the merchant."}
+          <Alert tone="warning" title={unavailableTitle}>
+            {unavailableBody}
           </Alert>
         ) : (
           <form onSubmit={submit} className="enrollment-form">
@@ -224,60 +249,57 @@ export function EnrollmentForm({
                 required
               />
             </FormField>
-            {program.policy.emailCollectionMode !== "HIDDEN" ? (
+            {program.policy.phoneCollectionMode !== "HIDDEN" ? (
               <FormField
-                label={ar ? "البريد الإلكتروني" : "Email"}
+                label={ar ? "رقم الهاتف" : "Phone number"}
                 hint={
-                  emailRequired
+                  phoneRequired
                     ? ar
-                      ? "مطلوب لنقل البطاقة بأمان"
-                      : "Required for secure card transfer"
+                      ? "مطلوب للتواصل بشأن بطاقتك"
+                      : "Required for your card contact"
                     : ar
-                      ? "اختياري · يساعدك في نقل البطاقة"
-                      : "Optional · helps with card transfer"
+                      ? "اختياري · أدخل رقمك بصيغة +964"
+                      : "Optional · use +964 7XX XXX XXXX"
                 }
-                required={emailRequired}
+                required={phoneRequired}
               >
-                <EmailInput
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required={emailRequired}
-                  maxLength={254}
+                <TextInput
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="+964 7XX XXX XXXX"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  required={phoneRequired}
+                  maxLength={30}
                 />
               </FormField>
             ) : null}
-            <Checkbox
-              checked={terms}
-              onChange={(event) => setTerms(event.target.checked)}
-              label={
-                ar
-                  ? `أوافق على شروط برنامج ${copy?.programName}`
-                  : `I accept the ${copy?.programName} program terms`
-              }
-              required
-            />
-            <details className="customer-terms">
-              <summary>{ar ? "عرض شروط البرنامج" : "View program terms"}</summary>
-              <p>{copy?.termsAndConditions}</p>
-            </details>
-            <Checkbox
-              checked={privacy}
-              onChange={(event) => setPrivacy(event.target.checked)}
-              label={
-                ar
-                  ? "أوافق على إشعار خصوصية Waflo (تخضع الصياغة للمراجعة القانونية)"
-                  : "I accept the Waflo privacy notice (copy remains subject to legal review)"
-              }
-              required
-            />
-            {program.policy.marketingConsentVisible && email ? (
+            <div className="enrollment-terms" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
+              <Checkbox
+                checked={terms}
+                onChange={(event) => setTerms(event.target.checked)}
+                label={
+                  ar
+                    ? `أوافق على شروط برنامج ${copy?.programName}`
+                    : `I accept the ${copy?.programName} program terms`
+                }
+                required
+              />
+              <details className="customer-terms">
+                <summary>{ar ? "عرض شروط البرنامج" : "View program terms"}</summary>
+                <p>{copy?.termsAndConditions}</p>
+              </details>
+            </div>
+            {/* Privacy acceptance is captured implicitly at enrollment. */}
+            {program.policy.marketingConsentVisible && phone ? (
               <Checkbox
                 checked={marketing}
                 onChange={(event) => setMarketing(event.target.checked)}
                 label={
                   ar
                     ? "أرغب في تلقي رسائل تسويقية من التاجر"
-                    : "I want marketing email from the merchant"
+                    : "I want marketing messages from the merchant"
                 }
               />
             ) : null}
@@ -290,13 +312,13 @@ export function EnrollmentForm({
                 onChange={(event) => setWebsite(event.target.value)}
               />
             </label>
-            <Button type="submit" loading={busy} disabled={!canSubmit}>
+            <Button type="submit" loading={busy}>
               {ar ? "إنشاء بطاقتي" : "Create my card"}
             </Button>
             <p className="privacy-note">
               {ar
-                ? "تدير Tavrix LLC منصة Waflo، ويدير التاجر برنامج الولاء. لن نضع اسمك أو بريدك في رمز QR."
-                : "Tavrix LLC operates Waflo; the merchant operates this loyalty program. Your QR never contains your name or email."}
+                ? "تدير Tavrix LLC منصة Waflo، ويدير التاجر برنامج الولاء. لن تتضمن بيانات العضوية القابلة للمسح اسمك أو رقم هاتفك."
+                : "Tavrix LLC operates Waflo; the merchant operates this loyalty program. Your scannable membership credential never contains your name or phone number."}
             </p>
           </form>
         )}

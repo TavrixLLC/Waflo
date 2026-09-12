@@ -62,6 +62,26 @@ function databaseUrls(name) {
   return { admin: admin.toString(), test: test.toString() };
 }
 
+function isolatedTestEnvironment(overrides = {}) {
+  return {
+    ...process.env,
+    NODE_ENV: "test",
+    DEPLOYMENT_ENVIRONMENT: "development",
+    CUSTOMER_DATA_ENCRYPTION_KEY_V1: "a".repeat(64),
+    CUSTOMER_CONTACT_LOOKUP_HMAC_KEY: "b".repeat(64),
+    CUSTOMER_SESSION_SECRET: "c".repeat(64),
+    MEMBERSHIP_CREDENTIAL_SECRET_V1: "d".repeat(64),
+    LEDGER_HASH_SECRET_V1: "e".repeat(64),
+    MERCHANT_TRANSACTION_REFERENCE_HMAC_KEY_V1: "f".repeat(64),
+    DEVICE_SESSION_SECRET: "1".repeat(64),
+    OAUTH_FLOW_SECRET: "2".repeat(64),
+    APPLE_PASS_AUTH_SECRET_V1: "3".repeat(64),
+    SCALE_LOCATION_LIMIT: "100",
+    SCALE_TEAM_LIMIT: "100",
+    ...overrides,
+  };
+}
+
 function corepackCommand(arguments_) {
   if (process.platform !== "win32") {
     return { command: "corepack", arguments: arguments_ };
@@ -155,7 +175,7 @@ async function main() {
       unitExitCode = await runVitestStage(
         "unit",
         vitestArguments,
-        { ...process.env, NODE_ENV: "test" },
+        isolatedTestEnvironment(),
         repetition,
         repeat,
       );
@@ -167,15 +187,13 @@ async function main() {
 
   const name = testDatabaseName();
   const urls = databaseUrls(name);
-  const environment = {
-    ...process.env,
-    NODE_ENV: "test",
+  const environment = isolatedTestEnvironment({
     DATABASE_URL: urls.test,
     WAFLO_TEST_DATABASE_NAME: name,
     WAFLO_TEST_RUN_ID: name.slice(TEST_DATABASE_PREFIX.length),
     APPLE_PASS_TYPE_IDENTIFIER:
       process.env.APPLE_PASS_TYPE_IDENTIFIER || "pass.app.waflo.test-adapter",
-  };
+  });
   let created = false;
   let exitCode = 1;
   try {

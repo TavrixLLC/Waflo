@@ -3,15 +3,14 @@ import {
   applyTemplateToDraft,
   createQuickDraft,
   type LocationItem,
-  type PreviewProfile,
   type ProgramDraftInput,
   type TemplateItem,
   type ValidationIssue,
   type ValidationResult,
 } from "./program-studio-types";
 
-export const BUILDER_AUTOSAVE_DELAY_MS = 850;
-export const BUILDER_PREVIEW_DELAY_MS = 300;
+export const BUILDER_AUTOSAVE_DELAY_MS = 800;
+export const BUILDER_PREVIEW_DELAY_MS = 120;
 
 export function shouldScheduleBuilderAutosave(
   serializedDraft: string,
@@ -26,19 +25,27 @@ export function shouldScheduleBuilderAutosave(
   );
 }
 
+export function shouldLoadBuilderPreview(
+  draft: ProgramDraftInput | null,
+  state: BuilderSaveState,
+): boolean {
+  return draft !== null && state === "saved";
+}
+
 export function builderPreviewCacheKey(
   revision: number,
-  profile: PreviewProfile,
-  locale: "EN" | "AR",
+  profile: string,
+  locale: string,
   progress: number,
+  assetGeneration: number,
 ): string {
-  return `${revision}:${profile}:${locale}:${progress}`;
+  return `${revision}:${profile}:${locale}:${progress}:${assetGeneration}`;
 }
 
 export const builderSections = [
+  "languages",
   "basics",
   "reward",
-  "languages",
   "locations",
   "appearance",
   "review",
@@ -51,6 +58,7 @@ export type BuilderSaveState = "saved" | "unsaved" | "saving" | "failed" | "conf
 const requiredLanguageFields = [
   "programName",
   "shortDescription",
+  "earningDescription",
   "termsAndConditions",
   "completionMessage",
   "rewardUnlockedMessage",
@@ -59,7 +67,7 @@ const requiredLanguageFields = [
 export interface LanguageCompleteness {
   complete: boolean;
   missing: number;
-  missingFields: readonly (typeof requiredLanguageFields)[number][];
+  missingFields: readonly string[];
 }
 
 export interface BuilderReadiness {
@@ -76,6 +84,7 @@ function neutralCopy(locale: "en" | "ar"): ProgramDraftInput["translations"]["en
     return {
       programName: "بطاقة ولائك",
       shortDescription: "اجمع ختمًا مع كل زيارة مؤهلة.",
+      earningDescription: "اجمع ختمًا مع كل زيارة مؤهلة.",
       rewardSummary: "مكافأتك",
       termsAndConditions: "تُطبق شروط المتجر على الزيارات والمكافآت المؤهلة.",
       completionMessage: "اكتمل هدف الأختام.",
@@ -86,6 +95,7 @@ function neutralCopy(locale: "en" | "ar"): ProgramDraftInput["translations"]["en
   return {
     programName: "Your loyalty card",
     shortDescription: "Earn a stamp with every qualifying visit.",
+    earningDescription: "Earn a stamp with every qualifying visit.",
     rewardSummary: "Your reward",
     termsAndConditions: "Store terms apply to qualifying visits and rewards.",
     completionMessage: "Your stamp goal is complete.",
@@ -105,6 +115,34 @@ export function languageCompleteness(
   };
 }
 
+export function cardLocaleCompleteness(
+  draft: ProgramDraftInput,
+  locale: string,
+): LanguageCompleteness {
+  const translation = draft.translations[locale];
+  if (!translation) {
+    return {
+      complete: false,
+      missing: requiredLanguageFields.length + 2,
+      missingFields: ["translation"],
+    };
+  }
+  const program = languageCompleteness(translation);
+  const rewardMissing = draft.rewards.flatMap((reward, rewardIndex) => {
+    const rewardTranslation = reward.translations[locale];
+    return [
+      ...(!rewardTranslation?.name.trim() ? [`rewards.${rewardIndex}.name`] : []),
+      ...(!rewardTranslation?.description.trim() ? [`rewards.${rewardIndex}.description`] : []),
+    ];
+  });
+  const missingFields = [...program.missingFields, ...rewardMissing];
+  return {
+    complete: missingFields.length === 0,
+    missing: missingFields.length,
+    missingFields,
+  };
+}
+
 export function builderReadiness(draft: ProgramDraftInput): BuilderReadiness {
   const finalReward = draft.rewards.find(
     (reward) => reward.thresholdStampCount === draft.requiredStampCount,
@@ -113,16 +151,17 @@ export function builderReadiness(draft: ProgramDraftInput): BuilderReadiness {
     draft.internalName.trim().length >= 2 &&
     draft.requiredStampCount >= 2 &&
     draft.requiredStampCount <= 30 &&
-    draft.earningDescription.trim().length > 0;
+    (draft.translations[draft.defaultLocale]?.earningDescription.trim().length ?? 0) > 0;
   const reward = Boolean(
-    finalReward?.translations.en.name.trim() &&
-      finalReward.translations.ar.name.trim() &&
-      draft.translations.en.rewardSummary.trim() &&
-      draft.translations.ar.rewardSummary.trim(),
+    finalReward &&
+      draft.enabledLocales.every((locale) => cardLocaleCompleteness(draft, locale).complete),
   );
   const languages =
-    languageCompleteness(draft.translations.en).complete &&
-    languageCompleteness(draft.translations.ar).complete;
+    draft.enabledLocales.length > 0 &&
+    draft.enabledLocales.includes(draft.defaultLocale) &&
+    draft.enabledLocales.every((locale) => {
+      return cardLocaleCompleteness(draft, locale).complete;
+    });
   const locations = draft.locationIds.length > 0;
   const appearance = Boolean(
     draft.templateCode &&
@@ -207,7 +246,7 @@ export function createBuilderDraft(
       secondaryColor: "#C9D0CC",
       mutedColor: "#717C76",
       layoutType: "GRID",
-      layoutConfiguration: { columns: 4 },
+      layoutConfiguration: {},
       stampSize: 44,
       stampSpacing: 10,
       customerWebVariant: "MINIMAL",
@@ -263,21 +302,26 @@ export function updateBuilderStampGoal(
 
 export function updateBuilderRewardCopy(
   current: ProgramDraftInput,
-  locale: "en" | "ar",
+  locale: string,
   value: string,
 ): ProgramDraftInput {
   const finalIndex = finalRewardIndex(current);
+  const currentTranslation =
+    current.translations[locale] ??
+    current.translations[current.defaultLocale] ??
+    current.translations.en;
   return {
     ...current,
     translations: {
       ...current.translations,
-      [locale]: { ...current.translations[locale], rewardSummary: value },
+      [locale]: { ...currentTranslation, rewardSummary: value },
     },
     rewards: current.rewards.map((reward, index) =>
       index === finalIndex
         ? {
             ...reward,
-            internalName: locale === "en" && value.trim() ? value : reward.internalName,
+            internalName:
+              locale === current.defaultLocale && value.trim() ? value : reward.internalName,
             translations: {
               ...reward.translations,
               [locale]: {
@@ -305,8 +349,7 @@ function finalRewardIndex(current: ProgramDraftInput): number {
 }
 
 export function builderSectionForIssue(issue: ValidationIssue): BuilderSection {
-  if (issue.path.startsWith("content.en") || issue.path.startsWith("content.ar"))
-    return "languages";
+  if (issue.path.startsWith("content.")) return "languages";
   if (issue.path.startsWith("locations")) return "locations";
   if (issue.path.startsWith("rewards")) return "reward";
   if (issue.path.startsWith("earning")) return "basics";

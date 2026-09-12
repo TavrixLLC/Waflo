@@ -3,23 +3,24 @@ import { unzipSync } from "fflate";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
+  type PublishedMembershipStampRenderInput,
   publishedMembershipStampVisualDigest,
   renderPublishedMembershipStampSvg,
-  type PublishedMembershipStampRenderInput,
 } from "../../packages/stamp-engine/src/index.js";
 import { AppleWalletProvider, TestApplePassSigner } from "../../packages/wallet-apple/src/index.js";
+import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
 import {
   mapGoogleLoyaltyClass,
   mapGoogleLoyaltyObject,
 } from "../../packages/wallet-google/src/index.js";
-import type { WalletMembershipInput } from "../../packages/wallet-core/src/index.js";
 
 const pinnedRenderInput: PublishedMembershipStampRenderInput = {
   organizationId: "00000000-0000-4000-8000-000000000001",
   programId: "00000000-0000-4000-8000-000000000002",
   programVersionId: "00000000-0000-4000-8000-000000000003",
   membershipId: "00000000-0000-4000-8000-000000000004",
-  rendererSchemaVersion: "waflo-stamp-render-v1",
+  rendererSchemaVersion: "waflo-stamp-render-v2",
+  rewardLabel: "مكافأة مجانية",
   locale: "ar",
   requiredStampCount: 8,
   currentStampCount: 3,
@@ -80,18 +81,13 @@ const walletInput: WalletMembershipInput = {
 };
 
 describe("W3 Repair Round 1 renderer and provider regressions", () => {
-  it("preserves identical FILLED/EMPTY placement across every output profile", () => {
+  it("preserves stamp order and state while keeping provider artwork text-free", () => {
     const profiles = ["JOIN_PREVIEW", "CUSTOMER_WEB", "APPLE_WALLET", "GOOGLE_WALLET"] as const;
     const results = profiles.map((outputProfile) =>
       renderPublishedMembershipStampSvg({ ...pinnedRenderInput, outputProfile }),
     );
     const semantics = results.map((result) =>
-      result.positions.map((position) => ({
-        index: position.index,
-        x: position.x,
-        y: position.y,
-        filled: position.filled,
-      })),
+      result.positions.map((position) => ({ index: position.index, filled: position.filled })),
     );
     expect(semantics.every((value) => JSON.stringify(value) === JSON.stringify(semantics[0]))).toBe(
       true,
@@ -99,8 +95,14 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     for (const result of results) {
       expect(result.svg.match(/data-visual-state="FILLED"/g)).toHaveLength(3);
       expect(result.svg.match(/data-visual-state="EMPTY"/g)).toHaveLength(5);
-      expect(result.svg).not.toMatch(/<text|check|star|gift|data-stamp-index="[^"]+">[0-9]/i);
+      expect(result.svg).not.toMatch(/check|star|gift|data-stamp-index="[^"]+">[0-9]/i);
     }
+    expect(results[0]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[1]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[2]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[2]?.svg).not.toContain("مكافأة مجانية");
+    expect(results[3]?.svg).not.toContain('data-integrated-reward="true"');
+    expect(results[3]?.svg).not.toContain("مكافأة مجانية");
     expect(new Set(results.map((result) => result.configurationDigest)).size).toBe(4);
   });
 
@@ -130,6 +132,12 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
         membershipId: "00000000-0000-4000-8000-000000000099",
       }),
     ).toBe(publishedMembershipStampVisualDigest(pinnedRenderInput));
+    expect(
+      publishedMembershipStampVisualDigest({
+        ...pinnedRenderInput,
+        rewardLabel: "مكافأة مختلفة",
+      }),
+    ).not.toBe(publishedMembershipStampVisualDigest(pinnedRenderInput));
   });
 
   it("packages nonblank Apple branding and selected-artwork progress without leaking secrets", async () => {
@@ -156,7 +164,10 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       "icon@3x.png",
       "logo.png",
       "logo@2x.png",
+      "logo@3x.png",
       "strip.png",
+      "strip@2x.png",
+      "strip@3x.png",
       "en.lproj/pass.strings",
       "ar.lproj/pass.strings",
     ];
@@ -177,13 +188,59 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       expect(raw.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
       expect(raw.some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
     }
+    for (const [name, dimensions] of [
+      ["strip.png", [375, 144]],
+      ["strip@2x.png", [750, 288]],
+      ["strip@3x.png", [1_125, 432]],
+    ] as const) {
+      await expect(sharp(Buffer.from(files[name] ?? [])).metadata()).resolves.toMatchObject({
+        width: dimensions[0],
+        height: dimensions[1],
+        format: "png",
+      });
+    }
     const packageText = Object.entries(files)
       .filter(([name]) => name.endsWith(".json") || name.endsWith(".strings"))
       .map(([, value]) => Buffer.from(value).toString("utf8"))
       .join("\n");
+    // Apple Wallet renders one square QR containing the unchanged opaque credential.
     expect(packageText.match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
+    const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8")) as {
+      barcodes: Array<{ format: string; message: string }>;
+    };
+    expect(pass.barcodes).toEqual([
+      expect.objectContaining({
+        format: "PKBarcodeFormatQR",
+        message: "wfl1.opaque.credential",
+      }),
+    ]);
     expect(packageText).not.toContain("customer@example.com");
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
+  });
+
+  it("uses provider-correct merchant logo package slots when generated branding is supplied", async () => {
+    const provider = new AppleWalletProvider({
+      mode: "TEST_ADAPTER",
+      configuration: {
+        passTypeIdentifier: "pass.app.waflo.test-adapter",
+        teamIdentifier: "WAFLOTEST",
+        organizationName: "Waflo Test Adapter",
+        webServiceUrl: "https://api.example.test/v1/apple-wallet",
+      },
+      signer: new TestApplePassSigner("merchant-logo-test-signature"),
+      authenticationToken: () => "a".repeat(43),
+      passDownloadUrl: "https://example.test/pass",
+    });
+    const issued = await provider.issueMembershipPass({
+      ...walletInput,
+      applePassImages: {
+        "logo.png": Buffer.from("merchant-logo-1x"),
+        "logo@2x.png": Buffer.from("merchant-logo-2x"),
+      },
+    });
+    const files = unzipSync(issued.artifact as Uint8Array);
+    expect(Buffer.from(files["logo.png"] ?? []).toString("utf8")).toBe("merchant-logo-1x");
+    expect(Buffer.from(files["logo@2x.png"] ?? []).toString("utf8")).toBe("merchant-logo-2x");
   });
 
   it("separates Apple local signing health from external device certification", async () => {
@@ -214,6 +271,43 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       externallyCertified: false,
     });
 
+    const certified = new AppleWalletProvider({
+      mode: "REAL",
+      configuration: {
+        passTypeIdentifier: "pass.app.waflo",
+        teamIdentifier: "WAFLOTEAM",
+        organizationName: "Waflo",
+        webServiceUrl: "https://api.waflo.app/v1/apple-wallet",
+      },
+      signer,
+      externallyCertified: true,
+      authenticationToken: () => "a".repeat(43),
+      passDownloadUrl: "https://api.waflo.app/pass",
+    });
+    await expect(certified.healthCheck()).resolves.toMatchObject({
+      status: "HEALTHY",
+      configured: true,
+      externallyCertified: true,
+    });
+
+    const invalidConfiguration = new AppleWalletProvider({
+      mode: "REAL",
+      configuration: {
+        passTypeIdentifier: "pass.app.waflo",
+        teamIdentifier: "WAFLOTEAM",
+        organizationName: "Waflo",
+        webServiceUrl: "http://api.waflo.app/v1/apple-wallet",
+      },
+      signer,
+      externallyCertified: true,
+      authenticationToken: () => "a".repeat(43),
+      passDownloadUrl: "https://api.waflo.app/pass",
+    });
+    await expect(invalidConfiguration.healthCheck()).resolves.toMatchObject({
+      status: "DEGRADED",
+      externallyCertified: false,
+    });
+
     for (const [certificateStatus, providerStatus] of [
       ["EXPIRED", "CERTIFICATE_EXPIRED"],
       ["EXPIRING", "CERTIFICATE_EXPIRING"],
@@ -235,6 +329,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
             expiresAt: "2027-07-29T00:00:00.000Z",
           }),
         },
+        externallyCertified: true,
         authenticationToken: () => "a".repeat(43),
         passDownloadUrl: "https://api.waflo.app/pass",
       });
@@ -249,6 +344,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
   it("maps safe Class logo imagery and keeps member progress/barcode only on the Object", () => {
     const classValue = mapGoogleLoyaltyClass(walletInput, "issuer.class");
     const objectValue = mapGoogleLoyaltyObject(walletInput, "issuer.object", "issuer.class");
+    expect(objectValue).not.toHaveProperty("barcode");
     expect(classValue).toMatchObject({
       programLogo: {
         sourceUri: { uri: walletInput.programLogoUrl },
@@ -256,9 +352,10 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
     });
     expect(JSON.stringify(classValue)).not.toContain(walletInput.credentialPayload);
     expect(objectValue).toMatchObject({
-      imageModulesData: [{ mainImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } } }],
-      barcode: { value: walletInput.credentialPayload },
+      heroImage: { sourceUri: { uri: walletInput.publicAssetBaseUrl } },
     });
-    expect(JSON.stringify(objectValue).match(/wfl1\.opaque\.credential/g)).toHaveLength(1);
+    expect(objectValue).not.toHaveProperty("loyaltyPoints");
+    expect(objectValue).not.toHaveProperty("imageModulesData");
+    expect(JSON.stringify(objectValue)).not.toContain(walletInput.credentialPayload);
   });
 });

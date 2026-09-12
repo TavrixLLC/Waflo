@@ -61,6 +61,43 @@ export class ErrorEnvelopeFilter implements ExceptionFilter {
       return;
     }
 
+    // @fastify/multipart and Fastify reject oversized or malformed multipart
+    // requests before a controller can turn them into a domain error. Preserve
+    // a stable, non-sensitive response for the asset uploader instead of
+    // surfacing the generic internal-error envelope.
+    const fastifyCode =
+      typeof exception === "object" && exception !== null && "code" in exception
+        ? (exception as { code?: unknown }).code
+        : undefined;
+    if (typeof fastifyCode === "string") {
+      const multipartStatus =
+        fastifyCode === "FST_REQ_FILE_TOO_LARGE" || fastifyCode === "FST_ERR_CTP_BODY_TOO_LARGE"
+          ? HttpStatus.PAYLOAD_TOO_LARGE
+          : fastifyCode === "FST_FILES_LIMIT" ||
+              fastifyCode === "FST_FIELDS_LIMIT" ||
+              fastifyCode === "FST_PARTS_LIMIT" ||
+              fastifyCode === "FST_INVALID_MULTIPART_CONTENT_TYPE"
+            ? HttpStatus.UNPROCESSABLE_ENTITY
+            : null;
+      if (multipartStatus) {
+        reply
+          .status(multipartStatus)
+          .send(
+            createErrorEnvelope(
+              fastifyCode === "FST_REQ_FILE_TOO_LARGE" ||
+                fastifyCode === "FST_ERR_CTP_BODY_TOO_LARGE"
+                ? "ASSET_UPLOAD_TOO_LARGE"
+                : "ASSET_MULTIPART_INVALID",
+              multipartStatus === HttpStatus.PAYLOAD_TOO_LARGE
+                ? "The image must be smaller than 2 MB."
+                : "The image upload is incomplete or invalid.",
+              requestId,
+            ),
+          );
+        return;
+      }
+    }
+
     request.log.error(
       { err: sanitizeErrorForReporting(exception), requestId },
       "Unhandled API error",

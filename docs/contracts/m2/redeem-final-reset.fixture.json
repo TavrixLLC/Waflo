@@ -1,0 +1,15 @@
+{
+  "operationPublicId": "20000000-0000-4000-8000-000000000004",
+  "commandId": "30000000-0000-4000-8000-000000000004",
+  "replayed": false,
+  "redemptionPublicId": "40000000-0000-4000-8000-000000000002",
+  "rewardStatus": "REDEEMED",
+  "finalReward": true,
+  "beforeProgress": 8,
+  "progress": 0,
+  "goal": 8,
+  "rewardReady": false,
+  "completedCycles": 2,
+  "projectionVersion": 19,
+  "requestId": "synthetic-request-4"
+}

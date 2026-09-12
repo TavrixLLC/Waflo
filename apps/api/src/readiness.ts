@@ -1,4 +1,11 @@
-import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { parseEnvironment } from "@waflo/config";
 import { Redis } from "ioredis";
 import Stripe from "stripe";
@@ -7,14 +14,14 @@ import { ExternalAuthService } from "./auth/external-auth.service.js";
 import { CustomerSecurityService } from "./customer/customer-security.service.js";
 import { PrismaService } from "./database/prisma.service.js";
 import { NotificationService } from "./notifications/notification.service.js";
+import {
+  evaluateReleaseReadiness,
+  mapWalletProviderHealthToReadiness,
+  type ReleaseReadinessResult,
+} from "./readiness-policy.js";
 import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
 
-type ReadinessStatus = "READY" | "NOT_CONFIGURED" | "UNREACHABLE" | "INVALID_CONFIG" | "DEGRADED";
-
-interface ComponentResult {
-  status: ReadinessStatus;
-  metadata?: Record<string, unknown>;
-}
+type ComponentResult = ReleaseReadinessResult;
 
 async function checked(operation: () => Promise<void>): Promise<ComponentResult> {
   try {
@@ -82,26 +89,69 @@ async function main() {
     };
   };
   const authCapabilities = externalAuth.publicCapabilities();
-  const walletCapabilities = wallets.publicCapabilities();
   const walletStatus = async (provider: "GOOGLE" | "APPLE") => {
-    if (!wallets.isConfigured(provider)) return { status: "NOT_CONFIGURED" as const };
+    const mode =
+      provider === "GOOGLE" ? environment.GOOGLE_WALLET_MODE : environment.APPLE_WALLET_MODE;
+    const safeConfiguration =
+      provider === "GOOGLE"
+        ? { mode, publishingMode: environment.GOOGLE_WALLET_PUBLISHING_MODE }
+        : { mode, apnsEnvironment: environment.APPLE_APNS_ENVIRONMENT };
+    if (mode === "DISABLED") {
+      return { status: "DISABLED" as const, metadata: safeConfiguration };
+    }
+    if (!wallets.isConfigured(provider)) {
+      return { status: "CONFIG_MISSING" as const, metadata: safeConfiguration };
+    }
     try {
       const health = await wallets.get(provider).healthCheck();
       return {
-        status:
-          health.status === "HEALTHY"
-            ? ("READY" as const)
-            : health.status === "API_UNAVAILABLE" || health.status === "PROVIDER_UNAVAILABLE"
-              ? ("UNREACHABLE" as const)
-              : ("DEGRADED" as const),
+        status: mapWalletProviderHealthToReadiness(health.status),
         metadata: {
+          ...safeConfiguration,
           providerStatus: health.status,
           externallyCertified: health.externallyCertified ?? false,
           demo: health.demo,
         },
       };
     } catch {
-      return { status: "UNREACHABLE" as const };
+      return { status: "PROVIDER_ERROR" as const, metadata: safeConfiguration };
+    }
+  };
+  const stripeConfiguration = [
+    environment.STRIPE_SECRET_KEY,
+    environment.STRIPE_PUBLISHABLE_KEY,
+    environment.STRIPE_WEBHOOK_SECRET,
+  ];
+  const stripeStatus = async (): Promise<ComponentResult> => {
+    if (!stripeConfiguration.some(Boolean)) return { status: "DISABLED" };
+    if (!stripeConfiguration.every(Boolean)) return { status: "CONFIG_MISSING" };
+    try {
+      const stripe = new Stripe(environment.STRIPE_SECRET_KEY as string);
+      await stripe.balance.retrieve();
+      const unpublishedCatalogCount = await prisma.client.pricingVersion.count({
+        where: { status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS", stripePriceId: null },
+      });
+      if (unpublishedCatalogCount > 0)
+        return {
+          status: "INVALID_CONFIG",
+          metadata: {
+            mode: environment.DEPLOYMENT_ENVIRONMENT === "production" ? "LIVE" : "TEST",
+            unpublishedCatalogCount,
+          },
+        };
+      return {
+        status: "READY",
+        metadata: {
+          mode: environment.DEPLOYMENT_ENVIRONMENT === "production" ? "LIVE" : "TEST",
+        },
+      };
+    } catch {
+      return {
+        status: "PROVIDER_ERROR",
+        metadata: {
+          mode: environment.DEPLOYMENT_ENVIRONMENT === "production" ? "LIVE" : "TEST",
+        },
+      };
     }
   };
   const result: Record<string, ComponentResult> = {
@@ -113,7 +163,29 @@ async function main() {
         })
       : { status: "NOT_CONFIGURED" },
     OBJECT_STORAGE: await checked(async () => {
+      const key = `readiness/${randomUUID()}.txt`;
+      const expected = Buffer.from("waflo-readiness", "utf8");
       await storage.send(new HeadBucketCommand({ Bucket: environment.OBJECT_STORAGE_BUCKET }));
+      try {
+        await storage.send(
+          new PutObjectCommand({
+            Bucket: environment.OBJECT_STORAGE_BUCKET,
+            Key: key,
+            Body: expected,
+            ContentType: "text/plain",
+          }),
+        );
+        const result = await storage.send(
+          new GetObjectCommand({ Bucket: environment.OBJECT_STORAGE_BUCKET, Key: key }),
+        );
+        if (!result.Body) throw new Error("Object storage returned an empty readiness object.");
+        const received = Buffer.from(await result.Body.transformToByteArray());
+        if (!received.equals(expected)) throw new Error("Object storage readiness data mismatch.");
+      } finally {
+        await storage
+          .send(new DeleteObjectCommand({ Bucket: environment.OBJECT_STORAGE_BUCKET, Key: key }))
+          .catch(() => undefined);
+      }
     }),
     SMTP:
       notifications.configurationStatus() === "READY"
@@ -125,24 +197,24 @@ async function main() {
     APPLE_SIGNIN: authCapabilities.appleSignInAvailable
       ? await checked(() => externalAuth.verifyProviderReachability("apple"))
       : { status: "NOT_CONFIGURED" },
-    GOOGLE_WALLET: walletCapabilities.googleWalletAvailable
-      ? await walletStatus("GOOGLE")
-      : { status: "NOT_CONFIGURED" },
-    APPLE_WALLET: walletCapabilities.appleWalletAvailable
-      ? await walletStatus("APPLE")
-      : { status: "NOT_CONFIGURED" },
-    STRIPE: environment.STRIPE_SECRET_KEY
-      ? await checked(async () => {
-          const stripe = new Stripe(environment.STRIPE_SECRET_KEY as string);
-          await stripe.balance.retrieve();
-        })
-      : { status: "NOT_CONFIGURED" },
+    GOOGLE_WALLET: await walletStatus("GOOGLE"),
+    APPLE_WALLET: await walletStatus("APPLE"),
+    STRIPE: await stripeStatus(),
     OPERATIONAL_WORKER: await workerStatus("OPERATIONAL_WORKER"),
     WALLET_WORKER: await workerStatus("WALLET_WORKER"),
     KEY_ROTATION_CONFIG: { status: "READY", metadata: security.keyVersionSummary() },
   };
+  const releaseGate = evaluateReleaseReadiness(result, environment.DEPLOYMENT_ENVIRONMENT);
+  result.RELEASE_GATE = {
+    status: releaseGate.blockers.length === 0 ? "READY" : "DEGRADED",
+    metadata: {
+      environment: environment.DEPLOYMENT_ENVIRONMENT,
+      blockers: releaseGate.blockers,
+      warnings: releaseGate.warnings,
+    },
+  };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (Object.values(result).some((item) => item.status !== "READY")) process.exitCode = 1;
+  if (releaseGate.blockers.length > 0) process.exitCode = 1;
   await redis?.quit().catch(() => undefined);
   storage.destroy();
   await app.close();

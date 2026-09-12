@@ -9,12 +9,23 @@ test("shows disabled Wallet providers without exposing credentials", async ({ pa
   const switcher = page.locator(".wf-org-switcher select");
   await switcher.selectOption({ label: "Today Coffee" });
   await page.goto("http://localhost:3001/en/dashboard/programs");
-  const card = page.locator(".program-list__card").filter({ hasText: "W3 Browser Circle" }).first();
+  const card = page
+    .locator(".program-list__card")
+    .filter({ hasText: "Today Coffee Rewards" })
+    .first();
   await card.getByRole("button", { name: "Open card" }).click();
-  await expect(page.getByText(/DISABLED/).first()).toBeVisible();
-  await mkdir("artifacts/handoff-w3-round-2/screenshots", { recursive: true });
+  await expect(
+    page.getByText(
+      "This Wallet surface is disabled for the organization. Customer Web remains available.",
+      { exact: true },
+    ),
+  ).toHaveCount(2);
+  expect(await page.locator(".dashboard-content").innerText()).not.toMatch(
+    /-----BEGIN|test-issuer|APPLE_WALLET_|GOOGLE_WALLET_/u,
+  );
+  await mkdir("test-results/evidence/handoff-w3-round-2/screenshots", { recursive: true });
   await page.screenshot({
-    path: "artifacts/handoff-w3-round-2/screenshots/15-provider-disabled.png",
+    path: "test-results/evidence/handoff-w3-round-2/screenshots/15-provider-disabled.png",
     fullPage: true,
     animations: "disabled",
   });

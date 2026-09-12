@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { resolveCardLocale } from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
 import type {
   WalletMembershipInput,
   WalletProgramInput,
   WalletProviderCode,
 } from "@waflo/wallet-core";
+import {
+  APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+  resolveWalletNearbyText,
+} from "@waflo/wallet-core";
+import sharp from "sharp";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
@@ -13,33 +19,102 @@ import type { WafloRequest } from "../common/request-context.js";
 import { CustomerCardService } from "../customer/customer-card.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { TenantService } from "../tenancy/tenant.service.js";
-import { WalletProviderRegistry } from "./wallet-provider.registry.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
+import { type PreviewAsset, resolvePreviewAssetContent } from "../programs/preview-assets.js";
 import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
+import { TenantService } from "../tenancy/tenant.service.js";
+import { WalletProviderRegistry } from "./wallet-provider.registry.js";
+export async function resolveApplePassImagesWithFallback(
+  objectStorage: ObjectStorage,
+  assets: ReadonlyArray<PreviewAsset | null | undefined>,
+): Promise<Readonly<Record<string, Uint8Array>> | undefined> {
+  const visited = new Set<string>();
+  for (const asset of assets) {
+    if (!asset || visited.has(asset.id)) continue;
+    visited.add(asset.id);
+    let content: Awaited<ReturnType<typeof resolvePreviewAssetContent>>;
+    try {
+      content = await resolvePreviewAssetContent(
+        objectStorage,
+        asset,
+        "ORIGINAL_SAFE",
+        "Wallet program logo",
+      );
+    } catch (error) {
+      if (error instanceof AppError && error.code === "PROGRAM_ASSET_CONTENT_UNAVAILABLE") {
+        continue;
+      }
+      throw error;
+    }
+    if (!content) continue;
+    const source = Buffer.from(content.dataUri.split(",")[1] ?? "", "base64");
+    if (!source.length) continue;
+    try {
+      const appleLogo = (scale: 1 | 2 | 3) =>
+        sharp(source)
+          .resize(144 * scale, 36 * scale, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+          })
+          .extend({
+            top: 7 * scale,
+            bottom: 7 * scale,
+            left: 8 * scale,
+            right: 8 * scale,
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+          })
+          .png()
+          .toBuffer();
+      const [logo, logo2x, logo3x] = await Promise.all([appleLogo(1), appleLogo(2), appleLogo(3)]);
+      return {
+        "logo.png": logo,
+        "logo@2x.png": logo2x,
+        "logo@3x.png": logo3x,
+      };
+    } catch {
+      // Branding is optional. A decoded but non-renderable program asset must not prevent
+      // organization/default Apple branding from being used.
+    }
+  }
+  return undefined;
+}
 
 const walletPassInclude = {
   walletProgramBinding: true,
   membershipCredential: true,
   membership: {
     include: {
-      organization: true,
+      organization: {
+        include: {
+          brandLogoAsset: { include: { variants: true } },
+          walletNearbyConfiguration: {
+            include: {
+              locations: { include: { location: true }, orderBy: { sortOrder: "asc" } },
+            },
+          },
+        },
+      },
       customer: true,
-      program: true,
+      program: { include: { walletNearbyProgramCopy: true } },
       progress: true,
       enrollmentProgramVersion: {
         include: {
           translations: true,
+          cardLocales: {
+            where: { enabled: true },
+            orderBy: [{ position: "asc" }, { locale: "asc" }],
+          },
           stampRule: true,
+          locations: { select: { locationId: true } },
           visualTheme: publishedVisualThemeInclude,
         },
       },
     },
   },
-} as const;
+} satisfies Prisma.WalletPassInstanceInclude;
 
 @Injectable()
 export class WalletService {
@@ -55,7 +130,7 @@ export class WalletService {
 
   async providerHealth(userId: string, organizationId: string, request: WafloRequest) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
-    const health = await Promise.all(this.registry.all().map((provider) => provider.healthCheck()));
+    const health = await this.registry.healthChecks();
     await Promise.allSettled(
       health
         .filter((provider) => !["HEALTHY", "NOT_CONFIGURED"].includes(provider.status))
@@ -307,11 +382,31 @@ export class WalletService {
   ): Promise<WalletMembershipInput> {
     const membership = pass.membership;
     const version = membership.enrollmentProgramVersion;
-    const locale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const nearbyLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const localizedContent = version.cardLocales.length
+      ? version.cardLocales.map((item) => ({
+          locale: item.locale,
+          programName: item.programName ?? membership.program.internalName,
+          description: item.shortDescription ?? "",
+          rewardSummary: item.rewardSummary ?? "",
+        }))
+      : version.translations.map((item) => ({
+          locale: item.locale === "AR" ? "ar" : "en",
+          programName: item.programName,
+          description: item.shortDescription,
+          rewardSummary: item.rewardSummary,
+        }));
+    const enabledLocales = localizedContent.map((item) => item.locale);
+    const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+      ? version.defaultCardLocale
+      : (enabledLocales[0] ?? "en");
+    const locale = resolveCardLocale({
+      enabledLocales,
+      defaultLocale,
+      explicitLocale: nearbyLocale,
+    });
     const translation =
-      version.translations.find((item) => item.locale === (locale === "ar" ? "AR" : "EN")) ??
-      version.translations.find((item) => item.locale === "EN") ??
-      version.translations[0];
+      localizedContent.find((item) => item.locale === locale) ?? localizedContent[0];
     const goal = version.stampRule?.requiredStampCount ?? 8;
     const progress = membership.progress?.currentCycleStampCount ?? 0;
     if (!version.visualTheme) throw new Error("Published Wallet stamp artwork is unavailable.");
@@ -322,19 +417,43 @@ export class WalletService {
       programVersionId: version.id,
       membershipId: membership.id,
       locale,
+      rewardLabel: translation?.rewardSummary ?? "",
       requiredStampCount: goal,
       currentStampCount: progress,
       rewardReady: membership.progress?.rewardReady ?? false,
       theme: version.visualTheme,
       outputProfile: pass.provider === "APPLE" ? "APPLE_WALLET" : "GOOGLE_WALLET",
     });
+    let qrCenterLogo: Buffer | undefined;
+    const logoVariant =
+      version.visualTheme.logoAsset?.variants.find(
+        (candidate) => candidate.variantCode === "ORIGINAL_SAFE",
+      ) ?? version.visualTheme.logoAsset?.variants[0];
+    if (
+      logoVariant &&
+      new Set(["image/png", "image/jpeg", "image/webp"]).has(logoVariant.mimeType) &&
+      logoVariant.fileSize >= 32 &&
+      logoVariant.fileSize <= 512_000
+    ) {
+      try {
+        const bytes = await this.objectStorage.get(logoVariant.objectKey);
+        if (
+          bytes.length === logoVariant.fileSize &&
+          createHash("sha256").update(bytes).digest("hex") === logoVariant.digest
+        ) {
+          qrCenterLogo = bytes;
+        }
+      } catch {
+        // Center branding is optional; pass generation and the plain QR remain available.
+      }
+    }
     const programInput: WalletProgramInput = {
       organizationId: membership.organizationId,
       organizationName: membership.organization.name,
       programId: membership.programId,
       programVersionId: version.id,
       programName: translation?.programName ?? membership.program.internalName,
-      description: translation?.shortDescription ?? "",
+      description: translation?.description ?? "",
       rewardSummary: translation?.rewardSummary ?? "",
       backgroundColor: version.visualTheme?.backgroundColor ?? "#F7F4EE",
       foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
@@ -343,7 +462,29 @@ export class WalletService {
         version.renderFingerprint ??
         createHash("sha256").update(version.id).digest("hex"),
       locale,
+      defaultLocale,
+      localizedContent,
+      nearbyRelevance: walletNearbyRelevance({
+        enabled: membership.organization.walletNearbyConfiguration?.enabled ?? false,
+        locations: membership.organization.walletNearbyConfiguration?.locations ?? [],
+        allowedLocationIds: new Set(version.locations.map((item) => item.locationId)),
+        templateCode: version.baseTemplateCode,
+        businessCategory: membership.organization.businessCategory,
+        merchantName: membership.organization.name,
+        locale: nearbyLocale,
+        customText:
+          nearbyLocale === "ar"
+            ? membership.program.walletNearbyProgramCopy?.appleCustomTextAr
+            : membership.program.walletNearbyProgramCopy?.appleCustomTextEn,
+      }),
     };
+    const applePassImages =
+      pass.provider === "APPLE"
+        ? await resolveApplePassImagesWithFallback(this.objectStorage, [
+            version.visualTheme.logoAsset,
+            membership.organization.brandLogoAsset,
+          ])
+        : undefined;
     return {
       ...programInput,
       walletPassInstanceId: pass.id,
@@ -351,6 +492,7 @@ export class WalletService {
       publicMembershipId: membership.publicMembershipId,
       displayName: membership.customer.displayName,
       credentialPayload: this.security.payloadForCredential(pass.membershipCredential),
+      ...(qrCenterLogo ? { qrCenterLogo } : {}),
       currentStampCount: progress,
       requiredStampCount: goal,
       rewardReady: membership.progress?.rewardReady ?? false,
@@ -358,6 +500,55 @@ export class WalletService {
       programStatus: membership.program.status,
       transferred: pass.membershipCredential.status === "TRANSFERRED",
       stampRenderInput: stampRender.renderInput,
+      ...(applePassImages ? { applePassImages } : {}),
     };
   }
+}
+
+function walletNearbyRelevance(input: {
+  enabled: boolean;
+  allowedLocationIds: ReadonlySet<string>;
+  locations: ReadonlyArray<{
+    location: {
+      id: string;
+      name: string;
+      status: "ACTIVE" | "ARCHIVED";
+      latitude: unknown;
+      longitude: unknown;
+    };
+  }>;
+  templateCode?: string | null | undefined;
+  businessCategory?: string | null | undefined;
+  merchantName: string;
+  locale: "en" | "ar";
+  customText?: string | null | undefined;
+}) {
+  const locations = input.locations
+    .filter(
+      ({ location }) =>
+        input.allowedLocationIds.has(location.id) &&
+        location.status === "ACTIVE" &&
+        location.latitude !== null &&
+        location.longitude !== null,
+    )
+    .slice(0, 10)
+    .map(({ location }) => ({
+      locationId: location.id,
+      displayName: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      relevantText: resolveWalletNearbyText({
+        templateCode: input.templateCode,
+        businessCategory: input.businessCategory,
+        merchantName: input.merchantName,
+        locationName: location.name,
+        locale: input.locale,
+        customText: input.customText,
+      }).text,
+    }));
+  return {
+    enabled: input.enabled && locations.length > 0,
+    desiredAppleMaxDistanceMeters: APPLE_NEARBY_DESIRED_MAX_DISTANCE_METERS,
+    locations,
+  };
 }

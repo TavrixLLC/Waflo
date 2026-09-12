@@ -32,9 +32,11 @@ customer database IDs, signing material, and internal fraud details.
 
 ## Version and migration policy
 
-iOS and Android pairing and signed requests enforce strict `major.minor.patch` versions against
-`STAFF_MOBILE_MINIMUM_APP_VERSION`. Development Test Client metadata remains explicitly exempt
-from mobile semantic-version enforcement and remains forbidden in production.
+iOS and Android pairing and signed requests enforce strict Semantic Versions against the
+platform-specific minimum, with `STAFF_MOBILE_MINIMUM_APP_VERSION` as the compatibility fallback.
+Development Test Client metadata remains explicitly exempt from mobile semantic-version
+enforcement and remains forbidden in production.
 
-No Prisma schema change or migration is required. The compatibility layer is API, DTO,
-validation, request-context, testing, and deterministic contract-generation code only.
+The additive W4 mobile projection requires stable public UUIDs for Organization members and
+Locations. Migration `20260825120000_w4_m1_mobile_contract` adds and backfills those fields without
+changing the existing M2 identifiers or relations.

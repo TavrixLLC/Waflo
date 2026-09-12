@@ -2,10 +2,12 @@ import sharp from "../../apps/api/node_modules/sharp";
 import { describe, expect, it } from "vitest";
 import { processMerchantImage } from "../../apps/api/src/programs/image-processing.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import {
   contrastRatio,
   validateProgramConfiguration,
 } from "../../apps/api/src/programs/validation-engine.js";
+import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
 const crop = { x: 0, y: 0, width: 1, height: 1, zoom: 1 };
 const jpeg = Buffer.from(
@@ -60,9 +62,52 @@ describe("W2 Round 2 visual pipeline", () => {
     await expect(processMerchantImage(jpeg, "image/png", crop)).rejects.toThrow("does not match");
   });
 
-  it("produces deterministic, structurally distinct platform compositions", () => {
-    const stampSvg =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><circle cx="20" cy="20" r="15"/></svg>';
+  it("requires a square source crop for Wallet-compatible merchant logos", async () => {
+    const logo = await sharp({
+      create: {
+        width: 1600,
+        height: 440,
+        channels: 4,
+        background: { r: 174, g: 49, b: 21, alpha: 0.8 },
+      },
+    })
+      .png()
+      .toBuffer();
+    await expect(
+      processMerchantImage(logo, "image/png", crop, { requireSquareCrop: true }),
+    ).rejects.toThrow("Wallet logo crops must be square.");
+
+    const processed = await processMerchantImage(
+      logo,
+      "image/png",
+      { x: 0.3625, y: 0, width: 0.275, height: 1, zoom: 1 },
+      { requireSquareCrop: true },
+    );
+
+    expect(processed.source).toMatchObject({ width: 1600, height: 440, format: "png" });
+    expect(processed.original).toMatchObject({
+      code: "ORIGINAL_SAFE",
+      width: 440,
+      height: 440,
+      mimeType: "image/png",
+    });
+    expect(processed.variants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "STAMP_256", width: 256, height: 256 }),
+        expect.objectContaining({ code: "THUMBNAIL_96", width: 96, height: 96 }),
+      ]),
+    );
+  });
+
+  it("produces deterministic, structurally distinct platform compositions", async () => {
+    const renderedStamp = renderStampSvg({
+      goal: 8,
+      progress: 4,
+      layout: "GRID",
+      filledColor: "#e4572e",
+      emptyColor: "#f3a712",
+      accentColor: "#e4572e",
+    });
     const base = {
       locale: "AR" as const,
       organizationName: "Waflo Coffee",
@@ -72,7 +117,7 @@ describe("W2 Round 2 visual pipeline", () => {
       terms: "تطبق الشروط",
       progress: 4,
       goal: 8,
-      stampSvg,
+      stampSvg: renderedStamp.svg,
       backgroundColor: "#ffffff",
       foregroundColor: "#222222",
       accentColor: "#e4572e",
@@ -93,20 +138,59 @@ describe("W2 Round 2 visual pipeline", () => {
       },
     };
     const customer = composeProgramPreview({ ...base, profile: "CUSTOMER_WEB" });
-    const apple = composeProgramPreview({ ...base, profile: "APPLE_WALLET" });
-    const google = composeProgramPreview({ ...base, profile: "GOOGLE_WALLET" });
+    const appleArtwork = await composeDashboardWalletArtwork({
+      profile: "APPLE_WALLET",
+      locale: base.locale,
+      renderedStamp,
+      stampSize: 24,
+      organizationName: base.organizationName,
+      programName: base.programName,
+      rewardSummary: base.rewardSummary,
+      progress: base.progress,
+      goal: base.goal,
+      backgroundColor: base.backgroundColor,
+      foregroundColor: base.foregroundColor,
+      accentColor: base.accentColor,
+      secondaryColor: base.secondaryColor,
+    });
+    const googleArtwork = await composeDashboardWalletArtwork({
+      profile: "GOOGLE_WALLET",
+      locale: base.locale,
+      renderedStamp,
+      stampSize: 24,
+      organizationName: base.organizationName,
+      programName: base.programName,
+      rewardSummary: base.rewardSummary,
+      progress: base.progress,
+      goal: base.goal,
+      backgroundColor: base.backgroundColor,
+      foregroundColor: base.foregroundColor,
+      accentColor: base.accentColor,
+      secondaryColor: base.secondaryColor,
+    });
+    const apple = composeProgramPreview({
+      ...base,
+      profile: "APPLE_WALLET",
+      walletArtwork: appleArtwork,
+    });
+    const google = composeProgramPreview({
+      ...base,
+      profile: "GOOGLE_WALLET",
+      walletArtwork: googleArtwork,
+    });
 
     expect(new Set([customer.digest, apple.digest, google.digest]).size).toBe(3);
     expect(customer.svg).toContain("Customer Web preview");
-    expect(apple.svg).toContain("Apple Wallet preview only");
-    expect(google.svg).toContain("Google Wallet preview only");
+    expect(apple.svg).toContain("Apple Store Card preview");
+    expect(apple.svg).toContain('data-apple-preview-variant="STORE_CARD"');
+    expect(google.svg).toContain("Google Wallet preview");
     expect(customer.svg).toContain("مكافآت وافلو");
     expect(apple.width).not.toBe(customer.width);
   });
 });
 
 describe("W2 Round 2 validation engine", () => {
-  it("returns typed, focusable issues across content, layout, previews, and Test Mode", () => {
+  it("returns typed, focusable issues across content, layout, and automatic previews", () => {
     const result = validateProgramConfiguration({
       plan: "STARTER",
       goal: 2,
@@ -140,7 +224,7 @@ describe("W2 Round 2 validation engine", () => {
         backgroundColor: "#ffffff",
         foregroundColor: "#fefefe",
         accentColor: "#fdfdfd",
-        layoutType: "PATH",
+        layoutType: "GRID",
         stampSize: 96,
         stampSpacing: 32,
         applePreviewConfig: {},
@@ -171,12 +255,12 @@ describe("W2 Round 2 validation engine", () => {
         "ACTIVE_LOCATION_REQUIRED",
         "ASSET_REQUIRED",
         "COLOR_CONTRAST_LOW",
-        "PATH_LAYOUT_TOO_SHORT",
+        "STAMP_LAYOUT_SPACING_DENSE",
         "PREVIEW_STALE",
         "PREVIEW_PROFILE_MISSING",
-        "TEST_MODE_FINGERPRINT_STALE",
       ]),
     );
+    expect(codes).not.toContain("PATH_LAYOUT_TOO_SHORT");
     expect(
       issues.every(
         (item) =>

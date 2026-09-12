@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { latestProgramTemplates, type ProgramTemplateArtworkReference } from "@waflo/contracts";
+import {
+  latestProgramTemplates,
+  type ProgramTemplateArtworkReference,
+  type ProgramTemplateDefinition,
+} from "@waflo/contracts";
 
 export const LIBRARY_ARTWORK_SCHEMA_VERSION = 2;
 
@@ -528,6 +532,42 @@ export function artworkFor(
   const matches = libraryArtwork.filter((item) => item.code === code);
   if (targetVersion !== undefined) return matches.find((item) => item.version === targetVersion);
   return matches.toSorted((left, right) => right.version - left.version)[0];
+}
+
+export interface ResolvedProductionTemplateStampArtwork {
+  readonly templateId: string;
+  readonly lifecycle: "ACTIVE" | "ARCHIVED";
+  readonly filled: LibraryArtwork;
+  readonly empty: LibraryArtwork;
+}
+
+/**
+ * Resolves the exact versioned library inputs persisted for a built-in template.
+ * Runtime memberships continue to render their pinned asset IDs; this resolver
+ * makes template creation, previews, and semantic source tests use that same
+ * versioned definition instead of a category/default guess.
+ */
+export function resolveProductionTemplateStampArtwork(
+  template: ProgramTemplateDefinition,
+): ResolvedProductionTemplateStampArtwork {
+  const filled = artworkFor(template.artwork.filled);
+  const empty = artworkFor(template.artwork.empty);
+  if (filled?.category !== "STAMP_FILLED") {
+    throw new Error(
+      `Template ${template.code}-v${template.version} has no exact filled stamp artwork.`,
+    );
+  }
+  if (empty?.category !== "STAMP_EMPTY") {
+    throw new Error(
+      `Template ${template.code}-v${template.version} has no exact empty stamp artwork.`,
+    );
+  }
+  return {
+    templateId: `${template.code}-v${template.version}`,
+    lifecycle: template.version === 1 ? "ARCHIVED" : "ACTIVE",
+    filled,
+    empty,
+  };
 }
 
 export function canonicalArtworkBytes(artwork: LibraryArtwork): Buffer {

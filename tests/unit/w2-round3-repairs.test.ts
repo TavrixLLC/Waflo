@@ -25,7 +25,9 @@ import {
   PREVIEW_RENDERER_SCHEMA_VERSION,
 } from "../../apps/api/src/programs/preview-cache.js";
 import { composeProgramPreview } from "../../apps/api/src/programs/preview-composer.js";
+import { composeDashboardWalletArtwork } from "../../apps/api/src/programs/wallet-preview-artwork.js";
 import type { ObjectStorage } from "../../apps/api/src/programs/object-storage.js";
+import { renderStampSvg } from "../../packages/stamp-engine/src/index.js";
 
 const requiredTemplates = [
   "COFFEE",
@@ -95,6 +97,35 @@ function previewInput(
   };
 }
 
+async function walletArtworkFor(
+  profile: "APPLE_WALLET" | "GOOGLE_WALLET",
+): Promise<Awaited<ReturnType<typeof composeDashboardWalletArtwork>>> {
+  const input = previewInput(profile);
+  const renderedStamp = renderStampSvg({
+    goal: input.goal,
+    progress: input.progress,
+    layout: "GRID",
+    filledColor: input.accentColor,
+    emptyColor: input.secondaryColor,
+    accentColor: input.accentColor,
+  });
+  return composeDashboardWalletArtwork({
+    profile,
+    locale: input.locale,
+    renderedStamp,
+    stampSize: 24,
+    organizationName: input.organizationName,
+    programName: input.programName,
+    rewardSummary: input.rewardSummary,
+    progress: input.progress,
+    goal: input.goal,
+    backgroundColor: input.backgroundColor,
+    foregroundColor: input.foregroundColor,
+    accentColor: input.accentColor,
+    secondaryColor: input.secondaryColor,
+  });
+}
+
 function storedAsset(bytes: Buffer, digest?: string): PreviewAsset {
   return {
     id: "asset-1",
@@ -150,7 +181,7 @@ describe("W2 Round 3 template catalog and application", () => {
       expect(template.artwork.filled.version).toBe(2);
       expect(template.artwork.empty.version).toBe(2);
       expect(template.artwork.milestone.version).toBe(2);
-      expect(template.layout.type).toMatch(/^(ROW|GRID|PATH|RING)$/);
+      expect(template.layout.type).toBe("GRID");
       expect(template.customerWeb.variant).toBeTruthy();
       expect(template.apple.barcodeLabel).toBeTruthy();
       expect(template.google.barcodeLabel).toBeTruthy();
@@ -188,7 +219,7 @@ describe("W2 Round 3 template catalog and application", () => {
     expect(switched.templateVersion).toBe(2);
     expect(switched.translations.en.programName).toBe(carWash.copy.en.programName);
     expect(switched.requiredStampCount).toBe(carWash.recommendedStampGoal);
-    expect(switched.visualTheme.layoutType).toBe("PATH");
+    expect(switched.visualTheme.layoutType).toBe("GRID");
   });
 
   it("keeps the template-switch confirmation mapping explicit and complete", () => {
@@ -304,19 +335,29 @@ describe("W2 Round 3 platform, preview cache, and truthful assets", () => {
     }
   });
 
-  it("renders selected background artwork only where supported and warns elsewhere", () => {
+  it("uses the current Google compositor fallback without the retired background warning", async () => {
     const backgroundDataUri = `data:image/png;base64,${Buffer.from("background").toString("base64")}`;
     const customer = composeProgramPreview(previewInput("CUSTOMER_WEB", backgroundDataUri));
-    const apple = composeProgramPreview(previewInput("APPLE_WALLET", backgroundDataUri));
-    const google = composeProgramPreview(previewInput("GOOGLE_WALLET", backgroundDataUri));
+    const apple = composeProgramPreview({
+      ...previewInput("APPLE_WALLET", backgroundDataUri),
+      walletArtwork: await walletArtworkFor("APPLE_WALLET"),
+    });
+    const google = composeProgramPreview({
+      ...previewInput("GOOGLE_WALLET", backgroundDataUri),
+      walletArtwork: await walletArtworkFor("GOOGLE_WALLET"),
+    });
     expect(customer.svg).toContain(backgroundDataUri);
     expect(customer.svg).toContain('opacity=".84"');
     expect(apple.svg).not.toContain(backgroundDataUri);
     expect(google.svg).not.toContain(backgroundDataUri);
-    expect(apple.warnings.map((warning) => warning.code)).toContain(
+    expect(apple.svg).toContain('data-production-wallet-artwork="APPLE_STORE_CARD_STRIP"');
+    expect(apple.warnings.map((warning) => warning.code)).not.toContain(
       "APPLE_BACKGROUND_ARTWORK_UNSUPPORTED",
     );
-    expect(google.warnings.map((warning) => warning.code)).toContain(
+    expect(google.svg).toContain(
+      'data-google-hero-artwork-composition="full-production-compositor"',
+    );
+    expect(google.warnings.map((warning) => warning.code)).not.toContain(
       "GOOGLE_BACKGROUND_ARTWORK_UNSUPPORTED",
     );
   });

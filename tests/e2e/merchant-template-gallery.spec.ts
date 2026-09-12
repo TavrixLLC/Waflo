@@ -4,6 +4,20 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: a manual local browser run chooses its evidence destination.
+const stagingRepairEvidenceDirectory = process.env.WAFLO_STAGING_REPAIR_EVIDENCE_DIR;
+
+async function captureStagingRepairEvidence(
+  target: Page | Locator,
+  filename: string,
+): Promise<void> {
+  if (!stagingRepairEvidenceDirectory) return;
+  await target.screenshot({
+    path: `${stagingRepairEvidenceDirectory}/${filename}`,
+    animations: "disabled",
+  });
+}
+
 const categories = [
   ["Coffee", "coffee"],
   ["Bakery", "bakery"],
@@ -234,6 +248,10 @@ test("preserves selected stable code and version through one Program draft and r
   await expect(page).toHaveURL(/\/en\/dashboard\/programs\/created-program-id\/edit$/u);
   await expect(page.getByText("Clean Blue", { exact: true })).toBeVisible();
 
+  await page
+    .getByRole("button", { name: /^Basics/u })
+    .first()
+    .click();
   await page.getByLabel("Card name in your dashboard").fill("Gallery car wash");
   await expect(page.getByText("Saving…", { exact: true })).toBeVisible();
   await expect.poll(() => patchBodies.length).toBe(1);
@@ -281,10 +299,10 @@ test("supports RTL, keyboard focus, Axe, and practical 1440-to-360 responsive br
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(allTemplates(page).locator(".template-gallery__grid")).toHaveCSS(
-    "grid-template-columns",
-    /\d+(?:\.\d+)?px \d+(?:\.\d+)?px/u,
-  );
+  const columnsAt390 = await allTemplates(page)
+    .locator(".template-gallery__grid")
+    .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  expect(columnsAt390).toBe(1);
   await page.setViewportSize({ width: 360, height: 800 });
   const columnsAt360 = await allTemplates(page)
     .locator(".template-gallery__grid")
@@ -319,6 +337,146 @@ test("supports RTL, keyboard focus, Axe, and practical 1440-to-360 responsive br
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(previewButton).toBeFocused();
+});
+
+test("keeps every template preview image inside its owned viewport", async ({ page }) => {
+  await mockTemplateGalleryApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/en/dashboard/programs/new");
+  for (const [templateName, evidenceFilename] of [
+    ["Classic Roast", "01-template-preview-contained.png"],
+    ["Dark Espresso", "02-google-dark-readable.png"],
+  ] as const) {
+    const dialog = await openPreview(page, templateName);
+    for (const profile of ["Customer", "Apple Wallet", "Google Wallet"] as const) {
+      await dialog.getByRole("tab", { name: profile }).click();
+      const image = dialog.getByRole("img");
+      await expect(image).toBeVisible();
+      const bounds = await dialog.locator(".template-preview-dialog__canvas").evaluate((canvas) => {
+        const image = canvas.querySelector<HTMLImageElement>("img");
+        if (!image) throw new Error("Template preview image is missing.");
+        const canvasBounds = canvas.getBoundingClientRect();
+        const imageBounds = image.getBoundingClientRect();
+        return { canvasBounds, imageBounds };
+      });
+      expect(bounds.imageBounds.left, `${templateName} ${profile}`).toBeGreaterThanOrEqual(
+        bounds.canvasBounds.left - 1,
+      );
+      expect(bounds.imageBounds.right, `${templateName} ${profile}`).toBeLessThanOrEqual(
+        bounds.canvasBounds.right + 1,
+      );
+      expect(bounds.imageBounds.top, `${templateName} ${profile}`).toBeGreaterThanOrEqual(
+        bounds.canvasBounds.top - 1,
+      );
+      expect(bounds.imageBounds.bottom, `${templateName} ${profile}`).toBeLessThanOrEqual(
+        bounds.canvasBounds.bottom + 1,
+      );
+    }
+    await captureStagingRepairEvidence(dialog, evidenceFilename);
+    await dialog.getByRole("button", { name: "Close template preview" }).click();
+  }
+});
+
+test("centers the mobile More sheet grid with equal logical insets in LTR and RTL", async ({
+  page,
+}) => {
+  for (const locale of ["en", "ar"] as const) {
+    for (const width of [360, 390, 430]) {
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await mockTemplateGalleryApi(page);
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`/${locale}/dashboard/programs/new`);
+      await page.locator('.dashboard-mobile-tabs button[aria-haspopup="dialog"]').click();
+      const sheet = page.locator(".dashboard-mobile-more__dialog");
+      await expect(sheet).toBeVisible();
+
+      const geometry = await sheet.evaluate((dialog) => {
+        const body = dialog.querySelector<HTMLElement>(".wf-dialog__body");
+        const grid = dialog.querySelector<HTMLElement>(".dashboard-mobile-more__navigation");
+        if (!body || !grid) throw new Error("Mobile More sheet is incomplete.");
+        const dialogBounds = dialog.getBoundingClientRect();
+        const gridBounds = grid.getBoundingClientRect();
+        const cards = [...grid.querySelectorAll<HTMLElement>(".dashboard-nav-link")].map((card) =>
+          card.getBoundingClientRect(),
+        );
+        return {
+          viewportWidth: window.innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          dialogBounds,
+          gridBounds,
+          cardWidths: cards.map((card) => card.width),
+        };
+      });
+
+      expect(geometry.documentWidth, `${locale} ${width}`).toBeLessThanOrEqual(
+        geometry.viewportWidth + 1,
+      );
+      expect(geometry.dialogBounds.left, `${locale} ${width}`).toBeGreaterThanOrEqual(-1);
+      expect(geometry.dialogBounds.right, `${locale} ${width}`).toBeLessThanOrEqual(
+        geometry.viewportWidth + 1,
+      );
+      expect(
+        geometry.gridBounds.left - geometry.dialogBounds.left,
+        `${locale} ${width}`,
+      ).toBeCloseTo(geometry.dialogBounds.right - geometry.gridBounds.right, 0);
+      expect(geometry.cardWidths.length, `${locale} ${width}`).toBeGreaterThan(1);
+      expect(
+        Math.max(...geometry.cardWidths) - Math.min(...geometry.cardWidths),
+        `${locale} ${width}`,
+      ).toBeLessThanOrEqual(1);
+      if (width === 390) {
+        await captureStagingRepairEvidence(
+          sheet,
+          locale === "ar" ? "15-more-rtl-mobile.png" : "14-more-ltr-mobile.png",
+        );
+      }
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+    }
+  }
+});
+
+test("keeps Kurdish body, navigation, headings, and buttons readable without changing Arabic", async ({
+  page,
+}) => {
+  for (const locale of ["ku-badini", "ku-sorani"] as const) {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await mockTemplateGalleryApi(page);
+    await page.goto(`/${locale}/dashboard/programs/new`);
+    await expect(page.locator(".template-gallery-card__action").first()).toBeVisible();
+    const typography = await page.evaluate(() => {
+      const body = document.body;
+      const nav = document.querySelector<HTMLElement>(".dashboard-nav-link");
+      const heading = document.querySelector<HTMLElement>("h1");
+      const button = document.querySelector<HTMLElement>(".template-gallery-card__action");
+      if (!nav || !heading || !button) throw new Error("Typography fixture is incomplete.");
+      return {
+        bodyFont: getComputedStyle(body).fontFamily,
+        bodySynthesis: getComputedStyle(body).fontSynthesis,
+        navigationWeight: getComputedStyle(nav).fontWeight,
+        headingWeight: getComputedStyle(heading).fontWeight,
+        buttonWeight: getComputedStyle(button).fontWeight,
+      };
+    });
+    expect(typography.bodyFont, locale).toContain("Sirwan");
+    expect(typography.bodySynthesis, locale).toBe("none");
+    expect(typography.navigationWeight, locale).toBe("400");
+    expect(typography.headingWeight, locale).toBe("600");
+    expect(typography.buttonWeight, locale).toBe("500");
+    await captureStagingRepairEvidence(
+      page,
+      locale === "ku-sorani"
+        ? "12-kurdish-sorani-typography.png"
+        : "13-kurdish-badini-typography.png",
+    );
+  }
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockTemplateGalleryApi(page);
+  await page.goto("/ar/dashboard/programs/new");
+  await expect(page.locator(".template-gallery-card__action").first()).toBeVisible();
+  const arabicFont = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+  expect(arabicFont).toContain("Cairo");
 });
 
 test("fixture boundary exposes the expanded catalog and only one initial preview surface", () => {
@@ -391,7 +549,7 @@ test("keeps visual discovery lazy, console-clean, and within practical browser b
 
 test("captures P2.1R visual evidence and differentiated contact sheets", async ({ page }) => {
   test.setTimeout(240_000);
-  const evidenceDirectory = "artifacts/uiux/template-library-p21r";
+  const evidenceDirectory = "test-results/evidence/uiux/template-library-p21r";
   await mkdir(evidenceDirectory, { recursive: true });
   await mockTemplateGalleryApi(page, { businessCategory: "Cafe" });
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -444,32 +602,28 @@ test("captures P2.1R visual evidence and differentiated contact sheets", async (
   await dialog.screenshot({ path: `${evidenceDirectory}/17-dark-customer-preview.png` });
   await dialog.getByRole("button", { name: "Close template preview" }).click();
 
-  const beforeSheet = await sharp("artifacts/uiux/template-library-p21/21-contact-sheet.png")
-    .resize({ width: 760 })
-    .png()
-    .toBuffer();
-  const afterSheet = await sharp(afterGallery).resize({ width: 760 }).png().toBuffer();
-  const [beforeMetadata, afterMetadata] = await Promise.all([
-    sharp(beforeSheet).metadata(),
-    sharp(afterSheet).metadata(),
-  ]);
-  const comparisonHeight = Math.max(beforeMetadata.height ?? 0, afterMetadata.height ?? 0);
+  const gallerySheet = await sharp(afterGallery).resize({ width: 1520 }).png().toBuffer();
+  const galleryMetadata = await sharp(gallerySheet).metadata();
   await sharp({
-    create: { width: 1568, height: comparisonHeight + 64, channels: 4, background: "#FCFBFA" },
+    create: {
+      width: 1552,
+      height: (galleryMetadata.height ?? 0) + 64,
+      channels: 4,
+      background: "#FCFBFA",
+    },
   })
     .composite([
       {
         input: Buffer.from(
-          '<svg xmlns="http://www.w3.org/2000/svg" width="1568" height="64"><text x="16" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#241916">Before · P2.1</text><text x="808" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#241916">After · P2.1R</text></svg>',
+          '<svg xmlns="http://www.w3.org/2000/svg" width="1552" height="64"><text x="16" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#241916">Current template gallery · P2.1R</text></svg>',
         ),
         left: 0,
         top: 0,
       },
-      { input: beforeSheet, left: 16, top: 64 },
-      { input: afterSheet, left: 808, top: 64 },
+      { input: gallerySheet, left: 16, top: 64 },
     ])
     .png()
-    .toFile(`${evidenceDirectory}/22-before-after-contact-sheet.png`);
+    .toFile(`${evidenceDirectory}/22-current-gallery-contact-sheet.png`);
 
   await page.goto("/ar/dashboard/programs/new");
   await page.addStyleTag({

@@ -66,6 +66,7 @@ export async function processMerchantImage(
   bytes: Buffer,
   declaredMimeType: SupportedImageMime,
   crop: ImageCrop,
+  options: { requireSquareCrop?: boolean } = {},
 ): Promise<ProcessedMerchantImage> {
   if (!bytes.length) throw new Error("The uploaded image is empty.");
   if (crop.x + crop.width > 1.000001 || crop.y + crop.height > 1.000001) {
@@ -103,30 +104,19 @@ export async function processMerchantImage(
 
   const hadAlpha = Boolean(metadata.hasAlpha);
   const normalized = await encodeSafe(sharp(bytes, decoderOptions).rotate(), hadAlpha);
-  const zoomWidth = Math.max(1, Math.round(normalized.width / crop.zoom));
-  const zoomHeight = Math.max(1, Math.round(normalized.height / crop.zoom));
-  const left = Math.min(
-    normalized.width - 1,
-    Math.round(crop.x * normalized.width + (normalized.width - zoomWidth) / 2),
-  );
-  const top = Math.min(
-    normalized.height - 1,
-    Math.round(crop.y * normalized.height + (normalized.height - zoomHeight) / 2),
-  );
+  const left = Math.min(normalized.width - 1, Math.round(crop.x * normalized.width));
+  const top = Math.min(normalized.height - 1, Math.round(crop.y * normalized.height));
   const width = Math.max(
     1,
-    Math.min(
-      normalized.width - left,
-      Math.round(Math.min(crop.width * normalized.width, zoomWidth)),
-    ),
+    Math.min(normalized.width - left, Math.round(crop.width * normalized.width)),
   );
   const height = Math.max(
     1,
-    Math.min(
-      normalized.height - top,
-      Math.round(Math.min(crop.height * normalized.height, zoomHeight)),
-    ),
+    Math.min(normalized.height - top, Math.round(crop.height * normalized.height)),
   );
+  if (options.requireSquareCrop && Math.abs(width - height) > 1) {
+    throw new Error("Wallet logo crops must be square.");
+  }
   const cropped = await encodeSafe(
     sharp(normalized.bytes, decoderOptions).extract({ left, top, width, height }),
     hadAlpha,

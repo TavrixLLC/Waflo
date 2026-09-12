@@ -1,7 +1,30 @@
 import { z } from "zod";
 
 const optionalUrl = z.union([z.literal(""), z.url()]).optional();
+const optionalPositiveInteger = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.coerce.number().int().positive().optional(),
+);
+const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
+const explicitEnvironmentBoolean = z.enum(["true", "false"]).transform((value) => value === "true");
+const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+
+export type PublicMapboxTokenStatus = "SET" | "UNSET" | "INVALID_FORMAT";
+
+export function classifyPublicMapboxToken(value: string | undefined): PublicMapboxTokenStatus {
+  if (!value?.trim()) return "UNSET";
+  return publicMapboxTokenPattern.test(value.trim()) ? "SET" : "INVALID_FORMAT";
+}
+
+const strictSemanticVersionSchema = z
+  .string()
+  .min(5)
+  .max(40)
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
+    "A strict semantic version is required.",
+  );
 
 export const environmentSchema = z
   .object({
@@ -39,6 +62,7 @@ export const environmentSchema = z
     MARKETING_WEB_URL: z.url().default("http://localhost:3000"),
     MERCHANT_DASHBOARD_URL: z.url().default("http://localhost:3001"),
     CUSTOMER_WEB_URL: z.url().default("http://localhost:3002"),
+    ADMIN_DASHBOARD_URL: z.url().default("http://localhost:3003"),
     API_PUBLIC_URL: z.url().default("http://localhost:4000"),
     OBJECT_STORAGE_ENDPOINT: z.url().default("http://127.0.0.1:9000"),
     OBJECT_STORAGE_REGION: z.string().min(1).default("us-east-1"),
@@ -53,7 +77,9 @@ export const environmentSchema = z
       .default("waflo-local-signing-secret-change-before-production"),
     ALLOWED_ORIGINS: z
       .string()
-      .default("http://localhost:3000,http://localhost:3001,http://localhost:3002"),
+      .default(
+        "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003",
+      ),
     COOKIE_SECURE: z.stringbool().default(false),
     COOKIE_SAME_SITE: z.enum(["LAX", "NONE"]).default("LAX"),
     COOKIE_NAME: z.string().min(1).default("waflo_session"),
@@ -61,6 +87,9 @@ export const environmentSchema = z
     SESSION_IDLE_TTL_MINUTES: z.coerce.number().int().min(15).max(43_200).default(1_440),
     CUSTOMER_COOKIE_NAME: z.string().min(1).default("waflo_customer"),
     CUSTOMER_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(90),
+    ADMIN_COOKIE_NAME: z.string().min(1).default("waflo_admin_session"),
+    ADMIN_SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(8),
+    ADMIN_SESSION_IDLE_TTL_MINUTES: z.coerce.number().int().min(5).max(1_440).default(60),
     CUSTOMER_DATA_ENCRYPTION_KEY_V1: z
       .string()
       .min(32)
@@ -108,10 +137,9 @@ export const environmentSchema = z
     DEVICE_SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     DEVICE_REQUEST_MAX_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     DEVICE_NONCE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
-    STAFF_MOBILE_MINIMUM_APP_VERSION: z
-      .string()
-      .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
-      .default("1.0.0"),
+    STAFF_MOBILE_MINIMUM_APP_VERSION: strictSemanticVersionSchema.default("1.0.0"),
+    STAFF_MOBILE_MINIMUM_IOS_VERSION: strictSemanticVersionSchema,
+    STAFF_MOBILE_MINIMUM_ANDROID_VERSION: strictSemanticVersionSchema,
     STAFF_OWN_REVERSAL_WINDOW_SECONDS: z.coerce.number().int().min(15).max(900).default(120),
     MANAGER_REVERSAL_WINDOW_MINUTES: z.coerce.number().int().min(1).max(10080).default(1440),
     MANAGER_APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(5),
@@ -135,21 +163,24 @@ export const environmentSchema = z
     GOOGLE_SIGNIN_CLIENT_ID: z.string().optional(),
     GOOGLE_SIGNIN_CLIENT_SECRET: z.string().optional(),
     GOOGLE_SIGNIN_REDIRECT_URI: optionalUrl,
+    NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: z
+      .union([z.literal(""), z.string().regex(publicMapboxTokenPattern)])
+      .optional(),
     APPLE_SIGNIN_CLIENT_ID: z.string().optional(),
     APPLE_SIGNIN_TEAM_ID: z.string().optional(),
     APPLE_SIGNIN_KEY_ID: z.string().optional(),
     APPLE_SIGNIN_PRIVATE_KEY: z.string().optional(),
     APPLE_SIGNIN_PRIVATE_KEY_BASE64: z.string().optional(),
     APPLE_SIGNIN_REDIRECT_URI: optionalUrl,
+    EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1: optionalSecret,
+    EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION: z.coerce.number().int().min(1).default(1),
+    EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON: z.string().optional(),
     MERCHANT_BASE_DOMAIN: z.string().min(3).default("waflo.app"),
-    SCALE_LOCATION_LIMIT: z.coerce.number().int().positive().optional(),
-    SCALE_TEAM_LIMIT: z.coerce.number().int().positive().optional(),
+    SCALE_LOCATION_LIMIT: optionalPositiveInteger,
+    SCALE_TEAM_LIMIT: optionalPositiveInteger,
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_PUBLISHABLE_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
-    STRIPE_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
-    STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
-    STRIPE_SCALE_MONTHLY_PRICE_ID: z.string().optional(),
     STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID: z.string().optional(),
     STRIPE_RECONCILIATION_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
     STRIPE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
@@ -166,6 +197,8 @@ export const environmentSchema = z
     SECURITY_TOKEN_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
     WALLET_PUBLIC_BASE_URL: z.url().default("http://localhost:4000/v1/public/wallet-assets"),
     APPLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
+    APPLE_WALLET_GENERATOR: z.enum(["legacy", "passbuilder"]).default("legacy"),
+    APPLE_WALLET_EXTERNALLY_CERTIFIED: explicitEnvironmentBoolean.default(false),
     APPLE_PASS_TYPE_IDENTIFIER: z.string().optional(),
     APPLE_TEAM_IDENTIFIER: z.string().optional(),
     APPLE_ORGANIZATION_NAME: z.string().default("Waflo by Tavrix LLC"),
@@ -180,6 +213,14 @@ export const environmentSchema = z
     APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION: z.coerce.number().int().min(1).default(1),
     APPLE_PASS_AUTH_SECRETS_JSON: z.string().optional(),
     APPLE_APNS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+    APPLE_APNS_CERTIFICATE_PATH_OR_BASE64: z.string().optional(),
+    APPLE_APNS_CERTIFICATE_PASSWORD_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_URL: optionalUrl,
+    APPLE_PASS_BUILDER_AUTH_TOKEN_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_SIGNING_KEY_ID: z.string().min(1).max(128).default("waflo-default"),
+    APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE: z.string().optional(),
+    APPLE_PASS_BUILDER_TEMPLATE_ID: z.string().min(1).max(128).default("waflo-loyalty-v1"),
+    APPLE_PASS_BUILDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
     GOOGLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
     GOOGLE_WALLET_ISSUER_ID: z.string().optional(),
     GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64: z.string().optional(),
@@ -188,6 +229,16 @@ export const environmentSchema = z
     GOOGLE_WALLET_PUBLISHING_MODE: z.enum(["DEMO", "PUBLISHING"]).default("DEMO"),
   })
   .superRefine((value, context) => {
+    if (
+      !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value.MERCHANT_BASE_DOMAIN)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["MERCHANT_BASE_DOMAIN"],
+        message:
+          "Merchant base domain must be a lowercase ASCII DNS name without a scheme or port.",
+      });
+    }
     const deployed = value.DEPLOYMENT_ENVIRONMENT !== "development";
     if (deployed && value.NODE_ENV !== "production") {
       context.addIssue({
@@ -268,6 +319,34 @@ export const environmentSchema = z
         message: "Apple Sign-In configuration must be complete or absent.",
       });
     }
+    if (appleSignInParts.every(Boolean)) {
+      try {
+        const tokenKeys = parseVersionedSecretEntries(
+          value.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEYS_JSON,
+          value.EXTERNAL_AUTH_TOKEN_ENCRYPTION_KEY_V1 ?? "",
+        );
+        if (!tokenKeys[value.EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION]) {
+          throw new Error("active version missing");
+        }
+        for (const secret of Object.values(tokenKeys)) {
+          const trimmed = secret.trim();
+          const decoded = /^[0-9a-f]{64}$/i.test(trimmed)
+            ? Buffer.from(trimmed, "hex")
+            : Buffer.from(
+                trimmed,
+                trimmed.includes("-") || trimmed.includes("_") ? "base64url" : "base64",
+              );
+          if (decoded.length !== 32) throw new Error("invalid key length");
+        }
+      } catch {
+        context.addIssue({
+          code: "custom",
+          path: ["EXTERNAL_AUTH_TOKEN_ACTIVE_KEY_VERSION"],
+          message:
+            "Apple Sign-In requires a valid versioned 32-byte external-auth token encryption keyring.",
+        });
+      }
+    }
     if (!value.COOKIE_SECURE) {
       context.addIssue({
         code: "custom",
@@ -287,6 +366,13 @@ export const environmentSchema = z
         code: "custom",
         path: ["CUSTOMER_COOKIE_NAME"],
         message: "Staging and production must use the __Host-waflo_customer cookie.",
+      });
+    }
+    if (value.ADMIN_COOKIE_NAME !== "__Host-waflo_admin_session") {
+      context.addIssue({
+        code: "custom",
+        path: ["ADMIN_COOKIE_NAME"],
+        message: "Staging and production must use the __Host-waflo_admin_session cookie.",
       });
     }
     const unsafeW3Secrets = [
@@ -320,20 +406,66 @@ export const environmentSchema = z
         message: "The Staff Test Client cannot run in staging or production.",
       });
     }
+    for (const key of [
+      "STAFF_MOBILE_MINIMUM_APP_VERSION",
+      "STAFF_MOBILE_MINIMUM_IOS_VERSION",
+      "STAFF_MOBILE_MINIMUM_ANDROID_VERSION",
+    ] as const) {
+      if (/^0\.0\.0(?:[-+]|$)/.test(value[key])) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Deployed Staff mobile minimum versions must enforce a non-zero release.",
+        });
+      }
+    }
     if (
       value.APPLE_WALLET_MODE === "REAL" &&
       (!value.APPLE_PASS_TYPE_IDENTIFIER ||
         !value.APPLE_TEAM_IDENTIFIER ||
-        !value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
-        !value.APPLE_PASS_CERTIFICATE_PASSWORD ||
-        !value.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64 ||
         !value.APPLE_PASS_WEB_SERVICE_URL)
     ) {
       context.addIssue({
         code: "custom",
         path: ["APPLE_WALLET_MODE"],
-        message:
-          "Real Apple Wallet mode requires a complete signing and update-service configuration.",
+        message: "Real Apple Wallet mode requires complete pass identity and update configuration.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      value.APPLE_WALLET_GENERATOR === "legacy" &&
+      (!value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 ||
+        !value.APPLE_PASS_CERTIFICATE_PASSWORD ||
+        !value.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_WALLET_GENERATOR"],
+        message: "The legacy generator requires its pass certificate, password, and WWDR chain.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      value.APPLE_WALLET_GENERATOR === "passbuilder" &&
+      (!value.APPLE_PASS_BUILDER_URL || !value.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_WALLET_GENERATOR"],
+        message: "The Pass Builder generator requires its private service URL and auth-token file.",
+      });
+    }
+    if (
+      value.APPLE_WALLET_MODE === "REAL" &&
+      (!(
+        value.APPLE_APNS_CERTIFICATE_PATH_OR_BASE64 || value.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64
+      ) ||
+        !(value.APPLE_APNS_CERTIFICATE_PASSWORD_FILE || value.APPLE_PASS_CERTIFICATE_PASSWORD))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_APNS_ENVIRONMENT"],
+        message: "Real Apple Wallet mode requires APNs certificate credentials for pass updates.",
       });
     }
     if (
@@ -349,6 +481,13 @@ export const environmentSchema = z
           "Real Google Wallet mode requires issuer, service-account, and public asset configuration.",
       });
     }
+    if (value.APPLE_WALLET_MODE === "REAL" && value.APPLE_APNS_ENVIRONMENT !== "production") {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_APNS_ENVIRONMENT"],
+        message: "Real Apple Wallet pass updates require the production APNs endpoint.",
+      });
+    }
     if (value.DEPLOYMENT_ENVIRONMENT === "production") {
       if (
         value.GOOGLE_WALLET_MODE === "REAL" &&
@@ -358,13 +497,6 @@ export const environmentSchema = z
           code: "custom",
           path: ["GOOGLE_WALLET_PUBLISHING_MODE"],
           message: "Production Google Wallet requires publishing mode.",
-        });
-      }
-      if (value.APPLE_WALLET_MODE === "REAL" && value.APPLE_APNS_ENVIRONMENT !== "production") {
-        context.addIssue({
-          code: "custom",
-          path: ["APPLE_APNS_ENVIRONMENT"],
-          message: "Production Apple Wallet requires production APNs.",
         });
       }
     }
@@ -435,6 +567,7 @@ export const environmentSchema = z
       "MARKETING_WEB_URL",
       "MERCHANT_DASHBOARD_URL",
       "CUSTOMER_WEB_URL",
+      "ADMIN_DASHBOARD_URL",
       "API_PUBLIC_URL",
       "WALLET_PUBLIC_BASE_URL",
     ] as const) {
@@ -445,6 +578,72 @@ export const environmentSchema = z
           message: "Production public URLs must use HTTPS.",
         });
       }
+    }
+    const publicAuthority =
+      value.DEPLOYMENT_ENVIRONMENT === "staging"
+        ? {
+            MARKETING_WEB_URL: "https://staging.waflo.app",
+            MERCHANT_DASHBOARD_URL: "https://app-staging.waflo.app",
+            CUSTOMER_WEB_URL: "https://card-staging.waflo.app",
+            ADMIN_DASHBOARD_URL: "https://admin-staging.waflo.app",
+            API_PUBLIC_URL: "https://api-staging.waflo.app",
+            WALLET_PUBLIC_BASE_URL: "https://api-staging.waflo.app/v1/public/wallet-assets",
+          }
+        : {
+            MARKETING_WEB_URL: "https://waflo.app",
+            MERCHANT_DASHBOARD_URL: "https://app.waflo.app",
+            CUSTOMER_WEB_URL: "https://card.waflo.app",
+            ADMIN_DASHBOARD_URL: "https://admin.waflo.app",
+            API_PUBLIC_URL: "https://api.waflo.app",
+            WALLET_PUBLIC_BASE_URL: "https://api.waflo.app/v1/public/wallet-assets",
+          };
+    for (const [key, expected] of Object.entries(publicAuthority) as Array<
+      [keyof typeof publicAuthority, string]
+    >) {
+      if (value[key].replace(/\/+$/u, "") !== expected) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `${value.DEPLOYMENT_ENVIRONMENT} requires the authoritative ${expected} URL.`,
+        });
+      }
+    }
+    const expectedWalletOrigin = new URL(publicAuthority.API_PUBLIC_URL).origin;
+    if (
+      value.APPLE_PASS_WEB_SERVICE_URL &&
+      value.APPLE_PASS_WEB_SERVICE_URL.replace(/\/+$/u, "") !==
+        `${expectedWalletOrigin}/v1/apple-wallet`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APPLE_PASS_WEB_SERVICE_URL"],
+        message: "Apple Wallet webServiceURL must use the authoritative API origin.",
+      });
+    }
+    if (
+      value.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL &&
+      value.GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL.replace(/\/+$/u, "") !==
+        `${expectedWalletOrigin}/v1/public/wallet-assets`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GOOGLE_WALLET_PUBLIC_ASSET_BASE_URL"],
+        message: "Google Wallet public assets must use the authoritative API origin.",
+      });
+    }
+    const googleWalletOrigins = value.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+    if (
+      googleWalletOrigins.length !== 1 ||
+      googleWalletOrigins[0] !== new URL(publicAuthority.CUSTOMER_WEB_URL).origin
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GOOGLE_WALLET_ALLOWED_ORIGINS"],
+        message:
+          "Google Wallet Save origins must contain only the authoritative Customer Web origin.",
+      });
     }
     if (
       value.APPLE_PASS_WEB_SERVICE_URL &&
@@ -478,14 +677,17 @@ export const environmentSchema = z
       new URL(value.MARKETING_WEB_URL).origin,
       new URL(value.MERCHANT_DASHBOARD_URL).origin,
       new URL(value.CUSTOMER_WEB_URL).origin,
+      new URL(value.ADMIN_DASHBOARD_URL).origin,
     ]);
     if (value.DEPLOYMENT_ENVIRONMENT === "production") {
       const marketing = new URL(value.MARKETING_WEB_URL);
       if (marketing.hostname === "waflo.app") exactOrigins.add("https://www.waflo.app");
     }
     if (
+      origins.length !== exactOrigins.size ||
       origins.some((origin) => !exactOrigins.has(origin)) ||
-      origins.length !== new Set(origins).size
+      origins.length !== new Set(origins).size ||
+      [...exactOrigins].some((origin) => !origins.includes(origin))
     ) {
       context.addIssue({
         code: "custom",
@@ -524,9 +726,23 @@ export const environmentSchema = z
     }
     const stripeKey = value.STRIPE_SECRET_KEY ?? "";
     const stripePublishable = value.STRIPE_PUBLISHABLE_KEY ?? "";
+    const stripeCore = [
+      value.STRIPE_SECRET_KEY,
+      value.STRIPE_PUBLISHABLE_KEY,
+      value.STRIPE_WEBHOOK_SECRET,
+    ];
+    if (stripeCore.some(Boolean) && !stripeCore.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_SECRET_KEY"],
+        message:
+          "Stripe secret and publishable keys and webhook secret must be complete or absent.",
+      });
+    }
     if (
       value.DEPLOYMENT_ENVIRONMENT === "staging" &&
-      (stripeKey.startsWith("sk_live_") || stripePublishable.startsWith("pk_live_"))
+      ((stripeKey && !stripeKey.startsWith("sk_test_")) ||
+        (stripePublishable && !stripePublishable.startsWith("pk_test_")))
     ) {
       context.addIssue({
         code: "custom",
@@ -543,6 +759,23 @@ export const environmentSchema = z
         code: "custom",
         path: ["STRIPE_SECRET_KEY"],
         message: "Production accepts Stripe live-mode keys only.",
+      });
+    }
+    if (value.STRIPE_WEBHOOK_SECRET && !value.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_WEBHOOK_SECRET"],
+        message: "Stripe webhook secrets must use the whsec_ endpoint-secret format.",
+      });
+    }
+    if (
+      value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID &&
+      !value.STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID.startsWith("bpc_")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["STRIPE_CUSTOMER_PORTAL_CONFIGURATION_ID"],
+        message: "Stripe customer portal configuration IDs must use bpc_ format.",
       });
     }
   });
@@ -578,8 +811,14 @@ export function parseVersionedSecretEntries(
 }
 
 export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
+  const genericMinimumVersion = source.STAFF_MOBILE_MINIMUM_APP_VERSION ?? "1.0.0";
   const result = environmentSchema.safeParse({
     ...source,
+    STAFF_MOBILE_MINIMUM_APP_VERSION: genericMinimumVersion,
+    STAFF_MOBILE_MINIMUM_IOS_VERSION:
+      source.STAFF_MOBILE_MINIMUM_IOS_VERSION ?? genericMinimumVersion,
+    STAFF_MOBILE_MINIMUM_ANDROID_VERSION:
+      source.STAFF_MOBILE_MINIMUM_ANDROID_VERSION ?? genericMinimumVersion,
     SERVICE_INSTANCE_ID: source.SERVICE_INSTANCE_ID ?? source.HOSTNAME ?? "local",
     DEPLOYMENT_ENVIRONMENT:
       source.DEPLOYMENT_ENVIRONMENT ??
@@ -597,5 +836,14 @@ export function parseEnvironment(source: NodeJS.ProcessEnv): Environment {
 export const platformDomains = {
   marketing: "waflo.app",
   dashboard: "app.waflo.app",
+  customer: "card.waflo.app",
+  admin: "admin.waflo.app",
   api: "api.waflo.app",
+  staging: {
+    marketing: "staging.waflo.app",
+    dashboard: "app-staging.waflo.app",
+    customer: "card-staging.waflo.app",
+    admin: "admin-staging.waflo.app",
+    api: "api-staging.waflo.app",
+  },
 } as const;

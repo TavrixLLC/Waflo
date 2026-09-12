@@ -17,9 +17,10 @@ export interface W3CustomerWalletFixture {
 
 export const w3EnrollmentBase = {
   preferredLocale: "en",
+  phone: "0770 123 4567",
   programTermsAccepted: true,
   wafloPrivacyAccepted: true,
-  marketingEmailConsent: false,
+  marketingPhoneConsent: false,
   website: "",
 } as const;
 
@@ -51,6 +52,8 @@ export async function createW3CustomerWalletFixture(
       merchantSlug,
       timezone: "UTC",
       selectedPlan: "GROWTH",
+      onboardingState: "COMPLETE",
+      onboardingCompletedAt: new Date(),
       members: { create: { userId: owner.id, role: "OWNER" } },
       billingProfile: {
         create: { selectedPlan: "GROWTH", subscriptionStatus: "ACTIVE" },
@@ -234,7 +237,7 @@ export async function createPublishedProgramVersion(
       enrollmentPolicy: {
         create: {
           organizationId: input.organizationId,
-          emailCollectionMode: "OPTIONAL",
+          phoneCollectionMode: "OPTIONAL",
           primaryCustomerLocale: "EN",
           allowLocaleSelection: true,
           marketingConsentVisible: true,

@@ -11,16 +11,19 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1095.0",
+    "@waflo/billing": "workspace:*",
     "@waflo/config": "workspace:*",
+    "@waflo/contracts": "workspace:*",
     "@waflo/customer-security": "workspace:*",
     "@waflo/database": "workspace:*",
     "@waflo/qr-core": "workspace:*",
     "@waflo/stamp-engine": "workspace:*",
     "@waflo/wallet-apple": "workspace:*",
+    "@waflo/wallet-artwork": "workspace:*",
     "@waflo/wallet-core": "workspace:*",
     "@waflo/wallet-google": "workspace:*",
     "ioredis": "5.11.1",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@types/node": "26.1.1",

@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 
-const screenshotDirectory = "artifacts/handoff-w3-round-2/screenshots";
+const screenshotDirectory = "test-results/evidence/handoff-w3-round-2/screenshots";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 async function connectPrisma() {
@@ -40,7 +40,7 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     const program = await prisma.loyaltyProgram.findFirstOrThrow({
       where: {
         organizationId,
-        internalName: { startsWith: "W3 Browser Circle" },
+        internalName: "Today Coffee Rewards",
         currentPublishedVersionId: { not: null },
         latestVersionNumber: 1,
       },
@@ -149,9 +149,11 @@ test("captures the remaining W3 browser evidence and proves version pinning", as
     await page.goto(`http://localhost:3002/join/${program.publicSlug}?tenant=today`);
     await page.getByLabel("Name on card").fill("Replacement Version Member");
     await page.getByLabel(new RegExp(`I accept the ${program.internalName}`)).check();
-    await page.getByLabel(/I accept the Waflo privacy notice/).check();
     await page.getByRole("button", { name: "Create my card" }).click();
-    await page.locator('a[href^="/card/"]').click();
+    await expect(page).toHaveURL(/\/card\/[^?]+\?wallet=prepare/u);
+    const enrollmentCardUrl = new URL(page.url());
+    enrollmentCardUrl.searchParams.delete("wallet");
+    await page.goto(enrollmentCardUrl.toString());
     await expect(page.getByRole("heading", { name: program.internalName })).toBeVisible();
     await screenshot(page, "30-new-version-enrollment");
     await expect(

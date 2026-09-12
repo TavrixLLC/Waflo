@@ -1,11 +1,12 @@
-import type { Locale, ProgramOperationalStatus } from "@waflo/contracts";
+import type { ProgramOperationalStatus } from "@waflo/contracts";
+import { localeRegistry, type InterfaceLocale } from "@waflo/i18n";
 
 export const studioAreas = [
   "overview",
   "how-it-works",
   "customers-locations",
-  "test",
   "launch",
+  "engagement",
   "settings",
 ] as const;
 
@@ -16,97 +17,41 @@ export type StudioOperationErrorContext =
   | "save"
   | "preview"
   | "readiness"
-  | "test-start"
-  | "test-action"
   | "lifecycle"
   | "create-draft";
 
-const studioOperationErrorCopy = {
-  en: {
-    load: "Loyalty Studio could not be opened. Your saved card has not changed. Reload and try again.",
-    save: "Changes could not be saved. Your last saved version is still safe. Try saving again.",
-    preview: "The preview could not be refreshed. Your saved card is unchanged. Try again.",
-    readiness: "Readiness checks could not run. Your saved card is unchanged. Try again.",
-    "test-start": "Test Mode could not start. No real customer activity was created. Try again.",
-    "test-action":
-      "The test action could not be completed. Real customer activity is unaffected. Try again.",
-    lifecycle: "The card status could not be updated. Its current status is unchanged. Try again.",
-    "create-draft": "A change draft could not be created. The live card is unchanged. Try again.",
-  },
-  ar: {
-    load: "تعذر فتح استوديو الولاء. لم تتغير بطاقتك المحفوظة. أعد تحميل الصفحة وحاول مرة أخرى.",
-    save: "تعذر حفظ التغييرات. آخر نسخة محفوظة من بطاقتك لا تزال آمنة. حاول الحفظ مرة أخرى.",
-    preview: "تعذر تحديث المعاينة. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
-    readiness: "تعذر تشغيل فحوصات الجاهزية. لم تتغير بطاقتك المحفوظة. حاول مرة أخرى.",
-    "test-start": "تعذر بدء وضع الاختبار. لم يتم إنشاء أي نشاط حقيقي للعملاء. حاول مرة أخرى.",
-    "test-action": "تعذر إكمال إجراء الاختبار. نشاط العملاء الحقيقي لم يتأثر. حاول مرة أخرى.",
-    lifecycle: "تعذر تحديث حالة البطاقة. حالتها الحالية لم تتغير. حاول مرة أخرى.",
-    "create-draft": "تعذر إنشاء مسودة تغييرات. البطاقة المباشرة لم تتغير. حاول مرة أخرى.",
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<StudioOperationErrorContext, string>>>
->;
-
-export function studioOperationError(context: StudioOperationErrorContext, locale: Locale): string {
-  return studioOperationErrorCopy[locale][context];
+function studioText(locale: InterfaceLocale) {
+  return localeRegistry[locale].messages.merchant.loyalty.studio;
 }
 
-const studioTestActionErrorCopy = {
-  DAILY_STAMP_LIMIT_REACHED: {
-    en: "The demo customer reached the daily stamp limit. Real customers are unaffected. Change the simulated day or reset the demo customer.",
-    ar: "وصل العميل التجريبي إلى حد الأختام اليومي. لم يتأثر العملاء الحقيقيون. غيّر اليوم المحاكى أو أعد ضبط العميل التجريبي.",
-  },
-  PURCHASE_AMOUNT_REQUIRED: {
-    en: "Enter a purchase amount to continue this demo. Real customers are unaffected.",
-    ar: "أدخل مبلغ الشراء لمتابعة هذا الاختبار. لم يتأثر العملاء الحقيقيون.",
-  },
-  PURCHASE_CURRENCY_MISMATCH: {
-    en: "The demo purchase currency must match the card's configured currency. Real customers are unaffected.",
-    ar: "يجب أن تتطابق عملة الشراء التجريبي مع العملة المضبوطة للبطاقة. لم يتأثر العملاء الحقيقيون.",
-  },
-  PURCHASE_THRESHOLD_NOT_MET: {
-    en: "The demo purchase does not meet the card's minimum amount. Real customers are unaffected.",
-    ar: "لا يفي الشراء التجريبي بالحد الأدنى للبطاقة. لم يتأثر العملاء الحقيقيون.",
-  },
+export function studioOperationError(
+  context: StudioOperationErrorContext,
+  locale: InterfaceLocale,
+): string {
+  const key = context === "create-draft" ? "createDraft" : context;
+  return studioText(locale).operationErrors[key];
+}
+
+const studioAreaMessageKeys = {
+  overview: "overview",
+  "how-it-works": "howItWorks",
+  "customers-locations": "customersLocations",
+  engagement: "engagement",
+  launch: "launch",
+  settings: "settings",
 } as const;
 
-export function studioTestActionError(code: string, locale: Locale): string {
-  const copy = studioTestActionErrorCopy[code as keyof typeof studioTestActionErrorCopy];
-  return copy?.[locale] ?? studioOperationError("test-action", locale);
+export function studioArea(
+  locale: InterfaceLocale,
+  area: StudioArea,
+): { label: string; description: string } {
+  return studioText(locale).areas[studioAreaMessageKeys[area]];
 }
-
-export const studioAreaCopy = {
-  en: {
-    overview: { label: "Overview", description: "Card status and next step" },
-    "how-it-works": { label: "How it works", description: "Earning and reward rules" },
-    "customers-locations": {
-      label: "Customers & locations",
-      description: "Where and how customers join",
-    },
-    test: { label: "Test", description: "Try a complete reward cycle" },
-    launch: { label: "Launch", description: "Readiness checks and publishing" },
-    settings: { label: "Settings", description: "Advanced controls and history" },
-  },
-  ar: {
-    overview: { label: "نظرة عامة", description: "حالة البطاقة والخطوة التالية" },
-    "how-it-works": { label: "طريقة العمل", description: "قواعد الكسب والمكافأة" },
-    "customers-locations": {
-      label: "العملاء والمواقع",
-      description: "أماكن وطريقة انضمام العملاء",
-    },
-    test: { label: "الاختبار", description: "جرّب دورة مكافأة كاملة" },
-    launch: { label: "الإطلاق", description: "فحوصات الجاهزية والنشر" },
-    settings: { label: "الإعدادات", description: "التحكم المتقدم وسجل التغييرات" },
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<StudioArea, { label: string; description: string }>>>
->;
 
 export function studioAreaForValidationPath(path: string): StudioArea {
   if (path.startsWith("earning") || path.startsWith("rewards") || path.startsWith("policies"))
     return "how-it-works";
   if (path.startsWith("locations") || path.startsWith("enrollment")) return "customers-locations";
-  if (path.startsWith("test")) return "test";
   if (
     path.startsWith("content") ||
     path.startsWith("artwork") ||
@@ -121,7 +66,7 @@ export function studioAreaForValidationPath(path: string): StudioArea {
 
 export function studioAreaForPublicationError(code: string): StudioArea {
   if (code === "PROGRAM_PUBLICATION_LOCATION_STALE") return "customers-locations";
-  if (code === "PROGRAM_TEST_REQUIRED") return "test";
+  if (code === "PROGRAM_TEST_REQUIRED") return "launch";
   if (code === "PROGRAM_PUBLICATION_ASSET_STALE" || code === "PROGRAM_PUBLICATION_PREVIEW_STALE")
     return "overview";
   return "launch";
@@ -152,7 +97,7 @@ export type StudioPresentationAction =
   | { kind: "publish" | "run-checks"; label: string };
 
 export interface StudioJourneyStagePresentation {
-  key: "design" | "checks" | "test" | "live";
+  key: "design" | "checks" | "live";
   label: string;
   hint: string;
   state: StudioJourneyStageState;
@@ -161,7 +106,7 @@ export interface StudioJourneyStagePresentation {
 }
 
 export interface StudioLaunchRequirementPresentation {
-  key: "automated" | "test" | "locations" | "plan";
+  key: "automated" | "locations" | "plan";
   label: string;
   status: string;
   description: string;
@@ -202,9 +147,8 @@ export interface StudioLifecyclePresentation extends MerchantStudioState {
 export interface StudioLifecyclePresentationInput {
   programStatus: ProgramOperationalStatus;
   draftVersionStatus: string | null;
-  locale: Locale;
+  locale: InterfaceLocale;
   validationState: "not-run" | "passed" | "failed";
-  testState: "incomplete" | "complete";
   designComplete: boolean;
   locationsReady: boolean;
   hasPublishedVersion: boolean;
@@ -213,112 +157,6 @@ export interface StudioLifecyclePresentationInput {
   planName: "STARTER" | "GROWTH" | "SCALE";
   validationIssues?: ReadonlyArray<{ code: string; path: string }> | undefined;
 }
-
-const stateCopy = {
-  en: {
-    draft: {
-      label: "Draft",
-      description: "Not visible to real customers until it is launched.",
-      tone: "neutral",
-    },
-    ready: {
-      label: "Ready to launch",
-      description: "Required checks and testing are complete. The card is not live yet.",
-      tone: "brand",
-    },
-    live: {
-      label: "Live",
-      description: "Currently available to eligible customers.",
-      tone: "success",
-    },
-    paused: {
-      label: "Paused",
-      description: "The card setup is retained, but new activity is temporarily unavailable.",
-      tone: "warning",
-    },
-    archived: {
-      label: "Archived",
-      description: "Removed from normal operation and available to restore with its saved setup.",
-      tone: "neutral",
-    },
-    scheduled: {
-      label: "Scheduled to go live",
-      description: "This card is waiting for its existing scheduled launch.",
-      tone: "brand",
-    },
-    suspended: {
-      label: "Temporarily unavailable",
-      description: "This card is unavailable under the existing suspension rule.",
-      tone: "danger",
-    },
-  },
-  ar: {
-    draft: {
-      label: "مسودة",
-      description: "غير ظاهرة للعملاء الحقيقيين حتى يتم إطلاقها.",
-      tone: "neutral",
-    },
-    ready: {
-      label: "جاهزة للإطلاق",
-      description: "اكتملت الفحوصات المطلوبة والاختبار، ولم تصبح البطاقة مباشرة بعد.",
-      tone: "brand",
-    },
-    live: {
-      label: "مباشرة",
-      description: "متاحة حالياً للعملاء المؤهلين.",
-      tone: "success",
-    },
-    paused: {
-      label: "متوقفة مؤقتاً",
-      description: "إعدادات البطاقة محفوظة، لكن النشاط الجديد غير متاح مؤقتاً.",
-      tone: "warning",
-    },
-    archived: {
-      label: "مؤرشفة",
-      description: "أُزيلت من التشغيل المعتاد ويمكن استعادتها بإعداداتها المحفوظة.",
-      tone: "neutral",
-    },
-    scheduled: {
-      label: "مجدولة للإطلاق",
-      description: "تنتظر هذه البطاقة موعد الإطلاق المجدول حالياً.",
-      tone: "brand",
-    },
-    suspended: {
-      label: "غير متاحة مؤقتاً",
-      description: "هذه البطاقة غير متاحة وفق قاعدة الإيقاف الحالية.",
-      tone: "danger",
-    },
-  },
-} as const satisfies Readonly<
-  Record<Locale, Readonly<Record<MerchantStudioState["key"], Omit<MerchantStudioState, "key">>>>
->;
-
-const journeyCopy = {
-  en: {
-    design: "Design",
-    checks: "Checks",
-    test: "Test",
-    live: "Live",
-    complete: "Complete",
-    current: "Next required",
-    pending: "Pending",
-    blocked: "Blocked",
-    paused: "Paused",
-    archived: "Archived",
-  },
-  ar: {
-    design: "التصميم",
-    checks: "الفحوصات",
-    test: "الاختبار",
-    live: "مباشرة",
-    complete: "مكتملة",
-    current: "المطلوبة تاليًا",
-    pending: "بانتظار الإكمال",
-    blocked: "متوقفة",
-    paused: "متوقفة مؤقتاً",
-    archived: "مؤرشفة",
-  },
-} as const;
 
 function lifecycleKey(
   programStatus: ProgramOperationalStatus,
@@ -329,30 +167,28 @@ function lifecycleKey(
   if (programStatus === "ARCHIVED") return "archived";
   if (programStatus === "SCHEDULED") return "scheduled";
   if (programStatus === "SUSPENDED") return "suspended";
-  if (draftVersionStatus === "TEST_READY") return "ready";
+  if (draftVersionStatus === "VALIDATED" || draftVersionStatus === "TEST_READY") return "ready";
   return "draft";
 }
 
 function presentationAction(
   key: MerchantStudioState["key"],
   checksComplete: boolean,
-  testComplete: boolean,
   designComplete: boolean,
   locationsReady: boolean,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): { primary: StudioPresentationAction; secondary?: StudioPresentationAction } {
-  const ar = locale === "ar";
   if (key === "live")
     return {
       primary: {
         kind: "navigate",
         area: "customers-locations",
-        label: ar ? "عرض العملاء والمواقع" : "View customers",
+        label: studioText(locale).ui.viewCustomers,
       },
       secondary: {
         kind: "lifecycle",
         action: "pause",
-        label: ar ? "إيقاف البطاقة مؤقتاً" : "Pause card",
+        label: studioText(locale).ui.pauseCard,
       },
     };
   if (key === "paused")
@@ -360,12 +196,12 @@ function presentationAction(
       primary: {
         kind: "lifecycle",
         action: "resume",
-        label: ar ? "استئناف البطاقة" : "Resume card",
+        label: studioText(locale).ui.resumeCard,
       },
       secondary: {
         kind: "navigate",
         area: "settings",
-        label: ar ? "مراجعة الإعدادات" : "Review settings",
+        label: studioText(locale).ui.reviewSettings,
       },
     };
   if (key === "archived")
@@ -373,12 +209,12 @@ function presentationAction(
       primary: {
         kind: "lifecycle",
         action: "restore",
-        label: ar ? "استعادة البطاقة" : "Restore card",
+        label: studioText(locale).ui.restoreCard,
       },
       secondary: {
         kind: "navigate",
         area: "settings",
-        label: ar ? "عرض سجل التغييرات" : "View change history",
+        label: studioText(locale).ui.viewChangeHistory,
       },
     };
   if (key === "scheduled")
@@ -386,7 +222,7 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "launch",
-        label: ar ? "عرض جدول الإطلاق" : "View launch schedule",
+        label: studioText(locale).ui.viewLaunchSchedule,
       },
     };
   if (key === "suspended")
@@ -394,7 +230,7 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "settings",
-        label: ar ? "عرض حالة البطاقة" : "View card status",
+        label: studioText(locale).ui.viewCardStatus,
       },
     };
   if (!designComplete)
@@ -402,7 +238,7 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "overview",
-        label: ar ? "مراجعة تصميم البطاقة" : "Review card design",
+        label: studioText(locale).ui.reviewCardDesign,
       },
     };
   if (!locationsReady)
@@ -410,109 +246,83 @@ function presentationAction(
       primary: {
         kind: "navigate",
         area: "customers-locations",
-        label: ar ? "اختيار المواقع" : "Choose locations",
+        label: studioText(locale).ui.chooseLocations,
       },
     };
   if (!checksComplete)
     return {
       primary: {
         kind: "run-checks",
-        label: ar ? "تشغيل فحوصات الجاهزية" : "Run readiness checks",
-      },
-    };
-  if (!testComplete)
-    return {
-      primary: {
-        kind: "navigate",
-        area: "test",
-        label: ar ? "بدء الاختبار" : "Start test",
+        label: studioText(locale).ui.runReadinessChecks,
       },
     };
   return {
     primary: {
       kind: "navigate",
       area: "launch",
-      label: ar ? "مراجعة الإطلاق" : "Review launch",
+      label: studioText(locale).ui.reviewLaunch,
     },
   };
 }
 
 function guidanceFor(
   key: MerchantStudioState["key"],
-  checksComplete: boolean,
-  testComplete: boolean,
   designComplete: boolean,
   locationsReady: boolean,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): StudioLifecyclePresentation["guidance"] {
-  const ar = locale === "ar";
   if (key === "live")
     return {
-      title: ar ? "بطاقة الولاء مباشرة" : "Your loyalty card is live",
-      description: ar
-        ? "يمكن للعملاء استخدام هذه البطاقة حالياً في المواقع المشاركة."
-        : "Customers can currently use this card at participating locations.",
+      title: studioText(locale).ui.yourLoyaltyCardIsLive,
+      description: studioText(locale).ui.customersCanCurrentlyUseThisCardAtParticipatingLocations,
       tone: "success",
     };
   if (key === "paused")
     return {
-      title: ar ? "بطاقة الولاء متوقفة مؤقتاً" : "Your loyalty card is paused",
-      description: ar
-        ? "استأنفها عندما تكون مستعداً لإتاحتها مرة أخرى."
-        : "Resume it when you are ready to make it available again.",
+      title: studioText(locale).ui.yourLoyaltyCardIsPaused,
+      description: studioText(locale).ui.resumeItWhenYouAreReadyToMakeItAvailableAgain,
       tone: "warning",
     };
   if (key === "archived")
     return {
-      title: ar ? "بطاقة الولاء مؤرشفة" : "This loyalty card is archived",
-      description: ar
-        ? "استعدها لمتابعة إدارة إعداد البطاقة المحفوظ أو استخدامه."
-        : "Restore it to continue managing or using the saved card setup.",
+      title: studioText(locale).ui.thisLoyaltyCardIsArchived,
+      description: studioText(locale).ui.restoreItToContinueManagingOrUsingTheSavedCardSetup,
       tone: "neutral",
     };
   if (key === "scheduled")
     return {
-      title: ar ? "البطاقة مجدولة للإطلاق" : "Your loyalty card is scheduled",
-      description: ar
-        ? "راجع حالة الإطلاق المجدول الحالية."
-        : "Review the existing scheduled launch status.",
+      title: studioText(locale).ui.yourLoyaltyCardIsScheduled,
+      description: studioText(locale).ui.reviewTheExistingScheduledLaunchStatus,
       tone: "brand",
     };
   if (key === "suspended")
     return {
-      title: ar ? "البطاقة غير متاحة مؤقتاً" : "Your loyalty card is temporarily unavailable",
-      description: ar
-        ? "راجع الحالة الحالية؛ لا تنشئ هذه الشاشة انتقالاً جديداً للحالة."
-        : "Review the current status; this screen does not create a new lifecycle transition.",
+      title: studioText(locale).ui.yourLoyaltyCardIsTemporarilyUnavailable,
+      description:
+        studioText(locale).ui.reviewTheCurrentStatusThisScreenDoesNotCreateANewLifecycleTransition,
       tone: "danger",
     };
   if (key === "ready")
     return {
-      title: ar ? "جاهزة للإطلاق" : "Ready to launch",
-      description: ar ? "راجع بطاقة الولاء وانشرها." : "Review and publish your loyalty card.",
+      title: studioText(locale).ui.readyToLaunch,
+      description: studioText(locale).ui.reviewAndPublishYourLoyaltyCard,
       tone: "brand",
     };
   if (!designComplete)
     return {
-      title: ar ? "يحتاج إعداد البطاقة إلى متابعة" : "Card setup needs attention",
-      description: ar ? "التالي: راجع تصميم البطاقة" : "Next: Review card design",
+      title: studioText(locale).ui.cardSetupNeedsAttention,
+      description: studioText(locale).ui.nextReviewCardDesign,
       tone: "brand",
     };
   if (!locationsReady)
     return {
-      title: ar ? "مطلوب موقع مشارك" : "A participating location is required",
-      description: ar ? "التالي: اختر موقعاً نشطاً" : "Next: Choose an active location",
-      tone: "brand",
-    };
-  if (checksComplete && !testComplete)
-    return {
-      title: ar ? "اجتازت الفحوصات الآلية" : "Automated checks passed",
-      description: ar ? "التالي: اختبر دورة المكافأة" : "Next: Test your reward cycle",
+      title: studioText(locale).ui.aParticipatingLocationIsRequired,
+      description: studioText(locale).ui.nextChooseAnActiveLocation,
       tone: "brand",
     };
   return {
-    title: ar ? "اكتمل تصميم البطاقة" : "Card design complete",
-    description: ar ? "التالي: شغّل فحوصات الجاهزية" : "Next: Run readiness checks",
+    title: studioText(locale).ui.cardDesignComplete,
+    description: studioText(locale).ui.nextRunReadinessChecks,
     tone: "brand",
   };
 }
@@ -520,9 +330,7 @@ function guidanceFor(
 function launchRequirements(
   input: StudioLifecyclePresentationInput,
   checksComplete: boolean,
-  testComplete: boolean,
 ): { requirements: StudioLaunchRequirementPresentation[]; planBlocked: boolean } {
-  const ar = input.locale === "ar";
   const planBlocked = (input.validationIssues ?? []).some((issue) =>
     /PLAN|LIMIT|STARTER|GROWTH|SCALE/iu.test(`${issue.code} ${issue.path}`),
   );
@@ -532,65 +340,30 @@ function launchRequirements(
     requirements: [
       {
         key: "automated",
-        label: ar ? "الفحوصات الآلية" : "Automated checks",
+        label: studioText(input.locale).ui.automatedChecks,
         status: checksComplete
-          ? ar
-            ? "ناجحة"
-            : "Passed"
-          : ar
-            ? "تحتاج متابعة"
-            : "Needs attention",
+          ? studioText(input.locale).ui.passed
+          : studioText(input.locale).ui.needsAttention,
         description: checksComplete
-          ? ar
-            ? "اكتملت فحوصات الإعداد والأصول والمعاينات."
-            : "Setup, asset, and preview checks passed."
+          ? studioText(input.locale).ui.setupAssetAndPreviewChecksPassed
           : automatedBlocked
-            ? ar
-              ? "توجد عناصر تمنع الإطلاق. افتح التفاصيل لإصلاحها."
-              : "Launch blockers need to be fixed in the check details."
-            : ar
-              ? "شغّل الفحوصات الآلية قبل الاختبار."
-              : "Run the automated checks before testing.",
+            ? studioText(input.locale).ui.launchBlockersNeedToBeFixedInTheCheckDetails
+            : studioText(input.locale).ui.runTheAutomatedChecksBeforePublishing,
         complete: checksComplete,
         blocking: !checksComplete,
         action: checksComplete
           ? undefined
-          : { kind: "run-checks", label: ar ? "تشغيل الفحوصات" : "Run checks" },
-      },
-      {
-        key: "test",
-        label: ar ? "دورة المكافأة التجريبية" : "Demo reward cycle",
-        status: testComplete ? (ar ? "مكتملة" : "Complete") : ar ? "مطلوبة" : "Required",
-        description: testComplete
-          ? ar
-            ? "اكتملت دورة المكافأة المعزولة."
-            : "The isolated reward cycle is complete."
-          : ar
-            ? "مطلوبة قبل الإطلاق ولا تؤثر في العملاء الحقيقيين."
-            : "Required before launch and isolated from real customers.",
-        complete: testComplete,
-        blocking: !testComplete,
-        action: testComplete
-          ? undefined
-          : { kind: "navigate", area: "test", label: ar ? "الانتقال إلى الاختبار" : "Go to Test" },
+          : { kind: "run-checks", label: studioText(input.locale).ui.runChecks },
       },
       {
         key: "locations",
-        label: ar ? "المواقع المشاركة" : "Participating locations",
+        label: studioText(input.locale).ui.participatingLocations,
         status: input.locationsReady
-          ? ar
-            ? "جاهزة"
-            : "Ready"
-          : ar
-            ? "تمنع الإطلاق"
-            : "Blocks launch",
+          ? studioText(input.locale).ui.ready
+          : studioText(input.locale).ui.blocksLaunch,
         description: input.locationsReady
-          ? ar
-            ? "تم اختيار موقع نشط واحد على الأقل."
-            : "At least one active location is selected."
-          : ar
-            ? "اختر موقعاً نشطاً واحداً على الأقل."
-            : "Choose at least one active participating location.",
+          ? studioText(input.locale).ui.atLeastOneActiveLocationIsSelected
+          : studioText(input.locale).ui.chooseAtLeastOneActiveParticipatingLocation,
         complete: input.locationsReady,
         blocking: !input.locationsReady,
         action: input.locationsReady
@@ -598,40 +371,31 @@ function launchRequirements(
           : {
               kind: "navigate",
               area: "customers-locations",
-              label: ar ? "اختيار المواقع" : "Choose locations",
+              label: studioText(input.locale).ui.chooseLocations,
             },
       },
       {
         key: "plan",
-        label: ar ? "حدود الخطة" : "Plan limits",
+        label: studioText(input.locale).ui.planLimits,
         status: planBlocked
-          ? ar
-            ? "تمنع الإطلاق"
-            : "Blocks launch"
+          ? studioText(input.locale).ui.blocksLaunch
           : checksComplete
-            ? ar
-              ? "جاهزة"
-              : "Ready"
-            : ar
-              ? "بانتظار الفحوصات"
-              : "Pending checks",
+            ? studioText(input.locale).ui.ready
+            : studioText(input.locale).ui.pendingChecks,
         description: planBlocked
-          ? ar
-            ? `يتطلب إعداد البطاقة مراجعة حدود خطة ${input.planName}.`
-            : `This card setup exceeds a ${input.planName} plan limit.`
+          ? studioText(input.locale).ui.planLimitExceeded.replace("{planName}", input.planName)
           : checksComplete
-            ? ar
-              ? `اجتاز الإعداد حدود خطة ${input.planName} الحالية.`
-              : `The setup passed the current ${input.planName} plan checks.`
-            : ar
-              ? `تُراجع حدود خطة ${input.planName} ضمن الفحوصات الآلية وعند النشر.`
-              : `${input.planName} limits are checked automatically and again at publish.`,
+            ? studioText(input.locale).ui.planChecksPassed.replace("{planName}", input.planName)
+            : studioText(input.locale).ui.planLimitsCheckedAutomatically.replace(
+                "{planName}",
+                input.planName,
+              ),
         complete: !planBlocked && checksComplete,
         blocking: planBlocked,
         action: planBlocked
           ? {
               kind: "run-checks",
-              label: ar ? "مراجعة عائق الخطة" : "Review plan blocker",
+              label: studioText(input.locale).ui.reviewPlanBlocker,
             }
           : undefined,
       },
@@ -643,7 +407,6 @@ export function deriveStudioLifecyclePresentation(
   input: StudioLifecyclePresentationInput,
 ): StudioLifecyclePresentation {
   const { programStatus, draftVersionStatus, locale } = input;
-  const ar = locale === "ar";
   const domainKey = lifecycleKey(programStatus, draftVersionStatus);
   const operationallyCompleted = ["live", "paused", "scheduled", "suspended"].includes(domainKey);
   const updateInProgress = Boolean(input.hasUnpublishedChanges);
@@ -654,21 +417,27 @@ export function deriveStudioLifecyclePresentation(
     (input.validationState !== "failed" &&
       (input.validationState === "passed" ||
         ["VALIDATED", "TEST_READY", "PUBLISHED", "SUPERSEDED"].includes(draftVersionStatus ?? "")));
-  const testComplete =
-    input.testState === "complete" ||
-    ["TEST_READY", "PUBLISHED", "SUPERSEDED"].includes(draftVersionStatus ?? "") ||
-    (!updateInProgress && operationallyCompleted) ||
-    archivedAfterPublication;
   const key =
-    domainKey === "ready" &&
-    !(input.designComplete && input.locationsReady && checksComplete && testComplete)
+    domainKey === "ready" && !(input.designComplete && input.locationsReady && checksComplete)
       ? "draft"
       : domainKey;
-  const lifecycle = { key, ...stateCopy[locale][key] } as MerchantStudioState;
+  const stateTones: Record<MerchantStudioState["key"], MerchantStudioState["tone"]> = {
+    draft: "neutral",
+    ready: "brand",
+    live: "success",
+    paused: "warning",
+    archived: "neutral",
+    scheduled: "brand",
+    suspended: "danger",
+  };
+  const lifecycle = {
+    key,
+    ...studioText(locale).states[key],
+    tone: stateTones[key],
+  } as MerchantStudioState;
   const baseActions = presentationAction(
     key,
     checksComplete,
-    testComplete,
     input.designComplete,
     input.locationsReady,
     locale,
@@ -679,19 +448,13 @@ export function deriveStudioLifecyclePresentation(
           ? ({
               kind: "navigate",
               area: "launch",
-              label: ar ? "مراجعة التغييرات" : "Review changes",
+              label: studioText(locale).ui.reviewChanges,
             } as const)
-          : !testComplete
-            ? ({
-                kind: "navigate",
-                area: "test",
-                label: ar ? "اختبار التغييرات" : "Test changes",
-              } as const)
-            : ({
-                kind: "navigate",
-                area: "launch",
-                label: ar ? "مراجعة التغييرات" : "Review changes",
-              } as const),
+          : ({
+              kind: "navigate",
+              area: "launch",
+              label: studioText(locale).ui.reviewChanges,
+            } as const),
         secondary: baseActions.secondary,
       }
     : baseActions;
@@ -707,9 +470,7 @@ export function deriveStudioLifecyclePresentation(
       ? "design"
       : !checksComplete
         ? "checks"
-        : !testComplete
-          ? "test"
-          : "live";
+        : "live";
 
   const stateFor = (stage: StudioJourneyStagePresentation["key"]): StudioJourneyStageState => {
     if (stage === "live") {
@@ -722,20 +483,17 @@ export function deriveStudioLifecyclePresentation(
     }
     if (key === "archived" && !archivedAfterPublication) {
       if (stage === "design") return input.designComplete ? "complete" : "archived";
-      if (stage === "checks") return checksComplete ? "complete" : "archived";
-      return testComplete ? "complete" : "archived";
+      return checksComplete ? "complete" : "archived";
     }
     const complete =
       stage === "design"
         ? input.designComplete || operationallyCompleted || archivedAfterPublication
-        : stage === "checks"
-          ? checksComplete
-          : testComplete;
+        : checksComplete;
     if (complete) return "complete";
     return currentJourneyStage === stage ? "current" : "pending";
   };
 
-  const jc = journeyCopy[locale];
+  const jc = studioText(locale).journey;
   const makeStage = (
     keyValue: StudioJourneyStagePresentation["key"],
     hint: string,
@@ -752,35 +510,24 @@ export function deriveStudioLifecyclePresentation(
     };
   };
   const journeyStages = [
-    makeStage("design", ar ? "أساسيات البطاقة" : "Card essentials", "overview"),
-    makeStage("checks", ar ? "الفحوصات الآلية" : "Automated checks", "launch"),
-    makeStage("test", ar ? "دورة مكافأة تجريبية" : "Demo reward cycle", "test"),
+    makeStage("design", studioText(locale).ui.cardEssentials, "overview"),
+    makeStage("checks", studioText(locale).ui.automatedChecks, "launch"),
     makeStage(
       "live",
       key === "paused"
-        ? ar
-          ? "متوقفة مؤقتاً"
-          : "Temporarily paused"
+        ? studioText(locale).ui.temporarilyPaused
         : key === "archived"
-          ? ar
-            ? "البطاقة مؤرشفة"
-            : "Card archived"
+          ? studioText(locale).ui.cardArchived
           : key === "suspended"
-            ? ar
-              ? "غير متاحة مؤقتاً"
-              : "Temporarily unavailable"
+            ? studioText(locale).ui.temporarilyUnavailable
             : key === "ready"
-              ? ar
-                ? "انشرها لإتاحتها"
-                : "Publish to make available"
-              : ar
-                ? "متاحة للعملاء"
-                : "Available to customers",
+              ? studioText(locale).ui.publishToMakeAvailable
+              : studioText(locale).ui.availableToCustomers,
       "launch",
     ),
   ];
 
-  const { requirements, planBlocked } = launchRequirements(input, checksComplete, testComplete);
+  const { requirements, planBlocked } = launchRequirements(input, checksComplete);
   const lifecycleOwnsLaunch =
     ["live", "paused", "archived", "scheduled", "suspended"].includes(key) &&
     !(updateInProgress && (key === "live" || key === "paused"));
@@ -788,7 +535,6 @@ export function deriveStudioLifecyclePresentation(
     (key === "ready" || (updateInProgress && (key === "live" || key === "paused"))) &&
     input.designComplete &&
     checksComplete &&
-    testComplete &&
     input.locationsReady &&
     !planBlocked &&
     input.publicationAllowed;
@@ -801,90 +547,55 @@ export function deriveStudioLifecyclePresentation(
       ? {
           kind: "publish",
           label: updateInProgress
-            ? ar
-              ? "نشر التغييرات"
-              : "Publish changes"
-            : ar
-              ? "إطلاق بطاقة الولاء"
-              : "Launch loyalty card",
+            ? studioText(locale).ui.publishChanges
+            : studioText(locale).ui.launchLoyaltyCard,
         }
       : (firstBlocker?.action ?? actions.primary);
   const launchLabel =
     updateInProgress && (key === "live" || key === "paused")
       ? launchReady
-        ? ar
-          ? "جاهزة لنشر التغييرات"
-          : "Ready to publish changes"
-        : ar
-          ? "تغييرات بانتظار النشر"
-          : "Changes waiting to be published"
+        ? studioText(locale).ui.readyToPublishChanges
+        : studioText(locale).ui.changesWaitingToBePublished
       : key === "live"
-        ? ar
-          ? "البطاقة مباشرة"
-          : "Card is live"
+        ? studioText(locale).ui.cardIsLive
         : key === "paused"
-          ? ar
-            ? "البطاقة متوقفة مؤقتاً"
-            : "Card is paused"
+          ? studioText(locale).ui.cardIsPaused
           : key === "archived"
-            ? ar
-              ? "البطاقة مؤرشفة"
-              : "Card is archived"
+            ? studioText(locale).ui.cardIsArchived
             : key === "scheduled"
-              ? ar
-                ? "مجدولة للإطلاق"
-                : "Scheduled to go live"
+              ? studioText(locale).ui.scheduledToGoLive
               : key === "suspended"
-                ? ar
-                  ? "الإطلاق غير متاح"
-                  : "Launch unavailable"
+                ? studioText(locale).ui.launchUnavailable
                 : launchReady
-                  ? ar
-                    ? "جاهزة للإطلاق"
-                    : "Ready to launch"
-                  : ar
-                    ? "غير جاهزة للإطلاق"
-                    : "Not ready to launch";
+                  ? studioText(locale).ui.readyToLaunch
+                  : studioText(locale).ui.notReadyToLaunch;
   const launchDescription =
     updateInProgress && (key === "live" || key === "paused")
       ? launchReady
-        ? ar
-          ? "اكتملت فحوصات التحديث واختباره. البطاقة الحالية لم تتغير بعد."
-          : "The update has passed checks and testing. The current live card is unchanged."
+        ? studioText(locale).ui.theUpdateHasPassedItsChecksTheCurrentLiveCardIsUnchanged
         : (firstBlocker?.description ??
-          (ar
-            ? "أكمل فحوصات التحديث واختباره قبل النشر. البطاقة الحالية لم تتغير."
-            : "Complete the update checks and test before publishing. The current live card is unchanged."))
+          studioText(locale).ui
+            .completeTheUpdateChecksBeforePublishingTheCurrentLiveCardIsUnchanged)
       : lifecycleOwnsLaunch
         ? lifecycle.description
         : launchReady
-          ? ar
-            ? "اكتملت جميع المتطلبات المطلوبة. أكد النشر لإتاحتها للعملاء."
-            : "Every required step is complete. Confirm publishing to make it available to customers."
+          ? studioText(locale).ui
+              .everyRequiredStepIsCompleteConfirmPublishingToMakeItAvailableToCustomers
           : (firstBlocker?.description ??
-            (ar
-              ? "أكمل المتطلبات المطلوبة قبل النشر."
-              : "Complete the required steps before publishing."));
+            studioText(locale).ui.completeTheRequiredStepsBeforePublishing);
 
   return {
     ...lifecycle,
     guidance:
       updateInProgress && key === "live"
         ? {
-            title: ar ? "تغييرات محفوظة · ليست مباشرة بعد" : "Saved changes · Not live yet",
-            description: ar
-              ? "راجع التغييرات المحفوظة قبل نشرها. البطاقة المباشرة الحالية لم تتغير."
-              : "Review the saved changes before publishing them. The current live card is unchanged.",
+            title: studioText(locale).ui.liveUnpublishedChanges,
+            description:
+              studioText(locale).ui
+                .yourCurrentCardIsLiveYouHaveUnpublishedChangesReviewAndPublishThemWhenYouAreReadyCustomersContinueToSeeTheCurrentLiveVersion,
             tone: "brand",
           }
-        : guidanceFor(
-            key,
-            checksComplete,
-            testComplete,
-            input.designComplete,
-            input.locationsReady,
-            locale,
-          ),
+        : guidanceFor(key, input.designComplete, input.locationsReady, locale),
     journeyStages,
     currentJourneyStage,
     primaryAction: actions.primary,
@@ -921,8 +632,18 @@ export function deriveStudioLifecyclePresentation(
 export function merchantStudioState(
   status: ProgramOperationalStatus,
   draftVersionStatus: string | null,
-  locale: Locale,
+  locale: InterfaceLocale,
 ): MerchantStudioState {
   const key = lifecycleKey(status, draftVersionStatus);
-  return { key, ...stateCopy[locale][key] } as MerchantStudioState;
+  const tone: MerchantStudioState["tone"] =
+    key === "live"
+      ? "success"
+      : key === "ready" || key === "scheduled"
+        ? "brand"
+        : key === "paused"
+          ? "warning"
+          : key === "suspended"
+            ? "danger"
+            : "neutral";
+  return { key, ...studioText(locale).states[key], tone };
 }

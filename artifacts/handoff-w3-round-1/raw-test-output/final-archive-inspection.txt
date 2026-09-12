@@ -1,5 +1,0 @@
-Archive inspection passed.
-Entries: 501
-Forbidden entries: 0
-
-EXIT_CODE=0

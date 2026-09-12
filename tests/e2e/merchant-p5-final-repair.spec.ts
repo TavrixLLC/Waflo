@@ -3,9 +3,10 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
+import { expectBuilderPreviewReady } from "./preview-assertions";
 import { mockTemplateGalleryApi, templateGalleryFixtures } from "./template-gallery-fixtures";
 
-const evidenceDirectory = path.resolve("artifacts/uiux/p5-final-repair");
+const evidenceDirectory = path.resolve("test-results/evidence/uiux/p5-final-repair");
 
 async function openGallery(
   page: Page,
@@ -66,20 +67,16 @@ async function openBuilder(
     locale?: "en" | "ar";
     viewport?: { width: number; height: number };
     studioState?: "DRAFT" | "READY" | "LIVE";
-    onBuilderPreview?: (profile: string, locale: string, svg: string) => void;
   } = {},
 ): Promise<void> {
   const {
     locale = "en",
     viewport = { width: 1440, height: 1000 },
     studioState = "DRAFT",
-    onBuilderPreview,
   } = options;
   await mockTemplateGalleryApi(page, {
     studioState,
     billingStatus: studioState === "DRAFT" ? "PENDING_ACTIVATION" : "ACTIVE",
-    onBuilderPreview: (profile, previewLocale, preview) =>
-      onBuilderPreview?.(profile, previewLocale, preview.svg),
   });
   await page.setViewportSize(viewport);
   await page.goto(`/${locale}/dashboard/programs/new`);
@@ -87,9 +84,15 @@ async function openBuilder(
   if (studioState !== "LIVE") {
     const desktopPreview = page.locator(".builder-preview-desktop");
     if (await desktopPreview.isVisible()) {
-      await expect(desktopPreview.locator(".builder-preview-canvas img")).toBeVisible();
+      await expectBuilderPreviewReady(desktopPreview);
     }
   }
+}
+
+async function addBuilderLanguage(page: Page, englishName: string): Promise<void> {
+  const picker = page.locator(".builder-language-configuration").getByRole("combobox").nth(1);
+  await picker.fill(englishName);
+  await page.getByRole("option", { name: new RegExp(`^${englishName}\\b`, "u") }).click();
 }
 
 async function continueToStudio(page: Page): Promise<void> {
@@ -127,6 +130,15 @@ async function screenshot(page: Page, filename: string, fullPage = true): Promis
     fullPage,
     animations: "disabled",
   });
+}
+
+async function stableLocatorScreenshot(target: Locator): Promise<Buffer> {
+  let image: Buffer | undefined;
+  await expect(async () => {
+    await expect(target).toBeVisible();
+    image = await target.screenshot({ animations: "disabled" });
+  }).toPass({ timeout: 10_000 });
+  return image as Buffer;
 }
 
 async function labeledPanel(
@@ -211,40 +223,36 @@ test("uses a neutral Library summary when renderer-ready data is unavailable", a
   });
   await page.goto("/en/dashboard/programs");
   const card = page.locator(".program-list__card");
-  await expect(
-    card.getByRole("img", { name: "Design available in Studio: Classic Roast rewards" }),
-  ).toBeVisible();
-  await expect(card.locator(".loyalty-card-visual__stamps")).toHaveCount(0);
-  await expect(card.locator(".loyalty-card-visual__stamp--filled")).toHaveCount(0);
+  await expect(card.locator(".loyalty-card-real-preview")).toBeVisible();
+  await expect(card.locator(".loyalty-card-real-preview__title")).toHaveText(
+    "Classic Roast rewards",
+  );
+  await expect(card.locator(".loyalty-card-real-preview__body")).toBeVisible();
   await expect(card.getByText("Design available in Studio", { exact: true })).toBeVisible();
 });
 
 test("selects Arabic customer content for the Arabic editor and preview", async ({ page }) => {
-  const previewResponses: Array<{ locale: string; svg: string }> = [];
-  await openBuilder(page, {
-    locale: "ar",
-    onBuilderPreview: (profile, previewLocale, svg) => {
-      if (profile === "CUSTOMER_WEB") previewResponses.push({ locale: previewLocale, svg });
-    },
+  const previewRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/preview")) previewRequests.push(url.pathname);
   });
+  await openBuilder(page, { locale: "ar" });
   await page.getByRole("button", { name: /اللغات/u }).click();
+  await addBuilderLanguage(page, "Arabic");
   const arabicTab = page.getByRole("tab", { name: /العربية/u });
   await arabicTab.click();
   const localizedName = "بطاقة القهوة العربية";
   await page.getByLabel("اسم البطاقة").fill(localizedName);
   await expect(page.locator(".builder-save-state")).toContainText("تم الحفظ", { timeout: 10_000 });
-  await expect
-    .poll(() =>
-      previewResponses.some(
-        (response) => response.locale === "AR" && response.svg.includes(localizedName),
-      ),
-    )
-    .toBe(true);
-  const previewImage = page.locator(".builder-preview-desktop .builder-preview-canvas img");
-  await expect(previewImage).toBeVisible();
-  expect(decodeURIComponent((await previewImage.getAttribute("src")) ?? "")).toContain(
-    localizedName,
-  );
+  const preview = page.locator(".builder-preview-desktop");
+  await expectBuilderPreviewReady(preview, "ar");
+  await expect(
+    preview.locator(
+      '[data-preview-ready="true"][data-wallet-profile="APPLE_LEGACY"] [data-wallet-artwork-render-plan="v1"][data-production-wallet-artwork="APPLE_STORE_CARD_STRIP"]',
+    ),
+  ).toHaveAttribute("lang", "ar");
+  expect(previewRequests).toEqual([]);
 });
 
 test("keeps focused bottom fields above the mobile Builder footer", async ({ page }) => {
@@ -282,11 +290,11 @@ test("keeps Wallet preview tabs selectable without implying provider readiness",
   const preview = page.locator(".builder-preview-desktop");
   await expect(
     preview.getByText(
-      "Visual preview only. Wallet availability and production readiness are shown separately in Studio.",
+      "Customer Web uses the published card renderer. Apple and Google are provider-faithful simulations; Wallet controls final spacing and type.",
       { exact: true },
     ),
   ).toBeVisible();
-  for (const name of ["Apple Wallet", "Google Wallet"]) {
+  for (const name of ["Apple Legacy", "Apple iOS 27+", "Google Wallet"]) {
     const tab = preview.getByRole("tab", { name });
     await expect(tab).toBeEnabled();
     const affordance = await tab.evaluate((element) => {
@@ -305,7 +313,7 @@ test("keeps Studio summary semantics truthful and the template dialog centered a
   page,
 }) => {
   await openStudio(page, "LIVE");
-  const preview = page.getByLabel("Card preview");
+  const preview = page.getByRole("region", { name: "Card preview" });
   await expect(preview.getByText("Published card summary", { exact: true })).toBeVisible();
   await expect(preview.getByRole("img", { name: "Current published card summary" })).toBeVisible();
   await expect(preview.getByText("Published customer view", { exact: true })).toHaveCount(0);
@@ -386,8 +394,9 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   const arabicBuilder = await context.newPage();
   await openBuilder(arabicBuilder, { locale: "ar" });
   await arabicBuilder.getByRole("button", { name: /اللغات/u }).click();
+  await addBuilderLanguage(arabicBuilder, "Arabic");
   await arabicBuilder.getByRole("tab", { name: /العربية/u }).click();
-  await expect(arabicBuilder.locator(".builder-preview-desktop img")).toBeVisible();
+  await expectBuilderPreviewReady(arabicBuilder.locator(".builder-preview-desktop"));
   await screenshot(arabicBuilder, "04-builder-arabic-localized-content.png");
   await arabicBuilder.close();
 
@@ -424,7 +433,9 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   await openStudio(studioPanel, "LIVE");
   semanticPanels.push(
     await labeledPanel(
-      await studioPanel.getByLabel("Card preview").screenshot({ animations: "disabled" }),
+      await studioPanel
+        .getByRole("region", { name: "Card preview" })
+        .screenshot({ animations: "disabled" }),
       "Studio · published card summary",
       500,
       430,
@@ -435,11 +446,15 @@ test("captures exactly the nine P5 final-repair evidence files", async ({ contex
   await openStudio(launch, "READY");
   await launch
     .getByRole("navigation", { name: "Studio sections" })
-    .getByRole("button", { name: /^Launch/u })
+    .getByRole("button", { name: /^(?:Review & launch|Launch)/u })
     .click();
+  const summaryAnchor = launch
+    .locator(".publication-card-anchor, [aria-label='Loyalty card summary']")
+    .first();
+  await expect(summaryAnchor).toBeVisible();
   semanticPanels.push(
     await labeledPanel(
-      await launch.getByLabel("Loyalty card summary").screenshot({ animations: "disabled" }),
+      await stableLocatorScreenshot(summaryAnchor),
       "Launch · operational summary",
       500,
       430,

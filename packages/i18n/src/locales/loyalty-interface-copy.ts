@@ -1,0 +1,552 @@
+export const loyaltyInterfaceCopy = {
+  en: {
+    builder: {
+      ui: {
+        thisCardHasNoEditableDraftOpenStudioToCreateTheNextVersion:
+          "This card has no editable draft. Open Studio to create the next version.",
+        startFromScratch: "Start from scratch",
+        selectedDesign: "Selected design",
+        neutral: "Neutral",
+        cardBuilderSections: "Card builder sections",
+        cardNameInYourDashboard: "Card name in your dashboard",
+        customersDoNotSeeThisInternalName: "Customers do not see this internal name.",
+        howDoesACustomerEarnAStamp: "How does a customer earn a stamp?",
+        stampGoal: "Stamp goal",
+        thisCardSupportsAnExactGoalFrom2To30Stamps:
+          "This card supports an exact goal from 2 to 30 stamps.",
+        stamps: "stamps",
+        exactStampGoal: "Exact stamp goal",
+        unlockedAt: "Unlocked at",
+        rewardReadinessAppearsOutsideTheStampGrid:
+          "Reward readiness appears outside the stamp grid.",
+        whatDoesTheCustomerGet: "What does the customer get?",
+        arabicReward: "Arabic reward",
+        rewardOptions: "Reward options",
+        rewardType: "Reward type",
+        freeItem: "Free item",
+        discount: "Discount",
+        descriptiveReward: "Descriptive reward",
+        custom: "Custom",
+        rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete:
+          "Reward validity and redemption approvals are set in Studio after the card design is complete.",
+        cardLanguages: "Card languages",
+        chooseCardLanguagesDescription:
+          "Choose the languages customers can view this loyalty card in. You can add or remove languages later.",
+        defaultLanguage: "Default language",
+        defaultLanguageHelp: "The customer default changes only after this draft is published.",
+        enabledLanguages: "Enabled languages",
+        addLanguage: "Add language",
+        searchLanguages: "Search by English or native name",
+        popularLanguages: "Popular",
+        allLanguages: "All languages",
+        defaultBadge: "Default",
+        cannotRemoveDefault: "Choose another default before removing this language.",
+        removeLanguage: "Remove language",
+        contentLanguage: "Content language",
+        providerReadiness: "Provider readiness for each enabled language",
+        normalizedSupport: "Normalized",
+        limitedSupport: "Limited",
+        customerCardName: "Customer-facing card name",
+        shortDescription: "Short description",
+        detailedContentAndMessages: "Detailed content and messages",
+        fullDescription: "Full description",
+        joinInstructions: "Join instructions",
+        termsAndConditions: "Terms and conditions",
+        goalCompletionMessage: "Goal completion message",
+        rewardReadyMessage: "Reward-ready message",
+        pausedCardMessage: "Paused-card message",
+        yourActiveLocationIsIncluded: "Your active location is included",
+        youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness:
+          "You can remove it, but at least one location is required for readiness.",
+        active: "Active",
+        inactive: "Inactive",
+        earning: "Earning",
+        redemption: "Redemption",
+        background: "Background",
+        text: "Text",
+        accent: "Accent",
+        secondary: "Secondary",
+        stampedIcon: "Stamped icon",
+        emptyStamp: "Empty stamp",
+        removeMilestonesBeforeReturningToQuickMode:
+          "Remove milestones before returning to Quick Mode",
+        milestoneRewards: "Milestone rewards",
+        milestonesRemainOutsideTheStampGridAndNeverReplaceASlot:
+          "Milestones remain outside the stamp grid and never replace a slot.",
+        addMilestone: "Add milestone",
+        stampThreshold: "Stamp threshold",
+        rewardName: "Reward name",
+        rewardDescription: "Reward description",
+        removeMilestone: "Remove milestone",
+        operationalRulesLiveInStudio: "Operational rules live in Studio",
+        afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks:
+          "After design, set stamp limits, purchase requirements, reversal windows, and manager permissions in How it works.",
+        stampArrangement: "Stamp arrangement",
+        horizontal: "Horizontal",
+        classic: "Classic",
+        flowing: "Flowing",
+        circular: "Circular",
+        growthRequired: "Growth required",
+        responsiveArrangement: "Responsive arrangement",
+        previewSurfaceDetails: "Preview surface details",
+        customerCard: "Customer card",
+        chooseTheRicherWebCardCompositionCustomersSee:
+          "Choose the richer web-card composition customers see.",
+        customerCardLayout: "Customer card layout",
+        card: "Card",
+        minimal: "Minimal",
+        hero: "Hero",
+        theseLabelsApplyToTheFieldsSupportedByAppleWallet:
+          "These labels apply to the fields supported by Apple Wallet.",
+        headerLabel: "Header label",
+        headerValue: "Header value",
+        secondaryLabel: "Secondary label",
+        barcodeLabel: "Barcode label",
+        showAppleCardBackContent: "Show Apple card back content",
+        theseLabelsApplyToTheFieldsSupportedByGoogleWallet:
+          "These labels apply to the fields supported by Google Wallet.",
+        title: "Title",
+        subtitle: "Subtitle",
+        detailsLabel: "Details label",
+        changeSummary: "Change summary",
+        finalRewardBehaviorIsFixed: "Final reward behavior is fixed",
+        atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds:
+          "At the goal every slot remains filled; the grid resets to empty only after final reward redemption succeeds.",
+        readinessChecks: "Readiness checks",
+      },
+    },
+  },
+  ar: {
+    builder: {
+      ui: {
+        thisCardHasNoEditableDraftOpenStudioToCreateTheNextVersion:
+          "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0633\u0648\u062f\u0629 \u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u062a\u062d\u0631\u064a\u0631 \u0644\u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629. \u0627\u0641\u062a\u062d \u0627\u0644\u0627\u0633\u062a\u0648\u062f\u064a\u0648 \u0644\u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062e\u0629 \u062c\u062f\u064a\u062f\u0629.",
+        startFromScratch: "\u0627\u0628\u062f\u0623 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631",
+        selectedDesign:
+          "\u0627\u0644\u062a\u0635\u0645\u064a\u0645 \u0627\u0644\u0645\u062d\u062f\u062f",
+        neutral: "\u0645\u062d\u0627\u064a\u062f",
+        cardBuilderSections:
+          "\u0623\u0642\u0633\u0627\u0645 \u0645\u062d\u0631\u0631 \u0627\u0644\u0628\u0637\u0627\u0642\u0629",
+        cardNameInYourDashboard:
+          "\u0627\u0633\u0645 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u062f\u0627\u062e\u0644 \u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645",
+        customersDoNotSeeThisInternalName:
+          "\u0644\u0646 \u064a\u0638\u0647\u0631 \u0647\u0630\u0627 \u0627\u0644\u0627\u0633\u0645 \u0644\u0644\u0639\u0645\u0644\u0627\u0621.",
+        howDoesACustomerEarnAStamp:
+          "\u0643\u064a\u0641 \u064a\u062d\u0635\u0644 \u0627\u0644\u0639\u0645\u064a\u0644 \u0639\u0644\u0649 \u062e\u062a\u0645\u061f",
+        stampGoal: "\u0647\u062f\u0641 \u0627\u0644\u0623\u062e\u062a\u0627\u0645",
+        thisCardSupportsAnExactGoalFrom2To30Stamps:
+          "\u062a\u062f\u0639\u0645 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0645\u0646 \u062e\u062a\u0645\u064a\u0646 \u0625\u0644\u0649 30 \u062e\u062a\u0645\u064b\u0627.",
+        stamps: "\u062e\u062a\u0645\u064b\u0627",
+        exactStampGoal:
+          "\u0627\u0644\u0642\u064a\u0645\u0629 \u0627\u0644\u062f\u0642\u064a\u0642\u0629 \u0644\u0647\u062f\u0641 \u0627\u0644\u0623\u062e\u062a\u0627\u0645",
+        unlockedAt: "\u0639\u0646\u062f \u0627\u0643\u062a\u0645\u0627\u0644",
+        rewardReadinessAppearsOutsideTheStampGrid:
+          "\u062a\u0638\u0647\u0631 \u062c\u0627\u0647\u0632\u064a\u0629 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629 \u062e\u0627\u0631\u062c \u0634\u0628\u0643\u0629 \u0627\u0644\u0623\u062e\u062a\u0627\u0645.",
+        whatDoesTheCustomerGet:
+          "\u0645\u0627 \u0627\u0644\u0630\u064a \u0633\u064a\u062d\u0635\u0644 \u0639\u0644\u064a\u0647 \u0627\u0644\u0639\u0645\u064a\u0644\u061f \u2014 English",
+        arabicReward:
+          "\u0645\u0627 \u0627\u0644\u0630\u064a \u0633\u064a\u062d\u0635\u0644 \u0639\u0644\u064a\u0647 \u0627\u0644\u0639\u0645\u064a\u0644\u061f",
+        rewardOptions:
+          "\u062e\u064a\u0627\u0631\u0627\u062a \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629",
+        rewardType: "\u0646\u0648\u0639 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629",
+        freeItem: "\u0639\u0646\u0635\u0631 \u0645\u062c\u0627\u0646\u064a",
+        discount: "\u062e\u0635\u0645",
+        descriptiveReward: "\u0645\u0643\u0627\u0641\u0623\u0629 \u0648\u0635\u0641\u064a\u0629",
+        custom: "\u0645\u062e\u0635\u0635\u0629",
+        rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete:
+          "\u062a\u064f\u0636\u0628\u0637 \u0635\u0644\u0627\u062d\u064a\u0629 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629 \u0648\u0645\u0648\u0627\u0641\u0642\u0627\u062a \u0627\u0644\u0627\u0633\u062a\u0631\u062f\u0627\u062f \u0641\u064a \u0627\u0644\u0627\u0633\u062a\u0648\u062f\u064a\u0648 \u0628\u0639\u062f \u0627\u0643\u062a\u0645\u0627\u0644 \u062a\u0635\u0645\u064a\u0645 \u0627\u0644\u0628\u0637\u0627\u0642\u0629.",
+        cardLanguages: "\u0644\u063a\u0627\u062a \u0627\u0644\u0628\u0637\u0627\u0642\u0629",
+        chooseCardLanguagesDescription:
+          "اختر اللغات التي يمكن للعملاء عرض بطاقة الولاء بها. يمكنك إضافة اللغات أو إزالتها لاحقًا.",
+        defaultLanguage: "اللغة الافتراضية",
+        defaultLanguageHelp: "يتغير اختيار العملاء الافتراضي فقط بعد نشر هذه المسودة.",
+        enabledLanguages: "اللغات المفعلة",
+        addLanguage: "إضافة لغة",
+        searchLanguages: "ابحث بالاسم الإنجليزي أو الأصلي",
+        popularLanguages: "شائعة",
+        allLanguages: "كل اللغات",
+        defaultBadge: "افتراضية",
+        cannotRemoveDefault: "اختر لغة افتراضية أخرى قبل إزالة هذه اللغة.",
+        removeLanguage: "إزالة اللغة",
+        contentLanguage: "لغة المحتوى",
+        providerReadiness: "جاهزية المزوّد لكل لغة مفعلة",
+        normalizedSupport: "مدعومة بعد التهيئة",
+        limitedSupport: "محدودة",
+        customerCardName: "اسم البطاقة الظاهر للعملاء",
+        shortDescription: "الوصف القصير",
+        detailedContentAndMessages: "المحتوى التفصيلي والرسائل",
+        fullDescription: "الوصف الكامل",
+        joinInstructions: "تعليمات الانضمام",
+        termsAndConditions: "الشروط والأحكام",
+        goalCompletionMessage: "رسالة اكتمال الهدف",
+        rewardReadyMessage: "رسالة جاهزية المكافأة",
+        pausedCardMessage: "رسالة الإيقاف المؤقت",
+        yourActiveLocationIsIncluded:
+          "\u062a\u0645 \u062a\u0636\u0645\u064a\u0646 \u0645\u0648\u0642\u0639\u0643 \u0627\u0644\u0646\u0634\u0637",
+        youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness:
+          "\u064a\u0645\u0643\u0646\u0643 \u0625\u0644\u063a\u0627\u0621 \u062a\u062d\u062f\u064a\u062f\u0647\u060c \u0644\u0643\u0646 \u064a\u0644\u0632\u0645 \u0645\u0648\u0642\u0639 \u0648\u0627\u062d\u062f \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644 \u0644\u0627\u062c\u062a\u064a\u0627\u0632 \u0641\u062d\u0635 \u0627\u0644\u062c\u0627\u0647\u0632\u064a\u0629.",
+        active: "\u0646\u0634\u0637",
+        inactive: "\u063a\u064a\u0631 \u0646\u0634\u0637",
+        earning: "\u0627\u0644\u0643\u0633\u0628",
+        redemption: "\u0627\u0644\u0627\u0633\u062a\u0631\u062f\u0627\u062f",
+        background: "\u0627\u0644\u062e\u0644\u0641\u064a\u0629",
+        text: "\u0627\u0644\u0646\u0635",
+        accent: "\u0644\u0648\u0646 \u0627\u0644\u062a\u0645\u064a\u064a\u0632",
+        secondary: "\u0627\u0644\u0644\u0648\u0646 \u0627\u0644\u062b\u0627\u0646\u0648\u064a",
+        stampedIcon: "\u0623\u064a\u0642\u0648\u0646\u0629 \u0627\u0644\u062e\u062a\u0645",
+        emptyStamp: "\u0627\u0644\u062e\u062a\u0645 \u0627\u0644\u0641\u0627\u0631\u063a",
+        removeMilestonesBeforeReturningToQuickMode:
+          "\u0623\u0632\u0644 \u0627\u0644\u0645\u0643\u0627\u0641\u0622\u062a \u0627\u0644\u0645\u0631\u062d\u0644\u064a\u0629 \u0642\u0628\u0644 \u0627\u0644\u0639\u0648\u062f\u0629 \u0625\u0644\u0649 \u0627\u0644\u0648\u0636\u0639 \u0627\u0644\u0633\u0631\u064a\u0639",
+        milestoneRewards:
+          "\u0627\u0644\u0645\u0643\u0627\u0641\u0622\u062a \u0627\u0644\u0645\u0631\u062d\u0644\u064a\u0629",
+        milestonesRemainOutsideTheStampGridAndNeverReplaceASlot:
+          "\u062a\u0638\u0647\u0631 \u0627\u0644\u0645\u0643\u0627\u0641\u0622\u062a \u062e\u0627\u0631\u062c \u0634\u0628\u0643\u0629 \u0627\u0644\u0623\u062e\u062a\u0627\u0645 \u0648\u0644\u0627 \u062a\u0633\u062a\u0628\u062f\u0644 \u0623\u064a \u062e\u0627\u0646\u0629.",
+        addMilestone:
+          "\u0625\u0636\u0627\u0641\u0629 \u0645\u0643\u0627\u0641\u0623\u0629 \u0645\u0631\u062d\u0644\u064a\u0629",
+        stampThreshold: "\u0639\u0646\u062f \u0639\u062f\u062f \u0623\u062e\u062a\u0627\u0645",
+        rewardName: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629",
+        rewardDescription: "\u0648\u0635\u0641 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629",
+        removeMilestone:
+          "\u0625\u0632\u0627\u0644\u0629 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629 \u0627\u0644\u0645\u0631\u062d\u0644\u064a\u0629",
+        operationalRulesLiveInStudio:
+          "\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u062a\u0634\u063a\u064a\u0644 \u0641\u064a \u0627\u0644\u0627\u0633\u062a\u0648\u062f\u064a\u0648",
+        afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks:
+          "\u0628\u0639\u062f \u0625\u0646\u0647\u0627\u0621 \u0627\u0644\u062a\u0635\u0645\u064a\u0645\u060c \u0627\u0636\u0628\u0637 \u062d\u062f\u0648\u062f \u0627\u0644\u0623\u062e\u062a\u0627\u0645 \u0648\u0645\u062a\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u0634\u0631\u0627\u0621 \u0648\u0641\u062a\u0631\u0627\u062a \u0627\u0644\u062a\u0631\u0627\u062c\u0639 \u0648\u0635\u0644\u0627\u062d\u064a\u0627\u062a \u0627\u0644\u0645\u062f\u064a\u0631 \u0645\u0646 \u0645\u0646\u0637\u0642\u0629 \u00ab\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u0639\u0645\u0644\u00bb.",
+        stampArrangement:
+          "\u062a\u062e\u0637\u064a\u0637 \u0627\u0644\u0623\u062e\u062a\u0627\u0645",
+        horizontal: "\u0623\u0641\u0642\u064a",
+        classic: "\u0643\u0644\u0627\u0633\u064a\u0643\u064a",
+        flowing: "\u0645\u062a\u062f\u0631\u062c",
+        circular: "\u062f\u0627\u0626\u0631\u064a",
+        growthRequired: "\u064a\u062a\u0637\u0644\u0628 Growth",
+        responsiveArrangement:
+          "\u062a\u0631\u062a\u064a\u0628 \u0645\u062a\u062c\u0627\u0648\u0628",
+        previewSurfaceDetails:
+          "\u062a\u0641\u0627\u0635\u064a\u0644 \u0623\u0633\u0637\u062d \u0627\u0644\u0645\u0639\u0627\u064a\u0646\u0629",
+        customerCard: "\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0639\u0645\u064a\u0644",
+        chooseTheRicherWebCardCompositionCustomersSee:
+          "\u0627\u062e\u062a\u0631 \u062a\u0631\u0643\u064a\u0628 \u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0648\u064a\u0628 \u0627\u0644\u063a\u0646\u064a \u0627\u0644\u0630\u064a \u064a\u0631\u0627\u0647 \u0627\u0644\u0639\u0645\u064a\u0644.",
+        customerCardLayout:
+          "\u062a\u0631\u0643\u064a\u0628 \u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0639\u0645\u064a\u0644",
+        card: "\u0628\u0637\u0627\u0642\u0629",
+        minimal: "\u0645\u0628\u0633\u0637\u0629",
+        hero: "\u0628\u0627\u0631\u0632\u0629",
+        theseLabelsApplyToTheFieldsSupportedByAppleWallet:
+          "\u0647\u0630\u0647 \u0627\u0644\u0646\u0635\u0648\u0635 \u062a\u062e\u0635 \u0627\u0644\u0645\u0639\u0627\u064a\u0646\u0629 \u0627\u0644\u062a\u064a \u064a\u062f\u0639\u0645\u0647\u0627 Apple Wallet.",
+        headerLabel: "\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0631\u0623\u0633",
+        headerValue: "\u0642\u064a\u0645\u0629 \u0627\u0644\u0631\u0623\u0633",
+        secondaryLabel:
+          "\u0627\u0644\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u062b\u0627\u0646\u0648\u064a",
+        barcodeLabel: "\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0631\u0645\u0632",
+        showAppleCardBackContent:
+          "\u0625\u0638\u0647\u0627\u0631 \u0645\u062d\u062a\u0648\u0649 \u0638\u0647\u0631 \u0628\u0637\u0627\u0642\u0629 Apple",
+        theseLabelsApplyToTheFieldsSupportedByGoogleWallet:
+          "\u0647\u0630\u0647 \u0627\u0644\u0646\u0635\u0648\u0635 \u062a\u062e\u0635 \u0627\u0644\u0645\u0639\u0627\u064a\u0646\u0629 \u0627\u0644\u062a\u064a \u064a\u062f\u0639\u0645\u0647\u0627 Google Wallet.",
+        title: "\u0627\u0644\u0639\u0646\u0648\u0627\u0646",
+        subtitle: "\u0627\u0644\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0641\u0631\u0639\u064a",
+        detailsLabel:
+          "\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
+        changeSummary:
+          "\u0645\u0644\u062e\u0635 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a",
+        finalRewardBehaviorIsFixed:
+          "\u0633\u0644\u0648\u0643 \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629 \u0627\u0644\u0646\u0647\u0627\u0626\u064a\u0629 \u062b\u0627\u0628\u062a",
+        atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds:
+          "\u062a\u0628\u0642\u0649 \u062c\u0645\u064a\u0639 \u0627\u0644\u062e\u0627\u0646\u0627\u062a \u0645\u0645\u062a\u0644\u0626\u0629 \u0639\u0646\u062f \u0628\u0644\u0648\u063a \u0627\u0644\u0647\u062f\u0641\u060c \u0648\u062a\u064f\u0639\u0627\u062f \u0625\u0644\u0649 \u0641\u0627\u0631\u063a\u0629 \u0641\u0642\u0637 \u0628\u0639\u062f \u0646\u062c\u0627\u062d \u0627\u0633\u062a\u0631\u062f\u0627\u062f \u0627\u0644\u0645\u0643\u0627\u0641\u0623\u0629 \u0627\u0644\u0646\u0647\u0627\u0626\u064a\u0629.",
+        readinessChecks:
+          "\u0641\u062d\u0648\u0635\u0627\u062a \u0627\u0644\u062c\u0627\u0647\u0632\u064a\u0629",
+      },
+    },
+  },
+  kuBadini: {
+    builder: {
+      ui: {
+        thisCardHasNoEditableDraftOpenStudioToCreateTheNextVersion:
+          "\u06a4\u06ce \u06a9\u06d5\u0631\u062a\u06ce \u067e\u06ce\u0634\u0646\u0648\u0648\u0645\u06d5\u06cc\u06d5 \u06a9\u0648 \u0648\u06d5\u0631\u06d5 \u06af\u0648\u0647\u06d5\u0631\u06d5\u0646\u062f\u06cc\u0646 \u062a\u0648\u0646\u06d5 \u06cc\u06d5. \u0633\u062a\u0648\u062f\u06cc\u06c6 \u06a4\u06d5\u06a9\u06cc\u0646 \u062f\u06d5 \u06a9\u0648 \u06af\u0648\u0647\u06d5\u0631\u062a\u06c6\u06cc\u06d5 \u067e\u06d5\u0634\u06ce\u0646 \u0628\u06cc\u06d5\u0641\u06cc\u0631\u06ce\u0646\u06cc\u0646.",
+        startFromScratch:
+          "\u0698\u06cc \u0633\u06cc\u0641\u06cc\u0631\u06ce \u062f\u06d5\u0633\u062a \u067e\u06ce \u0628\u06cc\u06a9\u06d5",
+        selectedDesign:
+          "\u0633\u06ce\u0648\u06cc\u0631\u06d5\u0646\u06d5 \u0647\u06cc\u0644\u0628\u06cc\u0698\u06d5\u0631\u062a\u06ce",
+        neutral: "\u0628\u06ce\u062f\u06d5\u0646\u06af",
+        cardBuilderSections:
+          "\u0628\u06d5\u0634\u06ce\u0646 \u0686\u06ce\u06a9\u06d5\u0631\u06ce \u06a9\u06d5\u0631\u062a\u06d5",
+        cardNameInYourDashboard:
+          "\u0646\u06d5\u06a4\u06ce \u0642\u06d5\u0631\u062a\u06ce \u062f\u06cc \u062f\u06d5\u0634\u0628\u06c6\u06d5\u0631\u062f\u06d5 \u0648\u06d5 \u062f\u06d5 \u06cc\u06d5",
+        customersDoNotSeeThisInternalName:
+          "\u062e\u06d5\u0631\u06ce\u062f\u06d5\u0631 \u06a4\u06ce \u0646\u06d5\u06a4\u06ce \u0646\u06d5\u06a4\u062e\u0648\u06d5\u06cc\u06ce \u0646\u06d5\u0628\u06ce\u0646\u06cc\u0646.",
+        howDoesACustomerEarnAStamp:
+          "\u062e\u06d5\u0631\u06ce\u062f\u06d5\u0631\u06d5\u06a9 \u0686\u06d5\u0648\u06d5 \u0645\u06c6\u0647\u0631\u06d5\u06a9 \u0642\u06d5\u0632\u06d5\u0646\u062c \u062f\u06cc\u06a9\u06d5?",
+        stampGoal: "\u0633\u062a\u06d5\u0645\u067e \u06d5\u0631\u0645\u06d5\u0646\u062c\u06d5",
+        thisCardSupportsAnExactGoalFrom2To30Stamps:
+          "\u06d5\u06a4 \u06a9\u06d5\u0631\u062a \u06d5\u0631\u0645\u06d5\u0646\u062c\u06d5\u06a9 \u0631\u06d5\u0633\u062a\u06ce\u0646 \u0698\u06cc 2 \u0647\u06d5\u062a\u06d5 30 \u0633\u062a\u06d5\u0645\u067e\u06d5\u0646 \u067e\u06cc\u0634\u062a\u06af\u06cc\u0631\u06ce \u062f\u06cc\u06a9\u06d5.",
+        stamps: "\u0645\u06c6\u0631\u06d5\u0646",
+        exactStampGoal:
+          "\u06d5\u0631\u0645\u06d5\u0646\u062c\u06d5 \u0633\u062a\u06d5\u0645\u067e\u06ce \u06cc\u06d5 \u0631\u06d5\u0633\u062a\u06ce\u0646",
+        unlockedAt: "\u06a4\u06d5\u06a9\u06cc\u0631\u06ce \u0644\u06cc",
+        rewardReadinessAppearsOutsideTheStampGrid:
+          "\u06d5\u0645\u06d5\u062f\u06d5\u0628\u0648\u0648\u0646\u06d5 \u062e\u06d5\u0644\u06d5\u062a\u06ce \u0644\u06cc \u062f\u06d5\u0631\u06a4\u06d5\u06cc\u06ce \u062a\u06c6\u0631\u06d5 \u0633\u062a\u06d5\u0645\u067e\u06ce \u062e\u0648\u06cc\u06d5 \u062f\u06cc\u06a9\u06d5.",
+        whatDoesTheCustomerGet:
+          "\u062e\u06d5\u0631\u06ce\u062f\u06d5\u0631 \u0686\u06cc \u062f\u06cc\u0633\u062a\u06ce\u0646\u06d5?",
+        arabicReward: "\u062e\u06d5\u0644\u06d5\u062a\u06d5 \u06d5\u0631\u06d5\u0628\u06ce",
+        rewardOptions:
+          "\u06a4\u06d5\u0628\u06cc\u0698\u06d5\u0631\u06a9\u06ce\u0646 \u062e\u06d5\u0644\u06d5\u062a\u06ce",
+        rewardType: "\u062c\u0648\u0631\u06d5\u06cc\u06ce \u062e\u06d5\u0644\u06d5\u062a\u06ce",
+        freeItem: "\u0628\u06d5\u0628\u06d5\u062a\u06ce \u0628\u06d5\u0644\u06d5\u0634",
+        discount: "\u06a9\u06ce\u0645\u06a9\u06cc\u0631\u06cc\u0646\u06ce",
+        descriptiveReward:
+          "\u062e\u06d5\u0644\u06d5\u062a\u06d5 \u062f\u06d5\u0633\u062c\u0631\u06cc\u067e\u062a\u06cc\u06a4\u06d5",
+        custom: "\u0647\u0648\u0648\u0646\u0628\u0648\u0646\u06ce",
+        rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete:
+          "\u067e\u06cc\u0634\u062a\u06ce \u06a9\u0648 \u0633\u06ce\u0648\u06cc\u0631\u06d5\u0646\u06d5 \u0642\u06d5\u0631\u062a\u06ce \u0642\u06d5\u062f\u06cc\u06cc\u06d5, \u062f\u06d5\u0631\u0628\u06d5\u0633\u062f\u06d5\u0631\u06cc\u06cc\u06d5 \u062e\u06d5\u0644\u06d5\u062a \u0648\u0648 \u067e\u06d5\u0698\u06cc\u0631\u06d5\u0646\u062f\u06cc\u0646\u06ce\u0646 \u062e\u06cc\u0644\u06d5\u0633\u0628\u0648\u0648\u0646\u06ce \u0644\u06cc \u0633\u062a\u0648\u062f\u06cc\u06c6 \u062a\u06ce\u0646\u06d5 \u062f\u06d5\u0646\u06ce\u0646.",
+        cardLanguages: "\u0632\u06cc\u0645\u0627\u0646\u00ea\u0646 \u06a9\u0627\u0631\u062a\u00ea",
+        chooseCardLanguagesDescription:
+          "زمانێن کو کریار دشێن کارتا وەفاداریێ پێ ببینن هەلبژێرە. تو دشێی پاشتر زمانان زێدە یان کێم بکەی.",
+        defaultLanguage: "زمانێ بنەرەت",
+        defaultLanguageHelp:
+          "زمانێ بنەرەت تەنێ پشتی بڵاوکرنا ڤێ ڕەشنڤیسێ بۆ کریاران دهێتە گۆهارتن.",
+        enabledLanguages: "زمانێن چالاک",
+        addLanguage: "زمان زێدە بکە",
+        searchLanguages: "ب ناڤێ ئینگلیزی یان ناڤێ ڕەسەن بگەڕێ",
+        popularLanguages: "بەربەلاڤ",
+        allLanguages: "هەمی زمان",
+        defaultBadge: "بنەرەت",
+        cannotRemoveDefault: "بەری ژێبرنا ڤی زمانی، زمانەکێ دی وەک بنەرەت هەلبژێرە.",
+        removeLanguage: "زمانی ژێ ببە",
+        contentLanguage: "زمانێ ناڤەڕۆکێ",
+        providerReadiness: "ئامادەبوونا دابینکەری بۆ هەر زمانەکێ چالاک",
+        normalizedSupport: "هاتیە گونجاندن",
+        limitedSupport: "سنووردار",
+        customerCardName: "ناڤێ کارتێ بۆ کریاران",
+        shortDescription: "پێناسەیا کورت",
+        detailedContentAndMessages: "ناڤەڕۆکا ورد و پەیام",
+        fullDescription: "پێناسەیا تەمام",
+        joinInstructions: "ڕێنماییێن پێڤەبوونێ",
+        termsAndConditions: "مەرج و ڕێسا",
+        goalCompletionMessage: "پەیاما تەمامکرنا ئارمانجێ",
+        rewardReadyMessage: "پەیاما ئامادەبوونا خەلاتێ",
+        pausedCardMessage: "پەیاما ڕاوەستاندنا کاتی",
+        yourActiveLocationIsIncluded:
+          "\u062c\u06cc\u0647\u06ce \u0648\u06d5\u06cc\u0627 \u0686\u0627\u0644\u0627\u06a9 \u062a\u06ce \u062f\u06d5 \u06cc\u06d5",
+        youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness:
+          "\u0647\u0648\u0646 \u062f\u06cc\u06a9\u0627\u0631\u06cc\u0646 \u0648\u06ce \u0698\u06ce\u0628\u06cc\u0631\u06cc\u0646, \u0644\u06ce \u0628\u06cc \u06a9\u06ce\u0645\u0627\u0646\u06cc \u062c\u06cc\u0647\u06d5\u06a9 \u0698\u06cc \u0628\u06c6 \u0627\u0645\u0627\u062f\u06d5\u0628\u0648\u0646\u06ce \u0647\u06d5\u0648\u062c\u06d5 \u06cc\u06d5.",
+        active: "\u0698\u06cc\u0631",
+        inactive: "\u0628\u06ce\u06a9\u0627\u0631",
+        earning: "\u06d5\u0627\u0631\u0646\u06cc\u0646\u06af",
+        redemption: "\u0631\u06d5\u062f\u06d5\u0645\u067e\u062a\u06cc\u06c6\u0646",
+        background: "\u067e\u06d5\u0634\u06ce",
+        text: "\u0646\u06cc\u06a4\u06ce\u0633\u062a\u06c6\u06a9",
+        accent: "\u062f\u06d5\u06a4\u06c6\u06a9",
+        secondary: "\u062f\u0648\u0648\u0648\u06d5\u0645\u062f\u06c6\u0631",
+        stampedIcon:
+          "\u06ce\u06a9\u06c6\u0646\u06d5 \u0645\u06c6\u0647\u0631\u06a9\u06cc\u0631\u06ce",
+        emptyStamp: "\u0645\u06c6\u0647\u0631\u06d5 \u06a4\u06d5\u0644\u06d5",
+        removeMilestonesBeforeReturningToQuickMode:
+          "\u0628\u06d5\u0631\u06ce \u06a9\u0648 \u0647\u0648\u0648\u0646 \u06a4\u06d5\u06af\u06d5\u0631\u06cc\u0646 \u0645\u06c6\u062f\u06d5 \u0632\u0648\u0648 \u0632\u0648\u0648, \u062e\u06d5\u0644\u06ce\u0646 \u06af\u06cc\u0631\u06ce\u0646\u06af \u0698\u06ce \u0628\u06cc\u06a9\u06cc\u0646",
+        milestoneRewards:
+          "\u062e\u06d5\u0644\u06d5\u062a\u06ce\u0646 \u0645\u06cc\u0644\u06d5\u0633\u062a\u06c6\u0646\u06d5",
+        milestonesRemainOutsideTheStampGridAndNeverReplaceASlot:
+          "\u0645\u06cc\u0644\u06d5\u0633\u062a\u06c6\u0646\u06d5\u0633 \u0644\u06cc \u062f\u06d5\u0631\u06a4\u06d5\u06cc\u06ce \u062a\u06c6\u0631\u06d5 \u0633\u062a\u06d5\u0645\u067e\u06ce \u062f\u06cc\u0645\u06ce\u0646\u06cc\u0646 \u0648\u0648 \u0686\u0648 \u062c\u06d5\u0631\u06ce \u062c\u06ce\u0647 \u0646\u06d5\u06af\u06cc\u0631\u06cc\u0646.",
+        addMilestone:
+          "\u0645\u06ce\u0644\u06cc\u06c6\u0646\u06ce \u0632\u06ce\u062f\u06d5 \u0628\u06cc\u06a9\u06cc\u0646",
+        stampThreshold: "\u0633\u06ce\u0646\u06af\u06ce \u0645\u06c6\u0631\u06d5\u0646",
+        rewardName: "\u0646\u06d5\u06a4\u06ce \u062e\u06d5\u0644\u06d5\u062a\u06ce",
+        rewardDescription:
+          "\u067e\u06ce\u0646\u0627\u0633\u06d5\u06cc\u0627 \u062e\u06d5\u0644\u0627\u062a\u06ce",
+        removeMilestone:
+          "\u0645\u06cc\u0644\u06d5\u0633\u062a\u06c6\u0646\u06d5 \u0698\u06ce\u0628\u06cc\u0631\u06cc\u0646",
+        operationalRulesLiveInStudio:
+          "\u0631\u06ce\u0632\u06cc\u06a9\u06ce\u0646 \u062e\u06d5\u0628\u06cc\u062a\u06d5\u0646\u062f\u06cc\u0646\u06ce \u0644\u06cc \u0633\u062a\u0648\u062f\u06cc\u06c6 \u062f\u06cc\u0698\u06ce\u0646",
+        afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks:
+          "\u067e\u06cc\u0634\u062a\u06ce \u0633\u06ce\u0648\u06cc\u0631\u06d5\u0646\u06ce, \u062f\u06cc \u0645\u06d5\u0631\u06cc\u06a4 \u0686\u06d5\u0648\u06d5 \u062f\u06cc\u062e\u06d5\u0628\u06cc\u062a\u06d5 \u062f\u06d5 \u0633\u06ce\u0646\u06c6\u0631\u06ce\u0646 \u0633\u062a\u06d5\u0645\u067e\u06ce, \u0647\u06d5\u0648\u062c\u06d5\u062f\u06d5\u0631\u06cc\u06cc\u06ce\u0646 \u06a9\u06cc\u0631\u06ce\u0646\u06ce, \u067e\u06d5\u062c\u06d5\u06cc\u06ce\u0646 \u06a4\u06d5\u06af\u06d5\u0631\u06d5\u0646\u062f\u06cc\u0646\u06ce, \u0648\u0648 \u062f\u06d5\u0633\u062a\u0648\u0648\u0631\u06ce\u0646 \u0631\u06ce\u06a4\u06d5\u0628\u06d5\u0631\u06ce \u0628\u06cc\u062c\u06ce\u0647 \u0628\u06cc\u06a9\u06cc\u0646.",
+        stampArrangement:
+          "\u0631\u06ce\u0632\u06a9\u06cc\u0631\u06cc\u0646\u06d5 \u0645\u06c6\u0631\u06d5\u0646",
+        horizontal: "\u06d5\u0633\u0648\u0645\u06d5\u0646\u06d5",
+        classic: "\u06a9\u0644\u06d5\u0633\u06ce\u06a9",
+        flowing: "\u062f\u06cc\u0647\u06d5\u0631\u06cc\u06a9\u06cc\u0646",
+        circular: "\u0686\u06d5\u0645\u0628\u06d5\u0631\u06ce\u0646",
+        growthRequired:
+          "\u0645\u06d5\u0632\u06cc\u0646\u0628\u0648\u0648\u0646 \u067e\u06ce\u0648\u06ce\u0633\u062a \u06d5",
+        responsiveArrangement:
+          "\u0631\u06ce\u06a9\u06d5\u0641\u062a\u06cc\u0646\u06d5 \u0628\u06d5\u0631\u0633\u06cc\u06a4\u062f\u06d5\u0631",
+        previewSurfaceDetails:
+          "\u06d5\u06af\u06d5\u0647\u06cc\u06cc\u06ce\u0646 \u0631\u0648\u0648\u06cc\u06ce \u067e\u06ce\u0634\u062f\u06ce\u062a\u06cc\u0646",
+        customerCard: "\u06a9\u06d5\u0631\u062a\u06d5 \u0645\u06cc\u0634\u062a\u06d5\u0631\u06ce",
+        chooseTheRicherWebCardCompositionCustomersSee:
+          "\u0647\u06cc\u0644\u0628\u06cc\u0698\u06d5\u0631\u062a\u06cc\u0646\u06d5 \u0628\u06d5\u0631\u0647\u06d5\u06a4\u06c6\u06a9\u06d5 \u0642\u06d5\u0631\u062a\u06d5 \u0648\u06d5\u0628\u06ce \u06cc\u06d5 \u062f\u06d5\u0648\u0644\u06d5\u0645\u06d5\u0646\u062f\u062a\u06cc\u0631 \u06a9\u0648 \u062e\u06d5\u0631\u06ce\u062f\u06d5\u0631 \u062f\u06cc\u0628\u06ce\u0646\u06cc\u0646 \u0647\u06cc\u0644\u0628\u06cc\u0698\u06ce\u0631\u06cc\u0646.",
+        customerCardLayout:
+          "\u0644\u06d5\u06cc\u06c6\u0648\u062a \u06a9\u06d5\u0631\u062a\u06d5 \u0645\u06cc\u0634\u062a\u06d5\u0631\u06ce",
+        card: "\u0642\u06d5\u0631\u062a",
+        minimal: "\u0633\u06d5\u062f\u06d5",
+        hero: "\u0642\u06d5\u0647\u0631\u06d5\u0645\u06d5\u0646",
+        theseLabelsApplyToTheFieldsSupportedByAppleWallet:
+          "\u06a4\u06d5\u0646 \u06d5\u062a\u06ce\u06a9\u06d5\u062a\u06d5\u0646 \u0644\u06cc \u0642\u06d5\u062f\u06ce\u0646 \u06a9\u0648 \u0698\u06cc \u0647\u06ce\u0644\u06d5 \u06d5\u067e\u067e\u0644\u06d5 \u0648\u06d5\u0644\u0644\u06d5\u062a \u06a4\u06d5 \u062a\u06ce\u0646\u06d5 \u067e\u06cc\u0634\u062a\u06af\u06cc\u0631\u06ce \u06a9\u06cc\u0631\u06cc\u0646 \u062f\u06d5\u0631\u0628\u06d5\u0633 \u062f\u06cc\u0628\u06cc\u0646.",
+        headerLabel: "\u0644\u06d5\u0628\u06d5\u0644\u06ce \u0633\u06d5\u0631\u06ce",
+        headerValue: "\u0646\u06cc\u0631\u062e\u06d5 \u0633\u06d5\u0631\u06ce",
+        secondaryLabel:
+          "\u0644\u06d5\u0628\u06d5\u0644\u06ce \u062f\u0648\u06cc\u06d5\u0645\u06ce\u0646",
+        barcodeLabel:
+          "\u0644\u06d5\u0628\u06d5\u0644\u06ce \u0628\u06d5\u0631\u062c\u06c6\u062f\u06d5",
+        showAppleCardBackContent:
+          "\u0646\u06d5\u06a4\u06d5\u0631\u06c6\u06a9\u06d5 \u067e\u06d5\u0634\u06cc\u06cc\u06d5 \u0642\u06d5\u0631\u062a\u06d5 \u06d5\u067e\u067e\u0644\u06d5 \u0646\u06ce\u0634\u06d5\u0646 \u0628\u06cc\u062f\u06cc\u0646",
+        theseLabelsApplyToTheFieldsSupportedByGoogleWallet:
+          "\u06a4\u06d5\u0646 \u06d5\u062a\u06ce\u06a9\u06d5\u062a\u06d5\u0646 \u0644\u06cc \u0642\u06d5\u062f\u06ce\u0646 \u06a9\u0648 \u0698\u06cc \u0647\u06ce\u0644\u06d5 \u06af\u06c6\u06c6\u06af\u0644\u06d5 \u0648\u06d5\u0644\u0644\u06d5\u062a \u06a4\u06d5 \u062a\u06ce\u0646\u06d5 \u067e\u06cc\u0634\u062a\u06af\u06cc\u0631\u06ce \u06a9\u06cc\u0631\u06cc\u0646 \u062f\u06d5\u0631\u0628\u06d5\u0633 \u062f\u06cc\u0628\u06cc\u0646.",
+        title: "\u0646\u06d5\u06a4",
+        subtitle: "\u0628\u06cc\u0646\u0646\u06cc\u06a4\u06ce\u0633",
+        detailsLabel:
+          "\u0646\u06d5\u06a4\u0646\u06ce\u0634\u06d5\u0646\u06d5 \u0647\u0648\u0648\u0631\u06af\u0648\u0644\u06cc\u06cc\u06d5\u0646",
+        changeSummary:
+          "\u06af\u0648\u0647\u06d5\u0631\u062a\u06cc\u0646\u06d5 \u06a9\u0648\u0631\u062a\u06d5\u06cc\u06d5",
+        finalRewardBehaviorIsFixed:
+          "\u062a\u06d5\u06a4\u06af\u06d5\u0631\u06d5 \u062e\u06d5\u0644\u06d5\u062a\u06d5 \u062f\u06d5\u0648\u06ce\u0646 \u0631\u06d5\u0633\u062a \u06d5",
+        atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds:
+          "\u062f\u06cc \u06d5\u0631\u0645\u06d5\u0646\u062c\u06ce \u062f\u06d5 \u0647\u06d5\u0631 \u0647\u06ce\u0644\u06ce\u0646 \u062a\u06cc\u0698\u06ce \u062f\u06cc\u0645\u06ce\u0646\u06d5; \u0634\u06d5\u0628\u06d5\u06a9 \u062a\u06d5\u0646\u06ce \u067e\u06cc\u0634\u062a\u06ce \u06a9\u0648 \u062e\u06d5\u0644\u06d5\u0633\u06a9\u06cc\u0631\u06cc\u0646\u06d5 \u062e\u06d5\u0644\u06d5\u062a\u06d5 \u067e\u06d5\u0634\u06ce\u0646 \u0628\u06cc\u0633\u06d5\u0631\u06a9\u06d5\u062a \u06a4\u06d5\u0644\u06d5 \u062f\u06cc\u06a9\u06d5.",
+        readinessChecks:
+          "\u06a9\u06c6\u0646\u062a\u0631\u06c6\u0644\u06ce\u0646 \u06d5\u0645\u06d5\u062f\u06d5\u06a9\u06d5\u0631\u06cc\u06cc\u06ce",
+      },
+    },
+  },
+  kuSorani: {
+    builder: {
+      ui: {
+        thisCardHasNoEditableDraftOpenStudioToCreateTheNextVersion:
+          "\u0626\u06d5\u0645 \u06a9\u0627\u0631\u062a\u06d5 \u0647\u06cc\u0686 \u0695\u06d5\u0634\u0646\u0648\u0648\u0633\u06ce\u06a9\u06cc \u062f\u06d5\u0633\u062a\u06a9\u0627\u0631\u06cc\u06a9\u0631\u0627\u0648\u06cc \u0646\u06cc\u06cc\u06d5. \u0633\u062a\u06c6\u062f\u06cc\u06c6 \u0628\u06a9\u06d5\u0631\u06d5\u0648\u06d5 \u0628\u06c6 \u062f\u0631\u0648\u0633\u062a\u06a9\u0631\u062f\u0646\u06cc \u0648\u06d5\u0634\u0627\u0646\u06cc \u062f\u0627\u0647\u0627\u062a\u0648\u0648.",
+        startFromScratch:
+          "\u0644\u06d5 \u0633\u0641\u0631\u06d5\u0648\u06d5 \u062f\u06d5\u0633\u062a \u067e\u06ce \u0628\u06a9\u06d5",
+        selectedDesign:
+          "\u062f\u06cc\u0632\u0627\u06cc\u0646\u06cc \u0647\u06d5\u06b5\u0628\u0698\u06ce\u0631\u062f\u0631\u0627\u0648",
+        neutral: "\u0628\u06ce\u0644\u0627\u06cc\u06d5\u0646",
+        cardBuilderSections:
+          "\u0628\u06d5\u0634\u06d5\u06a9\u0627\u0646\u06cc \u062f\u0631\u0648\u0633\u062a\u06a9\u06d5\u0631\u06cc \u06a9\u0627\u0631\u062a",
+        cardNameInYourDashboard:
+          "\u0646\u0627\u0648\u06cc \u06a9\u0627\u0631\u062a \u0644\u06d5 \u062f\u0627\u0634\u0628\u06c6\u0631\u062f\u06d5\u06a9\u06d5\u062a\u062f\u0627",
+        customersDoNotSeeThisInternalName:
+          "\u06a9\u0695\u06cc\u0627\u0631\u0627\u0646 \u0626\u06d5\u0645 \u0646\u0627\u0648\u06d5 \u0646\u0627\u0648\u062e\u06c6\u06cc\u06cc\u06d5 \u0646\u0627\u0628\u06cc\u0646\u0646.",
+        howDoesACustomerEarnAStamp:
+          "\u0686\u06c6\u0646 \u06a9\u0695\u06cc\u0627\u0631 \u0645\u06c6\u0631\u06ce\u06a9 \u0628\u06d5\u062f\u06d5\u0633\u062a \u062f\u06d5\u0647\u06ce\u0646\u06ce\u062a\u061f",
+        stampGoal: "\u06af\u06c6\u06b5\u06cc \u0645\u06c6\u0631",
+        thisCardSupportsAnExactGoalFrom2To30Stamps:
+          "\u0626\u06d5\u0645 \u06a9\u0627\u0631\u062a\u06d5 \u067e\u0634\u062a\u06af\u06cc\u0631\u06cc \u0644\u06d5 \u0626\u0627\u0645\u0627\u0646\u062c\u06ce\u06a9\u06cc \u0648\u0631\u062f \u062f\u06d5\u06a9\u0627\u062a \u0644\u06d5 \u0662 \u0628\u06c6 \u0663\u0660 \u0645\u06c6\u0631\u06d5\u0648\u06d5.",
+        stamps: "\u0645\u06c6\u0631\u06d5\u06a9\u0627\u0646",
+        exactStampGoal:
+          "\u0626\u0627\u0645\u0627\u0646\u062c\u06cc \u0645\u06c6\u0631\u06cc \u0648\u0631\u062f",
+        unlockedAt: "\u0644\u06d5...",
+        rewardReadinessAppearsOutsideTheStampGrid:
+          "\u0626\u0627\u0645\u0627\u062f\u06d5\u06cc\u06cc \u067e\u0627\u062f\u0627\u0634\u062a \u0644\u06d5 \u062f\u06d5\u0631\u06d5\u0648\u06d5\u06cc \u062a\u06c6\u0695\u06cc \u0645\u06c6\u0631\u06d5\u06a9\u0627\u0646 \u062f\u06d5\u0631\u062f\u06d5\u06a9\u06d5\u0648\u06ce\u062a.",
+        whatDoesTheCustomerGet:
+          "\u06a9\u0695\u06cc\u0627\u0631 \u0686\u06cc \u0628\u06d5\u062f\u06d5\u0633\u062a \u062f\u06d5\u0647\u06ce\u0646\u06ce\u062a\u061f",
+        arabicReward:
+          "\u067e\u0627\u062f\u0627\u0634\u062a\u06cc \u0639\u06d5\u0631\u06d5\u0628\u06cc",
+        rewardOptions:
+          "\u0628\u0698\u0627\u0631\u062f\u06d5\u06a9\u0627\u0646\u06cc \u067e\u0627\u062f\u0627\u0634\u062a",
+        rewardType: "\u062c\u06c6\u0631\u06cc \u067e\u0627\u062f\u0627\u0634\u062a",
+        freeItem:
+          "\u0628\u0627\u0628\u06d5\u062a\u06cc \u0628\u06ce \u0628\u06d5\u0631\u0627\u0645\u0628\u06d5\u0631",
+        discount: "\u062f\u0627\u0634\u06a9\u0627\u0646",
+        descriptiveReward:
+          "\u067e\u0627\u062f\u0627\u0634\u062a\u06cc \u0648\u06d5\u0633\u0641\u06a9\u06d5\u0631",
+        custom: "\u0628\u0627\u0648",
+        rewardValidityAndRedemptionApprovalsAreSetInStudioAfterTheCardDesignIsComplete:
+          "\u0695\u06d5\u0648\u0627\u06cc\u06d5\u062a\u06cc \u067e\u0627\u062f\u0627\u0634\u062a \u0648 \u0695\u06d5\u0632\u0627\u0645\u06d5\u0646\u062f\u06cc \u0695\u0632\u06af\u0627\u0631\u06a9\u0631\u062f\u0646 \u0644\u06d5 \u0633\u062a\u06c6\u062f\u06cc\u06c6\u062f\u0627 \u062f\u0627\u062f\u06d5\u0646\u0631\u06ce\u062a \u062f\u0648\u0627\u06cc \u062a\u06d5\u0648\u0627\u0648\u0628\u0648\u0648\u0646\u06cc \u062f\u06cc\u0632\u0627\u06cc\u0646\u06cc \u06a9\u0627\u0631\u062a\u06d5\u06a9\u06d5.",
+        cardLanguages:
+          "\u0632\u0645\u0627\u0646\u06d5\u06a9\u0627\u0646\u06cc \u06a9\u0627\u0631\u062a",
+        chooseCardLanguagesDescription:
+          "ئەو زمانانە هەڵبژێرە کە کڕیاران دەتوانن کارتی دڵسۆزییەکەی پێ ببینن. دواتر دەتوانیت زمان زیاد یان لاببەیت.",
+        defaultLanguage: "زمانی بنەڕەتی",
+        defaultLanguageHelp: "زمانی بنەڕەتیی کڕیار تەنها دوای بڵاوکردنەوەی ئەم ڕەشنووسە دەگۆڕێت.",
+        enabledLanguages: "زمانە چالاکەکان",
+        addLanguage: "زمان زیاد بکە",
+        searchLanguages: "بە ناوی ئینگلیزی یان ناوی ڕەسەن بگەڕێ",
+        popularLanguages: "باوەکان",
+        allLanguages: "هەموو زمانەکان",
+        defaultBadge: "بنەڕەتی",
+        cannotRemoveDefault: "پێش لابردنی ئەم زمانە، زمانێکی تر وەک بنەڕەتی هەڵبژێرە.",
+        removeLanguage: "زمان لاببە",
+        contentLanguage: "زمانی ناوەڕۆک",
+        providerReadiness: "ئامادەیی دابینکەر بۆ هەر زمانێکی چالاک",
+        normalizedSupport: "گونجێنراو",
+        limitedSupport: "سنووردار",
+        customerCardName: "ناوی کارتی پیشاندراو بە کڕیار",
+        shortDescription: "وەسفی کورت",
+        detailedContentAndMessages: "ناوەڕۆکی ورد و پەیامەکان",
+        fullDescription: "وەسفی تەواو",
+        joinInstructions: "ڕێنماییەکانی بەشداربوون",
+        termsAndConditions: "مەرج و ڕێساکان",
+        goalCompletionMessage: "پەیامی تەواوکردنی ئامانج",
+        rewardReadyMessage: "پەیامی ئامادەبوونی خەڵات",
+        pausedCardMessage: "پەیامی ڕاگرتنی کاتی",
+        yourActiveLocationIsIncluded:
+          "\u0634\u0648\u06ce\u0646\u06cc \u0686\u0627\u0644\u0627\u06a9\u06d5\u06a9\u06d5\u062a \u0644\u06d5\u06af\u06d5\u06b5\u062f\u0627\u06cc\u06d5",
+        youCanRemoveItButAtLeastOneLocationIsRequiredForReadiness:
+          "\u062f\u06d5\u062a\u0648\u0627\u0646\u06cc\u062a \u0644\u0627\u0628\u0628\u06d5\u06cc\u062a\u060c \u0628\u06d5\u06b5\u0627\u0645 \u0644\u0627\u0646\u06cc\u06a9\u06d5\u0645 \u06cc\u06d5\u06a9 \u0634\u0648\u06ce\u0646 \u067e\u06ce\u0648\u06cc\u0633\u062a\u06d5 \u0628\u06c6 \u0626\u0627\u0645\u0627\u062f\u06d5\u06cc\u06cc.",
+        active: "\u0686\u0627\u0644\u0627\u06a9",
+        inactive: "\u0646\u0627\u0686\u0627\u0644\u0627\u06a9",
+        earning: "\u062f\u0627\u0647\u0627\u062a",
+        redemption: "\u0695\u0632\u06af\u0627\u0631\u06a9\u0631\u062f\u0646",
+        background: "\u0628\u0627\u06a9\u06af\u0631\u0627\u0648\u0646\u062f",
+        text: "\u062f\u06d5\u0642",
+        accent: "\u0634\u06ce\u0648\u06d5\u0632\u0627\u0631",
+        secondary: "\u0642\u06c6\u0646\u0627\u063a\u06cc \u0644\u0627\u0648\u06d5\u06a9\u06cc",
+        stampedIcon:
+          "\u0626\u0627\u06cc\u06a9\u06c6\u0646\u06cc \u0645\u06c6\u0631\u06a9\u0631\u0627\u0648",
+        emptyStamp: "\u0645\u06c6\u0631\u06cc \u0628\u06d5\u062a\u0627\u06b5",
+        removeMilestonesBeforeReturningToQuickMode:
+          "\u067e\u06ce\u0634 \u06af\u06d5\u0695\u0627\u0646\u06d5\u0648\u06d5 \u0628\u06c6 \u062f\u06c6\u062e\u06cc \u062e\u06ce\u0631\u0627 \u0628\u06d5\u0631\u0628\u06d5\u0633\u062a\u06d5\u06a9\u0627\u0646 \u0644\u0627\u0628\u0628\u06d5",
+        milestoneRewards:
+          "\u067e\u0627\u062f\u0627\u0634\u062a\u06cc \u0645\u0627\u06cc\u06b5\u0633\u062a\u06c6\u0646",
+        milestonesRemainOutsideTheStampGridAndNeverReplaceASlot:
+          "\u0628\u06d5\u0631\u0628\u06d5\u0633\u062a\u06d5 \u06af\u0631\u0646\u06af\u06d5\u06a9\u0627\u0646 \u0644\u06d5 \u062f\u06d5\u0631\u06d5\u0648\u06d5\u06cc \u062a\u06c6\u0695\u06cc \u0645\u06c6\u0631\u06d5\u06a9\u0627\u0646 \u062f\u06d5\u0645\u06ce\u0646\u0646\u06d5\u0648\u06d5 \u0648 \u0647\u06d5\u0631\u06af\u06cc\u0632 \u0634\u0648\u06ce\u0646\u06ce\u06a9 \u0646\u0627\u06af\u06c6\u0695\u0646.",
+        addMilestone:
+          "\u0628\u0695\u0628\u0695\u06d5\u06cc \u06af\u0631\u0646\u06af \u0632\u06cc\u0627\u062f \u0628\u06a9\u06d5",
+        stampThreshold: "\u0626\u0627\u0633\u062a\u06cc \u0645\u06c6\u0631",
+        rewardName: "\u0646\u0627\u0648\u06cc \u067e\u0627\u062f\u0627\u0634\u062a",
+        rewardDescription: "\u0648\u06d5\u0633\u0641\u06cc \u067e\u0627\u062f\u0627\u0634\u062a",
+        removeMilestone:
+          "\u0644\u0627\u0628\u0631\u062f\u0646\u06cc \u0628\u0695\u0628\u0695\u06d5\u06cc \u067e\u0634\u062a",
+        operationalRulesLiveInStudio:
+          "\u06cc\u0627\u0633\u0627\u06a9\u0627\u0646\u06cc \u06a9\u0627\u0631\u06a9\u0631\u062f\u0646 \u0644\u06d5 \u0633\u062a\u06c6\u062f\u06cc\u06c6\u062f\u0627 \u0695\u0627\u0633\u062a\u06d5\u0648\u062e\u06c6",
+        afterDesignSetStampLimitsPurchaseRequirementsReversalWindowsAndManagerPermissionsInHowItWorks:
+          "\u062f\u0648\u0627\u06cc \u062f\u06cc\u0632\u0627\u06cc\u0646\u060c \u0633\u0646\u0648\u0648\u0631\u06cc \u0645\u06c6\u0631\u060c \u067e\u06ce\u062f\u0627\u0648\u06cc\u0633\u062a\u06cc\u06cc\u06d5\u06a9\u0627\u0646\u06cc \u06a9\u0695\u06cc\u0646\u060c \u067e\u06d5\u0646\u062c\u06d5\u0631\u06d5\u06cc \u067e\u06ce\u0686\u06d5\u0648\u0627\u0646\u06d5\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5 \u0648 \u0645\u06c6\u06b5\u06d5\u062a\u06cc \u0628\u06d5\u0695\u06ce\u0648\u06d5\u0628\u06d5\u0631 \u0644\u06d5 \u0686\u06c6\u0646\u06cc\u06d5\u062a\u06cc \u06a9\u0627\u0631\u06a9\u0631\u062f\u0646\u062f\u0627 \u062f\u0627\u0628\u0646\u06ce.",
+        stampArrangement:
+          "\u0695\u06ce\u06a9\u062e\u0633\u062a\u0646\u06cc \u0645\u06c6\u0631\u06d5\u06a9\u0627\u0646",
+        horizontal: "\u0626\u0627\u0633\u06c6\u06cc\u06cc",
+        classic: "\u06a9\u0644\u0627\u0633\u06cc\u06a9",
+        flowing: "\u0695\u0698\u0627\u0646",
+        circular: "\u0628\u0627\u0632\u0646\u06d5\u06cc\u06cc",
+        growthRequired:
+          "\u06af\u06d5\u0634\u06d5\u06a9\u0631\u062f\u0646 \u067e\u06ce\u0648\u06cc\u0633\u062a\u06d5",
+        responsiveArrangement:
+          "\u0695\u06ce\u06a9\u062e\u0633\u062a\u0646\u06cc \u0648\u06d5\u06b5\u0627\u0645\u062f\u06d5\u0631\u06d5\u0648\u06d5",
+        previewSurfaceDetails:
+          "\u067e\u06ce\u0634\u0628\u06cc\u0646\u06cc \u0648\u0631\u062f\u06d5\u06a9\u0627\u0631\u06cc\u06cc\u06d5\u06a9\u0627\u0646\u06cc \u0695\u0648\u0648\u06a9\u0627\u0631 \u0628\u06a9\u06d5",
+        customerCard: "\u06a9\u0627\u0631\u062a\u06cc \u06a9\u0695\u06cc\u0627\u0631",
+        chooseTheRicherWebCardCompositionCustomersSee:
+          "\u067e\u06ce\u06a9\u0647\u0627\u062a\u06d5\u06cc \u062f\u06d5\u0648\u06b5\u06d5\u0645\u06d5\u0646\u062f\u062a\u0631\u06cc \u0648\u06ce\u0628-\u06a9\u0627\u0631\u062a \u0647\u06d5\u06b5\u0628\u0698\u06ce\u0631\u06d5 \u06a9\u06d5 \u06a9\u0695\u06cc\u0627\u0631\u0627\u0646 \u062f\u06d5\u06cc\u0628\u06cc\u0646\u0646.",
+        customerCardLayout:
+          "\u0634\u06ce\u0648\u0627\u0632\u06cc \u06a9\u0627\u0631\u062a\u06cc \u06a9\u0695\u06cc\u0627\u0631",
+        card: "\u06a9\u0627\u0631\u062a",
+        minimal: "\u06a9\u06d5\u0645\u062a\u0631\u06cc\u0646",
+        hero: "\u067e\u0627\u06b5\u06d5\u0648\u0627\u0646",
+        theseLabelsApplyToTheFieldsSupportedByAppleWallet:
+          "\u0626\u06d5\u0645 \u0644\u06cc\u0628\u06ce\u06b5\u0627\u0646\u06d5 \u0628\u06c6 \u0626\u06d5\u0648 \u0628\u0648\u0627\u0631\u0627\u0646\u06d5 \u062f\u06d5\u06af\u0648\u0646\u062c\u06ce\u062a \u06a9\u06d5 \u0644\u06d5\u0644\u0627\u06cc\u06d5\u0646 \u0626\u06d5\u067e\u06b5 \u0648\u0627\u0644\u06ce\u062a\u06d5\u0648\u06d5 \u067e\u0634\u062a\u06af\u06cc\u0631\u06cc \u062f\u06d5\u06a9\u0631\u06ce\u0646.",
+        headerLabel: "\u0646\u0627\u0648\u06cc \u0633\u06d5\u0631\u062f\u06ce\u0695",
+        headerValue: "\u0628\u06d5\u0647\u0627\u06cc \u0633\u06d5\u0631\u062f\u06ce\u0695",
+        secondaryLabel: "\u0646\u0627\u0648\u06cc \u0644\u0627\u0648\u06d5\u06a9\u06cc",
+        barcodeLabel: "\u0644\u06cc\u0628\u06ce\u06b5\u06cc \u0628\u0627\u0631\u06a9\u06c6\u062f",
+        showAppleCardBackContent:
+          "\u0646\u0627\u0648\u06d5\u0695\u06c6\u06a9\u06cc \u06a9\u0627\u0631\u062a\u06cc \u0626\u06d5\u067e\u06b5 \u067e\u06cc\u0634\u0627\u0646 \u0628\u062f\u06d5",
+        theseLabelsApplyToTheFieldsSupportedByGoogleWallet:
+          "\u0626\u06d5\u0645 \u0644\u06cc\u0628\u06ce\u06b5\u0627\u0646\u06d5 \u0628\u06c6 \u0626\u06d5\u0648 \u0628\u0648\u0627\u0631\u0627\u0646\u06d5 \u062f\u06d5\u06af\u0648\u0646\u062c\u06ce\u062a \u06a9\u06d5 \u0644\u06d5\u0644\u0627\u06cc\u06d5\u0646 \u062c\u0632\u062f\u0627\u0646\u06cc \u06af\u0648\u0648\u06af\u06b5\u06d5\u0648\u06d5 \u067e\u0634\u062a\u06af\u06cc\u0631\u06cc \u062f\u06d5\u06a9\u0631\u06ce\u0646.",
+        title: "\u0646\u0627\u0648\u0646\u06cc\u0634\u0627\u0646",
+        subtitle: "\u0698\u06ce\u0631\u0646\u0648\u0648\u0633",
+        detailsLabel:
+          "\u0648\u0631\u062f\u06d5\u06a9\u0627\u0631\u06cc\u06cc\u06d5\u06a9\u0627\u0646 \u0644\u06cc\u0628\u06ce\u06b5",
+        changeSummary: "\u067e\u0648\u062e\u062a\u06d5 \u0628\u06af\u06c6\u0695\u06d5",
+        finalRewardBehaviorIsFixed:
+          "\u0695\u06d5\u0641\u062a\u0627\u0631\u06cc \u067e\u0627\u062f\u0627\u0634\u062a\u06cc \u06a9\u06c6\u062a\u0627\u06cc\u06cc \u062c\u06ce\u06af\u06cc\u0631\u06d5",
+        atTheGoalEverySlotRemainsFilledTheGridResetsToEmptyOnlyAfterFinalRewardRedemptionSucceeds:
+          "\u0644\u06d5 \u06af\u06c6\u06b5\u062f\u0627 \u0647\u06d5\u0645\u0648\u0648 \u0634\u0648\u06ce\u0646\u06ce\u06a9 \u0628\u06d5 \u067e\u0695 \u062f\u06d5\u0645\u06ce\u0646\u06ce\u062a\u06d5\u0648\u06d5\u061b \u062a\u06c6\u0695\u06d5\u06a9\u06d5 \u062a\u06d5\u0646\u0647\u0627 \u062f\u0648\u0627\u06cc \u0633\u06d5\u0631\u06a9\u06d5\u0648\u062a\u0646\u06cc \u0648\u06d5\u0631\u06af\u0631\u062a\u0646\u06d5\u0648\u06d5\u06cc \u067e\u0627\u062f\u0627\u0634\u062a\u06cc \u06a9\u06c6\u062a\u0627\u06cc\u06cc \u062f\u06d5\u06af\u06d5\u0695\u06ce\u062a\u06d5\u0648\u06d5 \u0628\u06c6 \u0628\u06d5\u062a\u0627\u06b5.",
+        readinessChecks:
+          "\u067e\u0634\u06a9\u0646\u06cc\u0646\u06cc \u0626\u0627\u0645\u0627\u062f\u06d5\u06cc\u06cc",
+      },
+    },
+  },
+} as const;

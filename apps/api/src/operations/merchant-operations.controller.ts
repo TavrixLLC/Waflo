@@ -4,7 +4,6 @@ import {
   analyticsRebuildSchema,
   createExportSchema,
   managerApprovalDecisionSchema,
-  managerApprovalRequestSchema,
   manualAdjustmentSchema,
   membershipStatusOperationSchema,
   privacyRequestSchema,
@@ -12,7 +11,7 @@ import {
   riskSignalDecisionSchema,
 } from "@waflo/contracts";
 import type { FastifyReply } from "fastify";
-import { CurrentUser, RateLimit } from "../common/decorators.js";
+import { CurrentUser } from "../common/decorators.js";
 import type { AuthenticatedUser, WafloRequest } from "../common/request-context.js";
 import {
   parseInput,
@@ -206,22 +205,6 @@ export class MerchantOperationsController {
       parseUuid(membershipId),
       input.commandId,
       input.expectedProjectionVersion,
-      request,
-    );
-  }
-
-  @Post("operation-approvals")
-  @RateLimit(60)
-  createApproval(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("organizationId") organizationId: string,
-    @Body() body: unknown,
-    @Req() request: WafloRequest,
-  ) {
-    return this.operations.createApproval(
-      user.id,
-      parseUuid(organizationId),
-      parseInput(managerApprovalRequestSchema, body),
       request,
     );
   }

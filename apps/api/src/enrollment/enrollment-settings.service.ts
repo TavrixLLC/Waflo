@@ -58,6 +58,7 @@ export class EnrollmentSettingsService {
             merchantSlug: program.organization.merchantSlug,
             programSlug: program.publicSlug,
             customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+            merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
           })
         : null;
     return {
@@ -150,7 +151,7 @@ export class EnrollmentSettingsService {
             metadata: {
               programId,
               versionId,
-              emailCollectionMode: policy.emailCollectionMode,
+              phoneCollectionMode: policy.phoneCollectionMode,
               enrollmentOpen: policy.enrollmentOpen,
             },
           },
@@ -265,6 +266,7 @@ export class EnrollmentSettingsService {
       merchantSlug: program.organization.merchantSlug,
       programSlug: program.publicSlug,
       customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+      merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
     });
     await this.audit.record(
       {
@@ -289,13 +291,14 @@ export class EnrollmentSettingsService {
         merchantSlug,
         programSlug,
         customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+        merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
       }),
     };
   }
 
   private policyData(input: ProgramEnrollmentPolicyInput) {
     return {
-      emailCollectionMode: input.emailCollectionMode,
+      phoneCollectionMode: input.phoneCollectionMode,
       primaryCustomerLocale:
         input.primaryCustomerLocale === "ar" ? ("AR" as const) : ("EN" as const),
       allowLocaleSelection: input.allowLocaleSelection,
@@ -309,7 +312,7 @@ export class EnrollmentSettingsService {
 
   private policy(
     value: {
-      emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
+      phoneCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
       primaryCustomerLocale: "EN" | "AR";
       allowLocaleSelection: boolean;
       marketingConsentVisible: boolean;
@@ -320,7 +323,7 @@ export class EnrollmentSettingsService {
     } | null,
   ) {
     return {
-      emailCollectionMode: value?.emailCollectionMode ?? "OPTIONAL",
+      phoneCollectionMode: value?.phoneCollectionMode ?? "OPTIONAL",
       primaryCustomerLocale: value?.primaryCustomerLocale === "AR" ? "ar" : "en",
       allowLocaleSelection: value?.allowLocaleSelection ?? true,
       marketingConsentVisible: value?.marketingConsentVisible ?? false,

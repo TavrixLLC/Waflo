@@ -1,7 +1,16 @@
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { unzipSync } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  renderNotificationHtml,
+  safeNotificationActionUrl,
+} from "../../apps/api/src/notifications/notification.service.js";
+import {
+  enrollmentBillingDecision,
+  walletIncludedForPlan,
+} from "../../packages/billing/src/index.js";
+import { parseEnvironment } from "../../packages/config/src/index.js";
 import {
   createCustomerDataKeyring,
   decryptCustomerValue,
@@ -16,31 +25,25 @@ import {
   canonicalJoinUrl,
   createQrPng,
   decodeQrImage,
-  formatMembershipQrPayload,
-  parseMembershipQrPayload,
+  formatMembershipCredentialPayload,
+  parseMembershipCredentialPayload,
 } from "../../packages/qr-core/src/index.js";
 import { AppleWalletProvider, TestApplePassSigner } from "../../packages/wallet-apple/src/index.js";
+import { WalletProviderError } from "../../packages/wallet-core/dist/index.js";
+import {
+  normalizeWalletProviderError,
+  resolveWalletLoyaltyPresentation,
+  type WalletMembershipInput,
+  walletCommandIdempotencyKey,
+} from "../../packages/wallet-core/src/index.js";
 import {
   createGoogleSaveJwt,
   GoogleWalletProvider,
   googleLoyaltyClassId,
   googleLoyaltyObjectId,
+  mapGoogleLoyaltyClass,
   mapGoogleLoyaltyObject,
 } from "../../packages/wallet-google/src/index.js";
-import {
-  normalizeWalletProviderError,
-  walletCommandIdempotencyKey,
-  type WalletMembershipInput,
-} from "../../packages/wallet-core/src/index.js";
-import { parseEnvironment } from "../../packages/config/src/index.js";
-import {
-  enrollmentBillingDecision,
-  walletIncludedForPlan,
-} from "../../packages/billing/src/index.js";
-import {
-  renderNotificationHtml,
-  safeNotificationActionUrl,
-} from "../../apps/api/src/notifications/notification.service.js";
 
 const walletInput: WalletMembershipInput = {
   organizationId: "00000000-0000-4000-8000-000000000001",
@@ -54,6 +57,27 @@ const walletInput: WalletMembershipInput = {
   foregroundColor: "#241916",
   configurationFingerprint: "a".repeat(64),
   locale: "en",
+  defaultLocale: "en",
+  localizedContent: [
+    {
+      locale: "en",
+      programName: "Cedar Circle",
+      description: "A multilingual coffee loyalty card.",
+      rewardSummary: "A complimentary drink after eight stamps.",
+    },
+    {
+      locale: "ar",
+      programName: "دائرة سيدار",
+      description: "بطاقة ولاء للمقهى.",
+      rewardSummary: "مشروب مجاني بعد ثمانية أختام.",
+    },
+    {
+      locale: "fr",
+      programName: "Cercle Cedar",
+      description: "Une carte de fidélité du café.",
+      rewardSummary: "Une boisson offerte après huit tampons.",
+    },
+  ],
   walletPassInstanceId: "00000000-0000-4000-8000-000000000004",
   providerIdentity: "waflo.00000000000040008000000000000004",
   publicMembershipId: "member_m8PNYl1aSr9bT0V4w89d3H2g",
@@ -70,7 +94,8 @@ const walletInput: WalletMembershipInput = {
     programId: "00000000-0000-4000-8000-000000000002",
     programVersionId: "00000000-0000-4000-8000-000000000003",
     membershipId: "00000000-0000-4000-8000-000000000005",
-    rendererSchemaVersion: "waflo-stamp-render-v1",
+    rendererSchemaVersion: "waflo-stamp-render-v2",
+    rewardLabel: "Free reward",
     locale: "en",
     requiredStampCount: 8,
     currentStampCount: 3,
@@ -104,6 +129,18 @@ const walletInput: WalletMembershipInput = {
 };
 
 describe("W3 customer security, QR, and Wallet domain", () => {
+  it("isolates the visible stamp fraction from Arabic bidi reordering", () => {
+    const enrollmentSource = readFileSync(
+      "apps/customer-web/app/join/[programSlug]/enrollment-form.tsx",
+      "utf8",
+    );
+    const globalStyles = readFileSync("apps/customer-web/app/globals.css", "utf8");
+    expect(enrollmentSource).toContain('<bdi dir="ltr" className="numeric-fraction">');
+    expect(globalStyles).toMatch(
+      /\.numeric-fraction\s*\{[^}]*direction:\s*ltr;[^}]*unicode-bidi:\s*isolate;[^}]*white-space:\s*nowrap;/su,
+    );
+  });
+
   it("encrypts customer email with tenant/record AAD and never stores plaintext", () => {
     const keyring = createCustomerDataKeyring(1, { 1: "10".repeat(32) });
     const encrypted = encryptCustomerValue("customer@example.com", {
@@ -142,13 +179,13 @@ describe("W3 customer security, QR, and Wallet domain", () => {
   it("round-trips opaque membership credentials through rendered QR images", async () => {
     const versioned = { version: 1, secret: Buffer.alloc(32, 8) };
     const publicCredentialId = "cred_m8PNYl1aSr9bT0V4w89d3H2g";
-    const payload = formatMembershipQrPayload({
+    const payload = formatMembershipCredentialPayload({
       publicCredentialId,
       secretVersion: 1,
       secret: deriveMembershipCredentialSecret(publicCredentialId, 1, versioned),
     });
     assertQrContainsNoPii(payload, ["Amina", "customer@example.com", "3/8"]);
-    expect(parseMembershipQrPayload(payload)).toMatchObject({
+    expect(parseMembershipCredentialPayload(payload)).toMatchObject({
       publicCredentialId,
       secretVersion: 1,
     });
@@ -191,15 +228,46 @@ describe("W3 customer security, QR, and Wallet domain", () => {
         "icon@3x.png",
         "logo.png",
         "strip.png",
+        "strip@2x.png",
+        "strip@3x.png",
         "en.lproj/pass.strings",
         "ar.lproj/pass.strings",
+        "fr.lproj/pass.strings",
       ]),
     );
     const pass = JSON.parse(Buffer.from(files["pass.json"] ?? []).toString("utf8"));
+    expect(pass.barcodes).toHaveLength(1);
+    expect(pass.barcodes.map((barcode: { format: string }) => barcode.format)).toEqual([
+      "PKBarcodeFormatQR",
+    ]);
     expect(pass.barcodes[0].message).toBe(walletInput.credentialPayload);
+    expect(pass.barcodes[0]).not.toHaveProperty("altText");
     expect(pass.voided).toBe(false);
     expect(Buffer.from(files.signature ?? [])).not.toHaveLength(0);
     expect(Buffer.from(files["manifest.json"] ?? []).toString("utf8")).not.toContain("signature");
+    const frenchStrings = Buffer.from(files["fr.lproj/pass.strings"] ?? [])
+      .subarray(2)
+      .toString("utf16le");
+    expect(frenchStrings).toContain('"__WAFLO_PROGRAM__" = "Cercle Cedar";');
+    expect(frenchStrings).toContain(
+      '"__WAFLO_REWARD__" = "Une boisson offerte après huit tampons.";',
+    );
+  });
+
+  it("maps the published card translation source into Google LocalizedString fields", () => {
+    const mapped = mapGoogleLoyaltyClass(
+      walletInput,
+      googleLoyaltyClassId("issuer-1", walletInput.programVersionId),
+    );
+    expect(mapped.localizedProgramName).toEqual({
+      defaultValue: { language: "en", value: "Cedar Circle" },
+      translatedValues: [
+        { language: "ar", value: "دائرة سيدار" },
+        { language: "fr", value: "Cercle Cedar" },
+      ],
+    });
+    expect(mapped.textModulesData).not.toContainEqual(expect.objectContaining({ id: "reward" }));
+    expect(mapped).not.toHaveProperty("classTemplateInfo");
   });
 
   it("maps Google Loyalty identity, opaque QR, public progress art, and transfer invalidation", () => {
@@ -214,9 +282,25 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       id: objectId,
       classId,
       state: "ACTIVE",
-      barcode: { value: walletInput.credentialPayload },
-      imageModulesData: [{ id: "waflo-progress" }],
+      heroImage: { sourceUri: { uri: "https://assets.example.test/wpa_opaque" } },
     });
+    expect(active).not.toHaveProperty("barcode");
+    expect(active).not.toHaveProperty("loyaltyPoints");
+    const {
+      publicAssetBaseUrl: _publicAssetBaseUrl,
+      walletArtworkUrl: _walletArtworkUrl,
+      ...withoutHero
+    } = walletInput;
+    expect(mapGoogleLoyaltyObject(withoutHero, objectId, classId)).toMatchObject({
+      barcode: { value: walletInput.credentialPayload },
+      textModulesData: expect.arrayContaining([
+        expect.objectContaining({ id: "reward", body: walletInput.rewardSummary }),
+      ]),
+    });
+    expect(active).not.toHaveProperty("imageModulesData");
+    expect(active).not.toHaveProperty("accountName");
+    expect(active).not.toHaveProperty("accountId");
+    expect(active).not.toHaveProperty("loyaltyPoints");
     expect(
       mapGoogleLoyaltyObject({ ...walletInput, transferred: true }, objectId, classId).state,
     ).toBe("INACTIVE");
@@ -239,6 +323,104 @@ describe("W3 customer security, QR, and Wallet domain", () => {
       origins: ["https://merchant.waflo.app"],
       payload: { loyaltyObjects: [{ id: "issuer.object" }] },
     });
+  });
+
+  it("converges a concurrent Google object create race onto the deterministic identity", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new WalletProviderError("NOT_FOUND", "missing", { retryable: false }))
+      .mockRejectedValueOnce(
+        new WalletProviderError("ALREADY_EXISTS", "raced", { retryable: false }),
+      )
+      .mockResolvedValueOnce({ value: {} });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer-1",
+      allowedOrigins: ["https://card.example.test"],
+      testActionBaseUrl: "https://card.example.test/wallet-test/google",
+      client: { request } as never,
+    });
+
+    await expect(provider.issueMembershipPass(walletInput)).resolves.toMatchObject({
+      providerObjectId: walletInput.providerIdentity,
+      state: "ACTIVE",
+    });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "loyaltyObject",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      `loyaltyObject/${encodeURIComponent(walletInput.providerIdentity)}`,
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("creates the complete inactive Google object when invalidation finds no provider object", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new WalletProviderError("NOT_FOUND", "missing", { retryable: false }))
+      .mockResolvedValueOnce({ value: {} });
+    const provider = new GoogleWalletProvider({
+      mode: "REAL",
+      issuerId: "issuer-1",
+      allowedOrigins: ["https://card.example.test"],
+      testActionBaseUrl: "https://card.example.test/wallet-test/google",
+      client: { request } as never,
+    });
+
+    await expect(
+      provider.invalidateMembershipPass(walletInput, "MEMBERSHIP_TRANSFERRED"),
+    ).resolves.toEqual({ state: "INACTIVE" });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "loyaltyObject",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.objectContaining({
+          id: walletInput.providerIdentity,
+          state: "INACTIVE",
+          barcode: {
+            type: "QR_CODE",
+            value: walletInput.credentialPayload,
+            alternateText: "No longer valid",
+          },
+        }),
+      }),
+    );
+  });
+
+  it("derives Apple and Google from one localized, PII-safe loyalty presentation", () => {
+    const presentation = resolveWalletLoyaltyPresentation({
+      ...walletInput,
+      locale: "ar",
+      displayName: "محمود سعد",
+      rewardReady: true,
+      currentStampCount: 8,
+    });
+    expect(presentation).toMatchObject({
+      merchantName: walletInput.organizationName,
+      programName: walletInput.programName,
+      memberName: "محمود سعد",
+      progress: "8/8",
+      status: "المكافأة جاهزة",
+      labels: {
+        stamps: "الأختام",
+        member: "العضو",
+        status: "الحالة",
+        reward: "المكافأة",
+      },
+      barcode: {
+        payload: walletInput.credentialPayload,
+        appleFormats: ["PKBarcodeFormatQR"],
+        googleFormat: "QR_CODE",
+      },
+    });
+    assertQrContainsNoPii(presentation.barcode.payload, [
+      presentation.memberName,
+      "customer@example.com",
+    ]);
   });
 
   it("classifies provider failures and makes command identity deterministic", () => {

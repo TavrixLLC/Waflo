@@ -29,13 +29,15 @@ export type PreviewAssetContent = {
       };
 };
 
+export type PreviewAssetVariant = "STAMP_256" | "ORIGINAL_SAFE" | "THUMBNAIL_96";
+
 function sha256Bytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
 export function previewAssetCacheIdentity(
   asset: PreviewAsset | null | undefined,
-  preferredVariant: "STAMP_256" | "ORIGINAL_SAFE",
+  preferredVariant: PreviewAssetVariant,
 ) {
   if (!asset) return null;
   const variant =
@@ -52,7 +54,7 @@ export function previewAssetCacheIdentity(
 export async function resolvePreviewAssetContent(
   storage: ObjectStorage,
   asset: PreviewAsset | null | undefined,
-  preferredVariant: "STAMP_256" | "ORIGINAL_SAFE",
+  preferredVariant: PreviewAssetVariant,
   role: string,
   required = false,
 ): Promise<PreviewAssetContent | undefined> {

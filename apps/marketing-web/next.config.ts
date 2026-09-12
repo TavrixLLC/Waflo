@@ -1,9 +1,9 @@
-import { createNextContentSecurityPolicy } from "@waflo/security";
 import { join } from "node:path";
+import { createNextContentSecurityPolicy } from "@waflo/security";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(process.env.WAFLO_E2E_NEXT_START === "1" ? {} : { output: "standalone" }),
   outputFileTracingRoot: join(import.meta.dirname, "../.."),
   transpilePackages: ["@waflo/ui", "@waflo/brand", "@waflo/billing", "@waflo/i18n"],
   images: { unoptimized: true },
@@ -11,9 +11,18 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   async headers() {
     return [
+      // Country-sensitive catalog output is rendered at request time. CDN and
+      // browser caches must not replay one market's prices to another country.
+      {
+        source: "/:locale/pricing",
+        headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }],
+      },
       {
         source: "/(.*)",
         headers: [
+          ...(process.env.DEPLOYMENT_ENVIRONMENT === "staging"
+            ? [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" }]
+            : []),
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "no-referrer" },

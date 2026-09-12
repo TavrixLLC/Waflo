@@ -13,13 +13,14 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiUrl } from "../lib/api-client";
 import {
+  canonicalPublicUrlForDisplay,
   deriveProgramSharingPresentation,
   isLocalPreviewUrl,
   walletSurfacePresentation,
 } from "./program-publication-presentation";
 
 export interface EnrollmentPolicy {
-  emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
+  phoneCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
   primaryCustomerLocale: "en" | "ar";
   allowLocaleSelection: boolean;
   marketingConsentVisible: boolean;
@@ -58,6 +59,11 @@ export interface WalletHealth {
   configured?: boolean;
   providerReachable?: boolean;
   externallyCertified?: boolean;
+  providerConfigured?: boolean;
+  artifactAvailable?: boolean;
+  installationAvailable?: boolean;
+  deviceEligibility?: "UNKNOWN" | "ELIGIBLE" | "REQUIRES_COMPATIBLE_DEVICE";
+  reason?: "CONFIGURATION" | "ARTIFACT" | "DEVICE" | "PROVIDER";
 }
 
 interface WalletSyncJob {
@@ -224,7 +230,9 @@ export function ProgramEnrollmentSettings({
   async function copyJoinLink() {
     if (!settings?.publicUrl) return;
     try {
-      await navigator.clipboard.writeText(settings.publicUrl);
+      await navigator.clipboard.writeText(
+        canonicalPublicUrlForDisplay(settings.publicUrl) ?? settings.publicUrl,
+      );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2_500);
     } catch {
@@ -302,6 +310,7 @@ export function ProgramEnrollmentSettings({
     locale: ar ? "ar" : "en",
   });
   const localPreview = isLocalPreviewUrl(settings.publicUrl);
+  const displayedPublicUrl = canonicalPublicUrlForDisplay(settings.publicUrl);
   return (
     <Card className="program-enrollment-settings">
       <div className="program-enrollment-settings__heading">
@@ -403,11 +412,11 @@ export function ProgramEnrollmentSettings({
                 </small>
               ) : localPreview ? (
                 <small className="program-local-preview-label">
-                  {ar ? "معاينة محلية للتطوير" : "Local development preview"}
+                  {ar ? "رابط المعاينة" : "Preview link"}
                 </small>
               ) : null}
               <code className="public-enrollment-url" dir="ltr">
-                {settings.publicUrl}
+                {displayedPublicUrl}
               </code>
             </>
           ) : null}
@@ -443,19 +452,19 @@ export function ProgramEnrollmentSettings({
           <h3>
             <ShieldCheck /> {ar ? "سياسة التسجيل" : "Enrollment policy"}
           </h3>
-          <FormField label={ar ? "جمع البريد" : "Email collection"}>
+          <FormField label={ar ? "رقم الهاتف" : "Phone number collection"}>
             <Select
-              value={policy.emailCollectionMode}
+              value={policy.phoneCollectionMode}
               disabled={!settings.editableVersion}
               onChange={(event) =>
                 setPolicy({
                   ...policy,
-                  emailCollectionMode: event.target
-                    .value as EnrollmentPolicy["emailCollectionMode"],
+                  phoneCollectionMode: event.target
+                    .value as EnrollmentPolicy["phoneCollectionMode"],
                 })
               }
             >
-              <option value="HIDDEN">{ar ? "بدون بريد إلكتروني" : "Do not ask"}</option>
+              <option value="HIDDEN">{ar ? "لا تسأل عن رقم هاتف" : "Do not ask"}</option>
               <option value="OPTIONAL">{ar ? "اختياري" : "Optional"}</option>
               <option value="REQUIRED">{ar ? "مطلوب" : "Required"}</option>
             </Select>
@@ -492,7 +501,7 @@ export function ProgramEnrollmentSettings({
           />
           <Checkbox
             checked={policy.marketingConsentVisible}
-            disabled={!settings.editableVersion || policy.emailCollectionMode === "HIDDEN"}
+            disabled={!settings.editableVersion || policy.phoneCollectionMode === "HIDDEN"}
             onChange={(event) =>
               setPolicy({ ...policy, marketingConsentVisible: event.target.checked })
             }
@@ -506,8 +515,8 @@ export function ProgramEnrollmentSettings({
             }
             label={
               ar
-                ? "السماح بالنقل الأقل أمانًا دون بريد"
-                : "Allow lower-security transfer without email"
+                ? "السماح بالنقل الأقل أمانًا دون بريد محفوظ"
+                : "Allow lower-security transfer without a stored email"
             }
           />
           {settings.editableVersion ? (

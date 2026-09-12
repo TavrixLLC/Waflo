@@ -26,12 +26,28 @@ export default defineConfig({
     {
       name: "chromium",
       testMatch:
-        /(?:^|[/\\])(?:platform|merchant-loyalty-cards|merchant-template-gallery|merchant-card-builder|merchant-loyalty-studio|merchant-loyalty-studio-evidence|merchant-launch-publish|merchant-launch-publish-evidence|merchant-p5-polish|merchant-p5-final-repair|merchant-p6-release)\.spec\.ts$/,
+        /(?:^|[/\\])(?:platform|customer-wallet-readiness|merchant-navigation|merchant-loyalty-cards|merchant-template-gallery|merchant-card-builder|merchant-loyalty-studio|merchant-loyalty-studio-evidence|merchant-wallet-engagement|merchant-launch-publish|merchant-launch-publish-evidence|merchant-p5-polish|merchant-p5-final-repair|merchant-p6-release|merchant-i18n-closure-visual|global-loyalty-localization-visual|staging-regression-remaining)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {
       name: "accessibility",
       testMatch: /(?:^|[/\\])accessibility\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], ...localChrome },
+    },
+    {
+      name: "admin",
+      testMatch: /(?:^|[/\\])admin\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], ...localChrome },
+    },
+    {
+      name: "admin-accessibility",
+      testMatch: /(?:^|[/\\])admin-accessibility\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"], ...localChrome },
+    },
+    {
+      name: "design-review",
+      testMatch:
+        /(?:^|[/\\])(?:merchant-design-review|merchant-targeted-branding-visual|merchant-i18n-closure-visual)\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"], ...localChrome },
     },
     {

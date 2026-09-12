@@ -21,6 +21,21 @@ enum UserStatus {
   DEACTIVATED
 }
 
+// Internal operators have a tenant-independent identity and capability role.
+// This is deliberately distinct from merchant OrganizationMember roles.
+enum AdminRole {
+  SUPER_ADMIN
+  PRICING_ADMIN
+  FINANCE
+  SUPPORT
+  READ_ONLY
+}
+
+enum AdminUserStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum MerchantAccountRequestType {
   DEACTIVATION
   DELETION
@@ -58,6 +73,106 @@ enum BillingStatus {
   GRACE_PERIOD
   SUSPENDED
   CANCELED
+}
+
+// Waflo-owned catalog terms. Stripe Prices are immutable provider bindings,
+// never the catalog of record.
+enum PricingMarketKind {
+  GLOBAL
+  COUNTRY_OVERRIDE
+}
+
+enum PricingVersionStatus {
+  DRAFT
+  VALIDATED
+  ACTIVE_FOR_NEW_SUBSCRIPTIONS
+  RETIRED_FOR_NEW_SUBSCRIPTIONS
+}
+
+enum BillingCadence {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum StripeReconciliationRunStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIALLY_FAILED
+  FAILED
+}
+
+enum RepricingStatus {
+  SCHEDULED
+  APPLIED
+  CANCELED
+  SUPERSEDED
+  FAILED
+}
+
+enum RepricingNoticeStatus {
+  SCHEDULED
+  CREATED
+  CANCELED
+}
+
+enum RepricingCampaignStatus {
+  PREVIEWED
+  SCHEDULED
+  CANCELED
+  SUPERSEDED
+}
+
+enum RepricingCampaignMemberDisposition {
+  ELIGIBLE
+  EXCLUDED
+}
+
+enum SubscriptionChangePreviewStatus {
+  PENDING
+  CONFIRMED
+  EXPIRED
+  INVALIDATED
+}
+
+enum BillingFinancialEventType {
+  BILLED
+  COLLECTED
+  PAYMENT_FAILED
+}
+
+enum BillingEmailStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DEAD_LETTER
+  CANCELED
+}
+
+enum BillingRecoveryStatus {
+  NONE
+  GRACE
+  ACTION_REQUIRED
+  RECOVERED
+  EXPIRED
+}
+
+enum RefundRequestStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  SUCCEEDED
+  REJECTED
+  FAILED
+}
+
+enum RefundReason {
+  DUPLICATE_CHARGE
+  INCORRECT_CHARGE
+  SERVICE_FAILURE
+  UNAUTHORIZED_PAYMENT
+  OTHER
 }
 
 enum MemberRole {
@@ -216,6 +331,12 @@ enum EmailCollectionMode {
   REQUIRED
 }
 
+enum PhoneCollectionMode {
+  HIDDEN
+  OPTIONAL
+  REQUIRED
+}
+
 enum CustomerStatus {
   ACTIVE
   SUSPENDED
@@ -224,6 +345,7 @@ enum CustomerStatus {
 
 enum CustomerContactType {
   EMAIL
+  PHONE
 }
 
 enum ContactVerificationStatus {
@@ -235,6 +357,8 @@ enum CustomerConsentType {
   WAFLO_PRIVACY
   PROGRAM_TERMS
   MARKETING_EMAIL
+  MARKETING_PHONE
+  WALLET_PROMOTIONS
 }
 
 enum MembershipStatus {
@@ -286,6 +410,7 @@ enum WalletCommandType {
   INVALIDATE
   RECONCILE
   APPLE_PUSH
+  SEND_PROMOTION
 }
 
 enum WalletCommandStatus {
@@ -302,6 +427,35 @@ enum ProgramWalletSyncJobStatus {
   COMPLETED
   FAILED
   DEAD_LETTER
+}
+
+enum WalletCampaignKind {
+  MANUAL_PROMOTION
+  LOYALTY_OPERATIONAL
+}
+
+enum WalletCampaignStatus {
+  PENDING
+  PROCESSING
+  DISPATCHED
+  COMPLETED
+  PARTIAL_FAILURE
+  FAILED
+  CANCELED
+}
+
+enum WalletCampaignAudienceRule {
+  ALL_ELIGIBLE_WALLET_HOLDERS
+}
+
+enum WalletCampaignDeliveryStatus {
+  QUEUED
+  SUCCEEDED
+  SKIPPED
+  THROTTLED
+  UNKNOWN
+  INVALID
+  FAILED
 }
 
 enum MembershipTransferMethod {
@@ -497,7 +651,25 @@ enum ExternalIdentityProvider {
 
 enum OAuthAuthorizationIntent {
   SIGN_IN
+  SIGN_UP
   LINK
+}
+
+enum AppleTokenRevocationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  DEAD_LETTER
+}
+
+enum AppleTokenRevocationReason {
+  UNLINK
+  ACCOUNT_DELETION
+}
+
+enum AppleTokenType {
+  REFRESH_TOKEN
+  ACCESS_TOKEN
 }
 
 model User {
@@ -507,6 +679,7 @@ model User {
   normalizedEmail            String                   @unique @map("normalized_email") @db.VarChar(254)
   emailVerifiedAt            DateTime?                @map("email_verified_at") @db.Timestamptz(6)
   passwordHash               String?                  @map("password_hash") @db.Text
+  interactiveLoginAllowed    Boolean                  @default(true) @map("interactive_login_allowed")
   preferredLocale            Locale                   @default(EN) @map("preferred_locale")
   status                     UserStatus               @default(ACTIVE)
   termsVersion               String                   @map("terms_version") @db.VarChar(60)
@@ -534,8 +707,54 @@ model User {
   createdValidationRuns      ProgramValidationRun[]     @relation("ValidationCreator")
   createdTestSessions        ProgramTestSession[]       @relation("TestSessionCreator")
   accountLifecycleRequests   MerchantAccountLifecycleRequest[]
+  createdWalletCampaigns     WalletEngagementCampaign[] @relation("WalletCampaignCreator")
+  updatedWalletNearbyConfigurations WalletNearbyConfiguration[] @relation("WalletNearbyUpdater")
+  updatedWalletNearbyProgramCopies  WalletNearbyProgramCopy[]  @relation("WalletNearbyProgramCopyUpdater")
+  requestedBillingRefunds    BillingRefundRequest[] @relation("BillingRefundRequester")
+  reviewedBillingRefunds     BillingRefundRequest[] @relation("BillingRefundReviewer")
 
   @@map("users")
+}
+
+model AdminUser {
+  id              String          @id @default(uuid()) @db.Uuid
+  publicId        String          @unique @default(uuid()) @map("public_id") @db.Uuid
+  displayName     String          @map("display_name") @db.VarChar(100)
+  email           String          @db.VarChar(254)
+  normalizedEmail String          @unique @map("normalized_email") @db.VarChar(254)
+  passwordHash    String          @map("password_hash") @db.Text
+  preferredLocale Locale          @default(EN) @map("preferred_locale")
+  role            AdminRole
+  status          AdminUserStatus @default(ACTIVE)
+  lastLoginAt     DateTime?       @map("last_login_at") @db.Timestamptz(6)
+  disabledAt      DateTime?       @map("disabled_at") @db.Timestamptz(6)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions        AdminSession[]
+  auditEvents     AuditLog[]      @relation("AdminAuditActor")
+  repricingCampaigns RepricingCampaign[] @relation("RepricingCampaignCreator")
+
+  @@index([status, role])
+  @@map("admin_users")
+}
+
+model AdminSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  adminUserId      String    @map("admin_user_id") @db.Uuid
+  tokenHash        String    @unique @map("token_hash") @db.Char(64)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastActiveAt     DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revocationReason String?   @map("revocation_reason") @db.VarChar(120)
+  pricingReauthenticatedAt DateTime? @map("pricing_reauthenticated_at") @db.Timestamptz(6)
+  ipMetadata       String?   @map("ip_metadata") @db.VarChar(64)
+  userAgent        String?   @map("user_agent") @db.VarChar(512)
+  adminUser        AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId, expiresAt])
+  @@index([adminUserId, revokedAt])
+  @@map("admin_sessions")
 }
 
 model MerchantAccountLifecycleRequest {
@@ -558,16 +777,18 @@ model MerchantAccountLifecycleRequest {
 }
 
 model ExternalIdentity {
-  id              String                   @id @default(uuid()) @db.Uuid
-  provider        ExternalIdentityProvider
-  issuer          String                   @db.VarChar(255)
-  providerSubject String                   @map("provider_subject") @db.VarChar(255)
-  userId          String                   @map("user_id") @db.Uuid
-  providerEmail   String?                  @map("provider_email") @db.VarChar(254)
-  emailVerified   Boolean                  @default(false) @map("email_verified")
-  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  lastUsedAt      DateTime                 @default(now()) @map("last_used_at") @db.Timestamptz(6)
-  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                     String                        @id @default(uuid()) @db.Uuid
+  provider               ExternalIdentityProvider
+  issuer                 String                        @db.VarChar(255)
+  providerSubject        String                        @map("provider_subject") @db.VarChar(255)
+  userId                 String                        @map("user_id") @db.Uuid
+  providerEmail          String?                       @map("provider_email") @db.VarChar(254)
+  emailVerified          Boolean                       @default(false) @map("email_verified")
+  emailForwardingEnabled Boolean?                      @map("email_forwarding_enabled")
+  createdAt              DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt             DateTime                      @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  user                   User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appleCredential        AppleAuthorizationCredential?
 
   @@unique([provider, issuer, providerSubject])
   @@unique([userId, provider])
@@ -583,8 +804,12 @@ model OAuthAuthorizationRequest {
   userId                   String?                   @map("user_id") @db.Uuid
   reauthenticatedSessionId String?                   @map("reauthenticated_session_id") @db.Uuid
   nonceHash                String                    @map("nonce_hash") @db.Char(64)
+  browserBindingHash       String                    @map("browser_binding_hash") @db.Char(64)
   codeVerifierCiphertext   String                    @map("code_verifier_ciphertext") @db.Text
   allowRegistration       Boolean                   @default(false) @map("allow_registration")
+  termsVersion            String?                   @map("terms_version") @db.VarChar(60)
+  privacyVersion          String?                   @map("privacy_version") @db.VarChar(60)
+  legalAcceptedAt         DateTime?                 @map("legal_accepted_at") @db.Timestamptz(6)
   locale                   Locale                    @default(EN)
   expiresAt                DateTime                  @map("expires_at") @db.Timestamptz(6)
   consumedAt               DateTime?                 @map("consumed_at") @db.Timestamptz(6)
@@ -595,6 +820,57 @@ model OAuthAuthorizationRequest {
   @@index([userId, createdAt])
   @@index([reauthenticatedSessionId])
   @@map("oauth_authorization_requests")
+}
+
+model AppleAuthorizationCredential {
+  id                       String           @id @default(uuid()) @db.Uuid
+  externalIdentityId       String           @unique @map("external_identity_id") @db.Uuid
+  refreshTokenEncrypted    String?          @map("refresh_token_encrypted") @db.Text
+  refreshTokenKeyVersion   Int?             @map("refresh_token_key_version")
+  accessTokenEncrypted     String?          @map("access_token_encrypted") @db.Text
+  accessTokenKeyVersion    Int?             @map("access_token_key_version")
+  accessTokenExpiresAt     DateTime?        @map("access_token_expires_at") @db.Timestamptz(6)
+  createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  externalIdentity         ExternalIdentity @relation(fields: [externalIdentityId], references: [id], onDelete: Cascade)
+
+  @@map("apple_authorization_credentials")
+}
+
+model AppleTokenRevocationJob {
+  id                    String                     @id @default(uuid()) @db.Uuid
+  idempotencyKey        String                     @unique @map("idempotency_key") @db.VarChar(255)
+  encryptionContextId   String                     @map("encryption_context_id") @db.Uuid
+  tokenEncrypted        String?                    @map("token_encrypted") @db.Text
+  tokenKeyVersion       Int                        @map("token_key_version")
+  tokenType             AppleTokenType             @map("token_type")
+  reason                AppleTokenRevocationReason
+  status                AppleTokenRevocationStatus @default(PENDING)
+  attemptCount          Int                        @default(0) @map("attempt_count")
+  nextAttemptAt         DateTime                   @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  leaseOwner            String?                    @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt        DateTime?                  @map("lease_expires_at") @db.Timestamptz(6)
+  lastFailureCode       String?                    @map("last_failure_code") @db.VarChar(120)
+  completedAt           DateTime?                  @map("completed_at") @db.Timestamptz(6)
+  tokenClearedAt        DateTime?                  @map("token_cleared_at") @db.Timestamptz(6)
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@map("apple_token_revocation_jobs")
+}
+
+model AppleServerNotification {
+  id              String   @id @default(uuid()) @db.Uuid
+  notificationId  String   @unique @map("notification_id") @db.VarChar(255)
+  eventType       String   @map("event_type") @db.VarChar(40)
+  providerSubject String   @map("provider_subject") @db.VarChar(255)
+  eventTime       DateTime @map("event_time") @db.Timestamptz(6)
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt     DateTime @map("processed_at") @db.Timestamptz(6)
+
+  @@index([providerSubject, eventTime])
+  @@map("apple_server_notifications")
 }
 
 model Session {
@@ -655,6 +931,9 @@ model Organization {
   selectedPlan          PlanCode                 @default(STARTER) @map("selected_plan")
   onboardingState       OnboardingState          @default(BUSINESS) @map("onboarding_state")
   onboardingCompletedAt DateTime?                @map("onboarding_completed_at") @db.Timestamptz(6)
+  onboardingCommandId   String?                  @unique @map("onboarding_command_id") @db.Uuid
+  onboardingRequestFingerprint String?           @map("onboarding_request_fingerprint") @db.Char(64)
+  brandLogoAssetId      String?                  @map("brand_logo_asset_id") @db.Uuid
   createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
   archivedAt            DateTime?                @map("archived_at") @db.Timestamptz(6)
@@ -665,13 +944,19 @@ model Organization {
   slugHistory           MerchantSlugHistory[]
   billingProfile        OrganizationBillingProfile?
   subscriptions         Subscription[]
+  billingFinancialEvents BillingFinancialEvent[]
+  subscriptionChangePreviews BillingSubscriptionChangePreview[]
   webhookEvents         ProcessedWebhookEvent[]
+  billingInvoices       BillingInvoice[]
+  billingEmailOutbox    BillingEmailOutbox[]
+  billingRefundRequests BillingRefundRequest[]
   auditLogs             AuditLog[]
   securityEvents        SecurityEvent[]
   checkoutIdempotencyKeys CheckoutIdempotencyKey[]
   loyaltyPrograms        LoyaltyProgram[]
   loyaltyProgramVersions LoyaltyProgramVersion[]
   merchantAssets         MerchantAsset[]
+  brandLogoAsset         MerchantAsset?          @relation("OrganizationBrandLogo", fields: [brandLogoAssetId], references: [id], onDelete: Restrict)
   generatedPreviews      GeneratedProgramPreview[]
   validationRuns         ProgramValidationRun[]
   testSessions           ProgramTestSession[]
@@ -692,6 +977,10 @@ model Organization {
   transferEvents         MembershipTransferEvent[]
   publicWalletAssets      PublicWalletAsset[]
   programWalletSyncJobs   ProgramWalletSyncJob[]
+  walletNearbyConfiguration  WalletNearbyConfiguration?
+  walletNearbyProgramCopies  WalletNearbyProgramCopy[]
+  walletEngagementCampaigns WalletEngagementCampaign[]
+  walletCampaignDeliveries WalletCampaignDelivery[]
 
   @@index([status])
   @@map("organizations")
@@ -713,6 +1002,7 @@ model MerchantSlugHistory {
 
 model OrganizationMember {
   id             String       @id @default(uuid()) @db.Uuid
+  publicId       String       @unique @default(uuid()) @map("public_id") @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   userId         String       @map("user_id") @db.Uuid
   role           MemberRole
@@ -753,6 +1043,7 @@ model OrganizationInvitation {
 
 model Location {
   id             String         @id @default(uuid()) @db.Uuid
+  publicId       String         @unique @default(uuid()) @map("public_id") @db.Uuid
   organizationId String         @map("organization_id") @db.Uuid
   name           String         @db.VarChar(120)
   addressLine1   String?        @map("address_line_1") @db.VarChar(160)
@@ -763,6 +1054,8 @@ model Location {
   countryCode    String?        @map("country_code") @db.Char(2)
   phone          String?        @db.VarChar(30)
   timezone       String         @db.VarChar(100)
+  latitude       Decimal?       @db.Decimal(9, 6)
+  longitude      Decimal?       @db.Decimal(9, 6)
   status         LocationStatus @default(ACTIVE)
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -771,6 +1064,8 @@ model Location {
   auditLogs      AuditLog[]
   programLocations ProgramLocation[]
   staffDeviceSessions StaffDeviceSession[]
+  walletNearbySelections WalletNearbyLocation[]
+  walletEngagementCampaigns WalletEngagementCampaign[]
 
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
@@ -798,12 +1093,22 @@ model OrganizationBillingProfile {
   organizationId           String        @unique @map("organization_id") @db.Uuid
   stripeCustomerId         String?       @unique @map("stripe_customer_id") @db.VarChar(255)
   selectedPlan             PlanCode      @default(STARTER) @map("selected_plan")
+  selectedCadence          BillingCadence @default(MONTHLY) @map("selected_cadence")
   subscriptionStatus       BillingStatus @default(PENDING_ACTIVATION) @map("subscription_status")
   trialStart               DateTime?     @map("trial_start") @db.Timestamptz(6)
   trialEnd                 DateTime?     @map("trial_end") @db.Timestamptz(6)
   trialTriggeringProgramId String?       @map("trial_triggering_program_id") @db.Uuid
   trialTriggeringUserId    String?       @map("trial_triggering_user_id") @db.Uuid
   gracePeriodEnd           DateTime?     @map("grace_period_end") @db.Timestamptz(6)
+  billingName              String?       @map("billing_name") @db.VarChar(160)
+  billingEmail             String?       @map("billing_email") @db.VarChar(254)
+  billingCountryCode       String?       @map("billing_country_code") @db.Char(2)
+  billingAddressLine1      String?       @map("billing_address_line_1") @db.VarChar(200)
+  billingAddressLine2      String?       @map("billing_address_line_2") @db.VarChar(200)
+  billingCity              String?       @map("billing_city") @db.VarChar(120)
+  billingRegion            String?       @map("billing_region") @db.VarChar(120)
+  billingPostalCode        String?       @map("billing_postal_code") @db.VarChar(40)
+  stripeIdentitySyncedAt   DateTime?     @map("stripe_identity_synced_at") @db.Timestamptz(6)
   createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -813,12 +1118,133 @@ model OrganizationBillingProfile {
   @@map("organization_billing_profiles")
 }
 
+model BillingInvoice {
+  id                       String                @id @default(uuid()) @db.Uuid
+  organizationId           String                @map("organization_id") @db.Uuid
+  stripeInvoiceId          String                @unique @map("stripe_invoice_id") @db.VarChar(255)
+  stripeSubscriptionId     String?               @map("stripe_subscription_id") @db.VarChar(255)
+  stripePaymentMethodId    String?               @map("stripe_payment_method_id") @db.VarChar(255)
+  invoiceNumber            String?               @map("invoice_number") @db.VarChar(120)
+  status                   String                @db.VarChar(40)
+  billingReason            String?               @map("billing_reason") @db.VarChar(80)
+  amountDue                Int                   @map("amount_due")
+  amountPaid               Int                   @map("amount_paid")
+  amountRemaining          Int                   @map("amount_remaining")
+  currency                 String                @db.Char(3)
+  invoiceDate              DateTime              @map("invoice_date") @db.Timestamptz(6)
+  periodStart              DateTime?             @map("period_start") @db.Timestamptz(6)
+  periodEnd                DateTime?             @map("period_end") @db.Timestamptz(6)
+  nextPaymentAttemptAt     DateTime?             @map("next_payment_attempt_at") @db.Timestamptz(6)
+  hostedInvoiceUrl         String?               @map("hosted_invoice_url") @db.Text
+  invoicePdfUrl            String?               @map("invoice_pdf_url") @db.Text
+  customerName             String?               @map("customer_name") @db.VarChar(160)
+  customerEmail            String?               @map("customer_email") @db.VarChar(254)
+  paymentMethodBrand       String?               @map("payment_method_brand") @db.VarChar(40)
+  paymentMethodLast4       String?               @map("payment_method_last4") @db.Char(4)
+  paymentMethodExpMonth    Int?                  @map("payment_method_exp_month")
+  paymentMethodExpYear     Int?                  @map("payment_method_exp_year")
+  firstFailedAt            DateTime?             @map("first_failed_at") @db.Timestamptz(6)
+  graceEndsAt              DateTime?             @map("grace_ends_at") @db.Timestamptz(6)
+  failureCategory          String?               @map("failure_category") @db.VarChar(80)
+  recoveryStatus           BillingRecoveryStatus @default(NONE) @map("recovery_status")
+  automaticRetryEligible   Boolean               @default(false) @map("automatic_retry_eligible")
+  nextRecoveryAttemptAt    DateTime?             @map("next_recovery_attempt_at") @db.Timestamptz(6)
+  recoveryAttemptCount     Int                   @default(0) @map("recovery_attempt_count")
+  recoveryAttemptToken     String?               @map("recovery_attempt_token") @db.VarChar(255)
+  recoveryLeaseOwner       String?               @map("recovery_lease_owner") @db.VarChar(120)
+  recoveryLeaseExpiresAt   DateTime?             @map("recovery_lease_expires_at") @db.Timestamptz(6)
+  recoveryFailureCode      String?               @map("recovery_failure_code") @db.VarChar(120)
+  paidAt                   DateTime?             @map("paid_at") @db.Timestamptz(6)
+  lastStripeEventAt        DateTime?             @map("last_stripe_event_at") @db.Timestamptz(6)
+  lastStripeEventId        String?               @map("last_stripe_event_id") @db.VarChar(255)
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  emailMessages            BillingEmailOutbox[]
+  refundRequests           BillingRefundRequest[]
+
+  @@index([organizationId, invoiceDate(sort: Desc)])
+  @@index([recoveryStatus, nextRecoveryAttemptAt, recoveryLeaseExpiresAt], map: "billing_invoice_recovery_due_idx")
+  @@map("billing_invoices")
+}
+
+model BillingEmailOutbox {
+  id                 String             @id @default(uuid()) @db.Uuid
+  organizationId     String             @map("organization_id") @db.Uuid
+  billingInvoiceId   String?            @map("billing_invoice_id") @db.Uuid
+  kind               String             @db.VarChar(80)
+  dedupeKey          String             @unique @map("dedupe_key") @db.VarChar(255)
+  recipientEmail     String             @map("recipient_email") @db.VarChar(254)
+  locale             Locale             @default(EN)
+  payload            Json               @db.JsonB
+  status             BillingEmailStatus @default(PENDING)
+  availableAt        DateTime           @default(now()) @map("available_at") @db.Timestamptz(6)
+  attemptCount       Int                @default(0) @map("attempt_count")
+  leaseOwner         String?            @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt     DateTime?          @map("lease_expires_at") @db.Timestamptz(6)
+  sentAt             DateTime?          @map("sent_at") @db.Timestamptz(6)
+  lastFailureCode    String?            @map("last_failure_code") @db.VarChar(120)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  billingInvoice     BillingInvoice?    @relation(fields: [billingInvoiceId], references: [id], onDelete: SetNull)
+
+  @@index([status, availableAt, leaseExpiresAt], map: "billing_email_delivery_due_idx")
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("billing_email_outbox")
+}
+
+model BillingRefundRequest {
+  id                         String              @id @default(uuid()) @db.Uuid
+  publicId                   String              @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId            String              @map("organization_id") @db.Uuid
+  billingInvoiceId           String              @map("billing_invoice_id") @db.Uuid
+  requestedByUserId          String              @map("requested_by_user_id") @db.Uuid
+  reviewedByUserId           String?             @map("reviewed_by_user_id") @db.Uuid
+  status                     RefundRequestStatus @default(REQUESTED)
+  reason                     RefundReason
+  explanation                String?             @db.VarChar(2000)
+  reviewNote                 String?             @map("review_note") @db.VarChar(2000)
+  requestedAmount            Int                 @map("requested_amount")
+  approvedAmount             Int?                @map("approved_amount")
+  currency                   String              @db.Char(3)
+  idempotencyKey             String              @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint         String              @map("request_fingerprint") @db.Char(64)
+  stripeRefundId             String?             @unique @map("stripe_refund_id") @db.VarChar(255)
+  stripePaymentIntentId      String?             @map("stripe_payment_intent_id") @db.VarChar(255)
+  providerStatus             String?             @map("provider_status") @db.VarChar(40)
+  executionIdempotencyKey    String              @unique @map("execution_idempotency_key") @db.VarChar(255)
+  executionLeaseOwner        String?             @map("execution_lease_owner") @db.VarChar(120)
+  executionLeaseExpiresAt    DateTime?           @map("execution_lease_expires_at") @db.Timestamptz(6)
+  executionAttemptCount      Int                 @default(0) @map("execution_attempt_count")
+  failureCode                String?             @map("failure_code") @db.VarChar(120)
+  requestedAt                DateTime            @default(now()) @map("requested_at") @db.Timestamptz(6)
+  reviewedAt                 DateTime?           @map("reviewed_at") @db.Timestamptz(6)
+  processingAt               DateTime?           @map("processing_at") @db.Timestamptz(6)
+  completedAt                DateTime?           @map("completed_at") @db.Timestamptz(6)
+  lastStripeEventAt          DateTime?           @map("last_stripe_event_at") @db.Timestamptz(6)
+  lastStripeEventId          String?              @map("last_stripe_event_id") @db.VarChar(255)
+  createdAt                  DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization               Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  billingInvoice             BillingInvoice       @relation(fields: [billingInvoiceId], references: [id], onDelete: Restrict)
+  requestedBy                User                 @relation("BillingRefundRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy                 User?                @relation("BillingRefundReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([billingInvoiceId, status])
+  @@index([status, executionLeaseExpiresAt])
+  @@map("billing_refund_requests")
+}
+
 model Subscription {
   id                       String        @id @default(uuid()) @db.Uuid
   organizationId           String        @map("organization_id") @db.Uuid
   stripeSubscriptionId     String        @unique @map("stripe_subscription_id") @db.VarChar(255)
   stripePriceId            String        @map("stripe_price_id") @db.VarChar(255)
   planCode                 PlanCode      @map("plan_code")
+  cadence                  BillingCadence @default(MONTHLY)
   status                   BillingStatus
   currentPeriodStart       DateTime?     @map("current_period_start") @db.Timestamptz(6)
   currentPeriodEnd         DateTime?     @map("current_period_end") @db.Timestamptz(6)
@@ -832,14 +1258,236 @@ model Subscription {
   reconciliationLeaseExpiresAt DateTime? @map("reconciliation_lease_expires_at") @db.Timestamptz(6)
   reconciliationAttemptCount Int         @default(0) @map("reconciliation_attempt_count")
   reconciliationFailureCode String?      @map("reconciliation_failure_code") @db.VarChar(120)
+  pricingVersionId         String?       @map("pricing_version_id") @db.Uuid
+  pricingMarketCode        String?       @map("pricing_market_code") @db.VarChar(32)
+  pricingCurrency          String?       @map("pricing_currency") @db.Char(3)
+  pricingAmountMinor       BigInt?       @map("pricing_amount_minor")
+  grandfathered            Boolean       @default(false)
   createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  pricingVersion           PricingVersion? @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  repricingTransitions     SubscriptionRepricing[]
+  repricingCampaignMembers RepricingCampaignMember[]
+  changePreviews           BillingSubscriptionChangePreview[]
+  financialEvents          BillingFinancialEvent[]
 
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
   @@index([reconciliationLeaseExpiresAt, lastProviderSyncAt])
   @@map("subscriptions")
+}
+
+// A bounded operational-worker reconciliation batch. This stores only safe
+// aggregate evidence; per-subscription provider state remains on Subscription.
+model StripeReconciliationRun {
+  id                       String                        @id @default(uuid()) @db.Uuid
+  workerId                 String                        @map("worker_id") @db.VarChar(120)
+  status                   StripeReconciliationRunStatus @default(RUNNING)
+  startedAt                DateTime                      @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt              DateTime?                     @map("completed_at") @db.Timestamptz(6)
+  subscriptionsScanned     Int                           @default(0) @map("subscriptions_scanned")
+  subscriptionsConverged   Int                           @default(0) @map("subscriptions_converged")
+  subscriptionsFailed      Int                           @default(0) @map("subscriptions_failed")
+  safeFailureCode          String?                       @map("safe_failure_code") @db.VarChar(120)
+
+  @@index([startedAt(sort: Desc)])
+  @@index([status, completedAt(sort: Desc)])
+  @@map("stripe_reconciliation_runs")
+}
+
+model PricingMarket {
+  id                 String             @id @default(uuid()) @db.Uuid
+  code               String             @unique @db.VarChar(32)
+  kind               PricingMarketKind
+  countryCode        String?            @unique @map("country_code") @db.Char(2)
+  configuredCurrency String?            @map("configured_currency") @db.Char(3)
+  active             Boolean            @default(true)
+  fallbackMarketCode String?            @map("fallback_market_code") @db.VarChar(32)
+  annualEffectiveMonth Int?             @map("annual_effective_month")
+  annualEffectiveDay Int?               @map("annual_effective_day")
+  annualNoticeDays   Int                @default(30) @map("annual_notice_days")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  versions           PricingVersion[]
+  repricingCampaigns RepricingCampaign[]
+
+  @@index([kind, active])
+  @@map("pricing_markets")
+}
+
+model PricingVersion {
+  id                String               @id @default(uuid()) @db.Uuid
+  marketId          String               @map("market_id") @db.Uuid
+  planCode          PlanCode             @map("plan_code")
+  cadence           BillingCadence
+  version           Int
+  currency          String               @db.Char(3)
+  amountMinor       BigInt               @map("amount_minor")
+  status            PricingVersionStatus @default(DRAFT)
+  stripeProductId   String?              @map("stripe_product_id") @db.VarChar(255)
+  stripePriceId     String?              @unique @map("stripe_price_id") @db.VarChar(255)
+  stripeBindingKey  String               @unique @map("stripe_binding_key") @db.VarChar(180)
+  publishedAt       DateTime?            @map("published_at") @db.Timestamptz(6)
+  retiredAt         DateTime?            @map("retired_at") @db.Timestamptz(6)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  market            PricingMarket        @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  subscriptions     Subscription[]
+  repricingTargets  SubscriptionRepricing[] @relation("RepricingTarget")
+  sourceChangePreviews BillingSubscriptionChangePreview[] @relation("ChangePreviewSource")
+  targetChangePreviews BillingSubscriptionChangePreview[] @relation("ChangePreviewTarget")
+  financialEvents      BillingFinancialEvent[]
+  repricingCampaigns   RepricingCampaign[]
+
+  @@unique([marketId, planCode, cadence, version])
+  @@index([marketId, planCode, cadence, status])
+  @@map("pricing_versions")
+}
+
+model BillingSubscriptionChangePreview {
+  id                          String                          @id @default(uuid()) @db.Uuid
+  publicId                    String                          @unique @default(uuid()) @map("public_id") @db.Uuid
+  organizationId              String                          @map("organization_id") @db.Uuid
+  subscriptionId              String                          @map("subscription_id") @db.Uuid
+  stripeSubscriptionId        String                          @map("stripe_subscription_id") @db.VarChar(255)
+  stripeSubscriptionItemId    String                          @map("stripe_subscription_item_id") @db.VarChar(255)
+  sourcePlan                  PlanCode                        @map("source_plan")
+  sourceCadence               BillingCadence                  @map("source_cadence")
+  sourcePricingVersionId      String                          @map("source_pricing_version_id") @db.Uuid
+  sourceStripePriceId         String                          @map("source_stripe_price_id") @db.VarChar(255)
+  sourceAmountMinor           BigInt                          @map("source_amount_minor")
+  sourceCurrency              String                          @map("source_currency") @db.Char(3)
+  targetPlan                  PlanCode                        @map("target_plan")
+  targetCadence               BillingCadence                  @map("target_cadence")
+  targetPricingVersionId      String                          @map("target_pricing_version_id") @db.Uuid
+  targetStripePriceId         String                          @map("target_stripe_price_id") @db.VarChar(255)
+  targetAmountMinor           BigInt                          @map("target_amount_minor")
+  targetCurrency              String                          @map("target_currency") @db.Char(3)
+  prorationDate               DateTime                        @map("proration_date") @db.Timestamptz(6)
+  providerFingerprint         String                          @map("provider_fingerprint") @db.Char(64)
+  amountDueNowMinor           BigInt                          @map("amount_due_now_minor")
+  creditAmountMinor           BigInt                          @map("credit_amount_minor")
+  prorationSummary            Json                            @map("proration_summary") @db.JsonB
+  nextRenewalAmountMinor      BigInt?                         @map("next_renewal_amount_minor")
+  nextRenewalAt               DateTime?                       @map("next_renewal_at") @db.Timestamptz(6)
+  status                      SubscriptionChangePreviewStatus @default(PENDING)
+  createdAt                   DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt                   DateTime                        @map("expires_at") @db.Timestamptz(6)
+  confirmedAt                 DateTime?                       @map("confirmed_at") @db.Timestamptz(6)
+  invalidatedAt               DateTime?                       @map("invalidated_at") @db.Timestamptz(6)
+  organization                Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription                Subscription                    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  sourcePricingVersion        PricingVersion                  @relation("ChangePreviewSource", fields: [sourcePricingVersionId], references: [id], onDelete: Restrict)
+  targetPricingVersion        PricingVersion                  @relation("ChangePreviewTarget", fields: [targetPricingVersionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, expiresAt])
+  @@index([subscriptionId, status, expiresAt])
+  @@map("billing_subscription_change_previews")
+}
+
+model SubscriptionRepricing {
+  id                    String          @id @default(uuid()) @db.Uuid
+  subscriptionId        String          @map("subscription_id") @db.Uuid
+  campaignId            String?         @map("campaign_id") @db.Uuid
+  targetPricingVersionId String         @map("target_pricing_version_id") @db.Uuid
+  effectiveAt           DateTime        @map("effective_at") @db.Timestamptz(6)
+  noticeSentAt          DateTime?       @map("notice_sent_at") @db.Timestamptz(6)
+  noticeStatus          RepricingNoticeStatus @default(SCHEDULED) @map("notice_status")
+  noticeSnapshot        Json?           @map("notice_snapshot") @db.JsonB
+  replacesRepricingId   String?         @map("replaces_repricing_id") @db.Uuid
+  replacedByRepricingId String?         @unique @map("replaced_by_repricing_id") @db.Uuid
+  status                RepricingStatus @default(SCHEDULED)
+  stripeScheduleId      String?         @unique @map("stripe_schedule_id") @db.VarChar(255)
+  idempotencyKey        String          @unique @map("idempotency_key") @db.VarChar(255)
+  failureCode           String?         @map("failure_code") @db.VarChar(120)
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subscription          Subscription    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  campaign              RepricingCampaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  targetPricingVersion  PricingVersion  @relation("RepricingTarget", fields: [targetPricingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([subscriptionId, status])
+  @@index([campaignId, status])
+  @@index([status, effectiveAt])
+  @@map("subscription_repricing")
+}
+
+model RepricingCampaign {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  publicId              String                  @unique @default(uuid()) @map("public_id") @db.Uuid
+  marketId              String                  @map("market_id") @db.Uuid
+  planCode              PlanCode                @map("plan_code")
+  cadence               BillingCadence
+  targetPricingVersionId String                 @map("target_pricing_version_id") @db.Uuid
+  currency              String                  @db.Char(3)
+  effectiveOnOrAfter    DateTime                @map("effective_on_or_after") @db.Timestamptz(6)
+  noticeDays            Int                     @map("notice_days")
+  status                RepricingCampaignStatus @default(PREVIEWED)
+  previewSnapshot       Json                    @map("preview_snapshot") @db.JsonB
+  previewedAt           DateTime                @default(now()) @map("previewed_at") @db.Timestamptz(6)
+  previewExpiresAt      DateTime                @map("preview_expires_at") @db.Timestamptz(6)
+  scheduledAt           DateTime?               @map("scheduled_at") @db.Timestamptz(6)
+  canceledAt            DateTime?               @map("canceled_at") @db.Timestamptz(6)
+  createdByAdminUserId  String?                 @map("created_by_admin_user_id") @db.Uuid
+  replacesCampaignId    String?                 @unique @map("replaces_campaign_id") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  market                PricingMarket           @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  targetPricingVersion  PricingVersion          @relation(fields: [targetPricingVersionId], references: [id], onDelete: Restrict)
+  createdByAdminUser    AdminUser?              @relation("RepricingCampaignCreator", fields: [createdByAdminUserId], references: [id], onDelete: SetNull)
+  replacesCampaign      RepricingCampaign?      @relation("RepricingCampaignReplacement", fields: [replacesCampaignId], references: [id], onDelete: Restrict)
+  replacedByCampaign    RepricingCampaign?      @relation("RepricingCampaignReplacement")
+  members               RepricingCampaignMember[]
+  commands              SubscriptionRepricing[]
+
+  @@index([marketId, planCode, cadence, status])
+  @@index([status, effectiveOnOrAfter])
+  @@map("repricing_campaigns")
+}
+
+model RepricingCampaignMember {
+  id                    String                              @id @default(uuid()) @db.Uuid
+  campaignId            String                              @map("campaign_id") @db.Uuid
+  subscriptionId        String                              @map("subscription_id") @db.Uuid
+  disposition           RepricingCampaignMemberDisposition
+  exclusionCode         String?                             @map("exclusion_code") @db.VarChar(80)
+  expectedRenewalAt     DateTime?                           @map("expected_renewal_at") @db.Timestamptz(6)
+  createdAt             DateTime                            @default(now()) @map("created_at") @db.Timestamptz(6)
+  campaign              RepricingCampaign                   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  subscription          Subscription                        @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, subscriptionId])
+  @@index([campaignId, disposition, expectedRenewalAt])
+  @@map("repricing_campaign_members")
+}
+
+model BillingFinancialEvent {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  organizationId     String                    @map("organization_id") @db.Uuid
+  subscriptionId     String                    @map("subscription_id") @db.Uuid
+  pricingVersionId   String?                   @map("pricing_version_id") @db.Uuid
+  provider           String                    @db.VarChar(40)
+  providerEventId    String                    @map("provider_event_id") @db.VarChar(255)
+  providerObjectId   String                    @map("provider_object_id") @db.VarChar(255)
+  type               BillingFinancialEventType
+  planCode           PlanCode?                 @map("plan_code")
+  pricingMarketCode  String?                   @map("pricing_market_code") @db.VarChar(32)
+  currency           String                    @db.Char(3)
+  amountMinor        BigInt                    @map("amount_minor")
+  providerOccurredAt DateTime                  @map("provider_occurred_at") @db.Timestamptz(6)
+  livemode           Boolean
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription       Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  pricingVersion     PricingVersion?           @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerEventId])
+  @@index([type, providerOccurredAt])
+  @@index([currency, type, providerOccurredAt])
+  @@index([planCode, type, providerOccurredAt])
+  @@index([pricingMarketCode, type, providerOccurredAt])
+  @@index([organizationId, providerOccurredAt])
+  @@map("billing_financial_events")
 }
 
 model ProcessedWebhookEvent {
@@ -867,6 +1515,7 @@ model AuditLog {
   id             String        @id @default(uuid()) @db.Uuid
   organizationId String?       @map("organization_id") @db.Uuid
   actorUserId    String?       @map("actor_user_id") @db.Uuid
+  actorAdminUserId String?     @map("actor_admin_user_id") @db.Uuid
   action         String        @db.VarChar(160)
   targetType     String        @map("target_type") @db.VarChar(100)
   targetId       String?       @map("target_id") @db.VarChar(255)
@@ -878,10 +1527,12 @@ model AuditLog {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   actor          User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  adminActor     AdminUser?    @relation("AdminAuditActor", fields: [actorAdminUserId], references: [id], onDelete: SetNull)
   location       Location?     @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, createdAt(sort: Desc)])
   @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([actorAdminUserId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
@@ -905,20 +1556,31 @@ model SecurityEvent {
   @@map("security_events")
 }
 
-// Persists caller-provided command IDs for Stripe Checkout creation idempotency.
-// Prevents duplicate sessions when the same (organizationId, planCode, idempotencyKey) is retried.
+// Persists caller-provided billing onboarding command IDs. Historical SetupIntent
+// fields remain nullable so pre-v1 records stay readable while new signups use
+// Checkout Sessions in setup mode.
 model CheckoutIdempotencyKey {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   idempotencyKey String       @map("idempotency_key") @db.VarChar(255)
   planCode       String       @map("plan_code") @db.VarChar(40)
+  selectedCadence BillingCadence @default(MONTHLY) @map("selected_cadence")
+  requestFingerprint String?  @map("request_fingerprint") @db.Char(64)
+  stripeCustomerId String?    @map("stripe_customer_id") @db.VarChar(255)
+  stripeSetupIntentId String? @unique @map("stripe_setup_intent_id") @db.VarChar(255)
+  stripePaymentMethodId String? @map("stripe_payment_method_id") @db.VarChar(255)
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id") @db.VarChar(255)
   stripeSessionId String?     @map("stripe_session_id") @db.VarChar(255)
   stripeSessionUrl String?    @map("stripe_session_url") @db.Text
+  status          String       @default("LEGACY_CHECKOUT") @db.VarChar(40)
+  expiresAt       DateTime?    @map("expires_at") @db.Timestamptz(6)
+  completedAt     DateTime?    @map("completed_at") @db.Timestamptz(6)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, createdAt])
+  @@index([organizationId, status, expiresAt])
   @@map("checkout_idempotency_keys")
 }
 
@@ -952,6 +1614,8 @@ model LoyaltyProgram {
   enrollmentCommands    EnrollmentCommand[]
   walletBindings        WalletProgramBinding[]
   walletSyncJobs        ProgramWalletSyncJob[]
+  walletNearbyProgramCopy   WalletNearbyProgramCopy?
+  walletEngagementCampaigns WalletEngagementCampaign[]
 
   @@index([organizationId, status, updatedAt(sort: Desc)])
   @@index([organizationId, createdAt(sort: Desc)])
@@ -982,6 +1646,7 @@ model LoyaltyProgramVersion {
   validationFingerprint String?                 @map("validation_fingerprint") @db.Char(64)
   renderFingerprint   String?                   @map("render_fingerprint") @db.Char(64)
   operationalTimezone String                    @default("Asia/Baghdad") @map("operational_timezone") @db.VarChar(64)
+  defaultCardLocale   String                    @default("en") @map("default_card_locale") @db.VarChar(35)
   staffOwnReversalWindowSeconds Int             @default(120) @map("staff_own_reversal_window_seconds")
   managerReversalWindowMinutes Int              @default(1440) @map("manager_reversal_window_minutes")
   managerOverrideAllowed Boolean                @default(true) @map("manager_override_allowed")
@@ -991,6 +1656,7 @@ model LoyaltyProgramVersion {
   currentDraftFor     LoyaltyProgram?           @relation("CurrentDraftVersion")
   currentPublishedFor LoyaltyProgram?           @relation("CurrentPublishedVersion")
   translations        ProgramTranslation[]
+  cardLocales         ProgramVersionLocale[]
   stampRule           StampRule?
   rewards             RewardDefinition[]
   locations           ProgramLocation[]
@@ -1009,6 +1675,36 @@ model LoyaltyProgramVersion {
   @@index([organizationId, programId, status])
   @@index([organizationId, updatedAt(sort: Desc)])
   @@map("loyalty_program_versions")
+}
+
+// Dynamic customer-card locales are version scoped so unpublished language
+// changes cannot affect the current live card. The legacy EN/AR translation
+// tables remain during the compatibility window and are dual-written by the
+// application for existing mobile/worker readers.
+model ProgramVersionLocale {
+  id                    String                @id @default(uuid()) @db.Uuid
+  versionId             String                @map("version_id") @db.Uuid
+  locale                String                @db.VarChar(35)
+  enabled               Boolean               @default(true)
+  position              Int                   @default(0)
+  programName           String?               @map("program_name") @db.VarChar(120)
+  shortDescription      String?               @map("short_description") @db.VarChar(240)
+  earningDescription    String?               @map("earning_description") @db.VarChar(240)
+  fullDescription       String?               @map("full_description") @db.Text
+  rewardSummary         String?               @map("reward_summary") @db.VarChar(240)
+  joinInstructions      String?               @map("join_instructions") @db.Text
+  termsAndConditions    String?               @map("terms_and_conditions") @db.Text
+  completionMessage     String?               @map("completion_message") @db.VarChar(240)
+  rewardUnlockedMessage String?               @map("reward_unlocked_message") @db.VarChar(240)
+  pausedMessage         String?               @map("paused_message") @db.VarChar(240)
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version               LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  rewardTranslations    ProgramLocaleRewardTranslation[]
+
+  @@unique([versionId, locale])
+  @@index([versionId, enabled, position])
+  @@map("program_version_locales")
 }
 
 model ProgramTranslation {
@@ -1064,6 +1760,7 @@ model RewardDefinition {
   updatedAt                 DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
   version                   LoyaltyProgramVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
   translations              RewardTranslation[]
+  cardLocaleTranslations    ProgramLocaleRewardTranslation[]
   visualOverride           RewardVisualOverride?
   testEvents                ProgramTestEvent[]
   entitlements              RewardEntitlement[]
@@ -1072,6 +1769,23 @@ model RewardDefinition {
   @@unique([versionId, thresholdStampCount])
   @@index([versionId, sortOrder])
   @@map("reward_definitions")
+}
+
+model ProgramLocaleRewardTranslation {
+  id                     String               @id @default(uuid()) @db.Uuid
+  rewardId               String               @map("reward_id") @db.Uuid
+  programVersionLocaleId String               @map("program_version_locale_id") @db.Uuid
+  name                   String?              @db.VarChar(120)
+  description            String?              @db.VarChar(240)
+  redemptionInstructions String?              @map("redemption_instructions") @db.Text
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reward                 RewardDefinition     @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  programVersionLocale   ProgramVersionLocale @relation(fields: [programVersionLocaleId], references: [id], onDelete: Restrict)
+
+  @@unique([rewardId, programVersionLocaleId])
+  @@index([programVersionLocaleId])
+  @@map("program_locale_reward_translations")
 }
 
 model RewardTranslation {
@@ -1179,6 +1893,7 @@ model MerchantAsset {
   emptyThemes     ProgramVisualTheme[]      @relation("ThemeEmptyStamp")
   milestoneThemes ProgramVisualTheme[]      @relation("ThemeMilestone")
   rewardOverrides RewardVisualOverride[]    @relation("RewardStampAsset")
+  brandOrganizations Organization[]         @relation("OrganizationBrandLogo")
 
   @@unique([organizationId, sha256Digest, category])
   @@index([organizationId, category, processingStatus])
@@ -1329,6 +2044,7 @@ model ProgramEnrollmentPolicy {
   organizationId              String                @map("organization_id") @db.Uuid
   programVersionId            String                @unique @map("program_version_id") @db.Uuid
   emailCollectionMode         EmailCollectionMode   @default(OPTIONAL) @map("email_collection_mode")
+  phoneCollectionMode         PhoneCollectionMode   @default(OPTIONAL) @map("phone_collection_mode")
   primaryCustomerLocale       Locale                @default(EN) @map("primary_customer_locale")
   allowLocaleSelection        Boolean               @default(true) @map("allow_locale_selection")
   marketingConsentVisible     Boolean               @default(false) @map("marketing_consent_visible")
@@ -1407,6 +2123,7 @@ model CustomerConsent {
 
   @@index([organizationId, customerId, capturedAt(sort: Desc)])
   @@index([membershipId, consentType])
+  @@index([membershipId, consentType, capturedAt(sort: Desc), id(sort: Desc)])
   @@map("customer_consents")
 }
 
@@ -1439,6 +2156,7 @@ model Membership {
   transferEvents             MembershipTransferEvent[]
   publicWalletAssets         PublicWalletAsset[]
   rewardEntitlements         RewardEntitlement[]
+  walletCampaignDeliveries   WalletCampaignDelivery[]
 
   @@index([organizationId, programId, status, enrolledAt(sort: Desc)])
   @@index([customerId, status])
@@ -1582,6 +2300,10 @@ model WalletPassInstance {
   providerState                   Json?            @map("provider_state") @db.JsonB
   updateTag                       Int              @default(1) @map("update_tag")
   appleUpdateSequence             BigInt?          @map("apple_update_sequence")
+  appleMerchantMessageTitle       String?          @map("apple_merchant_message_title") @db.VarChar(60)
+  appleMerchantMessageBody        String?          @map("apple_merchant_message_body") @db.VarChar(240)
+  appleMerchantMessageUrl         String?          @map("apple_merchant_message_url") @db.VarChar(2048)
+  appleMerchantMessageLocale      Locale?          @map("apple_merchant_message_locale")
   lastRenderedProjectionVersion   Int              @default(0) @map("last_rendered_projection_version")
   lastProviderSyncAt              DateTime?        @map("last_provider_sync_at") @db.Timestamptz(6)
   lastProviderErrorCode           String?          @map("last_provider_error_code") @db.VarChar(120)
@@ -1594,6 +2316,7 @@ model WalletPassInstance {
   walletProgramBinding            WalletProgramBinding? @relation(fields: [walletProgramBindingId], references: [id], onDelete: Restrict)
   appleRegistrations              ApplePassRegistration[]
   walletCommands                  WalletCommand[]
+  walletCampaignDeliveries        WalletCampaignDelivery[]
 
   @@unique([provider, providerIdentity])
   @@unique([membershipCredentialId, provider])
@@ -1639,13 +2362,142 @@ model WalletCommand {
   safeErrorCode        String?             @map("safe_error_code") @db.VarChar(120)
   createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   completedAt          DateTime?           @map("completed_at") @db.Timestamptz(6)
+  campaignDeliveryId   String?             @unique @map("campaign_delivery_id") @db.Uuid
   organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   membership           Membership          @relation(fields: [membershipId], references: [id], onDelete: Restrict)
   walletPassInstance   WalletPassInstance? @relation(fields: [walletPassInstanceId], references: [id], onDelete: Restrict)
+  campaignDelivery     WalletCampaignDelivery? @relation(fields: [campaignDeliveryId], references: [id], onDelete: Restrict)
 
   @@index([status, nextAttemptAt, leaseExpiresAt])
   @@index([organizationId, membershipId, provider, createdAt])
   @@map("wallet_commands")
+}
+
+model WalletNearbyConfiguration {
+  id                       String         @id @default(uuid()) @db.Uuid
+  organizationId           String         @unique @map("organization_id") @db.Uuid
+  enabled                  Boolean        @default(false)
+  desiredAppleMaxDistance  Int            @default(2000) @map("desired_apple_max_distance")
+  revision                 Int            @default(1)
+  updatedByUserId          String         @map("updated_by_user_id") @db.Uuid
+  createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  updatedBy                User           @relation("WalletNearbyUpdater", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+  locations                WalletNearbyLocation[]
+
+  @@index([enabled])
+  @@map("wallet_nearby_configurations")
+}
+
+model WalletNearbyProgramCopy {
+  id                       String         @id @default(uuid()) @db.Uuid
+  organizationId           String         @map("organization_id") @db.Uuid
+  programId                String         @unique @map("program_id") @db.Uuid
+  appleCustomTextEn        String?        @map("apple_custom_text_en") @db.VarChar(120)
+  appleCustomTextAr        String?        @map("apple_custom_text_ar") @db.VarChar(120)
+  updatedByUserId          String         @map("updated_by_user_id") @db.Uuid
+  createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program                  LoyaltyProgram @relation(fields: [programId], references: [id], onDelete: Restrict)
+  updatedBy                User           @relation("WalletNearbyProgramCopyUpdater", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@map("wallet_nearby_program_copies")
+}
+
+model WalletNearbyLocation {
+  configurationId String                    @map("configuration_id") @db.Uuid
+  locationId      String                    @map("location_id") @db.Uuid
+  sortOrder       Int                       @map("sort_order")
+  createdAt       DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  configuration   WalletNearbyConfiguration @relation(fields: [configurationId], references: [id], onDelete: Cascade)
+  location        Location                  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@id([configurationId, locationId])
+  @@unique([configurationId, sortOrder])
+  @@index([locationId])
+  @@map("wallet_nearby_locations")
+}
+
+model WalletEngagementCampaign {
+  id                    String                     @id @default(uuid()) @db.Uuid
+  organizationId        String                     @map("organization_id") @db.Uuid
+  programId             String                     @map("program_id") @db.Uuid
+  branchId              String?                    @map("branch_id") @db.Uuid
+  kind                  WalletCampaignKind         @default(MANUAL_PROMOTION)
+  locale                Locale
+  title                 String                     @db.VarChar(60)
+  body                  String                     @db.VarChar(240)
+  destinationUrl        String?                    @map("destination_url") @db.VarChar(2048)
+  intendedProviders     Json                       @map("intended_providers") @db.JsonB
+  audienceRule          WalletCampaignAudienceRule @default(ALL_ELIGIBLE_WALLET_HOLDERS) @map("audience_rule")
+  contentFingerprint    String                     @map("content_fingerprint") @db.Char(64)
+  idempotencyKey        String                     @map("idempotency_key") @db.VarChar(255)
+  status                WalletCampaignStatus       @default(PENDING)
+  eligibleCount         Int                        @default(0) @map("eligible_count")
+  appleEligiblePassCount Int                       @default(0) @map("apple_eligible_pass_count")
+  appleRegisteredDeviceCount Int                   @default(0) @map("apple_registered_device_count")
+  googleEligibleObjectCount Int                    @default(0) @map("google_eligible_object_count")
+  unknownCount          Int                        @default(0) @map("unknown_count")
+  throttledCount        Int                        @default(0) @map("throttled_count")
+  queuedCount           Int                        @default(0) @map("queued_count")
+  succeededCount        Int                        @default(0) @map("succeeded_count")
+  skippedCount          Int                        @default(0) @map("skipped_count")
+  failedCount           Int                        @default(0) @map("failed_count")
+  cursorPassInstanceId  String?                    @map("cursor_pass_instance_id") @db.Uuid
+  attemptCount          Int                        @default(0) @map("attempt_count")
+  leaseOwner            String?                    @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt        DateTime?                  @map("lease_expires_at") @db.Timestamptz(6)
+  nextAttemptAt         DateTime                   @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  safeFailureCode       String?                    @map("safe_failure_code") @db.VarChar(120)
+  createdByUserId       String                     @map("created_by_user_id") @db.Uuid
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  scheduledAt           DateTime                   @default(now()) @map("scheduled_at") @db.Timestamptz(6)
+  dispatchedAt          DateTime?                  @map("dispatched_at") @db.Timestamptz(6)
+  completedAt           DateTime?                  @map("completed_at") @db.Timestamptz(6)
+  canceledAt            DateTime?                  @map("canceled_at") @db.Timestamptz(6)
+  organization          Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  program               LoyaltyProgram             @relation(fields: [programId], references: [id], onDelete: Restrict)
+  branch                Location?                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  createdBy             User                       @relation("WalletCampaignCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  deliveries            WalletCampaignDelivery[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([status, scheduledAt, nextAttemptAt, leaseExpiresAt])
+  @@index([organizationId, programId, createdAt(sort: Desc)])
+  @@index([organizationId, branchId, createdAt(sort: Desc)])
+  @@index([organizationId, programId, contentFingerprint, createdAt(sort: Desc)])
+  @@map("wallet_engagement_campaigns")
+}
+
+model WalletCampaignDelivery {
+  id                    String                       @id @default(uuid()) @db.Uuid
+  organizationId        String                       @map("organization_id") @db.Uuid
+  campaignId            String                       @map("campaign_id") @db.Uuid
+  membershipId          String                       @map("membership_id") @db.Uuid
+  walletPassInstanceId  String                       @map("wallet_pass_instance_id") @db.Uuid
+  provider              WalletProviderCode
+  providerMessageId     String                       @map("provider_message_id") @db.VarChar(80)
+  status                WalletCampaignDeliveryStatus @default(QUEUED)
+  safeSkipCode          String?                      @map("safe_skip_code") @db.VarChar(120)
+  safeFailureCode       String?                      @map("safe_failure_code") @db.VarChar(120)
+  providerRequestId     String?                      @map("provider_request_id") @db.VarChar(255)
+  logicalSentAt         DateTime?                    @map("logical_sent_at") @db.Timestamptz(6)
+  completedAt           DateTime?                    @map("completed_at") @db.Timestamptz(6)
+  createdAt             DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization          Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  campaign              WalletEngagementCampaign     @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  membership            Membership                   @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+  walletPassInstance    WalletPassInstance            @relation(fields: [walletPassInstanceId], references: [id], onDelete: Restrict)
+  walletCommand         WalletCommand?
+
+  @@unique([campaignId, walletPassInstanceId])
+  @@unique([provider, providerMessageId])
+  @@index([organizationId, membershipId, provider, logicalSentAt])
+  @@index([campaignId, status])
+  @@map("wallet_campaign_deliveries")
 }
 
 model ProgramWalletSyncJob {
@@ -1967,6 +2819,7 @@ model DevicePairingSession {
   organizationId               String              @map("organization_id") @db.Uuid
   intendedStaffMemberId        String              @map("intended_staff_member_id") @db.Uuid
   pairingTokenHash             String              @unique @map("pairing_token_hash") @db.Char(64)
+  pairingManualCodeHash        String?             @unique @map("pairing_manual_code_hash") @db.Char(64)
   requestedLocationAssignments Json                @map("requested_location_assignments") @db.JsonB
   deviceLabelSuggestion        String?             @map("device_label_suggestion") @db.VarChar(120)
   createdByUserId              String              @map("created_by_user_id") @db.Uuid

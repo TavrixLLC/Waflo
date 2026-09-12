@@ -20,9 +20,7 @@ import {
 
 const generatorVersion = "waflo-m2-contract-generator-v1";
 const root = process.cwd();
-const outputDirectory = resolve(
-  process.env.M2_OUTPUT_DIRECTORY ?? "artifacts/handoff-w4-m2-provenance-repair/mobile-contracts",
-);
+const outputDirectory = resolve(process.env.M2_OUTPUT_DIRECTORY ?? "docs/contracts/m2");
 
 function git(...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();

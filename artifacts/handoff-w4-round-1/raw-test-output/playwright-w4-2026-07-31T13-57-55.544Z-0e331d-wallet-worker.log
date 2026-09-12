@@ -1,1 +1,0 @@
-{"level":"info","component":"wallet-worker","event":"ready","providers":[{"provider":"APPLE","mode":"TEST_ADAPTER","status":"HEALTHY"},{"provider":"GOOGLE","mode":"TEST_ADAPTER","status":"HEALTHY"}]}

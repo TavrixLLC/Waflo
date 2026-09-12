@@ -1,0 +1,70 @@
+{
+  "formatVersion": 1,
+  "passTypeIdentifier": "pass.invalid.waflo.template",
+  "serialNumber": "template-not-for-distribution",
+  "teamIdentifier": "TEMPLATE",
+  "organizationName": "Waflo",
+  "description": "Loyalty membership",
+  "logoText": "Waflo",
+  "foregroundColor": "rgb(36,25,22)",
+  "backgroundColor": "rgb(247,244,238)",
+  "labelColor": "rgb(36,25,22)",
+  "storeCard": {
+    "headerFields": [
+      {
+        "key": "progress",
+        "label": "STAMPS",
+        "value": "0/8",
+        "textAlignment": "PKTextAlignmentNatural"
+      }
+    ],
+    "primaryFields": [],
+    "secondaryFields": [
+      {
+        "key": "reward",
+        "label": "REWARD",
+        "value": "Reward",
+        "textAlignment": "PKTextAlignmentNatural"
+      }
+    ],
+    "auxiliaryFields": [
+      {
+        "key": "member",
+        "label": "MEMBER",
+        "value": "Member",
+        "textAlignment": "PKTextAlignmentNatural"
+      },
+      {
+        "key": "status",
+        "label": "STATUS",
+        "value": "Active",
+        "changeMessage": "%@",
+        "textAlignment": "PKTextAlignmentNatural"
+      }
+    ],
+    "backFields": [
+      { "key": "program", "label": "PROGRAM", "value": "Loyalty program" },
+      {
+        "key": "security",
+        "label": "SECURITY",
+        "value": "This QR is an opaque, revocable Waflo membership credential. Do not share screenshots."
+      },
+      { "key": "operator", "label": "WAFLO", "value": "Waflo is owned and operated by Tavrix LLC." }
+    ]
+  },
+  "posterGeneric": {
+    "backFields": [
+      { "key": "program", "label": "PROGRAM", "value": "Loyalty program" },
+      { "key": "member", "label": "MEMBER", "value": "Member" },
+      { "key": "status", "label": "STATUS", "value": "Active", "changeMessage": "%@" },
+      { "key": "progress_detail", "label": "STAMPS", "value": "0/8" },
+      { "key": "reward", "label": "REWARD", "value": "Reward" },
+      {
+        "key": "security",
+        "label": "SECURITY",
+        "value": "This QR is an opaque, revocable Waflo membership credential. Do not share screenshots."
+      },
+      { "key": "operator", "label": "WAFLO", "value": "Waflo is owned and operated by Tavrix LLC." }
+    ]
+  }
+}

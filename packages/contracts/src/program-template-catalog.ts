@@ -29,6 +29,16 @@ export interface ProgramTemplatePresentation {
   titleTreatment: "DISPLAY" | "EDITORIAL" | "COMPACT" | "QUIET";
 }
 
+export const defaultProgramTemplatePresentation: ProgramTemplatePresentation = {
+  visualRole: "MINIMAL",
+  composition: "STAMP_STAGE",
+  motifTreatment: "BADGE",
+  rewardTreatment: "FRAMED",
+  density: "BALANCED",
+  cornerTreatment: "SOFT",
+  titleTreatment: "COMPACT",
+};
+
 export interface ProgramTemplateArtworkReference {
   code: string;
   version: number;
@@ -86,13 +96,8 @@ export interface ProgramTemplateDefinition {
     milestone: ProgramTemplateArtworkReference;
   };
   layout: {
-    type: "ROW" | "GRID" | "PATH" | "RING";
-    configuration: {
-      columns?: number;
-      maxPerRow?: number;
-      serpentine?: boolean;
-      startAngle?: number;
-    };
+    type: "GRID";
+    configuration: Record<string, never>;
     stampSize: number;
     stampSpacing: number;
   };
@@ -131,8 +136,14 @@ interface TemplateSeed {
   background: string;
   artwork: string;
   milestoneArtwork?: string;
-  layout: ProgramTemplateDefinition["layout"]["type"];
-  layoutConfiguration?: ProgramTemplateDefinition["layout"]["configuration"];
+  /** Historical input retained only while catalog seeds are read during migration. */
+  layout: "ROW" | "GRID" | "PATH" | "RING";
+  layoutConfiguration?: {
+    columns?: number;
+    maxPerRow?: number;
+    serpentine?: boolean;
+    startAngle?: number;
+  };
   stampSize?: number;
   stampSpacing?: number;
   customerVariant?: ProgramTemplateDefinition["customerWeb"]["variant"];
@@ -197,7 +208,7 @@ const originalLaunchSeeds: TemplateSeed[] = [
     background: "#F0FAFF",
     artwork: "CAR",
     milestoneArtwork: "WATER_DROP",
-    layout: "PATH",
+    layout: "GRID",
     copyEn: "Earn a car stamp with every qualifying wash.",
     copyAr: "اكسب ختم سيارة مع كل غسلة مؤهلة.",
   },
@@ -217,7 +228,7 @@ const originalLaunchSeeds: TemplateSeed[] = [
     background: "#FFF5FA",
     artwork: "FLOWER",
     milestoneArtwork: "HEART",
-    layout: "RING",
+    layout: "GRID",
     copyEn: "Collect a flower stamp at every qualifying appointment.",
     copyAr: "اجمع ختم زهرة في كل موعد مؤهل.",
   },
@@ -237,7 +248,7 @@ const originalLaunchSeeds: TemplateSeed[] = [
     background: "#F4F8FA",
     artwork: "SCISSORS",
     milestoneArtwork: "STAR",
-    layout: "ROW",
+    layout: "GRID",
     copyEn: "Collect a scissors stamp with every qualifying service.",
     copyAr: "اجمع ختم مقص مع كل خدمة مؤهلة.",
   },
@@ -346,7 +357,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#1D1614",
     artwork: "ESPRESSO_SHOT",
     milestoneArtwork: "GIFT",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 6 },
     stampSize: 46,
     stampSpacing: 9,
@@ -371,7 +382,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF4E5",
     artwork: "LATTE_CUP",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -90 },
     stampSize: 42,
     stampSpacing: 10,
@@ -396,7 +407,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#F4F6F3",
     artwork: "COFFEE_BEAN",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 3, serpentine: true },
     stampSize: 44,
     stampSpacing: 12,
@@ -434,7 +445,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#3A261A",
     artwork: "BREAD_LOAF",
     milestoneArtwork: "GIFT",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 5 },
     stampSize: 44,
     stampSpacing: 9,
@@ -459,7 +470,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF3F7",
     artwork: "CUPCAKE",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -60 },
     stampSize: 44,
     stampSpacing: 8,
@@ -484,7 +495,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF9F5",
     artwork: "CROISSANT",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 4, serpentine: true },
     stampSize: 42,
     stampSpacing: 11,
@@ -547,7 +558,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#1D2327",
     artwork: "FOAM_BUBBLES",
     milestoneArtwork: "WATER_DROP",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 3 },
     stampSize: 48,
     stampSpacing: 12,
@@ -572,7 +583,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#F2FCFD",
     artwork: "WATER_DROP",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -90 },
     stampSize: 44,
     stampSpacing: 8,
@@ -634,7 +645,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF5F3",
     artwork: "NAIL_POLISH",
     milestoneArtwork: "GIFT",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 3 },
     stampSize: 48,
     stampSpacing: 11,
@@ -659,7 +670,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#F5F8F5",
     artwork: "LOTUS",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 4, serpentine: false },
     stampSize: 42,
     stampSpacing: 12,
@@ -721,7 +732,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#F2F8FA",
     artwork: "COMB",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 3, serpentine: true },
     stampSize: 44,
     stampSpacing: 12,
@@ -746,7 +757,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF8ED",
     artwork: "BARBER_POLE",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -90 },
     stampSize: 42,
     stampSpacing: 8,
@@ -785,7 +796,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#17352E",
     artwork: "CLOCHE",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -90 },
     stampSize: 42,
     stampSpacing: 9,
@@ -810,7 +821,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF9F0",
     artwork: "FORK_KNIFE",
     milestoneArtwork: "GIFT",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 4 },
     stampSize: 44,
     stampSpacing: 10,
@@ -835,7 +846,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF7E6",
     artwork: "BURGER",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 3, serpentine: true },
     stampSize: 46,
     stampSpacing: 11,
@@ -873,7 +884,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FCF4FF",
     artwork: "PRICE_TAG",
     milestoneArtwork: "GIFT",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 3 },
     stampSize: 48,
     stampSpacing: 11,
@@ -898,7 +909,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#201C26",
     artwork: "MEMBER_BADGE",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -90 },
     stampSize: 42,
     stampSpacing: 8,
@@ -923,7 +934,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#F5F8FA",
     artwork: "PACKAGE_BOX",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 3, serpentine: false },
     stampSize: 44,
     stampSpacing: 12,
@@ -961,7 +972,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#2B2550",
     artwork: "REWARD_LOOP",
     milestoneArtwork: "GIFT",
-    layout: "RING",
+    layout: "GRID",
     layoutConfiguration: { startAngle: -90 },
     stampSize: 42,
     stampSpacing: 9,
@@ -986,7 +997,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#F7F8F7",
     artwork: "NEUTRAL_MARK",
     milestoneArtwork: "GIFT",
-    layout: "ROW",
+    layout: "GRID",
     layoutConfiguration: { maxPerRow: 6 },
     stampSize: 44,
     stampSpacing: 10,
@@ -1011,7 +1022,7 @@ const p21LaunchSeeds: TemplateSeed[] = [
     background: "#FFF8EF",
     artwork: "VISIT_BADGE",
     milestoneArtwork: "GIFT",
-    layout: "PATH",
+    layout: "GRID",
     layoutConfiguration: { columns: 5, serpentine: true },
     stampSize: 42,
     stampSpacing: 9,
@@ -1437,16 +1448,10 @@ function launchTemplate(
       },
     },
     layout: {
-      type: seed.layout,
-      configuration:
-        seed.layoutConfiguration ??
-        (seed.layout === "GRID"
-          ? { columns: seed.goal > 8 ? 5 : 4 }
-          : seed.layout === "ROW"
-            ? { maxPerRow: 6 }
-            : seed.layout === "PATH"
-              ? { maxPerRow: 4, serpentine: true }
-              : { startAngle: -90 }),
+      // Catalog definitions deliberately never surface a legacy placement choice.
+      // Renderer distribution is derived from the stamp goal (3+3, 4+3, 4+4, etc.).
+      type: "GRID",
+      configuration: {},
       stampSize: seed.stampSize ?? 48,
       stampSpacing: seed.stampSpacing ?? 8,
     },
@@ -1521,6 +1526,23 @@ export function findProgramTemplate(
   const matches = programTemplateCatalog.filter((template) => template.code === code);
   if (version !== undefined) return matches.find((template) => template.version === version);
   return matches.toSorted((left, right) => right.version - left.version)[0];
+}
+
+/**
+ * Published cards can outlive a catalog revision. Prefer the exact historical
+ * definition, then the latest art direction for the same template code, and
+ * finally a stable neutral composition for custom/legacy programs.
+ */
+export function resolveProgramTemplatePresentation(
+  code: string | null | undefined,
+  version?: number | null,
+): ProgramTemplatePresentation {
+  if (!code) return defaultProgramTemplatePresentation;
+  return (
+    findProgramTemplate(code, version ?? undefined)?.presentation ??
+    findProgramTemplate(code)?.presentation ??
+    defaultProgramTemplatePresentation
+  );
 }
 
 export function latestProgramTemplates(): ProgramTemplateDefinition[] {

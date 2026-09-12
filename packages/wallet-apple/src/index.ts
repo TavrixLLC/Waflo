@@ -1,9 +1,16 @@
 import { createHash, createHmac } from "node:crypto";
-import { zipSync } from "fflate";
-import forge from "node-forge";
-import sharp from "sharp";
+import {
+  cardLocalePresentation,
+  cardLocaleRegistry,
+  walletStructuralCopyForLocale,
+} from "@waflo/contracts";
 import { renderPublishedMembershipStampSvg } from "@waflo/stamp-engine";
 import {
+  composeAppleStoreCardStripArtwork,
+  walletArtworkInputFromStampRender,
+} from "@waflo/wallet-artwork";
+import {
+  resolveWalletLoyaltyPresentation,
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
@@ -17,6 +24,30 @@ import {
   type WalletUpdateReason,
   type WalletUpdateResult,
 } from "@waflo/wallet-core";
+import { zipSync } from "fflate";
+import forge from "node-forge";
+import sharp from "sharp";
+import {
+  mapAppleStoreCardPosterPass,
+  mapLegacyApplePresentation,
+  type WalletPassGenerationInput,
+  type WalletPassGenerator,
+  type WalletPassGeneratorHealth,
+} from "./pass-builder.js";
+
+export {
+  ApplePassBuilderGenerator,
+  type ApplePassBuilderGeneratorOptions,
+  type AppleStoreCardPosterPassDocument,
+  adoptedApplePassBuilderRevision,
+  mapAppleStoreCardPosterPass,
+  mapLegacyApplePresentation,
+  parseAppleSigningKeyMap,
+  type WalletPassGenerationInput,
+  type WalletPassGenerator,
+  type WalletPassGeneratorHealth,
+  type WalletPassValidationResult,
+} from "./pass-builder.js";
 
 export interface ApplePassConfiguration {
   readonly passTypeIdentifier: string;
@@ -30,6 +61,7 @@ export interface ApplePassField {
   readonly label?: string;
   readonly value: string | number;
   readonly changeMessage?: string;
+  readonly textAlignment?: "PKTextAlignmentNatural";
 }
 
 export interface AppleStoreCardPass {
@@ -46,11 +78,16 @@ export interface AppleStoreCardPass {
   readonly webServiceURL: string;
   readonly authenticationToken: string;
   readonly voided: boolean;
+  readonly locations?: ReadonlyArray<{
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly relevantText: string;
+  }>;
+  readonly maxDistance?: number;
   readonly barcodes: ReadonlyArray<{
     readonly format: "PKBarcodeFormatQR";
     readonly message: string;
     readonly messageEncoding: "iso-8859-1";
-    readonly altText: string;
   }>;
   readonly storeCard: {
     readonly headerFields: readonly ApplePassField[];
@@ -74,12 +111,11 @@ export function mapAppleStoreCard(
   configuration: ApplePassConfiguration,
   authenticationToken: string,
 ): AppleStoreCardPass {
-  const progress = `${input.currentStampCount}/${input.requiredStampCount}`;
-  const inactive =
-    input.transferred ||
-    input.membershipStatus !== "ACTIVE" ||
-    input.programStatus === "ARCHIVED" ||
-    input.programStatus === "SUSPENDED";
+  const presentation = resolveWalletLoyaltyPresentation(input);
+  const nearby = input.nearbyRelevance;
+  if (nearby?.enabled && nearby.locations.length > 10) {
+    throw new Error("Apple Wallet supports at most 10 nearby locations per pass.");
+  }
   return {
     formatVersion: 1,
     passTypeIdentifier: configuration.passTypeIdentifier,
@@ -93,48 +129,25 @@ export function mapAppleStoreCard(
     labelColor: appleRgb(input.foregroundColor),
     webServiceURL: configuration.webServiceUrl.replace(/\/+$/, ""),
     authenticationToken,
-    voided: inactive,
+    voided: presentation.inactive,
+    ...(nearby?.enabled && nearby.locations.length
+      ? {
+          locations: nearby.locations.map((location) => ({
+            latitude: location.latitude,
+            longitude: location.longitude,
+            relevantText: location.relevantText,
+          })),
+          maxDistance: nearby.desiredAppleMaxDistanceMeters,
+        }
+      : {}),
     barcodes: [
       {
-        format: "PKBarcodeFormatQR",
-        message: input.credentialPayload,
+        format: presentation.barcode.appleFormats[0],
+        message: presentation.barcode.payload,
         messageEncoding: "iso-8859-1",
-        altText: inactive ? "No longer valid" : input.publicMembershipId.slice(-12),
       },
     ],
-    storeCard: {
-      headerFields: [{ key: "progress", label: "STAMPS", value: progress }],
-      primaryFields: [{ key: "program", value: input.programName.slice(0, 80) }],
-      secondaryFields: [{ key: "member", label: "MEMBER", value: input.displayName.slice(0, 80) }],
-      auxiliaryFields: [
-        {
-          key: "status",
-          label: "STATUS",
-          value: input.transferred
-            ? "Transferred"
-            : input.programStatus === "PAUSED"
-              ? "Temporarily paused"
-              : input.rewardReady
-                ? "Reward ready"
-                : "Active",
-          changeMessage: "%@",
-        },
-      ],
-      backFields: [
-        { key: "reward", label: "REWARD", value: input.rewardSummary.slice(0, 500) },
-        {
-          key: "security",
-          label: "SECURITY",
-          value:
-            "This QR is an opaque, revocable Waflo membership credential. Do not share screenshots.",
-        },
-        {
-          key: "operator",
-          label: "WAFLO",
-          value: "Waflo is owned and operated by Tavrix LLC.",
-        },
-      ],
-    },
+    storeCard: mapLegacyApplePresentation(input) as AppleStoreCardPass["storeCard"],
   };
 }
 
@@ -278,20 +291,18 @@ export class Pkcs7ApplePassSigner implements ApplePassSigner {
 }
 
 async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
-  const image = (width: number, height: number, logo = false) => {
-    const markSize = Math.min(height, logo ? width / 3 : width);
-    const text = logo
-      ? `<text x="${markSize + Math.max(5, width * 0.04)}" y="${height * 0.7}" font-family="Arial,sans-serif" font-size="${height * 0.48}" font-weight="700" fill="#241916">WAFLO</text>`
-      : "";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${markSize}" height="${height}" rx="${Math.max(4, height * 0.18)}" fill="#E4572E"/><path d="M${markSize * 0.2} ${height * 0.28}l${markSize * 0.16} ${height * 0.46} ${markSize * 0.14}-${height * 0.27} ${markSize * 0.14} ${height * 0.27} ${markSize * 0.16}-${height * 0.46}" fill="none" stroke="#fff" stroke-width="${Math.max(2, markSize * 0.09)}" stroke-linecap="round" stroke-linejoin="round"/>${text}</svg>`;
+  const image = (width: number, height: number) => {
+    const markSize = Math.min(height, width);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${markSize}" height="${height}" rx="${Math.max(4, height * 0.18)}" fill="#E4572E"/><path d="M${markSize * 0.2} ${height * 0.28}l${markSize * 0.16} ${height * 0.46} ${markSize * 0.14}-${height * 0.27} ${markSize * 0.14} ${height * 0.27} ${markSize * 0.16}-${height * 0.46}" fill="none" stroke="#fff" stroke-width="${Math.max(2, markSize * 0.09)}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     return sharp(Buffer.from(svg, "utf8")).png().toBuffer();
   };
-  const [icon, icon2x, icon3x, logo, logo2x] = await Promise.all([
-    image(29, 29),
-    image(58, 58),
-    image(87, 87),
-    image(160, 50, true),
-    image(320, 100, true),
+  const [icon, icon2x, icon3x, logo, logo2x, logo3x] = await Promise.all([
+    image(38, 38),
+    image(76, 76),
+    image(114, 114),
+    image(38, 38),
+    image(76, 76),
+    image(114, 114),
   ]);
   return {
     "icon.png": icon,
@@ -299,40 +310,235 @@ async function defaultPassImages(): Promise<Record<string, Uint8Array>> {
     "icon@3x.png": icon3x,
     "logo.png": logo,
     "logo@2x.png": logo2x,
+    "logo@3x.png": logo3x,
   };
 }
 
-async function progressStrip(input: WalletMembershipInput): Promise<Buffer> {
+async function progressStripImages(
+  input: WalletMembershipInput,
+): Promise<Readonly<Record<string, Buffer>>> {
+  const walletLocale = cardLocalePresentation(input.locale).locale;
+  const stampRenderInput = { ...input.stampRenderInput, locale: walletLocale };
   const rendered = renderPublishedMembershipStampSvg({
-    ...input.stampRenderInput,
+    ...stampRenderInput,
     outputProfile: "APPLE_WALLET",
   });
-  return sharp(Buffer.from(rendered.svg, "utf8"))
-    .resize(750, 246, {
-      fit: "contain",
-      background: input.stampRenderInput.visualTheme.backgroundColor,
-    })
-    .png()
-    .toBuffer();
+  const composed = await composeAppleStoreCardStripArtwork(
+    walletArtworkInputFromStampRender(
+      {
+        stampRenderInput,
+        rewardLabel: input.rewardSummary,
+        organizationName: input.organizationName,
+        programName: input.programName,
+        memberName: input.displayName,
+        credentialPayload: input.credentialPayload,
+        ...(input.qrCenterLogo ? { qrCenterLogo: { bytes: input.qrCenterLogo } } : {}),
+      },
+      rendered,
+    ),
+  );
+  return {
+    "strip.png": composed.times1.bytes,
+    "strip@2x.png": composed.times2.bytes,
+    "strip@3x.png": composed.times3.bytes,
+  };
 }
 
-function localizedStrings(locale: "en" | "ar"): string {
-  return locale === "ar"
-    ? '"STAMPS" = "الأختام";\n"MEMBER" = "العضو";\n"STATUS" = "الحالة";\n"Transferred" = "تم النقل";\n"No longer valid" = "لم تعد صالحة";\n'
-    : '"STAMPS" = "STAMPS";\n"MEMBER" = "MEMBER";\n"STATUS" = "STATUS";\n"Transferred" = "Transferred";\n"No longer valid" = "No longer valid";\n';
+/**
+ * Legacy Store Cards have one compact logo slot beside logoText. Normalize
+ * only pass-package derivatives, never the merchant source asset or Poster
+ * artwork, so a wide wordmark cannot consume the identity row.
+ */
+async function normalizeLegacyLogoImages(
+  images: Readonly<Record<string, Uint8Array>> | undefined,
+): Promise<Readonly<Record<string, Uint8Array>>> {
+  if (!images) return {};
+  const output: Record<string, Uint8Array> = { ...images };
+  await Promise.all(
+    (
+      [
+        ["logo.png", 38],
+        ["logo@2x.png", 76],
+        ["logo@3x.png", 114],
+      ] as const
+    ).map(async ([name, size]) => {
+      const source = images[name];
+      if (!source) return;
+      try {
+        output[name] = await sharp(source)
+          .trim({ background: { r: 255, g: 255, b: 255, alpha: 0 } })
+          .resize(size, size, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+          })
+          .png()
+          .toBuffer();
+      } catch {
+        // Source-image validity is checked earlier in the branding flow. Keep
+        // a supplied legacy/test asset when this presentation-only derivative
+        // cannot be raster-normalized.
+        output[name] = source;
+      }
+    }),
+  );
+  return output;
+}
+
+function appleStringsEscape(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
+}
+
+function localizedStrings(
+  locale: string,
+  replacements: readonly { key: string; value: string }[] = [],
+): string {
+  const presentation = cardLocalePresentation(locale);
+  const copy = walletStructuralCopyForLocale(presentation.locale);
+  const structural = [
+    ["STAMPS", copy.stamps],
+    ["MEMBER", copy.member],
+    ["STATUS", copy.status],
+    ["REWARD", copy.reward],
+    ["PROGRAM", copy.program],
+    ["SECURITY", copy.security],
+    ["Active", copy.active],
+    ["Reward ready", copy.rewardReady],
+    ["Transferred", copy.transferred],
+    ["Temporarily paused", copy.paused],
+    ["No longer valid", copy.invalid],
+  ] as const;
+  return [...structural, ...replacements.map(({ key, value }) => [key, value] as const)]
+    .filter(([key]) => key.length > 0)
+    .map(([key, value]) => `"${appleStringsEscape(key)}" = "${appleStringsEscape(value)}";\n`)
+    .join("");
+}
+
+function utf16AppleStrings(value: string): Buffer {
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(value, "utf16le")]);
+}
+
+function passFieldValue(pass: AppleStoreCardPass, key: string): string {
+  const field = [
+    ...pass.storeCard.headerFields,
+    ...pass.storeCard.primaryFields,
+    ...pass.storeCard.secondaryFields,
+    ...pass.storeCard.auxiliaryFields,
+    ...pass.storeCard.backFields,
+  ].find((candidate) => candidate.key === key);
+  return field?.value.toString() ?? "";
+}
+
+const appleLocalizableValueKeys: Readonly<Record<string, string>> = Object.freeze({
+  progress: "__WAFLO_PROGRESS__",
+  reward: "__WAFLO_REWARD__",
+  program: "__WAFLO_PROGRAM__",
+  member: "__WAFLO_MEMBER__",
+  security: "__WAFLO_SECURITY_VALUE__",
+  operator: "__WAFLO_OPERATOR_VALUE__",
+});
+
+/**
+ * Apple resolves pass.strings by matching pass.json string values. Stable keys
+ * keep that mapping independent of the language used to issue this pass while
+ * retaining the approved field hierarchy and geometry.
+ */
+function withAppleLocalizationKeys(pass: AppleStoreCardPass): AppleStoreCardPass {
+  const fields = (value: readonly ApplePassField[]) =>
+    value.map((field) => ({
+      ...field,
+      value: appleLocalizableValueKeys[field.key] ?? field.value,
+    }));
+  return {
+    ...pass,
+    description: "__WAFLO_DESCRIPTION__",
+    logoText: "__WAFLO_LOGO_TEXT__",
+    storeCard: {
+      headerFields: fields(pass.storeCard.headerFields),
+      primaryFields: fields(pass.storeCard.primaryFields),
+      secondaryFields: fields(pass.storeCard.secondaryFields),
+      auxiliaryFields: fields(pass.storeCard.auxiliaryFields),
+      backFields: fields(pass.storeCard.backFields),
+    },
+  };
 }
 
 export async function buildApplePassPackage(input: {
   pass: AppleStoreCardPass;
   signer: ApplePassSigner;
   images?: Readonly<Record<string, Uint8Array>>;
+  defaultLocale?: string;
+  localizations?: ReadonlyArray<{
+    locale: string;
+    programName: string;
+    description: string;
+    rewardSummary: string;
+  }>;
 }): Promise<Buffer> {
   const defaults = await defaultPassImages();
+  const localizablePass = withAppleLocalizationKeys(input.pass);
+  const configuredLocalizations = input.localizations?.length
+    ? input.localizations
+    : [
+        {
+          locale: "en",
+          programName: passFieldValue(input.pass, "program"),
+          description: input.pass.description,
+          rewardSummary: passFieldValue(input.pass, "reward"),
+        },
+      ];
+  const defaultLocale = cardLocalePresentation(
+    input.defaultLocale ?? configuredLocalizations[0]?.locale ?? "en",
+  ).locale;
+  const defaultContent =
+    configuredLocalizations.find(
+      (item) => cardLocalePresentation(item.locale).locale === defaultLocale,
+    ) ?? configuredLocalizations[0];
+  if (!defaultContent) throw new Error("Apple pass needs localized default content.");
+  // Apple receives a complete localization folder for every locale Waflo can
+  // issue. A program's configured values win; unconfigured locales retain the
+  // default merchant copy while their structural field labels remain correct.
+  const localizations = cardLocaleRegistry.map((locale) => {
+    const configured = configuredLocalizations.find(
+      (item) => cardLocalePresentation(item.locale).locale === locale.id,
+    );
+    return configured ?? { ...defaultContent, locale: locale.id };
+  });
+  const localizedFiles = Object.fromEntries(
+    localizations.map((content) => [
+      `${cardLocalePresentation(content.locale).appleLocale}.lproj/pass.strings`,
+      utf16AppleStrings(
+        localizedStrings(content.locale, [
+          {
+            key: "__WAFLO_PROGRAM__",
+            value: content.programName,
+          },
+          {
+            key: "__WAFLO_DESCRIPTION__",
+            value: content.description,
+          },
+          {
+            key: "__WAFLO_REWARD__",
+            value: content.rewardSummary,
+          },
+          { key: "__WAFLO_LOGO_TEXT__", value: input.pass.logoText },
+          { key: "__WAFLO_PROGRESS__", value: passFieldValue(input.pass, "progress") },
+          { key: "__WAFLO_MEMBER__", value: passFieldValue(input.pass, "member") },
+          {
+            key: "__WAFLO_SECURITY_VALUE__",
+            value: passFieldValue(input.pass, "security"),
+          },
+          {
+            key: "__WAFLO_OPERATOR_VALUE__",
+            value: passFieldValue(input.pass, "operator"),
+          },
+        ]),
+      ),
+    ]),
+  );
   const files: Record<string, Uint8Array> = {
-    "pass.json": Buffer.from(JSON.stringify(input.pass), "utf8"),
+    "pass.json": Buffer.from(JSON.stringify(localizablePass), "utf8"),
     ...defaults,
-    "en.lproj/pass.strings": Buffer.from(localizedStrings("en"), "utf8"),
-    "ar.lproj/pass.strings": Buffer.from(localizedStrings("ar"), "utf8"),
+    ...localizedFiles,
     ...(input.images ?? {}),
   };
   const manifest = Buffer.from(JSON.stringify(createAppleManifest(files)), "utf8");
@@ -351,16 +557,59 @@ export interface AppleWalletProviderOptions {
   readonly mode: WalletProviderMode;
   readonly configuration?: ApplePassConfiguration;
   readonly signer?: ApplePassSigner;
+  readonly generator?: WalletPassGenerator;
+  /** Operator attestation after successful real-device Apple Wallet certification. */
+  readonly externallyCertified?: boolean;
   readonly authenticationToken: (input: WalletMembershipInput) => string;
   readonly passDownloadUrl: string;
+}
+
+export class LegacyApplePassGenerator implements WalletPassGenerator {
+  readonly kind = "legacy" as const;
+
+  constructor(private readonly signer: ApplePassSigner) {}
+
+  async generatePass(input: WalletPassGenerationInput): Promise<Buffer> {
+    const pass = mapAppleStoreCard(
+      input.membership,
+      input.configuration,
+      input.authenticationToken,
+    );
+    return buildApplePassPackage({
+      pass,
+      signer: this.signer,
+      images: {
+        ...(await progressStripImages(input.membership)),
+        ...(await normalizeLegacyLogoImages(input.membership.applePassImages)),
+      },
+      ...(input.membership.defaultLocale ? { defaultLocale: input.membership.defaultLocale } : {}),
+      ...(input.membership.localizedContent
+        ? { localizations: input.membership.localizedContent }
+        : {}),
+    });
+  }
+
+  async validatePass(input: WalletPassGenerationInput) {
+    const artifact = await this.generatePass(input);
+    return { valid: artifact.length > 0, warnings: [] };
+  }
+
+  async healthCheck(configuration: ApplePassConfiguration): Promise<WalletPassGeneratorHealth> {
+    if (this.signer.mode !== "REAL" || !this.signer.health) return { status: "READY" };
+    return this.signer.health(configuration.passTypeIdentifier, configuration.teamIdentifier);
+  }
 }
 
 export class AppleWalletProvider implements WalletProvider {
   readonly provider = "APPLE" as const;
   readonly mode: WalletProviderMode;
+  private readonly generator: WalletPassGenerator | undefined;
 
   constructor(private readonly options: AppleWalletProviderOptions) {
     this.mode = options.mode;
+    this.generator =
+      options.generator ??
+      (options.signer ? new LegacyApplePassGenerator(options.signer) : undefined);
   }
 
   async healthCheck(): Promise<WalletProviderHealth> {
@@ -375,7 +624,7 @@ export class AppleWalletProvider implements WalletProvider {
         demo: false,
       };
     }
-    if (!this.options.configuration || !this.options.signer) {
+    if (!this.options.configuration || !this.generator) {
       return {
         provider: this.provider,
         mode: this.mode,
@@ -403,12 +652,22 @@ export class AppleWalletProvider implements WalletProvider {
         externallyCertified: false,
       };
     }
-    if (this.options.signer.mode === "REAL" && this.options.signer.health) {
+    if (this.mode === "REAL") {
       try {
-        const certificate = this.options.signer.health(
-          this.options.configuration.passTypeIdentifier,
-          this.options.configuration.teamIdentifier,
-        );
+        const certificate = await this.generator.healthCheck(this.options.configuration);
+        if (certificate.status === "DEGRADED") {
+          return {
+            provider: this.provider,
+            mode: this.mode,
+            status: "PROVIDER_UNAVAILABLE",
+            checkedAt,
+            safeMessage: "Apple pass generation is unavailable.",
+            demo: false,
+            configured: true,
+            providerReachable: false,
+            externallyCertified: false,
+          };
+        }
         if (certificate.status === "EXPIRED") {
           return {
             provider: this.provider,
@@ -420,7 +679,7 @@ export class AppleWalletProvider implements WalletProvider {
             configured: true,
             providerReachable: false,
             externallyCertified: false,
-            certificateExpiresAt: certificate.expiresAt,
+            ...(certificate.expiresAt ? { certificateExpiresAt: certificate.expiresAt } : {}),
           };
         }
         if (certificate.status === "EXPIRING") {
@@ -434,7 +693,7 @@ export class AppleWalletProvider implements WalletProvider {
             configured: true,
             providerReachable: false,
             externallyCertified: false,
-            certificateExpiresAt: certificate.expiresAt,
+            ...(certificate.expiresAt ? { certificateExpiresAt: certificate.expiresAt } : {}),
           };
         }
         if (
@@ -454,7 +713,7 @@ export class AppleWalletProvider implements WalletProvider {
             configured: true,
             providerReachable: false,
             externallyCertified: false,
-            certificateExpiresAt: certificate.expiresAt,
+            ...(certificate.expiresAt ? { certificateExpiresAt: certificate.expiresAt } : {}),
           };
         }
       } catch {
@@ -469,17 +728,19 @@ export class AppleWalletProvider implements WalletProvider {
       }
     }
     if (this.mode === "REAL") {
+      const externallyCertified = this.options.externallyCertified === true;
       return {
         provider: this.provider,
         mode: this.mode,
-        status: "EXTERNALLY_UNCERTIFIED",
+        status: externallyCertified ? "HEALTHY" : "EXTERNALLY_UNCERTIFIED",
         checkedAt,
-        safeMessage:
-          "Apple Wallet signing is locally valid; external device certification is still pending.",
+        safeMessage: externallyCertified
+          ? "Apple Wallet signing and external device certification are confirmed."
+          : "Apple Wallet signing is locally valid; external device certification is still pending.",
         demo: false,
         configured: true,
         providerReachable: false,
-        externallyCertified: false,
+        externallyCertified,
       };
     }
     return {
@@ -509,20 +770,24 @@ export class AppleWalletProvider implements WalletProvider {
 
   async issueMembershipPass(input: WalletMembershipInput): Promise<WalletIssueResult> {
     const configuration = this.requireConfigured();
-    const pass = mapAppleStoreCard(input, configuration, this.options.authenticationToken(input));
-    const artifact = await buildApplePassPackage({
-      pass,
-      signer: this.options.signer as ApplePassSigner,
-      images: {
-        "strip.png": await progressStrip(input),
-      },
+    const authenticationToken = this.options.authenticationToken(input);
+    const pass =
+      this.generator?.kind === "apple-pass-builder"
+        ? mapAppleStoreCardPosterPass(input, configuration, authenticationToken)
+        : mapAppleStoreCard(input, configuration, authenticationToken);
+    const artifact = await this.generator?.generatePass({
+      membership: input,
+      configuration,
+      authenticationToken,
     });
+    if (!artifact) throw new Error("Apple Wallet pass generator is unavailable.");
     return {
       providerObjectId: input.providerIdentity,
       state: "ACTIVE",
       artifact,
       safeMetadata: {
         mode: this.mode,
+        generator: this.generator?.kind ?? "unavailable",
         packageDigest: createHash("sha256").update(artifact).digest("hex"),
         voided: pass.voided,
       },
@@ -560,7 +825,7 @@ export class AppleWalletProvider implements WalletProvider {
   }
 
   private requireConfigured(): ApplePassConfiguration {
-    if (this.mode === "DISABLED" || !this.options.configuration || !this.options.signer) {
+    if (this.mode === "DISABLED" || !this.options.configuration || !this.generator) {
       throw new Error("Apple Wallet is not configured.");
     }
     return this.options.configuration;

@@ -1,25 +1,43 @@
 "use client";
 
-import { Alert, Badge, Button, Card } from "@waflo/ui";
-import { ArrowRightLeft, Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
+import {
+  cardLocaleMetadata,
+  defaultProgramTemplatePresentation,
+  directionForCardLocale,
+  fontStackForCardLocale,
+  type ProgramTemplatePresentation,
+} from "@waflo/contracts";
+import { Alert, Badge, Card, SearchableSelect } from "@waflo/ui";
+import { Clock3, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import { useCallback, useEffect, useState } from "react";
-import { customerApi, CustomerApiError } from "../../client-api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CustomerApiError, customerApi } from "../../client-api";
+import { CustomerMerchantIdentity } from "../../customer-merchant-identity";
+import { type WalletPlatform, walletPlatform } from "../../wallet-platform";
 
 interface CardView {
   publicMembershipId: string;
   customer: {
     displayName: string;
     preferredLocale: "en" | "ar";
-    maskedEmail: string | null;
+    maskedPhone: string | null;
   };
-  merchant: { name: string; slug: string };
+  merchant: { name: string; slug: string; brandLogoDataUri?: string | null | undefined };
   program: {
+    defaultLocale: string;
+    enabledLocales: string[];
+    contentLocale: string;
     name: string;
     description: string;
     rewardSummary: string;
     pausedMessage: string | null;
+    template?: {
+      code: string | null;
+      version: number | null;
+      presentation: ProgramTemplatePresentation;
+      identityArtworkDataUri: string | null;
+    };
   };
   membership: {
     status: string;
@@ -52,42 +70,324 @@ interface CardView {
     apple: { mode: string; status: string; testAdapter: boolean; safeErrorCode: string | null };
     google: { mode: string; status: string; testAdapter: boolean; safeErrorCode: string | null };
   };
-  transfer: {
-    allowed: boolean;
-    emailConfirmationRequired: boolean;
-    transferWithoutEmailAllowed: boolean;
-  };
 }
 
-export function CustomerCard({ publicMembershipId }: { publicMembershipId: string }) {
+interface WalletReadiness {
+  cardId: string;
+  apple: CardView["wallet"]["apple"];
+  google: CardView["wallet"]["google"];
+  updatedAt: string;
+}
+
+type CardLoadOutcome = "applied" | "failed" | "superseded";
+
+const walletConvergenceDelays = [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000] as const;
+
+function walletPreparationStages(ar: boolean) {
+  return [
+    {
+      afterSeconds: 0,
+      title: ar ? "جارٍ تجهيز بطاقة المحفظة" : "Preparing your Wallet pass",
+      description: ar
+        ? "ننشئ نسخة آمنة من بطاقتك لتكون جاهزة على جهازك."
+        : "Creating a secure pass that is ready for this device.",
+    },
+    {
+      afterSeconds: 2,
+      title: ar ? "جارٍ تصميم بطاقتك" : "Designing your card",
+      description: ar
+        ? "نرتّب تفاصيل برنامج الولاء في تنسيق المحفظة الأصلي."
+        : "Arranging your loyalty details in the native Wallet format.",
+    },
+    {
+      afterSeconds: 5,
+      title: ar ? "جارٍ تطبيق التفاصيل النهائية" : "Applying final details",
+      description: ar
+        ? "نراجع التقدم والمكافآت وتفاصيل بطاقتك المنشورة."
+        : "Reviewing your progress, rewards, and published card details.",
+    },
+    {
+      afterSeconds: 9,
+      title: ar ? "جارٍ تأمين بطاقتك ونشرها" : "Securing and publishing your pass",
+      description: ar
+        ? "يتم حفظ البطاقة في مسار تسليم Wallet الآمن."
+        : "Saving the pass through Wallet’s secure delivery path.",
+    },
+    {
+      afterSeconds: 15,
+      title: ar ? "جارٍ التحقق من توافق الجهاز" : "Checking device compatibility",
+      description: ar
+        ? "سنُظهر إجراء الإضافة الحقيقي فور تأكيد الجاهزية."
+        : "We’ll show the real add action as soon as readiness is confirmed.",
+    },
+    {
+      afterSeconds: Number.POSITIVE_INFINITY,
+      title: ar ? "جاهزة للإضافة" : "Ready to add",
+      description: ar
+        ? "بانتظار تأكيد Wallet النهائي."
+        : "Waiting for Wallet’s final confirmation.",
+    },
+  ];
+}
+
+function WalletPassPreparation({ ar, elapsedSeconds }: { ar: boolean; elapsedSeconds: number }) {
+  const stages = walletPreparationStages(ar);
+  const currentIndex = stages.reduce(
+    (index, stage, candidate) => (stage.afterSeconds <= elapsedSeconds ? candidate : index),
+    0,
+  );
+  const current = stages[currentIndex] ?? stages[0]!;
+  const progress = [18, 36, 54, 72, 88][Math.min(currentIndex, 4)] ?? 18;
+
+  return (
+    <section
+      className="wallet-preparation"
+      data-testid="wallet-preparation"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="wallet-preparation__visual" aria-hidden="true">
+        <div className="wallet-preparation__pass">
+          <WalletCards size={42} />
+          <span />
+          <i />
+        </div>
+        <div className="wallet-preparation__orbit wallet-preparation__orbit--outer" />
+        <div className="wallet-preparation__orbit wallet-preparation__orbit--inner" />
+      </div>
+      <div className="wallet-preparation__intro">
+        <span className="wallet-preparation__eyebrow">{ar ? "إعداد Wallet" : "WALLET SETUP"}</span>
+        <h1>{ar ? "بطاقتك قيد التحضير" : "Your pass is being prepared"}</h1>
+        <p>
+          {ar
+            ? "نُكمل إعداد بطاقتك للمحفظة. لا تحتاج إلى التحديث أو إعادة فتح الصفحة."
+            : "We’re finishing your Wallet setup. You do not need to refresh or reopen this page."}
+        </p>
+      </div>
+      <div
+        className="wallet-preparation__progress"
+        role="progressbar"
+        aria-label={ar ? "تقدم تجهيز البطاقة" : "Wallet pass preparation progress"}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+        aria-valuetext={current.title}
+      >
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <div className="wallet-preparation__current" aria-live="polite">
+        <strong>{current.title}</strong>
+        <p>{current.description}</p>
+      </div>
+      <ol
+        className="wallet-preparation__checkpoints"
+        aria-label={ar ? "مراحل التجهيز" : "Preparation stages"}
+      >
+        {stages.map((stage, index) => {
+          const state =
+            index < currentIndex ? "complete" : index === currentIndex ? "active" : "pending";
+          return (
+            <li key={stage.title} data-state={state}>
+              <span aria-hidden="true">{state === "complete" ? "✓" : index + 1}</span>
+              <strong>{stage.title}</strong>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="wallet-preparation__reassurance">
+        <ShieldCheck size={16} aria-hidden="true" />
+        {ar
+          ? "لن نعرض زر إضافة قبل أن تصبح البطاقة جاهزة بالفعل."
+          : "We only show the add action when the pass is genuinely ready."}
+      </p>
+    </section>
+  );
+}
+
+function walletIsPreparing(status: string): boolean {
+  return status === "PREPARING" || status === "PENDING";
+}
+
+function membershipStateLabel(state: string, ar: boolean): string {
+  if (state === "ACTIVE") return ar ? "نشطة" : "Active";
+  if (state === "TRANSFERRED") return ar ? "منقولة" : "Transferred";
+  if (state === "SUSPENDED") return ar ? "موقوفة" : "Suspended";
+  return ar ? "غير متاحة" : "Unavailable";
+}
+
+export function CustomerCard({
+  publicMembershipId,
+  tenant,
+  walletJourney = false,
+}: {
+  publicMembershipId: string;
+  tenant?: string;
+  walletJourney?: boolean;
+}) {
   const [card, setCard] = useState<CardView | null>(null);
   const [qrUrl, setQrUrl] = useState("");
   const [error, setError] = useState("");
-  const [walletBusy, setWalletBusy] = useState<"apple" | "google" | null>(null);
-  const [tenantQuery, setTenantQuery] = useState("");
+  const [walletBusy, setWalletBusy] = useState<"google" | null>(null);
+  const [platform, setPlatform] = useState<WalletPlatform | null>(null);
+  const [selectedCardLocale, setSelectedCardLocale] = useState<string | undefined>();
+  const [cardLoadInFlight, setCardLoadInFlight] = useState(false);
+  const [walletPreparationSeconds, setWalletPreparationSeconds] = useState(0);
+  const walletConvergenceAttempts = useRef(0);
+  const activeCardRequest = useRef<AbortController | null>(null);
+  const cardRequestGeneration = useRef(0);
+  const walletReadinessGeneration = useRef(0);
+  const activeReadinessRequest = useRef<AbortController | null>(null);
+  const mounted = useRef(false);
+  const tenantQuery = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
 
   useEffect(() => {
-    const tenant = new URLSearchParams(window.location.search).get("tenant");
-    setTenantQuery(tenant ? `?tenant=${encodeURIComponent(tenant)}` : "");
+    setPlatform(walletPlatform(window.navigator.userAgent, window.navigator.maxTouchPoints));
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      setCard(
-        await customerApi<CardView>(`/v1/customer/card/${encodeURIComponent(publicMembershipId)}`),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof CustomerApiError ? caught.message : "This card could not be opened.",
-      );
-    }
-  }, [publicMembershipId]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      cardRequestGeneration.current += 1;
+      walletReadinessGeneration.current += 1;
+      activeReadinessRequest.current?.abort();
+      activeReadinessRequest.current = null;
+      activeCardRequest.current?.abort();
+      activeCardRequest.current = null;
+    };
+  }, []);
+
+  const load = useCallback(
+    async (localeOverride?: string): Promise<CardLoadOutcome> => {
+      activeCardRequest.current?.abort();
+      const controller = new AbortController();
+      activeCardRequest.current = controller;
+      const requestGeneration = ++cardRequestGeneration.current;
+      if (mounted.current) setCardLoadInFlight(true);
+      try {
+        const query = new URLSearchParams();
+        if (tenant) query.set("tenant", tenant);
+        if (localeOverride) query.set("locale", localeOverride);
+        const nextCard = await customerApi<CardView>(
+          `/v1/customer/card/${encodeURIComponent(publicMembershipId)}${query.size ? `?${query.toString()}` : ""}`,
+          { signal: controller.signal },
+        );
+        if (
+          controller.signal.aborted ||
+          requestGeneration !== cardRequestGeneration.current ||
+          !mounted.current
+        ) {
+          return "superseded";
+        }
+        setError("");
+        setCard(nextCard);
+        return "applied";
+      } catch (caught) {
+        if (
+          controller.signal.aborted ||
+          requestGeneration !== cardRequestGeneration.current ||
+          !mounted.current
+        ) {
+          return "superseded";
+        }
+        setError(
+          caught instanceof CustomerApiError ? caught.message : "This card could not be opened.",
+        );
+        return "failed";
+      } finally {
+        if (requestGeneration === cardRequestGeneration.current) {
+          activeCardRequest.current = null;
+          if (mounted.current) setCardLoadInFlight(false);
+        }
+      }
+    },
+    [publicMembershipId, tenant],
+  );
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(timer);
-  }, [load]);
+    const saved =
+      window.localStorage.getItem(`waflo:card-locale:${publicMembershipId}`) ?? undefined;
+    setSelectedCardLocale(saved);
+    void load(saved);
+    return () => {
+      cardRequestGeneration.current += 1;
+      walletReadinessGeneration.current += 1;
+      activeReadinessRequest.current?.abort();
+      activeReadinessRequest.current = null;
+      activeCardRequest.current?.abort();
+      activeCardRequest.current = null;
+    };
+  }, [load, publicMembershipId]);
+
+  useEffect(() => {
+    if (!card || !platform || platform === "desktop") {
+      walletConvergenceAttempts.current = 0;
+      return;
+    }
+    const status = platform === "ios" ? card.wallet.apple.status : card.wallet.google.status;
+    if (!walletIsPreparing(status)) {
+      walletConvergenceAttempts.current = 0;
+      return;
+    }
+    if (cardLoadInFlight) return;
+    const attempt = Math.min(walletConvergenceAttempts.current, walletConvergenceDelays.length - 1);
+    walletConvergenceAttempts.current += 1;
+    const timer = window.setTimeout(() => {
+      activeReadinessRequest.current?.abort();
+      const controller = new AbortController();
+      activeReadinessRequest.current = controller;
+      const generation = ++walletReadinessGeneration.current;
+      const query = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
+      void customerApi<WalletReadiness>(
+        `/v1/customer/card/${encodeURIComponent(publicMembershipId)}/wallet-readiness${query}`,
+        { signal: controller.signal },
+      )
+        .then((readiness) => {
+          if (
+            controller.signal.aborted ||
+            generation !== walletReadinessGeneration.current ||
+            !mounted.current
+          )
+            return;
+          setCard((current) => {
+            if (!current || current.publicMembershipId !== readiness.cardId) return current;
+            // A stale PREPARING/UNAVAILABLE response must never displace a CTA
+            // that a newer verification already proved READY.
+            const keepReady = (previous: string, next: string) =>
+              previous === "READY" && next !== "READY" ? previous : next;
+            return {
+              ...current,
+              wallet: {
+                apple: {
+                  ...current.wallet.apple,
+                  ...readiness.apple,
+                  status: keepReady(current.wallet.apple.status, readiness.apple.status),
+                },
+                google: {
+                  ...current.wallet.google,
+                  ...readiness.google,
+                  status: keepReady(current.wallet.google.status, readiness.google.status),
+                },
+              },
+            };
+          });
+        })
+        .catch(() => undefined);
+    }, walletConvergenceDelays[attempt]);
+    return () => window.clearTimeout(timer);
+  }, [card, cardLoadInFlight, platform, publicMembershipId, tenant]);
+
+  function chooseCardLocale(locale: string) {
+    if (!card?.program.enabledLocales.includes(locale)) return;
+    walletConvergenceAttempts.current = 0;
+    walletReadinessGeneration.current += 1;
+    activeReadinessRequest.current?.abort();
+    activeReadinessRequest.current = null;
+    setSelectedCardLocale(locale);
+    window.localStorage.setItem(`waflo:card-locale:${publicMembershipId}`, locale);
+    void load(locale);
+  }
 
   useEffect(() => {
     if (!card?.membershipQr) {
@@ -105,9 +405,12 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
   async function addGoogle() {
     setWalletBusy("google");
     try {
-      const action = await customerApi<{ url: string }>("/v1/customer/wallet/google/add-action", {
-        method: "POST",
-      });
+      const action = await customerApi<{ url: string }>(
+        `/v1/customer/wallet/google/add-action${tenantQuery}`,
+        {
+          method: "POST",
+        },
+      );
       window.location.assign(action.url);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Google Wallet is unavailable.");
@@ -120,6 +423,41 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
     await customerApi("/v1/customer/session/logout", { method: "POST" });
     window.location.assign("/");
   }
+
+  const selectedWalletStatus =
+    platform === "ios"
+      ? card?.wallet.apple.status
+      : platform === "android"
+        ? card?.wallet.google.status
+        : null;
+  const desktopWalletPreparing = Boolean(
+    card &&
+      (walletIsPreparing(card.wallet.apple.status) || walletIsPreparing(card.wallet.google.status)),
+  );
+  const waitingForWallet = Boolean(
+    card &&
+      (platform === null ||
+        (platform === "desktop"
+          ? desktopWalletPreparing
+          : typeof selectedWalletStatus === "string" && walletIsPreparing(selectedWalletStatus))),
+  );
+
+  useEffect(() => {
+    if (!waitingForWallet) {
+      setWalletPreparationSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    let timer: number | undefined;
+    const updateElapsedTime = () => {
+      setWalletPreparationSeconds(Math.floor((Date.now() - startedAt) / 1_000));
+      timer = window.setTimeout(updateElapsedTime, 1_000);
+    };
+    updateElapsedTime();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [waitingForWallet]);
 
   if (!card) {
     return (
@@ -139,154 +477,308 @@ export function CustomerCard({ publicMembershipId }: { publicMembershipId: strin
 
   const ar = card.customer.preferredLocale === "ar";
   const active = card.membership.state === "ACTIVE";
-  return (
-    <main className="customer-page card-page" lang={ar ? "ar" : "en"} dir={ar ? "rtl" : "ltr"}>
-      <header className="customer-header card-header">
-        <span className="waflo-wordmark">waflo</span>
-        <button type="button" className="customer-language" onClick={() => void logout()}>
-          <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
-        </button>
-      </header>
-      <section
-        className={`digital-card ${active ? "" : "digital-card--inactive"}`}
-        style={
-          {
-            "--card-bg": card.theme.backgroundColor,
-            "--card-ink": card.theme.foregroundColor,
-            "--card-accent": card.theme.accentColor,
-          } as React.CSSProperties
-        }
+  if (waitingForWallet) {
+    return (
+      <main
+        className="customer-page card-page wallet-preparation-page"
+        lang={ar ? "ar" : "en"}
+        dir={ar ? "rtl" : "ltr"}
       >
-        <div className="digital-card__brand">
-          <div>
-            <small>{card.merchant.name}</small>
-            <h1>{card.program.name}</h1>
-          </div>
-          <Badge tone={active ? "success" : "warning"}>
-            {card.membership.state.replaceAll("_", " ")}
-          </Badge>
-        </div>
-        {!active ? (
-          <Alert
-            tone={card.membership.state === "TRANSFERRED" ? "warning" : "info"}
-            title={
-              card.membership.state === "TRANSFERRED"
-                ? ar
-                  ? "تم نقل هذه البطاقة"
-                  : "This card was transferred"
-                : ar
-                  ? "البطاقة غير نشطة"
-                  : "Card unavailable"
-            }
-          >
-            {card.membership.state === "TRANSFERRED"
+        <header className="customer-header card-header">
+          <CustomerMerchantIdentity
+            locale={ar ? "ar" : "en"}
+            logoDataUri={card.merchant.brandLogoDataUri}
+            name={card.merchant.name}
+          />
+          <button type="button" className="customer-language" onClick={() => void logout()}>
+            <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
+          </button>
+        </header>
+        <WalletPassPreparation ar={ar} elapsedSeconds={walletPreparationSeconds} />
+        <footer className="customer-footer">
+          <ShieldCheck size={15} /> {ar ? "مدعوم من Waflo" : "Powered by Waflo"}
+        </footer>
+      </main>
+    );
+  }
+
+  const walletDescription =
+    platform === null
+      ? ar
+        ? "جارٍ التحقق من خيار المحفظة لهذا الجهاز."
+        : "Checking the wallet option for this device."
+      : platform === "desktop"
+        ? ar
+          ? "استخدم جهازًا محمولًا مدعومًا لإضافة بطاقتك إلى المحفظة."
+          : "Use a supported mobile device to add your card to Wallet."
+        : selectedWalletStatus === "READY"
+          ? ar
+            ? "بطاقتك جاهزة للإضافة إلى المحفظة."
+            : "Your card is ready to add to Wallet."
+          : waitingForWallet
+            ? selectedWalletStatus === "PREPARING"
               ? ar
-                ? "رمز QR القديم لم يعد صالحًا."
-                : "The old QR credential is no longer valid."
-              : card.program.pausedMessage ||
-                (ar ? "تواصل مع التاجر للمساعدة." : "Contact the merchant for help.")}
-          </Alert>
-        ) : null}
-        <div className="digital-card__member">
-          <span>{ar ? "العضو" : "MEMBER"}</span>
-          <strong>{card.customer.displayName}</strong>
-          {card.customer.maskedEmail ? <small>{card.customer.maskedEmail}</small> : null}
-        </div>
-        <Image
-          className="published-stamp-artwork"
-          src={card.progress.render.dataUri}
-          alt={`${card.progress.currentCycleStampCount} of ${card.progress.goal} stamps`}
-          width={card.progress.render.width}
-          height={card.progress.render.height}
-          unoptimized
+                ? "\u062a\u0633\u062a\u063a\u0631\u0642 \u0628\u0637\u0627\u0642\u062a\u0643 \u0644\u0644\u0645\u062d\u0641\u0638\u0629 \u0648\u0642\u062a\u064b\u0627 \u0623\u0637\u0648\u0644 \u0645\u0646 \u0627\u0644\u0645\u062a\u0648\u0642\u0639. \u062a\u062d\u0642\u0651\u0642 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649 \u0644\u0645\u0639\u0631\u0641\u0629 \u0645\u0627 \u0625\u0630\u0627 \u0643\u0627\u0646\u062a \u062c\u0627\u0647\u0632\u0629."
+                : "Your Wallet pass is still being prepared. We will keep checking automatically."
+              : ar
+                ? "يتم تجهيز بطاقتك للمحفظة الآن، وسيظهر الزر تلقائيًا."
+                : "Your Wallet pass is being prepared. The button will appear automatically."
+            : ar
+              ? "يتعذر إضافة هذه البطاقة إلى المحفظة حاليًا."
+              : "This card cannot be added to Wallet right now.";
+  const presentation = card.program.template?.presentation ?? defaultProgramTemplatePresentation;
+  const identityArtworkDataUri = card.program.template?.identityArtworkDataUri ?? null;
+  return (
+    <main
+      className={`customer-page card-page ${walletJourney ? "wallet-ready-page" : ""}`}
+      lang={ar ? "ar" : "en"}
+      dir={ar ? "rtl" : "ltr"}
+    >
+      <header className="customer-header card-header">
+        <CustomerMerchantIdentity
+          locale={ar ? "ar" : "en"}
+          logoDataUri={card.merchant.brandLogoDataUri}
+          name={card.merchant.name}
         />
-        <div className="progress-copy">
-          <strong>
-            {card.progress.currentCycleStampCount} / {card.progress.goal}
-          </strong>
-          <span>
-            {card.progress.rewardReady
-              ? ar
-                ? "المكافأة جاهزة"
-                : "Reward ready"
-              : card.program.rewardSummary}
-          </span>
-        </div>
-        {qrUrl && card.membershipQr ? (
-          <div className="membership-qr">
-            {/* The alt text intentionally describes purpose without exposing the payload. */}
-            <Image
-              src={qrUrl}
-              alt={ar ? "رمز بطاقة العضوية" : "Membership card QR"}
-              width={520}
-              height={520}
-              unoptimized
+        <div className="customer-card-actions">
+          {card.program.enabledLocales.length > 1 ? (
+            <SearchableSelect
+              ariaLabel={ar ? "لغة محتوى البطاقة" : "Card content language"}
+              value={selectedCardLocale ?? card.program.contentLocale}
+              onValueChange={chooseCardLocale}
+              options={card.program.enabledLocales.map((locale) => {
+                const metadata = cardLocaleMetadata(locale);
+                return {
+                  value: locale,
+                  label: metadata ? `${metadata.englishName} · ${metadata.nativeName}` : locale,
+                  ...(metadata?.aliases.length ? { searchText: metadata.aliases.join(" ") } : {}),
+                };
+              })}
             />
+          ) : null}
+          <button type="button" className="customer-language" onClick={() => void logout()}>
+            <LogOut size={15} /> {ar ? "إنهاء الجلسة" : "Sign out"}
+          </button>
+        </div>
+      </header>
+      {walletJourney ? (
+        <section className="wallet-ready-summary" data-testid="wallet-ready-summary">
+          <Badge tone={active ? "success" : "warning"}>
+            {membershipStateLabel(card.membership.state, ar)}
+          </Badge>
+          <div>
+            <span className="wallet-ready-summary__kicker">
+              <WalletCards size={17} aria-hidden="true" />
+              {ar
+                ? "\u0628\u0637\u0627\u0642\u0629 \u0627\u0644\u0645\u062d\u0641\u0638\u0629"
+                : "WALLET PASS"}
+            </span>
+            <h1>
+              {ar
+                ? "\u0628\u0637\u0627\u0642\u062a\u0643 \u062c\u0627\u0647\u0632\u0629 \u0644\u0644\u0645\u062d\u0641\u0638\u0629"
+                : "Your Wallet card is ready"}
+            </h1>
             <p>
-              <ShieldCheck />{" "}
-              {ar ? "يحتوي على بيانات اعتماد عشوائية فقط" : "Contains an opaque credential only"}
+              {ar
+                ? `\u0623\u0635\u0628\u062d\u062a \u0628\u0637\u0627\u0642\u0629 ${card.program.name} \u062c\u0627\u0647\u0632\u0629 \u0644\u0644\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0645\u062d\u0641\u0638\u0629 \u062c\u0647\u0627\u0632\u0643.`
+                : `${card.program.name} is ready to add to your device Wallet.`}
             </p>
           </div>
-        ) : null}
-      </section>
-      <section className="card-actions">
-        <Card>
-          <div className="card-actions__heading">
-            <WalletCards />
-            <div>
-              <h2>{ar ? "أضف إلى Wallet" : "Add to Wallet"}</h2>
-              <p>
-                {ar
-                  ? "تظهر الأزرار فقط عندما تصبح البطاقة جاهزة."
-                  : "Buttons appear only when provider issuance is ready."}
-              </p>
+        </section>
+      ) : (
+        <section
+          className={`digital-card ${active ? "" : "digital-card--inactive"}`}
+          lang={card.program.contentLocale}
+          dir={directionForCardLocale(card.program.contentLocale)}
+          data-composition={presentation.composition}
+          data-corner-treatment={presentation.cornerTreatment}
+          data-density={presentation.density}
+          data-motif-treatment={presentation.motifTreatment}
+          data-reward-treatment={presentation.rewardTreatment}
+          data-title-treatment={presentation.titleTreatment}
+          data-visual-role={presentation.visualRole}
+          style={
+            {
+              "--card-bg": card.theme.backgroundColor,
+              "--card-ink": card.theme.foregroundColor,
+              "--card-accent": card.theme.accentColor,
+              "--card-secondary": card.theme.secondaryColor,
+              fontFamily: fontStackForCardLocale(card.program.contentLocale),
+            } as React.CSSProperties
+          }
+        >
+          {identityArtworkDataUri ? (
+            <span className="digital-card__motif" aria-hidden="true">
+              <Image src={identityArtworkDataUri} alt="" width={96} height={96} unoptimized />
+            </span>
+          ) : null}
+          <div className="digital-card__brand">
+            <div className="digital-card__issuer">
+              <CustomerMerchantIdentity
+                locale={ar ? "ar" : "en"}
+                logoDataUri={card.merchant.brandLogoDataUri}
+                name={card.merchant.name}
+                showName={false}
+              />
+              <div>
+                <small>{card.merchant.name}</small>
+                <h1>{card.program.name}</h1>
+              </div>
             </div>
+            <Badge tone={active ? "success" : "warning"}>
+              {membershipStateLabel(card.membership.state, ar)}
+            </Badge>
           </div>
-          <div className="wallet-buttons">
-            {card.wallet.apple.status === "READY" ? (
-              <a
-                className="wallet-button wallet-button--apple"
-                href="/api/waflo/v1/customer/wallet/apple/pass"
-              >
-                Add to Apple Wallet
-              </a>
-            ) : (
-              <span className="wallet-state">Apple Wallet · {card.wallet.apple.status}</span>
-            )}
-            {card.wallet.google.status === "READY" ? (
-              <Button onClick={() => void addGoogle()} loading={walletBusy === "google"}>
-                Add to Google Wallet
-              </Button>
-            ) : (
-              <span className="wallet-state">Google Wallet · {card.wallet.google.status}</span>
-            )}
-          </div>
-          {card.wallet.apple.testAdapter || card.wallet.google.testAdapter ? (
-            <Alert tone="info" title={ar ? "وضع اختبار" : "Test Adapter mode"}>
-              {ar
-                ? "لا يمثل هذا تثبيتًا حقيقيًا لدى مزود Wallet."
-                : "This does not claim a real provider installation."}
+          {!active ? (
+            <Alert
+              tone={card.membership.state === "TRANSFERRED" ? "warning" : "info"}
+              title={
+                card.membership.state === "TRANSFERRED"
+                  ? ar
+                    ? "تم نقل هذه البطاقة"
+                    : "This card was transferred"
+                  : ar
+                    ? "البطاقة غير نشطة"
+                    : "Card unavailable"
+              }
+            >
+              {card.membership.state === "TRANSFERRED"
+                ? ar
+                  ? "رمز QR القديم لم يعد صالحًا."
+                  : "The old QR credential is no longer valid."
+                : card.program.pausedMessage ||
+                  (ar ? "تواصل مع التاجر للمساعدة." : "Contact the merchant for help.")}
             </Alert>
           ) : null}
-        </Card>
-        {card.transfer.allowed ? (
-          <a className="transfer-action" href={`/transfer${tenantQuery}`}>
-            <ArrowRightLeft />
+          <div className="digital-card__member">
+            <span>{ar ? "العضو" : "MEMBER"}</span>
+            <strong>{card.customer.displayName}</strong>
+            {card.customer.maskedPhone ? <small>{card.customer.maskedPhone}</small> : null}
+          </div>
+          <Image
+            className="published-stamp-artwork"
+            src={card.progress.render.dataUri}
+            alt={`${card.progress.currentCycleStampCount} of ${card.progress.goal} stamps`}
+            width={card.progress.render.width}
+            height={card.progress.render.height}
+            unoptimized
+          />
+          <div className="progress-copy">
+            <strong dir="ltr" className="numeric-fraction">
+              {card.progress.currentCycleStampCount} / {card.progress.goal}
+            </strong>
             <span>
-              <strong>{ar ? "نقل البطاقة إلى جهاز آخر" : "Transfer to another device"}</strong>
-              <small>
-                {card.transfer.emailConfirmationRequired
-                  ? ar
-                    ? "يتطلب تأكيد البريد"
-                    : "Email confirmation required"
-                  : ar
-                    ? "مسار أقل أمانًا باستخدام رمز البطاقة"
-                    : "Lower-security QR proof path"}
-              </small>
+              {card.progress.rewardReady
+                ? ar
+                  ? "المكافأة جاهزة"
+                  : "Reward ready"
+                : card.program.rewardSummary}
             </span>
-          </a>
-        ) : null}
-      </section>
+          </div>
+          {qrUrl && card.membershipQr ? (
+            <div className="membership-qr">
+              {/* The alt text intentionally describes purpose without exposing the payload. */}
+              <Image
+                src={qrUrl}
+                alt={ar ? "رمز بطاقة العضوية" : "Membership card QR"}
+                width={520}
+                height={520}
+                unoptimized
+              />
+              <p>
+                <ShieldCheck />{" "}
+                {ar
+                  ? "استخدم رمز QR هذا مع بطاقة الولاء."
+                  : "Use this QR code with your loyalty card."}
+              </p>
+            </div>
+          ) : null}
+        </section>
+      )}
+      {!waitingForWallet && platform !== null ? (
+        <section className="card-actions">
+          <Card>
+            <div className="card-actions__heading">
+              <WalletCards />
+              <div>
+                <h2>{ar ? "أضف إلى المحفظة" : "Add to Wallet"}</h2>
+                <p role="status" aria-live="polite">
+                  {walletDescription}
+                </p>
+              </div>
+            </div>
+            <div className="wallet-buttons" aria-busy={waitingForWallet || undefined}>
+              {platform === "ios" ? (
+                card.wallet.apple.status === "READY" ? (
+                  <a
+                    className="wallet-button wallet-button--apple"
+                    aria-label="Add to Apple Wallet"
+                    href={`/api/waflo/v1/customer/wallet/apple/pass${tenantQuery}`}
+                  >
+                    <Image
+                      src={
+                        ar
+                          ? "/wallet-buttons/apple-add-to-wallet-ar.svg"
+                          : "/wallet-buttons/apple-add-to-wallet-en.svg"
+                      }
+                      alt=""
+                      width={111}
+                      height={35}
+                      unoptimized
+                    />
+                  </a>
+                ) : card.wallet.apple.status === "UNAVAILABLE" ? (
+                  <p className="wallet-platform-note">
+                    {ar
+                      ? "\u064a\u062a\u0639\u0630\u0631 \u0625\u0636\u0627\u0641\u0629 \u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0625\u0644\u0649 Apple Wallet \u062d\u0627\u0644\u064a\u0627\u064b."
+                      : "This card cannot be added to Apple Wallet right now."}
+                  </p>
+                ) : null
+              ) : platform === "android" ? (
+                card.wallet.google.status === "READY" ? (
+                  <button
+                    type="button"
+                    className="wallet-button wallet-button--google"
+                    onClick={() => void addGoogle()}
+                    disabled={walletBusy === "google"}
+                    aria-busy={walletBusy === "google" || undefined}
+                    aria-label={
+                      walletBusy === "google" ? "Adding to Google Wallet" : "Add to Google Wallet"
+                    }
+                  >
+                    <Image
+                      src={
+                        ar
+                          ? "/wallet-buttons/google-add-to-wallet-ar.svg"
+                          : "/wallet-buttons/google-add-to-wallet-en.svg"
+                      }
+                      alt=""
+                      width={283}
+                      height={50}
+                      unoptimized
+                    />
+                  </button>
+                ) : card.wallet.google.status === "UNAVAILABLE" ? (
+                  <p className="wallet-platform-note">
+                    {ar
+                      ? "\u064a\u062a\u0639\u0630\u0631 \u0625\u0636\u0627\u0641\u0629 \u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0625\u0644\u0649 Google Wallet \u062d\u0627\u0644\u064a\u0627\u064b."
+                      : "This card cannot be added to Google Wallet right now."}
+                  </p>
+                ) : null
+              ) : (
+                <p className="wallet-platform-note">
+                  {ar
+                    ? "\u0627\u0641\u062a\u062d \u0647\u0630\u0647 \u0627\u0644\u0628\u0637\u0627\u0642\u0629 \u0639\u0644\u0649 iPhone \u0623\u0648 Android \u0644\u0625\u0636\u0627\u0641\u062a\u0647\u0627 \u0625\u0644\u0649 \u0645\u062d\u0641\u0638\u0629 \u062c\u0647\u0627\u0632\u0643."
+                    : "Open this card on iPhone or Android to add it to that device\u0027s wallet."}
+                </p>
+              )}
+            </div>
+          </Card>
+        </section>
+      ) : null}
+      <footer className="customer-footer">
+        <ShieldCheck size={15} /> {ar ? "مدعوم من Waflo" : "Powered by Waflo"}
+      </footer>
     </main>
   );
 }

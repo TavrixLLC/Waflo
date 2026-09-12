@@ -1,20 +1,31 @@
 import "reflect-metadata";
+import { randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import fastifyCookie from "@fastify/cookie";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyMultipart from "@fastify/multipart";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { randomUUID } from "node:crypto";
-import type { IncomingMessage } from "node:http";
 import { parseEnvironment } from "@waflo/config";
 import { sanitizeRequestUrl } from "@waflo/security";
 import type { FastifyRequest } from "fastify";
 import { AppModule } from "./app.module.js";
 import { EnvironmentService } from "./config/environment.service.js";
 
+const MAX_ASSET_FILE_BYTES = 2 * 1024 * 1024;
+// Multipart boundaries and the JSON metadata field count toward Fastify's
+// request body but not @fastify/multipart's file-size limit.
+const MAX_ASSET_MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+
 export interface CreateApiApplicationOptions {
   logger?: boolean;
+  /**
+   * Test harnesses need Nest to throw initialization errors instead of
+   * terminating their worker process. Production keeps Nest's fail-fast
+   * default by leaving this unset.
+   */
+  abortOnError?: boolean;
 }
 
 export function serializeHttpRequest(
@@ -61,6 +72,7 @@ export async function createApiApplication(
                 "req.headers['x-waflo-body-sha256']",
                 "*.qrPayload",
                 "*.pairingToken",
+                "*.manualCode",
                 "*.refreshToken",
                 "*.signature",
                 "*.nonce",
@@ -74,7 +86,12 @@ export async function createApiApplication(
             },
           },
     trustProxy: trustedProxies.length > 0 ? [...trustedProxies] : false,
-    bodyLimit: 1024 * 1024,
+    // The multipart asset endpoint explicitly accepts one image up to 2 MiB.
+    // Fastify applies this adapter limit before Nest or the multipart plugin can
+    // validate the upload, so it must not reject a valid 1–2 MiB image first.
+    // Preserve a small envelope allowance; JSON endpoints remain protected by
+    // their schemas and route validation.
+    bodyLimit: MAX_ASSET_FILE_BYTES + MAX_ASSET_MULTIPART_OVERHEAD_BYTES,
     requestIdHeader: "x-request-id",
     genReqId: (request: IncomingMessage) => {
       const candidate = request.headers["x-request-id"];
@@ -86,6 +103,7 @@ export async function createApiApplication(
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     rawBody: true,
     ...(options.logger === false ? { logger: false } : {}),
+    ...(options.abortOnError === false ? { abortOnError: false } : {}),
   });
   const environment = app.get(EnvironmentService);
 
@@ -94,7 +112,7 @@ export async function createApiApplication(
     limits: {
       files: 1,
       fields: 8,
-      fileSize: 2 * 1024 * 1024,
+      fileSize: MAX_ASSET_FILE_BYTES,
     },
   });
   await app.register(fastifyHelmet, {
@@ -121,7 +139,7 @@ export async function createApiApplication(
   app.enableCors({
     origin: [...environment.allowedOrigins],
     credentials: true,
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "content-type",
       "authorization",
@@ -144,6 +162,7 @@ export async function createApiApplication(
     reply.header("x-request-id", request.id);
     reply.header("cache-control", "no-store");
     reply.header("referrer-policy", "no-referrer");
+    reply.header("x-robots-tag", "noindex, nofollow, noarchive");
     done();
   });
 

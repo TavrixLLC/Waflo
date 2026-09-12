@@ -17,7 +17,28 @@ body {
   background:
     radial-gradient(circle at 15% 10%, rgb(255 107 74 / 15%), transparent 26rem),
     radial-gradient(circle at 85% 85%, rgb(174 49 21 / 10%), transparent 28rem), var(--waflo-cloud);
-  font-family: Manrope, "Noto Sans Arabic", system-ui, sans-serif;
+  font-family: var(--waflo-font-latin);
+}
+
+:lang(ar),
+[dir="rtl"] {
+  font-family: var(--waflo-font-arabic);
+}
+
+body [lang^="ckb"],
+body [lang^="kmr"],
+body [lang^="ku"] {
+  --waflo-font-arabic:
+    var(--font-sirwan), "Sirwan", var(--font-noto-sans-arabic), "Noto Sans Arabic",
+    var(--font-cairo), system-ui, sans-serif !important;
+  font-family: var(--waflo-font-arabic) !important;
+}
+
+:where(:lang(ar), :lang(ckb), :lang(kmr), :lang(ku)) {
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
+  /* biome-ignore lint/complexity/noImportantStyles: Arabic-script shaping must override Latin tracking in every customer surface. */
+  letter-spacing: normal !important;
 }
 
 button,
@@ -183,6 +204,26 @@ a {
 
 .customer-state-card .customer-kicker {
   margin-top: 3rem;
+}
+
+.customer-error-state {
+  justify-items: start;
+}
+
+.customer-error-state__icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-top: 2.25rem;
+  place-items: center;
+  color: var(--waflo-brick);
+  border: 1px solid rgb(174 49 21 / 18%);
+  border-radius: 999px;
+  background: rgb(228 87 46 / 10%);
+}
+
+.customer-error-state .wf-button {
+  margin-top: 0.5rem;
 }
 
 .program-grid {
@@ -416,13 +457,6 @@ a {
   background: #16835a;
 }
 
-.wallet-readiness {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.wallet-readiness span,
 .wallet-state {
   padding: 0.55rem 0.75rem;
   border-radius: 999px;
@@ -487,6 +521,13 @@ a {
   align-items: start;
 }
 
+.digital-card__issuer {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+
 .digital-card__brand small,
 .digital-card__member span {
   color: color-mix(in srgb, var(--card-ink) 64%, transparent);
@@ -544,6 +585,14 @@ a {
 
 .progress-copy strong {
   font-size: 1.2rem;
+}
+
+.numeric-fraction {
+  display: inline-block;
+  direction: ltr;
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+  white-space: nowrap;
 }
 
 .progress-copy span {
@@ -608,22 +657,324 @@ a {
 .wallet-buttons {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.7rem;
   margin-top: 1rem;
 }
 
 .wallet-button {
   display: inline-flex;
-  min-height: 2.75rem;
-  padding: 0.75rem 1rem;
   align-items: center;
-  border-radius: 0.75rem;
-  font-weight: 800;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 0;
 }
 
-.wallet-button--apple {
-  color: white;
-  background: #050505;
+.wallet-button img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.wallet-button--apple img {
+  width: 111px;
+}
+
+.wallet-button--google {
+  cursor: pointer;
+}
+
+.wallet-button--google img {
+  width: min(283px, calc(100vw - 4rem));
+}
+
+.wallet-button:focus-visible {
+  outline: 3px solid var(--waflo-coral);
+  outline-offset: 4px;
+}
+
+.wallet-button--google:disabled {
+  cursor: progress;
+  opacity: 0.68;
+}
+
+.wallet-check-again {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 0.65rem;
+  background: transparent;
+  color: var(--waflo-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wallet-check-again:hover:not(:disabled) {
+  background: var(--waflo-soft);
+}
+
+.wallet-check-again:focus-visible {
+  outline: 3px solid var(--waflo-coral);
+  outline-offset: 3px;
+}
+
+.wallet-check-again:disabled {
+  cursor: progress;
+  opacity: 0.68;
+}
+
+.wallet-platform-note {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--waflo-muted);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.wallet-preparation-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 100vh;
+}
+
+.wallet-preparation {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 1.1rem;
+  min-height: min(43rem, calc(100vh - 10rem));
+  margin-top: 1.25rem;
+  padding: clamp(1.35rem, 5vw, 2.5rem);
+  overflow: hidden;
+  color: var(--waflo-ink);
+  border: 1px solid var(--waflo-border);
+  border-block-start: 4px solid var(--waflo-brick);
+  border-radius: var(--waflo-radius-xl);
+  background: var(--waflo-surface);
+  box-shadow: var(--waflo-shadow-raised);
+}
+
+.wallet-preparation > * {
+  position: relative;
+  z-index: 1;
+}
+
+.wallet-preparation__visual {
+  position: relative;
+  display: grid;
+  width: 10rem;
+  height: 10rem;
+  place-items: center;
+  margin: 0 auto 0.15rem;
+}
+
+.wallet-preparation__pass {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 5.6rem;
+  height: 7.2rem;
+  place-items: center;
+  overflow: hidden;
+  color: var(--waflo-brick);
+  border: 1px solid var(--waflo-border-strong);
+  border-radius: var(--waflo-radius-lg);
+  background: var(--waflo-soft);
+  box-shadow: var(--waflo-shadow-card);
+}
+
+.wallet-preparation__pass::before,
+.wallet-preparation__pass::after {
+  position: absolute;
+  right: 0.85rem;
+  left: 0.85rem;
+  height: 0.28rem;
+  border-radius: var(--waflo-radius-pill);
+  background: color-mix(in srgb, var(--waflo-brick) 24%, transparent);
+  content: "";
+}
+
+.wallet-preparation__pass::before {
+  top: 1rem;
+}
+
+.wallet-preparation__pass::after {
+  bottom: 1rem;
+}
+
+.wallet-preparation__pass > span,
+.wallet-preparation__pass > i {
+  position: absolute;
+  right: 1.05rem;
+  left: 1.05rem;
+  height: 0.2rem;
+  border-radius: var(--waflo-radius-pill);
+  background: color-mix(in srgb, var(--waflo-brick) 16%, transparent);
+}
+
+.wallet-preparation__pass > span {
+  top: 1.72rem;
+}
+
+.wallet-preparation__pass > i {
+  bottom: 1.65rem;
+}
+
+.wallet-preparation__orbit {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, var(--waflo-coral) 40%, transparent);
+  border-radius: 50%;
+}
+
+.wallet-preparation__orbit--outer {
+  width: 9.6rem;
+  height: 9.6rem;
+  border-inline-start-color: transparent;
+  border-bottom-color: transparent;
+  animation: wallet-preparation-orbit 7s linear infinite;
+}
+
+.wallet-preparation__orbit--inner {
+  width: 7.7rem;
+  height: 7.7rem;
+  border-top-color: transparent;
+  border-inline-end-color: transparent;
+  animation: wallet-preparation-orbit 4.5s linear infinite reverse;
+}
+
+@keyframes wallet-preparation-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wallet-preparation__intro {
+  max-width: 35rem;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.wallet-preparation__eyebrow {
+  color: var(--waflo-brick);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.wallet-preparation__intro h1 {
+  margin: 0.45rem 0 0;
+  font-size: clamp(1.65rem, 6vw, 2.45rem);
+  letter-spacing: -0.045em;
+}
+
+.wallet-preparation__intro p,
+.wallet-preparation__current p {
+  margin: 0.5rem 0 0;
+  color: var(--waflo-muted);
+  line-height: 1.65;
+}
+
+.wallet-preparation__progress {
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: var(--waflo-radius-pill);
+  background: var(--waflo-soft);
+  box-shadow: inset 0 0 0 1px var(--waflo-border);
+}
+
+.wallet-preparation__progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--waflo-coral);
+  transition: width var(--waflo-motion-reassuring) var(--waflo-ease);
+}
+
+.wallet-preparation__current {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-md);
+  background: var(--waflo-surface-subtle);
+  text-align: center;
+}
+
+.wallet-preparation__current strong {
+  color: var(--waflo-ink);
+}
+
+.wallet-preparation__checkpoints {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.wallet-preparation__checkpoints li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+  min-height: 3.6rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--waflo-muted);
+  border: 1px solid transparent;
+  border-radius: var(--waflo-radius-md);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.wallet-preparation__checkpoints li > span {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  color: var(--waflo-muted);
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wallet-preparation__checkpoints li[data-state="complete"] {
+  color: var(--waflo-success);
+}
+
+.wallet-preparation__checkpoints li[data-state="complete"] > span {
+  color: var(--waflo-surface);
+  border-color: var(--waflo-success);
+  background: var(--waflo-success);
+}
+
+.wallet-preparation__checkpoints li[data-state="active"] {
+  color: var(--waflo-ink);
+  border-color: color-mix(in srgb, var(--waflo-coral) 56%, var(--waflo-border));
+  background: var(--waflo-soft);
+}
+
+.wallet-preparation__checkpoints li[data-state="active"] > span {
+  color: var(--waflo-brick);
+  border-color: var(--waflo-coral);
+  background: var(--waflo-surface);
+  box-shadow: 0 0 0 0.28rem color-mix(in srgb, var(--waflo-coral) 16%, transparent);
+}
+
+.wallet-preparation__reassurance {
+  display: flex;
+  justify-content: center;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0;
+  color: var(--waflo-muted);
+  font-size: 0.76rem;
+  text-align: center;
 }
 
 .transfer-action {
@@ -856,6 +1207,15 @@ a {
   .progress-copy span {
     text-align: start;
   }
+
+  .wallet-preparation {
+    min-height: calc(100vh - 8.5rem);
+    border-radius: var(--waflo-radius-lg);
+  }
+
+  .wallet-preparation__checkpoints {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -864,5 +1224,1184 @@ a {
   *::after {
     scroll-behavior: auto;
     transition-duration: 0.01ms;
+  }
+
+  .wallet-preparation__orbit--outer,
+  .wallet-preparation__orbit--inner {
+    animation: none;
+  }
+}
+
+/* Lovable visual authority — mobile-first customer loyalty experience */
+html,
+body {
+  background: var(--waflo-surface);
+}
+
+body {
+  background-image: none;
+}
+
+.customer-page,
+.card-page,
+.transfer-page {
+  width: min(100%, 560px);
+  padding: 0 1.25rem 2rem;
+  background: var(--waflo-surface);
+}
+
+.customer-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  min-height: 64px;
+  margin-inline: -1.25rem;
+  padding: 0.75rem 1.25rem;
+  border-block-end: 1px solid rgb(234 223 220 / 70%);
+  background: rgb(255 255 255 / 86%);
+  backdrop-filter: blur(18px);
+}
+
+.customer-logo {
+  width: 104px;
+}
+
+.customer-merchant-identity {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.customer-merchant-identity i {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  place-items: center;
+  color: white;
+  border-radius: 14px;
+  background: var(--waflo-ink);
+  font-size: 0.85rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.customer-merchant-identity__logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  padding: 0.18rem;
+  border: 1px solid color-mix(in srgb, var(--waflo-ink) 12%, transparent);
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, #fff 88%, transparent);
+  object-fit: contain;
+}
+
+.customer-merchant-identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.customer-language {
+  min-height: 2.35rem;
+  padding: 0.5rem 0.8rem;
+  color: var(--waflo-ink);
+  border-color: var(--waflo-border);
+  background: var(--waflo-surface);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.customer-hero,
+.customer-hero--compact {
+  justify-items: start;
+  margin: 3.5rem 0 2rem;
+  text-align: start;
+}
+
+.customer-merchant-mark {
+  width: 3.5rem;
+  height: 3.5rem;
+  margin: 1.4rem 0 1rem;
+  border-radius: 18px;
+  background: var(--waflo-ink);
+  box-shadow: var(--waflo-shadow-card);
+  font-size: 1.2rem;
+}
+
+.customer-merchant-mark.customer-merchant-identity {
+  display: inline-flex;
+}
+
+.customer-merchant-mark .customer-merchant-identity__logo,
+.customer-merchant-mark i {
+  width: 3.5rem;
+  height: 3.5rem;
+  flex-basis: 3.5rem;
+  border-radius: 18px;
+}
+
+.digital-card__issuer .customer-merchant-identity {
+  flex: 0 0 auto;
+}
+
+.digital-card__issuer .customer-merchant-identity i,
+.digital-card__issuer .customer-merchant-identity__logo {
+  width: 2.6rem;
+  height: 2.6rem;
+  flex-basis: 2.6rem;
+  border-radius: 0.82rem;
+}
+
+.program-story__merchant {
+  margin-block-end: 0.85rem;
+}
+
+.customer-kicker {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+}
+
+.customer-hero h1,
+.customer-state-card h1 {
+  max-width: 30rem;
+  margin: 0.65rem 0 0;
+  font-size: clamp(1.7rem, 6vw, 2.15rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.customer-lead,
+.customer-state-card > p {
+  max-width: 31rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+.program-grid,
+.customer-facts,
+.transfer-methods {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: none;
+  gap: 0.75rem;
+}
+
+.program-choice .wf-card {
+  min-height: 7.5rem;
+  padding: 1rem;
+  border-radius: 22px;
+  box-shadow: none;
+}
+
+.program-choice:hover .wf-card {
+  border-color: color-mix(in srgb, var(--waflo-brick) 30%, var(--waflo-border));
+  box-shadow: var(--waflo-shadow-card);
+}
+
+.program-choice__swatch {
+  width: 0.3rem;
+}
+
+.customer-footer {
+  margin-top: 2rem;
+  padding: 1.25rem 0 0;
+  border-block-start: 1px solid var(--waflo-border);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+[dir="rtl"] .customer-footer {
+  letter-spacing: 0;
+}
+
+.customer-state-card {
+  width: 100%;
+  max-width: 34rem;
+  margin: 12vh auto;
+  padding: clamp(1.5rem, 7vw, 2.5rem);
+  border-radius: 24px;
+  box-shadow: var(--waflo-shadow-card);
+}
+
+.join-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  padding: 2rem 0;
+}
+
+.program-story {
+  --story-radius: 26px;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-areas:
+    "header"
+    "progress"
+    "reward"
+    "details";
+  gap: 1rem;
+  padding: 1.35rem;
+  overflow: hidden;
+  color: var(--program-ink);
+  border: 1px solid color-mix(in srgb, var(--program-ink) 14%, transparent);
+  border-radius: var(--story-radius);
+  background:
+    radial-gradient(
+      65% 65% at 88% 4%,
+      color-mix(in srgb, var(--program-accent) 24%, transparent),
+      transparent 72%
+    ),
+    var(--program-bg);
+  box-shadow: var(--waflo-shadow-pass);
+}
+
+.program-story::before,
+.digital-card::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.program-story[data-corner-treatment="ROUND"],
+.digital-card[data-corner-treatment="ROUND"] {
+  --story-radius: 34px;
+  border-radius: 34px;
+}
+
+.program-story[data-corner-treatment="CRISP"],
+.digital-card[data-corner-treatment="CRISP"] {
+  --story-radius: 16px;
+  border-radius: 16px;
+}
+
+.program-story[data-density="COMPACT"] {
+  gap: 0.72rem;
+  padding: 1.1rem;
+}
+
+.program-story[data-density="AIRY"] {
+  gap: 1.35rem;
+  padding: 1.65rem;
+}
+
+.program-story[data-density="EXPRESSIVE"] {
+  gap: 1.15rem;
+}
+
+.program-story__header {
+  position: relative;
+  z-index: 2;
+  grid-area: header;
+}
+
+.program-story__progress {
+  position: relative;
+  z-index: 2;
+  grid-area: progress;
+  min-width: 0;
+}
+
+.program-story > .reward-card {
+  position: relative;
+  z-index: 2;
+  grid-area: reward;
+}
+
+.program-story > .program-details {
+  position: relative;
+  z-index: 2;
+  grid-area: details;
+}
+
+.program-story__motif,
+.digital-card__motif {
+  position: absolute;
+  z-index: 0;
+  display: grid;
+  width: 7.5rem;
+  height: 7.5rem;
+  place-items: center;
+  opacity: 0.2;
+  pointer-events: none;
+  inset-block-start: 1rem;
+  inset-inline-end: 0.75rem;
+}
+
+.program-story__motif-art,
+.digital-card__motif img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.program-story[data-motif-treatment="WATERMARK"] .program-story__motif,
+.digital-card[data-motif-treatment="WATERMARK"] .digital-card__motif {
+  width: 12rem;
+  height: 12rem;
+  opacity: 0.09;
+}
+
+.program-story[data-motif-treatment="EDGE_CROP"] .program-story__motif,
+.digital-card[data-motif-treatment="EDGE_CROP"] .digital-card__motif {
+  width: 11rem;
+  height: 11rem;
+  opacity: 0.3;
+  transform: translate(32%, -24%);
+}
+
+[dir="rtl"].program-story[data-motif-treatment="EDGE_CROP"] .program-story__motif,
+[dir="rtl"].digital-card[data-motif-treatment="EDGE_CROP"] .digital-card__motif {
+  transform: translate(-32%, -24%);
+}
+
+.program-story[data-motif-treatment="HEADER_MARK"] .program-story__motif,
+.program-story[data-motif-treatment="CORNER_MARK"] .program-story__motif,
+.program-story[data-motif-treatment="BADGE"] .program-story__motif,
+.digital-card[data-motif-treatment="HEADER_MARK"] .digital-card__motif,
+.digital-card[data-motif-treatment="CORNER_MARK"] .digital-card__motif,
+.digital-card[data-motif-treatment="BADGE"] .digital-card__motif {
+  padding: 0.8rem;
+  border-radius: 1.5rem;
+  background: color-mix(in srgb, var(--program-secondary, var(--card-secondary)) 22%, transparent);
+  opacity: 0.72;
+}
+
+.program-story[data-motif-treatment="SIDE_MARK"] .program-story__motif,
+.digital-card[data-motif-treatment="SIDE_MARK"] .digital-card__motif {
+  inset-block-start: 9rem;
+  inset-inline-start: 0.75rem;
+  inset-inline-end: auto;
+  opacity: 0.3;
+}
+
+.program-story h1 {
+  max-width: 30rem;
+  margin: 0.45rem 0 0;
+  color: var(--program-ink);
+  font-size: clamp(1.8rem, 8vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.program-story[data-title-treatment="DISPLAY"] h1 {
+  font-size: clamp(2.2rem, 9vw, 3rem);
+  line-height: 0.98;
+}
+
+.program-story[data-title-treatment="EDITORIAL"] h1 {
+  max-width: 24rem;
+  font-size: clamp(2rem, 8vw, 2.7rem);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+}
+
+.program-story[data-title-treatment="COMPACT"] h1 {
+  font-size: clamp(1.55rem, 7vw, 2rem);
+}
+
+.program-story[data-title-treatment="QUIET"] h1 {
+  font-size: clamp(1.65rem, 7vw, 2.1rem);
+  font-weight: 700;
+}
+
+[dir="rtl"] .program-story h1 {
+  letter-spacing: 0;
+}
+
+.program-story .customer-lead {
+  max-width: 34rem;
+  color: color-mix(in srgb, var(--program-ink) 70%, transparent);
+}
+
+.published-stamp-artwork--preview {
+  max-width: 100%;
+  max-height: 14rem;
+  margin: 0 auto 0.5rem;
+}
+
+.stamp-preview-count {
+  margin: 0 0 1rem;
+  color: color-mix(in srgb, var(--program-ink) 72%, transparent);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.reward-card {
+  align-items: center;
+  margin-top: 0;
+  padding: 0.85rem;
+  color: var(--program-ink);
+  border-color: color-mix(in srgb, var(--program-ink) 14%, transparent);
+  background: color-mix(in srgb, var(--program-ink) 7%, transparent);
+  box-shadow: none;
+}
+
+.reward-card > span {
+  flex-basis: 3.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 14px;
+  font-size: 1.25rem;
+}
+
+.program-story .reward-card > div {
+  min-width: 0;
+}
+
+.reward-card strong {
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.reward-card p,
+.program-details li {
+  color: color-mix(in srgb, var(--program-ink) 68%, transparent);
+}
+
+.program-details {
+  gap: 0.75rem;
+  margin-top: 0;
+  font-size: 0.8rem;
+}
+
+.program-story[data-reward-treatment="FRAMED"] > .reward-card,
+.program-story[data-reward-treatment="SIDE_PANEL"] > .reward-card {
+  border: 2px solid color-mix(in srgb, var(--program-accent) 42%, transparent);
+  background: transparent;
+}
+
+.program-story[data-reward-treatment="FOOTER_BAND"] > .reward-card {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--program-secondary) 20%, transparent);
+}
+
+.program-story[data-reward-treatment="RULE"] > .reward-card {
+  border: 0;
+  border-block-start: 3px solid var(--program-accent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.program-story[data-reward-treatment="BADGE"] > .reward-card {
+  border-color: transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--program-accent) 14%, transparent);
+}
+
+.program-story[data-composition="STAMP_STAGE"] .program-story__progress {
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--program-ink) 10%, transparent);
+  border-radius: calc(var(--story-radius) - 8px);
+  background: color-mix(in srgb, var(--program-secondary) 11%, transparent);
+}
+
+.program-story[data-composition="LABEL_FRAME"]::before {
+  inset: 1rem;
+  border: 2px solid color-mix(in srgb, var(--program-ink) 15%, transparent);
+  border-radius: calc(var(--story-radius) - 7px);
+}
+
+.program-story[data-composition="LABEL_FRAME"] {
+  padding: 2rem;
+}
+
+.program-story[data-composition="HEADER_BAND"]::before {
+  height: 8.75rem;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--program-accent) 16%, transparent);
+}
+
+.program-story[data-composition="SIDE_TOTEM"]::before,
+.program-story[data-composition="SPLIT_HERO"]::before {
+  width: 29%;
+  inset-inline: auto 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--program-accent) 15%, transparent);
+}
+
+.program-story[data-composition="DIAGONAL_FIELD"]::before {
+  inset-inline-start: 48%;
+  background: linear-gradient(
+    152deg,
+    color-mix(in srgb, var(--program-accent) 20%, transparent) 0 46%,
+    color-mix(in srgb, var(--program-secondary) 16%, transparent) 46% 68%,
+    transparent 68%
+  );
+}
+
+.program-story[data-composition="POSTER"] .program-story__header,
+.program-story[data-composition="POSTER"] .stamp-preview-count {
+  text-align: center;
+}
+
+.program-story[data-composition="POSTER"] .program-story__merchant {
+  justify-content: center;
+}
+
+@media (min-width: 500px) {
+  .program-story[data-composition="EDITORIAL"],
+  .program-story[data-composition="LABEL_FRAME"] {
+    grid-template-areas:
+      "header header"
+      "progress reward"
+      "details details";
+    grid-template-columns: minmax(0, 1fr) minmax(9.5rem, 0.42fr);
+  }
+
+  .program-story[data-composition="SIDE_TOTEM"] {
+    grid-template-areas:
+      ". header"
+      ". progress"
+      "reward progress"
+      ". details";
+    grid-template-columns: minmax(8rem, 0.34fr) minmax(0, 1fr);
+  }
+
+  .program-story[data-composition="SPLIT_HERO"] > :not(.program-story__motif) {
+    width: 69%;
+    margin-inline-end: auto;
+  }
+}
+
+.enrollment-card {
+  padding: 1.25rem;
+  border-radius: 24px;
+  box-shadow: var(--waflo-shadow-card);
+}
+
+.enrollment-card__heading h2 {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.customer-terms {
+  border-radius: 16px;
+  background: var(--waflo-cloud);
+}
+
+.enrollment-success,
+.transfer-result {
+  margin: 8vh auto 0;
+  padding: 1.5rem;
+  border-radius: 24px;
+}
+
+.enrollment-success h1,
+.transfer-result h1 {
+  font-size: clamp(1.7rem, 7vw, 2.3rem);
+  line-height: 1.08;
+}
+
+.card-page {
+  width: min(100%, 560px);
+}
+
+.digital-card {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  isolation: isolate;
+  border-radius: 26px;
+  box-shadow: var(--waflo-shadow-pass);
+}
+
+.digital-card::after {
+  display: none;
+}
+
+.digital-card[data-composition="HEADER_BAND"]::before {
+  height: 8.5rem;
+  background: color-mix(in srgb, var(--card-accent) 16%, transparent);
+}
+
+.digital-card[data-composition="SIDE_TOTEM"]::before,
+.digital-card[data-composition="SPLIT_HERO"]::before {
+  width: 28%;
+  inset-inline: auto 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--card-accent) 15%, transparent);
+}
+
+.digital-card[data-composition="DIAGONAL_FIELD"]::before {
+  inset-inline-start: 46%;
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--card-accent) 20%, transparent) 0 44%,
+    color-mix(in srgb, var(--card-secondary) 17%, transparent) 44% 66%,
+    transparent 66%
+  );
+}
+
+.digital-card[data-composition="LABEL_FRAME"]::before {
+  inset: 0.8rem;
+  border: 2px solid color-mix(in srgb, var(--card-ink) 14%, transparent);
+  border-radius: calc(var(--story-radius) - 7px);
+}
+
+.digital-card[data-composition="STAMP_STAGE"] > .published-stamp-artwork {
+  padding: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--card-ink) 10%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--card-secondary) 11%, transparent);
+}
+
+.digital-card[data-composition="POSTER"] .digital-card__brand,
+.digital-card[data-composition="POSTER"] .digital-card__member,
+.digital-card[data-composition="POSTER"] .progress-copy {
+  align-items: center;
+  text-align: center;
+}
+
+.digital-card[data-density="COMPACT"] {
+  padding: 1rem;
+}
+
+.digital-card[data-density="AIRY"] {
+  padding: 1.6rem;
+}
+
+.digital-card__brand h1 {
+  font-size: clamp(1.45rem, 6vw, 2rem);
+  font-weight: 800;
+}
+
+.digital-card[data-title-treatment="DISPLAY"] .digital-card__brand h1 {
+  font-size: clamp(1.8rem, 8vw, 2.5rem);
+  line-height: 1;
+}
+
+.digital-card[data-title-treatment="EDITORIAL"] .digital-card__brand h1 {
+  font-weight: 720;
+}
+
+.digital-card[data-title-treatment="QUIET"] .digital-card__brand h1 {
+  font-size: clamp(1.35rem, 6vw, 1.8rem);
+  font-weight: 700;
+}
+
+.digital-card__member {
+  margin-top: 1.5rem;
+}
+
+.digital-card__member strong {
+  font-size: 1.05rem;
+}
+
+.digital-card > .published-stamp-artwork {
+  max-height: 14rem;
+  margin-block: 0.5rem;
+}
+
+.progress-copy {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.progress-copy span {
+  text-align: start;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.membership-qr {
+  width: min(100%, 10rem);
+  margin-top: 1.25rem;
+  padding: 0.7rem;
+  border: 1px solid rgb(36 25 22 / 10%);
+  border-radius: 18px;
+}
+
+.membership-qr p {
+  font-size: 0.6rem;
+}
+
+.card-actions > .wf-card,
+.transfer-action {
+  padding: 1rem;
+  border-radius: 22px;
+  box-shadow: none;
+}
+
+.transfer-intro {
+  margin: 3rem 0 1.5rem;
+}
+
+.transfer-intro h1 {
+  font-size: clamp(1.8rem, 8vw, 2.5rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.transfer-methods > .wf-card {
+  min-height: auto;
+  padding: 1.25rem;
+  border-radius: 22px;
+}
+
+.legal-page > .wf-card {
+  margin: 2rem auto;
+  padding: 1.5rem;
+  border-radius: 24px;
+}
+
+.legal-page h1 {
+  font-size: clamp(1.8rem, 7vw, 2.5rem);
+}
+
+@media (max-width: 430px) {
+  .customer-page,
+  .card-page,
+  .transfer-page {
+    padding-inline: 1rem;
+  }
+
+  .customer-header {
+    margin-inline: -1rem;
+    padding-inline: 1rem;
+  }
+
+  .customer-merchant-identity strong {
+    max-width: 10rem;
+  }
+
+  .customer-hero,
+  .customer-hero--compact {
+    margin-top: 2.5rem;
+  }
+
+  .enrollment-card {
+    margin-inline: 0;
+  }
+
+  .enrollment-card__heading {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .enrollment-card__heading .wf-search-select {
+    width: 100%;
+  }
+
+  .digital-card {
+    border-radius: 24px;
+  }
+}
+
+/* Enrollment is a desktop card counter, not a phone-sized form in empty space. */
+.customer-page.join-page {
+  width: min(100% - clamp(2rem, 5vw, 6rem), 92rem);
+  padding-block: clamp(1rem, 2vw, 2rem) clamp(2.5rem, 5vw, 5rem);
+}
+
+.join-page .join-layout {
+  grid-template-columns: minmax(0, 1.18fr) minmax(23rem, 0.82fr);
+  align-items: start;
+  gap: clamp(1.5rem, 4vw, 4.5rem);
+  padding-block: clamp(2rem, 5vw, 4.5rem);
+}
+
+.join-page .program-story {
+  min-width: 0;
+  min-height: clamp(32rem, 53vw, 43rem);
+  padding: clamp(1.5rem, 3vw, 2.75rem);
+  align-content: start;
+  gap: clamp(1rem, 2vw, 1.7rem);
+}
+
+.join-page .program-story__header,
+.join-page .program-story__progress,
+.join-page .program-story > .reward-card,
+.join-page .program-story > .program-details {
+  min-width: 0;
+}
+
+.join-page .program-story h1 {
+  max-width: 18ch;
+  font-size: clamp(2.1rem, 4vw, 4.1rem);
+  line-height: 1.02;
+}
+
+.join-page .program-story .customer-lead {
+  max-width: 56ch;
+  font-size: clamp(0.95rem, 1.25vw, 1.08rem);
+}
+
+.join-page .published-stamp-artwork--preview {
+  width: min(100%, 37rem);
+  max-height: 17rem;
+  margin-block: 0.25rem 0.65rem;
+}
+
+.join-page .stamp-preview-count {
+  margin-block-end: 0;
+  font-size: 0.9rem;
+}
+
+.join-page .reward-card {
+  max-width: none;
+  padding: clamp(1rem, 2vw, 1.35rem);
+}
+
+.join-page .reward-card > div {
+  min-width: 0;
+}
+
+.join-page .reward-card strong,
+.join-page .reward-card p {
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.join-page .program-details {
+  margin-block-start: auto;
+}
+
+.join-page .enrollment-card {
+  position: sticky;
+  top: 1.5rem;
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: clamp(1.5rem, 3vw, 2.35rem);
+  border-radius: 28px;
+  box-shadow: 0 1.25rem 3.5rem rgb(36 25 22 / 12%);
+}
+
+.join-page .enrollment-card__heading {
+  align-items: start;
+  gap: 0.65rem 1rem;
+  margin-block-end: 1.75rem;
+}
+
+.join-page .enrollment-card__heading h2 {
+  max-width: 19ch;
+  font-size: clamp(1.45rem, 2vw, 1.8rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.join-page .enrollment-form {
+  gap: 1.2rem;
+}
+
+.join-page .enrollment-form .wf-field {
+  gap: 0.55rem;
+}
+
+.join-page .enrollment-form .wf-input {
+  min-height: 3.4rem;
+  padding-inline: 1rem;
+  background: rgb(247 244 238 / 82%);
+  font-size: 1rem;
+}
+
+.join-page .enrollment-form .wf-check {
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.join-page .enrollment-form .wf-check input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  flex: 0 0 auto;
+}
+
+.join-page .customer-terms {
+  padding: 0;
+  overflow: hidden;
+  background: rgb(247 244 238 / 74%);
+}
+
+.join-page .customer-terms summary {
+  min-height: 3rem;
+  padding: 0.8rem 1rem;
+  color: var(--program-ink);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.join-page .customer-terms[open] summary {
+  border-block-end: 1px solid var(--waflo-border);
+}
+
+.join-page .customer-terms p {
+  max-height: 12rem;
+  margin: 0;
+  padding: 0.9rem 1rem 1rem;
+  overflow: auto;
+}
+
+.join-page .enrollment-form > .wf-button {
+  width: 100%;
+  min-height: 3.35rem;
+  margin-block-start: 0.15rem;
+  font-size: 1rem;
+}
+
+.join-page .privacy-note {
+  max-width: 56ch;
+  font-size: 0.8rem;
+}
+
+@media (min-width: 900px) {
+  .join-page .program-story[data-composition="EDITORIAL"],
+  .join-page .program-story[data-composition="LABEL_FRAME"] {
+    grid-template-columns: minmax(0, 1fr) minmax(14.5rem, 0.68fr);
+  }
+
+  .join-page .program-story[data-composition="SIDE_TOTEM"] {
+    grid-template-columns: minmax(11rem, 0.4fr) minmax(0, 1fr);
+  }
+
+  .join-page .program-story[data-composition="SPLIT_HERO"] > :not(.program-story__motif) {
+    width: min(76%, 36rem);
+  }
+}
+
+@media (max-width: 980px) {
+  .customer-page.join-page {
+    width: min(100% - 2rem, 72rem);
+  }
+
+  .join-page .join-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(1.25rem, 3vw, 2rem);
+  }
+
+  .join-page .program-story {
+    min-height: 0;
+  }
+
+  .join-page .enrollment-card {
+    position: static;
+    width: min(100%, 42rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .customer-page.join-page {
+    width: min(100% - 1.25rem, 42rem);
+    padding-block: 0.75rem 2rem;
+  }
+
+  .join-page .join-layout {
+    gap: 1rem;
+    padding-block: 1.25rem 2rem;
+  }
+
+  .join-page .program-story {
+    padding: 1.25rem;
+    border-radius: 24px;
+  }
+
+  .join-page .program-story h1 {
+    max-width: 15ch;
+    font-size: clamp(2rem, 10vw, 2.75rem);
+  }
+
+  .join-page .published-stamp-artwork--preview {
+    max-height: 12rem;
+  }
+
+  .join-page .reward-card {
+    gap: 0.8rem;
+  }
+
+  .join-page .reward-card > span {
+    flex-basis: 3rem;
+    width: 3rem;
+    height: 3rem;
+  }
+
+  .join-page .enrollment-card {
+    width: 100%;
+    padding: 1.25rem;
+    border-radius: 24px;
+  }
+
+  .join-page .enrollment-card__heading {
+    grid-template-columns: minmax(0, 1fr);
+    margin-block-end: 1.25rem;
+  }
+
+  .join-page .enrollment-card__heading .wf-search-select {
+    width: 100%;
+  }
+}
+
+/* Enrollment introduces the program without presenting a web card as the Wallet result. */
+.join-page .join-layout--compact {
+  grid-template-columns: minmax(0, 0.72fr) minmax(20rem, 0.88fr);
+  gap: clamp(1rem, 3vw, 2.5rem);
+}
+
+.join-page .join-layout--compact .enrollment-summary {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 0.75rem;
+  padding: clamp(1.2rem, 2.5vw, 1.85rem);
+  color: var(--waflo-ink);
+  border: 1px solid var(--waflo-border);
+  border-radius: 22px;
+  background: var(--waflo-soft);
+  box-shadow: none;
+}
+
+.join-page .join-layout--compact .enrollment-summary .program-story__motif,
+.join-page .join-layout--compact .enrollment-summary .program-story__progress,
+.join-page .join-layout--compact .enrollment-summary > .reward-card,
+.join-page .join-layout--compact .enrollment-summary > .program-details {
+  display: none;
+}
+
+.join-page .join-layout--compact .enrollment-summary .program-story__header {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.join-page .join-layout--compact .enrollment-summary h1 {
+  max-width: 24ch;
+  margin: 0;
+  font-size: clamp(1.55rem, 2.4vw, 2.25rem);
+  line-height: 1.14;
+}
+
+.join-page .join-layout--compact .enrollment-summary .customer-lead {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--waflo-muted);
+  font-size: 0.96rem;
+  line-height: 1.6;
+}
+
+.enrollment-summary__kicker,
+.wallet-ready-summary__kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--waflo-brick);
+  font-size: 0.71rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.enrollment-terms {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+  border: 1px solid var(--waflo-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--waflo-soft) 72%, transparent);
+}
+
+.join-page .enrollment-terms .wf-check {
+  padding: 0;
+  text-align: start;
+}
+
+.join-page .enrollment-terms .customer-terms {
+  border: 1px solid color-mix(in srgb, var(--waflo-border) 86%, transparent);
+  border-radius: 10px;
+  background: var(--waflo-cloud);
+}
+
+.join-page .enrollment-terms .customer-terms summary {
+  min-height: 2.7rem;
+  padding-block: 0.7rem;
+  text-align: start;
+}
+
+.join-page .enrollment-terms .customer-terms p {
+  max-height: none;
+  padding-block: 0.75rem 0.85rem;
+  overflow: visible;
+  color: var(--waflo-muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.wallet-ready-page .wallet-ready-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.9rem;
+  margin-block: 1.1rem 1rem;
+  padding: clamp(1rem, 3vw, 1.4rem);
+  border: 1px solid var(--waflo-border);
+  border-inline-start: 4px solid var(--waflo-brick);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--waflo-soft) 62%, transparent);
+}
+
+.wallet-ready-summary > div {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.wallet-ready-summary h1,
+.wallet-ready-summary p {
+  margin: 0;
+}
+
+.wallet-ready-summary h1 {
+  font-size: clamp(1.25rem, 4vw, 1.65rem);
+  line-height: 1.2;
+}
+
+.wallet-ready-summary p {
+  color: var(--waflo-muted);
+  line-height: 1.55;
+}
+
+.wallet-ready-page .card-actions > .wf-card {
+  border-color: color-mix(in srgb, var(--waflo-brick) 32%, var(--waflo-border));
+  box-shadow: 0 1rem 2.5rem rgb(36 25 22 / 9%);
+}
+
+@media (max-width: 980px) {
+  .join-page .join-layout--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .join-page .join-layout--compact .enrollment-summary {
+    width: min(100%, 42rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .join-page .join-layout--compact .enrollment-summary {
+    padding: 1rem;
+    border-radius: 18px;
+  }
+
+  .enrollment-terms {
+    padding: 0.75rem;
+  }
+
+  .wallet-ready-page .wallet-ready-summary {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+    border-radius: 15px;
   }
 }

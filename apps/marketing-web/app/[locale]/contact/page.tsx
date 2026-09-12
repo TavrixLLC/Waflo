@@ -1,29 +1,46 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { isLocale } from "@waflo/i18n";
+import { isInterfaceLocale } from "@waflo/i18n";
 import { Card } from "@waflo/ui";
 import { MarketingShell } from "../../../components/marketing-shell";
+import { marketingDocuments } from "../../../lib/marketing-documents";
+import { configuredSupportEmail, createMarketingMetadata } from "../../../lib/seo";
+
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return isInterfaceLocale(locale) ? createMarketingMetadata(locale, "contact") : {};
+}
 
 export default async function ContactPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
-  if (!isLocale(locale)) notFound();
-  const ar = locale === "ar";
+  if (!isInterfaceLocale(locale)) notFound();
+  const copy = marketingDocuments[locale].contact;
+  const supportEmail = configuredSupportEmail();
+  const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL ?? "https://dashboard.waflo.app";
   return (
-    <MarketingShell locale={locale}>
+    <MarketingShell locale={locale} path="/contact">
       <section className="marketing-container marketing-content">
-        <span className="marketing-kicker">{ar ? "تواصل معنا" : "Contact Waflo"}</span>
-        <h1>{ar ? "نحن نجهّز قنوات التواصل." : "We’re preparing our support channels."}</h1>
-        <p className="marketing-content__lead">
-          {ar
-            ? "ستُنشر قنوات المبيعات والدعم الرسمية هنا قبل الإطلاق العام. يمكنك في الوقت الحالي متابعة إعداد حسابك من لوحة التاجر."
-            : "Official sales and support channels will be published here before public launch. For now, you can continue setting up your account in the merchant dashboard."}
-        </p>
+        <span className="marketing-kicker">{copy.kicker}</span>
+        <h1>{copy.title}</h1>
+        <p className="marketing-content__lead">{copy.lede}</p>
         <Card style={{ maxWidth: 700, padding: "2rem", marginTop: "2rem" }}>
           <strong>Waflo · Tavrix LLC</strong>
-          <p style={{ color: "var(--waflo-muted)", lineHeight: 1.7 }}>
-            {ar
-              ? "لن نعرض عنواناً أو وسيلة اتصال غير مؤكدة. ستتم مراجعة هذه الصفحة قبل الإطلاق."
-              : "We will not publish an unverified address or contact method. This page will be reviewed before launch."}
-          </p>
+          <p style={{ color: "var(--waflo-muted)", lineHeight: 1.7 }}>{copy.sections[0]?.body}</p>
+          {supportEmail ? (
+            <a className="marketing-contact-link" href={`mailto:${supportEmail}`}>
+              {supportEmail}
+            </a>
+          ) : (
+            <a className="marketing-contact-link" href={`${dashboardUrl}/${locale}/login`}>
+              {copy.contactLabel}
+            </a>
+          )}
         </Card>
       </section>
     </MarketingShell>

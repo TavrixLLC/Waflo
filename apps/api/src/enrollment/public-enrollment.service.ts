@@ -5,10 +5,19 @@ import {
   enrollmentBillingDecision,
   walletIncludedForPlan,
 } from "@waflo/billing";
-import type { BillingStatus, EnrollmentInput } from "@waflo/contracts";
+import {
+  resolveProgramTemplatePresentation,
+  type BillingStatus,
+  type EnrollmentInput,
+} from "@waflo/contracts";
 import type { Prisma } from "@waflo/database";
+import { canonicalCustomerUrl } from "@waflo/qr-core";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
-import { walletCommandIdempotencyKey, type WalletProviderCode } from "@waflo/wallet-core";
+import {
+  WALLET_PRESENTATION_SCHEMA_VERSION,
+  walletCommandIdempotencyKey,
+  type WalletProviderCode,
+} from "@waflo/wallet-core";
 import { AuditService } from "../audit/audit.service.js";
 import { AppError } from "../common/app-error.js";
 import { withProgramLifecycleInvariantLock } from "../common/organization-transaction.js";
@@ -16,13 +25,16 @@ import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { HostResolutionService } from "../public/host-resolution.service.js";
+import {
+  HostResolutionService,
+  normalizeRequestHostname,
+} from "../public/host-resolution.service.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
 import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
-import type { PreviewAsset } from "../programs/preview-assets.js";
+import { resolvePreviewAssetContent, type PreviewAsset } from "../programs/preview-assets.js";
 
 const visibleProgramStates = ["PUBLISHED", "PAUSED", "ARCHIVED", "SUSPENDED"] as const;
 
@@ -34,18 +46,14 @@ function billingStatus(value: string): BillingStatus {
   return value.toLocaleLowerCase("en-US") as BillingStatus;
 }
 
-function merchantCustomerUrl(baseUrl: string, merchantSlug: string, path: string): string {
-  const url = new URL(baseUrl);
-  url.hostname = `${merchantSlug}.${url.hostname}`;
-  url.pathname = path;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
 const publicVersionInclude = {
   enrollmentPolicy: true,
   translations: true,
+  cardLocales: {
+    where: { enabled: true },
+    orderBy: [{ position: "asc" }, { locale: "asc" }],
+    include: { rewardTranslations: true },
+  },
   stampRule: true,
   rewards: { include: { translations: true }, orderBy: { sortOrder: "asc" as const } },
   locations: {
@@ -61,7 +69,7 @@ const publicVersionInclude = {
     },
   },
   visualTheme: publishedVisualThemeInclude,
-} as const;
+} satisfies Prisma.LoyaltyProgramVersionInclude;
 
 @Injectable()
 export class PublicEnrollmentService {
@@ -73,6 +81,49 @@ export class PublicEnrollmentService {
     private readonly audit: AuditService,
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
+
+  /**
+   * Old staging QR codes were issued before the shared customer host carried an
+   * explicit `tenant` query parameter. Preserve those already-printed codes only
+   * when the public program slug identifies exactly one active organization.
+   * Production keeps strict hostname tenancy, and ambiguous slugs stay closed.
+   */
+  private async resolveProgramOrganization(
+    host: string,
+    programSlug: string,
+    developmentOverride?: string,
+  ) {
+    const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
+    if (resolved.status === "active" || developmentOverride) return resolved;
+    if (this.environment.values.DEPLOYMENT_ENVIRONMENT !== "staging") return resolved;
+    const sharedCustomerHost = new URL(this.environment.values.CUSTOMER_WEB_URL).hostname;
+    if (normalizeRequestHostname(host) !== sharedCustomerHost) return resolved;
+
+    const candidates = await this.prisma.client.organization.findMany({
+      where: {
+        status: "ACTIVE",
+        loyaltyPrograms: {
+          some: {
+            publicSlug: programSlug,
+            status: { in: [...visibleProgramStates] },
+            currentPublishedVersionId: { not: null },
+          },
+        },
+      },
+      take: 2,
+      include: {
+        billingProfile: true,
+        brandLogoAsset: { include: { variants: true } },
+      },
+    });
+    const organization = candidates[0];
+    if (candidates.length !== 1 || !organization) return resolved;
+    return {
+      status: "active" as const,
+      organization,
+      normalizedHost: sharedCustomerHost,
+    };
+  }
 
   async merchantPrograms(host: string, developmentOverride?: string) {
     const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
@@ -99,6 +150,7 @@ export class PublicEnrollmentService {
         name: organization.name,
         slug: organization.merchantSlug,
         defaultLocale: organization.defaultLocale === "AR" ? "ar" : "en",
+        brandLogoDataUri: await this.publicBrandLogoDataUri(organization.brandLogoAsset),
       },
       // A broken historical asset must not take the entire merchant discovery root
       // offline. The affected program remains unavailable (and its direct route
@@ -110,7 +162,7 @@ export class PublicEnrollmentService {
   }
 
   async program(host: string, programSlug: string, developmentOverride?: string) {
-    const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
+    const resolved = await this.resolveProgramOrganization(host, programSlug, developmentOverride);
     if (resolved.status !== "active") return { status: resolved.status };
     const program = await this.prisma.client.loyaltyProgram.findFirst({
       where: {
@@ -133,6 +185,7 @@ export class PublicEnrollmentService {
         name: resolved.organization.name,
         slug: resolved.organization.merchantSlug,
         defaultLocale: resolved.organization.defaultLocale === "AR" ? "ar" : "en",
+        brandLogoDataUri: await this.publicBrandLogoDataUri(resolved.organization.brandLogoAsset),
       },
       program: await this.publicProgram(program, resolved.organization),
     };
@@ -153,7 +206,7 @@ export class PublicEnrollmentService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    const resolved = await this.hosts.resolveOrganization(host, developmentOverride);
+    const resolved = await this.resolveProgramOrganization(host, programSlug, developmentOverride);
     if (resolved.status !== "active") {
       throw new AppError(
         "ENROLLMENT_UNAVAILABLE",
@@ -173,15 +226,15 @@ export class PublicEnrollmentService {
         HttpStatus.CONFLICT,
       );
     }
-    const email = input.email?.trim() ?? "";
+    const phone = input.phone?.trim() ?? "";
     const requestFingerprint = sha256({
       programSlug,
       displayName: input.displayName.normalize("NFKC").trim(),
-      emailHash: email ? this.security.emailRequestFingerprint(email) : null,
+      phoneHash: phone ? this.security.phoneRequestFingerprint(phone) : null,
       preferredLocale: input.preferredLocale,
       programTermsAccepted: input.programTermsAccepted,
       wafloPrivacyAccepted: input.wafloPrivacyAccepted,
-      marketingEmailConsent: input.marketingEmailConsent,
+      marketingPhoneConsent: input.marketingPhoneConsent,
     });
     const result = await withProgramLifecycleInvariantLock(
       this.prisma.client,
@@ -270,21 +323,21 @@ export class PublicEnrollmentService {
             { reason: billing.code },
           );
         }
-        if (policy.emailCollectionMode === "REQUIRED" && !email) {
+        if (policy.phoneCollectionMode === "REQUIRED" && !phone) {
           throw new AppError(
-            "ENROLLMENT_EMAIL_REQUIRED",
-            "Email is required for this program.",
+            "ENROLLMENT_PHONE_REQUIRED",
+            "Phone number is required for this program.",
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        if (policy.emailCollectionMode === "HIDDEN" && email) {
+        if (policy.phoneCollectionMode === "HIDDEN" && phone) {
           throw new AppError(
-            "ENROLLMENT_EMAIL_NOT_COLLECTED",
-            "This program does not collect email.",
+            "ENROLLMENT_PHONE_NOT_COLLECTED",
+            "This program does not collect phone numbers.",
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        if (input.marketingEmailConsent && (!policy.marketingConsentVisible || !email)) {
+        if (input.marketingPhoneConsent && (!policy.marketingConsentVisible || !phone)) {
           throw new AppError(
             "MARKETING_CONSENT_INVALID",
             "Marketing consent is not available for this enrollment.",
@@ -336,20 +389,20 @@ export class PublicEnrollmentService {
         const credentialId = randomUUID();
         const credential = this.security.createCredential(1);
         const rawSessionToken = this.security.deterministicEnrollmentSessionToken(commandId);
-        const preparedEmail = email ? this.security.prepareEmail(organizationId, email) : null;
+        const preparedPhone = phone ? this.security.preparePhone(organizationId, phone) : null;
         await transaction.customer.create({
           data: {
             id: customerId,
             organizationId,
             displayName: input.displayName.normalize("NFKC").trim(),
             preferredLocale: input.preferredLocale === "ar" ? "AR" : "EN",
-            ...(preparedEmail
+            ...(preparedPhone
               ? {
                   contacts: {
                     create: {
-                      ...preparedEmail,
+                      ...preparedPhone,
                       organizationId,
-                      type: "EMAIL",
+                      type: "PHONE",
                       verificationStatus: "UNVERIFIED",
                       isPrimary: true,
                     },
@@ -414,7 +467,7 @@ export class PublicEnrollmentService {
               granted: true,
               documentFingerprint: this.environment.values.LEGAL_PRIVACY_VERSION,
               locale: input.preferredLocale === "ar" ? "AR" : "EN",
-              safeMetadata: { riskSignals },
+              safeMetadata: { captureMethod: "ENROLLMENT_IMPLICIT", riskSignals },
             },
             {
               organizationId,
@@ -431,8 +484,8 @@ export class PublicEnrollmentService {
                     organizationId,
                     customerId,
                     membershipId,
-                    consentType: "MARKETING_EMAIL" as const,
-                    granted: input.marketingEmailConsent,
+                    consentType: "MARKETING_PHONE" as const,
+                    granted: input.marketingPhoneConsent,
                     documentFingerprint: consentFingerprint,
                     locale: input.preferredLocale === "ar" ? ("AR" as const) : ("EN" as const),
                   },
@@ -477,7 +530,7 @@ export class PublicEnrollmentService {
                 programId: program.id,
                 programVersionId: version.id,
                 ...(event[0] === "customer.enrolled"
-                  ? { contact: preparedEmail?.maskedDisplayValue ?? null }
+                  ? { contact: preparedPhone?.maskedDisplayValue ?? null }
                   : {}),
               },
             },
@@ -511,11 +564,12 @@ export class PublicEnrollmentService {
     return {
       membership: {
         publicMembershipId: membership.publicMembershipId,
-        cardUrl: merchantCustomerUrl(
-          this.environment.values.CUSTOMER_WEB_URL,
+        cardUrl: canonicalCustomerUrl({
+          customerBaseUrl: this.environment.values.CUSTOMER_WEB_URL,
+          merchantBaseDomain: this.environment.values.MERCHANT_BASE_DOMAIN,
           merchantSlug,
-          `/card/${membership.publicMembershipId}`,
-        ),
+          pathname: `/card/${membership.publicMembershipId}`,
+        }),
       },
       providerStates,
       replayed,
@@ -630,7 +684,7 @@ export class PublicEnrollmentService {
           providerState: { mode },
         },
       });
-      const ensureKey = `wallet:${provider.toLocaleLowerCase("en-US")}:ensure-template:${version.id}`;
+      const ensureKey = `wallet:${provider.toLocaleLowerCase("en-US")}:ensure-template:v${WALLET_PRESENTATION_SCHEMA_VERSION}:${version.id}`;
       await transaction.walletCommand.upsert({
         where: { idempotencyKey: ensureKey },
         create: {
@@ -673,7 +727,10 @@ export class PublicEnrollmentService {
       status: string;
       currentPublishedVersion: {
         id: string;
+        baseTemplateCode: string | null;
+        baseTemplateVersion: number | null;
         validationFingerprint: string | null;
+        defaultCardLocale: string;
         translations: Array<{
           locale: "EN" | "AR";
           programName: string;
@@ -684,8 +741,27 @@ export class PublicEnrollmentService {
           termsAndConditions: string;
           pausedMessage: string | null;
         }>;
+        cardLocales: Array<{
+          locale: string;
+          enabled: boolean;
+          position: number;
+          programName: string | null;
+          shortDescription: string | null;
+          earningDescription: string | null;
+          fullDescription: string | null;
+          rewardSummary: string | null;
+          joinInstructions: string | null;
+          termsAndConditions: string | null;
+          pausedMessage: string | null;
+          rewardTranslations: Array<{
+            rewardId: string;
+            name: string | null;
+            description: string | null;
+          }>;
+        }>;
         stampRule: { requiredStampCount: number; earningDescription: string } | null;
         rewards: Array<{
+          id: string;
           thresholdStampCount: number;
           translations: Array<{ locale: "EN" | "AR"; name: string; description: string }>;
         }>;
@@ -710,7 +786,7 @@ export class PublicEnrollmentService {
           emptyStampAsset: PreviewAsset;
         } | null;
         enrollmentPolicy: {
-          emailCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
+          phoneCollectionMode: "HIDDEN" | "OPTIONAL" | "REQUIRED";
           primaryCustomerLocale: "EN" | "AR";
           allowLocaleSelection: boolean;
           marketingConsentVisible: boolean;
@@ -722,6 +798,7 @@ export class PublicEnrollmentService {
     organization: {
       id: string;
       billingProfile: { subscriptionStatus: string; trialEnd: Date | null } | null;
+      brandLogoAsset: PreviewAsset | null;
     },
   ) {
     const version = program.currentPublishedVersion;
@@ -735,34 +812,74 @@ export class PublicEnrollmentService {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     const goal = version.stampRule?.requiredStampCount ?? 8;
-    const previews = await Promise.all(
-      (["en", "ar"] as const).map((locale) =>
-        renderPublishedStampArtwork({
-          storage: this.objectStorage,
-          organizationId: organization.id,
-          programId: program.id,
-          programVersionId: version.id,
-          membershipId: `join-preview:${version.id}`,
-          locale,
-          requiredStampCount: goal,
-          currentStampCount: 0,
-          rewardReady: false,
-          theme: visualTheme,
-          outputProfile: "JOIN_PREVIEW",
-        }),
+    const legacyCardLocales = version.translations.map((item, position) => ({
+      locale: item.locale === "AR" ? "ar" : "en",
+      enabled: true,
+      position,
+      programName: item.programName,
+      shortDescription: item.shortDescription,
+      earningDescription: version.stampRule?.earningDescription ?? null,
+      fullDescription: item.fullDescription,
+      rewardSummary: item.rewardSummary,
+      joinInstructions: item.joinInstructions,
+      termsAndConditions: item.termsAndConditions,
+      pausedMessage: item.pausedMessage,
+      rewardTranslations: version.rewards.flatMap((reward) =>
+        reward.translations
+          .filter((translation) => translation.locale === item.locale)
+          .map((translation) => ({
+            rewardId: reward.id,
+            name: translation.name,
+            description: translation.description,
+          })),
       ),
-    );
-    const [englishPreview, arabicPreview] = previews;
-    if (!englishPreview || !arabicPreview) {
-      throw new Error("Published enrollment previews could not be rendered.");
-    }
-    const safePreview = (preview: typeof englishPreview) => ({
+    }));
+    const cardLocales = (version.cardLocales.length ? version.cardLocales : legacyCardLocales)
+      .filter((item) => item.enabled)
+      .toSorted(
+        (left, right) => left.position - right.position || left.locale.localeCompare(right.locale),
+      );
+    if (cardLocales.length === 0)
+      throw new AppError(
+        "PROGRAM_CARD_LOCALES_INVALID",
+        "The published program has no enabled card language.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    const firstCardLocale = cardLocales[0];
+    if (!firstCardLocale)
+      throw new AppError(
+        "PROGRAM_CARD_LOCALES_INVALID",
+        "The published program has no enabled card language.",
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    const defaultLocale =
+      cardLocales.find((item) => item.locale === version.defaultCardLocale)?.locale ??
+      firstCardLocale.locale;
+    const defaultPreview = await renderPublishedStampArtwork({
+      storage: this.objectStorage,
+      organizationId: organization.id,
+      programId: program.id,
+      programVersionId: version.id,
+      membershipId: `join-preview:${version.id}`,
+      locale: defaultLocale,
+      rewardLabel: cardLocales.find((item) => item.locale === defaultLocale)?.rewardSummary ?? "",
+      requiredStampCount: goal,
+      currentStampCount: 0,
+      rewardReady: false,
+      theme: visualTheme,
+      outputProfile: "JOIN_PREVIEW",
+    });
+    const safePreview = (preview: typeof defaultPreview) => ({
       dataUri: preview.dataUri,
       contentDigest: preview.contentDigest,
       configurationDigest: preview.configurationDigest,
       width: preview.width,
       height: preview.height,
     });
+    const identityArtworkDataUri = await this.publicAssetDataUri(
+      visualTheme.filledStampAsset,
+      "published stamp artwork",
+    );
     const billing = organization.billingProfile
       ? enrollmentBillingDecision(
           effectiveBillingStatus(
@@ -785,34 +902,57 @@ export class PublicEnrollmentService {
       versionFingerprint:
         version.validationFingerprint ??
         sha256({ version: version.id, programSlug: program.publicSlug }),
+      defaultLocale,
+      enabledLocales: cardLocales.map((item) => item.locale),
       translations: Object.fromEntries(
-        version.translations.map((item) => [
-          item.locale === "AR" ? "ar" : "en",
+        cardLocales.map((item) => [
+          item.locale,
           {
-            programName: item.programName,
-            shortDescription: item.shortDescription,
+            programName: item.programName ?? "",
+            shortDescription: item.shortDescription ?? "",
+            earningDescription:
+              item.earningDescription ?? version.stampRule?.earningDescription ?? "",
             fullDescription: item.fullDescription,
-            rewardSummary: item.rewardSummary,
+            rewardSummary: item.rewardSummary ?? "",
             joinInstructions: item.joinInstructions,
-            termsAndConditions: item.termsAndConditions,
+            termsAndConditions: item.termsAndConditions ?? "",
             pausedMessage: item.pausedMessage,
           },
         ]),
       ),
       goal,
-      stampPreview: safePreview(englishPreview),
-      stampPreviews: {
-        en: safePreview(englishPreview),
-        ar: safePreview(arabicPreview),
+      stampPreview: safePreview(defaultPreview),
+      stampPreviews: Object.fromEntries(
+        cardLocales.map((item) => [item.locale, safePreview(defaultPreview)]),
+      ),
+      template: {
+        code: version.baseTemplateCode,
+        version: version.baseTemplateVersion,
+        presentation: resolveProgramTemplatePresentation(
+          version.baseTemplateCode,
+          version.baseTemplateVersion,
+        ),
+        identityArtworkDataUri,
       },
       earningDescription: version.stampRule?.earningDescription ?? "",
       rewards: version.rewards.map((reward) => ({
         thresholdStampCount: reward.thresholdStampCount,
         translations: Object.fromEntries(
-          reward.translations.map((item) => [
-            item.locale === "AR" ? "ar" : "en",
-            { name: item.name, description: item.description },
-          ]),
+          cardLocales.map((item) => {
+            const translation = item.rewardTranslations.find(
+              (candidate) => candidate.rewardId === reward.id,
+            );
+            const legacy = reward.translations.find(
+              (candidate) => candidate.locale === (item.locale === "ar" ? "AR" : "EN"),
+            );
+            return [
+              item.locale,
+              {
+                name: translation?.name ?? legacy?.name ?? "",
+                description: translation?.description ?? legacy?.description ?? "",
+              },
+            ];
+          }),
         ),
       })),
       locations: version.locations
@@ -827,15 +967,38 @@ export class PublicEnrollmentService {
         foregroundColor: version.visualTheme?.foregroundColor ?? "#241916",
         accentColor: version.visualTheme?.accentColor ?? "#E4572E",
         secondaryColor: version.visualTheme?.secondaryColor ?? "#F3A712",
-        layoutType: version.visualTheme?.layoutType ?? "GRID",
+        layoutType: "GRID",
       },
       policy: {
-        emailCollectionMode: policy?.emailCollectionMode ?? "OPTIONAL",
+        phoneCollectionMode: policy?.phoneCollectionMode ?? "OPTIONAL",
         primaryCustomerLocale: policy?.primaryCustomerLocale === "AR" ? "ar" : "en",
         allowLocaleSelection: policy?.allowLocaleSelection ?? true,
         marketingConsentVisible: policy?.marketingConsentVisible ?? false,
         transferWithoutEmailAllowed: policy?.transferWithoutEmailAllowed ?? true,
       },
     };
+  }
+
+  private async publicAssetDataUri(
+    asset: PreviewAsset | null,
+    label: string,
+  ): Promise<string | null> {
+    try {
+      const resolved = await resolvePreviewAssetContent(
+        this.objectStorage,
+        asset,
+        "THUMBNAIL_96",
+        label,
+      );
+      return resolved?.dataUri ?? null;
+    } catch {
+      // Public card discovery must retain the intentional Waflo issuer fallback
+      // when a historical logo object is no longer readable.
+      return null;
+    }
+  }
+
+  private publicBrandLogoDataUri(asset: PreviewAsset | null): Promise<string | null> {
+    return this.publicAssetDataUri(asset, "merchant brand logo");
   }
 }

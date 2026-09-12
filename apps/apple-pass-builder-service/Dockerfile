@@ -1,0 +1,101 @@
+# syntax=docker/dockerfile:1.8
+FROM swift:6.3-noble@sha256:56ef1be2c1ca36f4c52440357dc1fcdfdb5e113587134fcadeef57c225c71b54 AS pass-builder-build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /source/pass-builder
+COPY apps/apple-pass-builder-service/patches/8908b955-swift-6.3-linux-pointer.patch /tmp/pass-builder.patch
+COPY apps/apple-pass-builder-service/Package.resolved /tmp/Package.resolved
+RUN git init \
+    && git remote add origin https://github.com/apple/pass-builder.git \
+    && git config http.version HTTP/1.1 \
+    && git fetch --depth 1 origin 8908b955a42da8294ce7506719aa1f186d096c02 \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "8908b955a42da8294ce7506719aa1f186d096c02" \
+    && echo "5a22f17961993b12c963bcb0ac1b5c0371d902a55361b5fb9524715b8b9938e6  /tmp/pass-builder.patch" \
+      | sha256sum --check --strict \
+    && git apply --check /tmp/pass-builder.patch \
+    && git apply /tmp/pass-builder.patch \
+    && echo "0cc5f7d74bba8d3882f2fd46b9dc0e107a977bb817872948a2f459276ee325a6  /tmp/Package.resolved" \
+      | sha256sum --check --strict \
+    && cp /tmp/Package.resolved Package.resolved \
+    && echo "0cc5f7d74bba8d3882f2fd46b9dc0e107a977bb817872948a2f459276ee325a6  Package.resolved" \
+      | sha256sum --check --strict
+RUN --mount=type=cache,id=waflo-apple-pass-builder-swiftpm,target=/root/.cache/org.swift.swiftpm,sharing=locked \
+    --mount=type=cache,id=waflo-apple-pass-builder-swift-build,target=/source/pass-builder/.build,sharing=locked \
+    git config --global http.version HTTP/1.1 \
+    && swift build -c release --product buildpass --static-swift-stdlib --disable-automatic-resolution \
+    && mkdir -p /out/runtime /out/Protobufs \
+    && cp .build/release/buildpass /out/runtime/buildpass \
+    && cp Package.resolved /out/runtime/Package.resolved \
+    && cp LICENSE.txt /out/runtime/LICENSE.pass-builder.txt \
+    && find .build/release -maxdepth 1 -type d -name '*.resources' -exec cp -R '{}' /out/runtime/ \; \
+    && cp Protobufs/*.proto /out/Protobufs/
+
+FROM node:24-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS node-build
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/apple-pass-builder-service/package.json apps/apple-pass-builder-service/
+COPY packages/auth/package.json packages/auth/
+COPY packages/billing/package.json packages/billing/
+COPY packages/brand/package.json packages/brand/
+COPY packages/config/package.json packages/config/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/customer-security/package.json packages/customer-security/
+COPY packages/database/package.json packages/database/
+COPY packages/external-auth-security/package.json packages/external-auth-security/
+COPY packages/i18n/package.json packages/i18n/
+COPY packages/loyalty-ledger/package.json packages/loyalty-ledger/
+COPY packages/loyalty-policy/package.json packages/loyalty-policy/
+COPY packages/operational-analytics/package.json packages/operational-analytics/
+COPY packages/permissions/package.json packages/permissions/
+COPY packages/qr-core/package.json packages/qr-core/
+COPY packages/security/package.json packages/security/
+COPY packages/staff-device-security/package.json packages/staff-device-security/
+COPY packages/stamp-engine/package.json packages/stamp-engine/
+COPY packages/ui/package.json packages/ui/
+COPY packages/wallet-apple/package.json packages/wallet-apple/
+COPY packages/wallet-artwork/package.json packages/wallet-artwork/
+COPY packages/wallet-core/package.json packages/wallet-core/
+COPY packages/wallet-google/package.json packages/wallet-google/
+RUN --mount=type=cache,id=waflo-apple-pass-builder-pnpm-v11,target=/root/.local/share/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile --filter @waflo/apple-pass-builder-service...
+COPY apps/apple-pass-builder-service apps/apple-pass-builder-service
+COPY packages/contracts packages/contracts
+RUN pnpm --filter @waflo/contracts build \
+    && pnpm --filter @waflo/apple-pass-builder-service build \
+    && pnpm --filter @waflo/apple-pass-builder-service deploy --prod --legacy /out/service
+
+FROM ubuntu:noble@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS runtime
+LABEL org.opencontainers.image.source="https://github.com/apple/pass-builder" \
+      io.waflo.pass-builder.revision="8908b955a42da8294ce7506719aa1f186d096c02" \
+      io.waflo.pass-builder.compatibility-patch="8908b955-swift-6.3-linux-pointer.patch"
+COPY --from=node:24-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df /usr/local/ /usr/local/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends zip ca-certificates openssl libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 passbuilder \
+    && useradd --system --uid 10001 --gid passbuilder --home-dir /nonexistent --shell /usr/sbin/nologin passbuilder
+
+COPY --from=pass-builder-build --chown=root:root /out/runtime/ /opt/pass-builder/
+COPY --from=pass-builder-build --chown=root:root /out/Protobufs/ /opt/pass-builder/Protobufs/
+COPY --from=node-build --chown=root:root /out/service/ /opt/waflo/service/
+COPY --chown=root:root apps/apple-pass-builder-service/THIRD_PARTY_NOTICES.md /opt/pass-builder/THIRD_PARTY_NOTICES.md
+RUN chown -R 10001:10001 /opt/waflo/service/templates
+
+ENV NODE_ENV=production \
+    PASS_BUILDER_EXECUTABLE=/opt/pass-builder/buildpass \
+    PASS_BUILDER_OPENSSL_EXECUTABLE=/usr/bin/openssl \
+    PASS_BUILDER_PROTOBUF_ROOT=/opt/pass-builder/Protobufs \
+    PASS_BUILDER_TEMPLATE_ROOT=/opt/waflo/service/templates \
+    PASS_BUILDER_HOST=0.0.0.0 \
+    PASS_BUILDER_PORT=8080
+WORKDIR /opt/waflo/service
+USER 10001:10001
+EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "dist/main.js"]

@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  ColorInput,
   FormField,
   Modal,
   RadioGroup,
@@ -410,8 +411,8 @@ export function ProgramQuickWizard({
               ] as const
             ).map(([key, label]) => (
               <FormField key={key} label={label}>
-                <input
-                  type="color"
+                <ColorInput
+                  aria-label={label}
                   value={draft.visualTheme[key]}
                   onChange={(event) =>
                     editDraft((current) => ({
@@ -423,21 +424,6 @@ export function ProgramQuickWizard({
               </FormField>
             ))}
           </div>
-          <ProgramAssetPicker
-            organizationId={organizationId}
-            category="LOGO"
-            label={ar ? "الشعار" : "Logo"}
-            assets={assets}
-            selectedId={draft.visualTheme.logoAssetId}
-            onSelected={(assetId) =>
-              editDraft((current) => ({
-                ...current,
-                visualTheme: { ...current.visualTheme, logoAssetId: assetId },
-              }))
-            }
-            onUploaded={onAssetUploaded}
-            ar={ar}
-          />
           <ProgramAssetPicker
             organizationId={organizationId}
             category="STAMP_FILLED"

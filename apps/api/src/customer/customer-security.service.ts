@@ -14,12 +14,18 @@ import {
   encryptCustomerValue,
   hashCustomerToken,
   hashNormalizedEmail,
+  hashNormalizedPhone,
   maskEmail,
+  maskPhone,
   membershipCredentialHash,
   normalizeEmail,
+  normalizePhone,
   type VersionedSecret,
 } from "@waflo/customer-security";
-import { formatMembershipQrPayload, parseMembershipQrPayload } from "@waflo/qr-core";
+import {
+  formatMembershipCredentialPayload,
+  parseMembershipCredentialPayload,
+} from "@waflo/qr-core";
 import { parseVersionedSecretEntries } from "@waflo/config";
 import type { Prisma } from "@waflo/database";
 import { EnvironmentService } from "../config/environment.service.js";
@@ -94,6 +100,28 @@ export class CustomerSecurityService {
     return hashNormalizedEmail(normalizeEmail(email), this.contactLookupKey);
   }
 
+  preparePhone(organizationId: string, phone: string) {
+    const id = randomUUID();
+    const normalized = normalizePhone(phone);
+    const encrypted = encryptCustomerValue(normalized, {
+      organizationId,
+      recordId: id,
+      purpose: "customer-phone",
+      keyring: this.customerKeyring,
+    });
+    return {
+      id,
+      encryptedValue: encrypted.serialized,
+      encryptionKeyVersion: encrypted.keyVersion,
+      normalizedValueHash: hashNormalizedPhone(normalized, this.contactLookupKey),
+      maskedDisplayValue: maskPhone(normalized),
+    };
+  }
+
+  phoneRequestFingerprint(phone: string): string {
+    return hashNormalizedPhone(normalizePhone(phone), this.contactLookupKey);
+  }
+
   decryptEmail(contact: { id: string; organizationId: string; encryptedValue: string }): string {
     return decryptCustomerValue(contact.encryptedValue, {
       organizationId: contact.organizationId,
@@ -150,7 +178,7 @@ export class CustomerSecurityService {
         credentialVersion,
         this.activeCredentialSecret,
       ),
-      payload: formatMembershipQrPayload({
+      payload: formatMembershipCredentialPayload({
         publicCredentialId,
         secretVersion: this.activeCredentialSecret.version,
         secret,
@@ -164,7 +192,7 @@ export class CustomerSecurityService {
     secretVersion: number;
   }): string {
     const secretVersion = this.secretForCredentialVersion(credential.secretVersion);
-    return formatMembershipQrPayload({
+    return formatMembershipCredentialPayload({
       publicCredentialId: credential.publicCredentialId,
       secretVersion: credential.secretVersion,
       secret: deriveMembershipCredentialSecret(
@@ -179,9 +207,9 @@ export class CustomerSecurityService {
     rawPayload: string,
     transaction: Prisma.TransactionClient | null = null,
   ) {
-    let parsed: ReturnType<typeof parseMembershipQrPayload>;
+    let parsed: ReturnType<typeof parseMembershipCredentialPayload>;
     try {
-      parsed = parseMembershipQrPayload(rawPayload);
+      parsed = parseMembershipCredentialPayload(rawPayload);
     } catch {
       return null;
     }

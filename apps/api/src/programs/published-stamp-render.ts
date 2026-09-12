@@ -1,19 +1,20 @@
 import {
-  renderPublishedMembershipStampSvg,
   type PublishedMembershipStampRenderInput,
+  renderPublishedMembershipStampSvg,
   type StampOutputProfile,
 } from "@waflo/stamp-engine";
 import type { ObjectStorage } from "./object-storage.js";
 import {
+  type PreviewAsset,
   previewAssetCacheIdentity,
   resolvePreviewAssetContent,
-  type PreviewAsset,
 } from "./preview-assets.js";
 
 export const publishedVisualThemeInclude = {
   include: {
     filledStampAsset: { include: { variants: true } },
     emptyStampAsset: { include: { variants: true } },
+    logoAsset: { include: { variants: true } },
   },
 } as const;
 
@@ -36,7 +37,8 @@ export async function renderPublishedStampArtwork(input: {
   programId: string;
   programVersionId: string;
   membershipId: string;
-  locale: "en" | "ar";
+  locale: string;
+  rewardLabel: string;
   requiredStampCount: number;
   currentStampCount: number;
   rewardReady: boolean;
@@ -62,38 +64,20 @@ export async function renderPublishedStampArtwork(input: {
   if (!filled || !empty) throw new Error("Published stamp artwork is required.");
   const filledIdentity = previewAssetCacheIdentity(input.theme.filledStampAsset, "STAMP_256");
   const emptyIdentity = previewAssetCacheIdentity(input.theme.emptyStampAsset, "STAMP_256");
-  const rawLayout =
-    input.theme.layoutConfiguration &&
-    typeof input.theme.layoutConfiguration === "object" &&
-    !Array.isArray(input.theme.layoutConfiguration)
-      ? input.theme.layoutConfiguration
-      : {};
-  const layoutConfiguration = {
-    ...("columns" in rawLayout && typeof rawLayout.columns === "number"
-      ? { columns: rawLayout.columns }
-      : {}),
-    ...("maxPerRow" in rawLayout && typeof rawLayout.maxPerRow === "number"
-      ? { maxPerRow: rawLayout.maxPerRow }
-      : {}),
-    ...("serpentine" in rawLayout && typeof rawLayout.serpentine === "boolean"
-      ? { serpentine: rawLayout.serpentine }
-      : {}),
-    ...("startAngle" in rawLayout && typeof rawLayout.startAngle === "number"
-      ? { startAngle: rawLayout.startAngle }
-      : {}),
-  };
   const renderInput: PublishedMembershipStampRenderInput = {
     organizationId: input.organizationId,
     programId: input.programId,
     programVersionId: input.programVersionId,
     membershipId: input.membershipId,
-    rendererSchemaVersion: "waflo-stamp-render-v1",
+    rendererSchemaVersion: "waflo-stamp-render-v2",
     locale: input.locale,
+    rewardLabel: input.rewardLabel,
     requiredStampCount: input.requiredStampCount,
     currentStampCount: input.currentStampCount,
     rewardReady: input.rewardReady,
-    layoutType: input.theme.layoutType,
-    ...(Object.keys(layoutConfiguration).length > 0 ? { layoutConfiguration } : {}),
+    // Persisted ROW/PATH/RING values are compatibility data only. All live outputs are grid.
+    layoutType: "GRID",
+    layoutPolicy: "BALANCED_WALLET_ROWS_V1",
     visualTheme: {
       filledColor: input.theme.accentColor,
       emptyColor: input.theme.secondaryColor,

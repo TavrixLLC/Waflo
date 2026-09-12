@@ -8,26 +8,33 @@ import {
 import { Reflector } from "@nestjs/core";
 import { hashOpaqueToken, isSessionActive, safeTokenEquals } from "@waflo/auth";
 import { evaluateRiskRules, riskDeduplicationKey } from "@waflo/operational-analytics";
-import { AppError } from "../common/app-error.js";
-import { CUSTOMER_CSRF, IS_PUBLIC, RATE_LIMIT, SKIP_CSRF } from "../common/decorators.js";
-import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
-import type { WafloRequest } from "../common/request-context.js";
-import { EnvironmentService } from "../config/environment.service.js";
-import { PrismaService } from "../database/prisma.service.js";
-import { AuditService } from "../audit/audit.service.js";
-import { RateLimitService } from "./rate-limit.service.js";
-import { CustomerCardService } from "../customer/customer-card.service.js";
-import { CustomerSecurityService } from "../customer/customer-security.service.js";
 import {
-  assertStaffMobileAppVersion,
   assertBodyDigest,
   assertDeviceOperational,
   assertDeviceRequestTimestamp,
+  assertStaffMobileAppVersion,
   assertTestClientAllowed,
   hashOpaqueDeviceToken,
+  type StaffDeviceSecurityCode,
   verifyDeviceRequestSignature,
 } from "@waflo/staff-device-security";
-import { STAFF_DEVICE_SIGNED } from "../common/decorators.js";
+import { AuditService } from "../audit/audit.service.js";
+import { AppError } from "../common/app-error.js";
+import {
+  CUSTOMER_CSRF,
+  IS_ADMIN_ROUTE,
+  IS_PUBLIC,
+  RATE_LIMIT,
+  SKIP_CSRF,
+  STAFF_DEVICE_SIGNED,
+} from "../common/decorators.js";
+import { ERROR_REPORTER, type ErrorReporter } from "../common/error-reporter.js";
+import type { WafloRequest } from "../common/request-context.js";
+import { EnvironmentService } from "../config/environment.service.js";
+import { CustomerCardService } from "../customer/customer-card.service.js";
+import { CustomerSecurityService } from "../customer/customer-security.service.js";
+import { PrismaService } from "../database/prisma.service.js";
+import { RateLimitService } from "./rate-limit.service.js";
 
 @Injectable()
 export class SessionGuard implements CanActivate {
@@ -39,6 +46,11 @@ export class SessionGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const adminRoute = this.reflector.getAllAndOverride<boolean>(IS_ADMIN_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (adminRoute) return true;
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
       context.getHandler(),
       context.getClass(),
@@ -107,6 +119,11 @@ export class CsrfGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const adminRoute = this.reflector.getAllAndOverride<boolean>(IS_ADMIN_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (adminRoute) return true;
     const request = context.switchToHttp().getRequest<WafloRequest>();
     if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
     const customerCsrf = this.reflector.getAllAndOverride<boolean | "optional">(CUSTOMER_CSRF, [
@@ -211,6 +228,9 @@ export class CustomerCsrfGuard implements CanActivate {
 
   private expectedOrigins(merchantSlug: string): string[] {
     const base = new URL(this.environment.values.CUSTOMER_WEB_URL);
+    if (this.environment.values.DEPLOYMENT_ENVIRONMENT === "staging") {
+      return [base.origin];
+    }
     const merchant = new URL(base);
     merchant.hostname = `${merchantSlug}.${base.hostname}`;
     if (this.environment.values.NODE_ENV === "production") {
@@ -277,6 +297,77 @@ export class ApiRateLimitGuard implements CanActivate {
 
 function singleHeader(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+export interface StaffDeviceFailureDisposition {
+  readonly auditSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  readonly riskRuleCode: string;
+  readonly riskSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  readonly riskScore: number;
+  readonly httpStatus: number;
+}
+
+export function staffDeviceFailureDisposition(code: string): StaffDeviceFailureDisposition {
+  const stateMappings: Partial<Record<StaffDeviceSecurityCode, StaffDeviceFailureDisposition>> = {
+    STAFF_DEVICE_COMPROMISED: {
+      auditSeverity: "CRITICAL",
+      riskRuleCode: "DEVICE_COMPROMISED",
+      riskSeverity: "CRITICAL",
+      riskScore: 100,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_REVOKED: {
+      auditSeverity: "HIGH",
+      riskRuleCode: "DEVICE_REVOKED",
+      riskSeverity: "HIGH",
+      riskScore: 80,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_MEMBER_INACTIVE: {
+      auditSeverity: "HIGH",
+      riskRuleCode: "MEMBER_INACTIVE",
+      riskSeverity: "HIGH",
+      riskScore: 75,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_SESSION_EXPIRED: {
+      auditSeverity: "LOW",
+      riskRuleCode: "SESSION_EXPIRED",
+      riskSeverity: "LOW",
+      riskScore: 20,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_APP_VERSION_UNSUPPORTED: {
+      auditSeverity: "LOW",
+      riskRuleCode: "APP_UPDATE_REQUIRED",
+      riskSeverity: "LOW",
+      riskScore: 10,
+      httpStatus: 426,
+    },
+    STAFF_DEVICE_CLOCK_SKEW: {
+      auditSeverity: "MEDIUM",
+      riskRuleCode: "CLOCK_SKEW",
+      riskSeverity: "HIGH",
+      riskScore: 85,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+    STAFF_DEVICE_NOT_ACTIVE: {
+      auditSeverity: "HIGH",
+      riskRuleCode: "DEVICE_NOT_ACTIVE",
+      riskSeverity: "HIGH",
+      riskScore: 70,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    },
+  };
+  return (
+    stateMappings[code as StaffDeviceSecurityCode] ?? {
+      auditSeverity: "HIGH",
+      riskRuleCode: "SIGNATURE_FAILURE",
+      riskSeverity: "CRITICAL",
+      riskScore: 100,
+      httpStatus: HttpStatus.UNAUTHORIZED,
+    }
+  );
 }
 
 @Injectable()
@@ -376,7 +467,7 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       },
       include: {
         staffDevice: true,
-        organizationMember: true,
+        organizationMember: { include: { user: { select: { status: true } } } },
       },
     });
     if (!session) {
@@ -384,6 +475,77 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         "STAFF_DEVICE_NOT_ACTIVE",
         "Staff device session is not active.",
         HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const [location, staffAssignment, deviceAssignment] = await Promise.all([
+      this.prisma.client.location.findFirst({
+        where: {
+          id: session.locationId,
+          organizationId: session.organizationId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          name: true,
+          organization: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.client.staffLocationAssignment.findFirst({
+        where: {
+          organizationId: session.organizationId,
+          organizationMemberId: session.organizationMemberId,
+          locationId: session.locationId,
+          active: true,
+        },
+        select: { locationId: true },
+      }),
+      this.prisma.client.staffDeviceLocation.findFirst({
+        where: {
+          staffDeviceId: session.staffDeviceId,
+          locationId: session.locationId,
+          active: true,
+        },
+        select: { locationId: true },
+      }),
+    ]);
+    const principalFailure =
+      session.organizationMember.user.status !== "ACTIVE"
+        ? {
+            code: "STAFF_USER_DEACTIVATED",
+            message: "The Staff identity is deactivated.",
+          }
+        : !location || !staffAssignment || !deviceAssignment
+          ? {
+              code: "STAFF_LOCATION_ASSIGNMENT_INVALID",
+              message: "The Staff Location assignment is no longer active.",
+            }
+          : null;
+    if (principalFailure) {
+      await this.audit.security(
+        {
+          organizationId: session.organizationId,
+          eventType: `staff_device.${principalFailure.code.toLocaleLowerCase("en-US")}`,
+          severity: "HIGH",
+          metadata: { devicePublicId, requestId },
+        },
+        request,
+      );
+      throw new AppError(principalFailure.code, principalFailure.message, HttpStatus.UNAUTHORIZED);
+    }
+    if (!location) {
+      throw new AppError(
+        "STAFF_LOCATION_ASSIGNMENT_INVALID",
+        "The Staff Location assignment is no longer active.",
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const organizationDisplayName = location.organization.name.trim();
+    const currentLocationDisplayName = location.name.trim();
+    if (!organizationDisplayName || !currentLocationDisplayName) {
+      throw new AppError(
+        "STAFF_DEVICE_CONTEXT_INVALID",
+        "Staff device context is unavailable.",
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
     try {
@@ -402,7 +564,12 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       assertStaffMobileAppVersion({
         platform: session.staffDevice.platform,
         appVersion: session.staffDevice.appVersion,
-        minimumVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+        minimumVersion:
+          session.staffDevice.platform === "IOS"
+            ? this.environment.values.STAFF_MOBILE_MINIMUM_IOS_VERSION
+            : session.staffDevice.platform === "ANDROID"
+              ? this.environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION
+              : this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
       });
       assertDeviceRequestTimestamp({
         timestamp,
@@ -429,40 +596,27 @@ export class StaffDeviceSignatureGuard implements CanActivate {
         error && typeof error === "object" && "code" in error && typeof error.code === "string"
           ? error.code
           : "STAFF_DEVICE_SIGNATURE_INVALID";
+      const disposition = staffDeviceFailureDisposition(code);
       await this.audit.security(
         {
           organizationId: session.organizationId,
           eventType: `staff_device.${code.toLocaleLowerCase("en-US")}`,
-          severity:
-            code === "STAFF_APP_VERSION_UNSUPPORTED"
-              ? "LOW"
-              : code === "STAFF_DEVICE_CLOCK_SKEW"
-                ? "MEDIUM"
-                : "HIGH",
+          severity: disposition.auditSeverity,
           metadata: { devicePublicId, requestId },
         },
         request,
       );
-      if (code === "STAFF_APP_VERSION_UNSUPPORTED") {
-        throw new AppError(code, "This Staff mobile app version is no longer supported.", 426);
-      }
-      const ruleCode =
-        code === "STAFF_DEVICE_CLOCK_SKEW"
-          ? "CLOCK_SKEW"
-          : code === "STAFF_DEVICE_NOT_ACTIVE"
-            ? "DEVICE_NOT_ACTIVE"
-            : "SIGNATURE_FAILURE";
       await this.persistDeviceRisk(
         session,
-        ruleCode,
-        code === "STAFF_DEVICE_CLOCK_SKEW" ? "HIGH" : "CRITICAL",
-        code === "STAFF_DEVICE_CLOCK_SKEW" ? 85 : 100,
+        disposition.riskRuleCode,
+        disposition.riskSeverity,
+        disposition.riskScore,
         { failureCode: code },
       );
       throw new AppError(
         code,
         "Staff device request could not be verified.",
-        HttpStatus.UNAUTHORIZED,
+        disposition.httpStatus,
       );
     }
 
@@ -547,7 +701,12 @@ export class StaffDeviceSignatureGuard implements CanActivate {
       deviceSessionId: session.id,
       platform: session.staffDevice.platform,
       appVersion: session.staffDevice.appVersion,
-      minimumSupportedAppVersion: this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
+      minimumSupportedAppVersion:
+        session.staffDevice.platform === "IOS"
+          ? this.environment.values.STAFF_MOBILE_MINIMUM_IOS_VERSION
+          : session.staffDevice.platform === "ANDROID"
+            ? this.environment.values.STAFF_MOBILE_MINIMUM_ANDROID_VERSION
+            : this.environment.values.STAFF_MOBILE_MINIMUM_APP_VERSION,
       appVersionSupported: true,
       requestId,
     };

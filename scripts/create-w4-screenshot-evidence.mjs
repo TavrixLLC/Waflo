@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { access, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import sharp from "../apps/api/node_modules/sharp/dist/index.mjs";
 
 const root = process.cwd();
 const handoffDirectory = resolve(root, "artifacts/handoff-w4-round-1");
 const screenshotDirectory = resolve(handoffDirectory, "screenshots");
-const acceptedFoundationDirectory = resolve(root, "artifacts/handoff-w4/screenshots");
+const acceptedFoundationDirectory = process.argv[2] ? resolve(root, process.argv[2]) : null;
 const contactSheet = resolve(screenshotDirectory, "00-contact-sheet.png");
 const manifest = resolve(handoffDirectory, "SCREENSHOT-MANIFEST.md");
 
@@ -28,10 +28,11 @@ const coverage = [
   ["Manager approval pending", "32-manager-approval-pending.png"],
   ["Manager approval completed", "33-manager-approval-completed.png"],
   ["Wrong Location blocked by the signed Staff Test Client", "40-wrong-location-blocked.png"],
-  ["Daily cap blocked in policy-aware Test Mode", "37-daily-cap-blocked.png"],
-  ["Purchase amount required", "38-purchase-amount-required.png"],
-  ["Purchase threshold blocked", "41-purchase-threshold-blocked.png"],
-  ["Purchase currency mismatch", "39-purchase-currency-mismatch.png"],
+  ["Daily Coffee automatic publish preflight", "37-daily-coffee-automatic-preflight.png"],
+  [
+    "Qualifying Purchase automatic publish preflight",
+    "38-qualifying-purchase-automatic-preflight.png",
+  ],
   ["Risk dashboard", "10-risk-signals.png"],
   ["Risk detail and safe evidence", "34-risk-detail.png"],
   ["Basic analytics", "11-analytics-overview.png"],
@@ -41,8 +42,6 @@ const coverage = [
   ["Privacy export request", "35-privacy-export-request.png"],
   ["Erased/anonymized Customer with retained ledger", "36-erased-anonymized-customer.png"],
   ["Program operational policy", "14-program-operations-policy.png"],
-  ["Test Mode policy controls", "15-test-mode-policy-controls.png"],
-  ["Test Mode milestone state", "16-test-mode-milestone.png"],
   ["Arabic Customer detail", "23-arabic-customer-detail.png"],
   ["RTL device pairing", "24-rtl-device-pairing.png"],
   ["Staff restricted navigation", "25-staff-restricted-navigation.png"],
@@ -76,6 +75,11 @@ let files = (await readdir(screenshotDirectory))
 
 for (const [, name] of coverage) {
   if (files.includes(name)) continue;
+  if (!acceptedFoundationDirectory) {
+    throw new Error(
+      `Missing ${name}. Generate it in this run or pass a foundation screenshot directory as the first argument.`,
+    );
+  }
   const acceptedFoundationSource = resolve(acceptedFoundationDirectory, name);
   await access(acceptedFoundationSource);
   await copyFile(acceptedFoundationSource, resolve(screenshotDirectory, name));
@@ -177,11 +181,9 @@ const roundOneFiles = new Set([
   "34-risk-detail.png",
   "35-privacy-export-request.png",
   "36-erased-anonymized-customer.png",
-  "37-daily-cap-blocked.png",
-  "38-purchase-amount-required.png",
-  "39-purchase-currency-mismatch.png",
+  "37-daily-coffee-automatic-preflight.png",
+  "38-qualifying-purchase-automatic-preflight.png",
   "40-wrong-location-blocked.png",
-  "41-purchase-threshold-blocked.png",
 ]);
 
 const content = `# W4 Repair Round 1 screenshot manifest

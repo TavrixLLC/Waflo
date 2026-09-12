@@ -4,19 +4,25 @@ import { AppError } from "../common/app-error.js";
 import type { WafloRequest } from "../common/request-context.js";
 import { EnvironmentService } from "../config/environment.service.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { HostResolutionService } from "../public/host-resolution.service.js";
+import {
+  HostResolutionService,
+  normalizeRequestHostname,
+} from "../public/host-resolution.service.js";
 import { AuditService } from "../audit/audit.service.js";
 import { OBJECT_STORAGE, type ObjectStorage } from "../programs/object-storage.js";
 import {
   publishedVisualThemeInclude,
   renderPublishedStampArtwork,
 } from "../programs/published-stamp-render.js";
+import { resolvePreviewAssetContent, type PreviewAsset } from "../programs/preview-assets.js";
 import { CustomerSecurityService } from "./customer-security.service.js";
 import { withInvariantLock } from "../common/organization-transaction.js";
 import { WalletProviderRegistry } from "../wallet/wallet-provider.registry.js";
+import { resolveCardLocale, resolveProgramTemplatePresentation } from "@waflo/contracts";
+import type { Prisma } from "@waflo/database";
 
 const customerCardMembershipInclude = {
-  organization: true,
+  organization: { include: { brandLogoAsset: { include: { variants: true } } } },
   customer: {
     include: {
       contacts: {
@@ -29,25 +35,30 @@ const customerCardMembershipInclude = {
   enrollmentProgramVersion: {
     include: {
       translations: true,
+      cardLocales: {
+        where: { enabled: true },
+        orderBy: [{ position: "asc" }, { locale: "asc" }],
+      },
       stampRule: true,
-      rewards: { include: { translations: true }, orderBy: { sortOrder: "asc" as const } },
+      rewards: { include: { translations: true }, orderBy: { sortOrder: "asc" } },
       visualTheme: publishedVisualThemeInclude,
       enrollmentPolicy: true,
     },
   },
   progress: true,
-  credentials: { orderBy: { credentialVersion: "desc" as const } },
+  credentials: { orderBy: { credentialVersion: "desc" } },
   walletPassInstances: {
-    orderBy: { createdAt: "desc" as const },
+    orderBy: { createdAt: "desc" },
     select: {
       provider: true,
       status: true,
       membershipCredentialId: true,
       lastProviderErrorCode: true,
       providerState: true,
+      updatedAt: true,
     },
   },
-} as const;
+} satisfies Prisma.MembershipInclude;
 
 @Injectable()
 export class CustomerCardService {
@@ -96,6 +107,7 @@ export class CustomerCardService {
     request: WafloRequest,
     expectedPublicMembershipId?: string,
     developmentOverride?: string,
+    requestedCardLocale?: string,
   ) {
     const context = await this.requireSession(request, developmentOverride);
     const membership = context.session.membership;
@@ -115,18 +127,35 @@ export class CustomerCardService {
       credentialStatus === "ACTIVE" &&
       membership.status === "ACTIVE" &&
       membership.customer.status === "ACTIVE";
-    const locale = membership.customer.preferredLocale === "AR" ? "AR" : "EN";
-    const translations = membership.enrollmentProgramVersion.translations;
-    const selected =
-      translations.find((item) => item.locale === locale) ??
-      translations.find((item) => item.locale === "EN") ??
-      translations[0];
+    const interfaceLocale = membership.customer.preferredLocale === "AR" ? "ar" : "en";
+    const version = membership.enrollmentProgramVersion;
+    const legacyLocales = version.translations.map((item) => (item.locale === "AR" ? "ar" : "en"));
+    const enabledLocales = version.cardLocales.length
+      ? version.cardLocales.map((item) => item.locale)
+      : legacyLocales;
+    const defaultLocale = enabledLocales.includes(version.defaultCardLocale)
+      ? version.defaultCardLocale
+      : (enabledLocales[0] ?? "en");
+    const cardLocale = resolveCardLocale({
+      enabledLocales,
+      defaultLocale,
+      ...(requestedCardLocale !== undefined ? { explicitLocale: requestedCardLocale } : {}),
+      ...(typeof request.headers["accept-language"] === "string"
+        ? { acceptedLanguages: request.headers["accept-language"] }
+        : {}),
+    });
+    const dynamicSelected = version.cardLocales.find((item) => item.locale === cardLocale);
+    const legacySelected =
+      version.translations.find((item) => item.locale === (cardLocale === "ar" ? "AR" : "EN")) ??
+      version.translations[0];
+    const selected = dynamicSelected ?? legacySelected;
     const goal = membership.enrollmentProgramVersion.stampRule?.requiredStampCount ?? 8;
     const progress = membership.progress?.currentCycleStampCount ?? 0;
     const wallet = membership.walletPassInstances.filter(
       (item) => item.membershipCredentialId === boundCredential?.id,
     );
     const email = membership.customer.contacts.find((item) => item.type === "EMAIL");
+    const phone = membership.customer.contacts.find((item) => item.type === "PHONE");
     if (!membership.enrollmentProgramVersion.visualTheme) {
       throw new AppError(
         "PROGRAM_ASSET_CONTENT_UNAVAILABLE",
@@ -140,27 +169,39 @@ export class CustomerCardService {
       programId: membership.programId,
       programVersionId: membership.enrollmentProgramVersionId,
       membershipId: membership.id,
-      locale: locale === "AR" ? "ar" : "en",
+      locale: cardLocale,
+      rewardLabel: selected?.rewardSummary ?? "",
       requiredStampCount: goal,
       currentStampCount: progress,
       rewardReady: membership.progress?.rewardReady ?? false,
       theme: membership.enrollmentProgramVersion.visualTheme,
       outputProfile: "CUSTOMER_WEB",
     });
+    const [brandLogoDataUri, identityArtworkDataUri] = await Promise.all([
+      this.publicAssetDataUri(membership.organization.brandLogoAsset, "merchant brand logo"),
+      this.publicAssetDataUri(
+        membership.enrollmentProgramVersion.visualTheme.filledStampAsset,
+        "published stamp artwork",
+      ),
+    ]);
     await this.touch(context.session.id, context.session.lastActiveAt);
     return {
       publicMembershipId: membership.publicMembershipId,
       customer: {
         displayName: membership.customer.displayName,
-        preferredLocale: locale === "AR" ? "ar" : "en",
-        maskedEmail: email?.maskedDisplayValue ?? null,
-        emailVerificationStatus: email?.verificationStatus ?? null,
+        preferredLocale: interfaceLocale,
+        maskedPhone: phone?.maskedDisplayValue ?? null,
+        phoneVerificationStatus: phone?.verificationStatus ?? null,
       },
       merchant: {
         name: membership.organization.name,
         slug: membership.organization.merchantSlug,
+        brandLogoDataUri,
       },
       program: {
+        defaultLocale,
+        enabledLocales,
+        contentLocale: cardLocale,
         slug: membership.program.publicSlug,
         status: membership.program.status,
         name: selected?.programName ?? membership.program.internalName,
@@ -169,6 +210,15 @@ export class CustomerCardService {
         termsAndConditions: selected?.termsAndConditions ?? "",
         pausedMessage: selected?.pausedMessage ?? null,
         enrollmentVersionNumber: membership.enrollmentProgramVersion.versionNumber,
+        template: {
+          code: membership.enrollmentProgramVersion.baseTemplateCode,
+          version: membership.enrollmentProgramVersion.baseTemplateVersion,
+          presentation: resolveProgramTemplatePresentation(
+            membership.enrollmentProgramVersion.baseTemplateCode,
+            membership.enrollmentProgramVersion.baseTemplateVersion,
+          ),
+          identityArtworkDataUri,
+        },
       },
       membership: {
         status: membership.status,
@@ -210,7 +260,7 @@ export class CustomerCardService {
         accentColor: membership.enrollmentProgramVersion.visualTheme?.accentColor ?? "#E4572E",
         secondaryColor:
           membership.enrollmentProgramVersion.visualTheme?.secondaryColor ?? "#F3A712",
-        layoutType: membership.enrollmentProgramVersion.visualTheme?.layoutType ?? "GRID",
+        layoutType: "GRID",
       },
       membershipQr:
         credentialActive && boundCredential
@@ -254,6 +304,67 @@ export class CustomerCardService {
     return { wallet: card.wallet, credentialStatus: card.membership.credentialStatus };
   }
 
+  /** Stable, lightweight readiness contract for Customer Web and mobile apps. */
+  async walletReadiness(
+    request: WafloRequest,
+    expectedPublicMembershipId?: string,
+    developmentOverride?: string,
+  ) {
+    const context = await this.requireSession(request, developmentOverride);
+    const membership = context.session.membership;
+    if (
+      expectedPublicMembershipId &&
+      membership.publicMembershipId !== expectedPublicMembershipId
+    ) {
+      throw new AppError(
+        "CUSTOMER_CARD_NOT_FOUND",
+        "This customer card is unavailable.",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const credential = context.session.membershipCredential;
+    const credentialActive =
+      credential?.status === "ACTIVE" &&
+      membership.status === "ACTIVE" &&
+      membership.customer.status === "ACTIVE";
+    const wallet = membership.walletPassInstances.filter(
+      (item) => item.membershipCredentialId === credential?.id,
+    );
+    return {
+      cardId: membership.publicMembershipId,
+      apple: this.walletState(
+        "APPLE",
+        wallet.find((item) => item.provider === "APPLE"),
+        credentialActive,
+      ),
+      google: this.walletState(
+        "GOOGLE",
+        wallet.find((item) => item.provider === "GOOGLE"),
+        credentialActive,
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async publicAssetDataUri(
+    asset: PreviewAsset | null,
+    label: string,
+  ): Promise<string | null> {
+    try {
+      const resolved = await resolvePreviewAssetContent(
+        this.objectStorage,
+        asset,
+        "THUMBNAIL_96",
+        label,
+      );
+      return resolved?.dataUri ?? null;
+    } catch {
+      // Customer cards have a Waflo issuer fallback; a historical object-loss
+      // must not replace a usable card with a broken image.
+      return null;
+    }
+  }
+
   async rotate(request: WafloRequest, developmentOverride?: string) {
     const context = await this.requireSession(request, developmentOverride);
     if (context.session.membershipCredential?.status !== "ACTIVE") {
@@ -274,9 +385,9 @@ export class CustomerCardService {
         });
         if (!current || current.revokedAt || current.expiresAt <= new Date()) {
           throw new AppError(
-            "CUSTOMER_SESSION_ALREADY_ROTATED",
-            "This customer session was already rotated.",
-            HttpStatus.CONFLICT,
+            "CUSTOMER_SESSION_EXPIRED",
+            "This customer card session has expired.",
+            HttpStatus.UNAUTHORIZED,
           );
         }
         await transaction.membershipAccessSession.update({
@@ -440,8 +551,21 @@ export class CustomerCardService {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    const resolved = await this.hosts.resolveOrganization(request.hostname, developmentOverride);
-    if (resolved.status !== "active" || resolved.organization.id !== session.organizationId) {
+    const normalizedHost = normalizeRequestHostname(request.hostname);
+    const sharedStagingHost =
+      this.environment.values.DEPLOYMENT_ENVIRONMENT === "staging"
+        ? new URL(this.environment.values.CUSTOMER_WEB_URL).hostname
+        : null;
+    const sharedStagingSessionMatches =
+      sharedStagingHost !== null &&
+      normalizedHost === sharedStagingHost &&
+      developmentOverride === session.membership.organization.merchantSlug;
+    const resolved = sharedStagingSessionMatches
+      ? null
+      : await this.hosts.resolveOrganization(request.hostname, developmentOverride);
+    const canonicalSessionMatches =
+      resolved?.status === "active" && resolved.organization.id === session.organizationId;
+    if (!sharedStagingSessionMatches && !canonicalSessionMatches) {
       await this.audit.security(
         {
           organizationId: session.organizationId,
@@ -467,23 +591,33 @@ export class CustomerCardService {
           status: string;
           lastProviderErrorCode: string | null;
           providerState: unknown;
+          updatedAt: Date;
         }
       | undefined,
     credentialActive: boolean,
   ) {
     const mode = this.walletProviders.get(provider).mode;
+    const artifactAvailable = instance?.status === "ACTIVE" || instance?.status === "ISSUED";
+    const configured = mode !== "DISABLED";
+    const status =
+      !credentialActive || !configured
+        ? ("UNAVAILABLE" as const)
+        : artifactAvailable
+          ? ("READY" as const)
+          : instance?.status === "ERROR"
+            ? ("UNAVAILABLE" as const)
+            : ("PREPARING" as const);
     return {
       mode,
-      status:
-        !credentialActive || mode === "DISABLED"
-          ? ("UNAVAILABLE" as const)
-          : instance?.status === "ACTIVE" || instance?.status === "ISSUED"
-            ? ("READY" as const)
-            : instance?.status === "ERROR"
-              ? ("UNAVAILABLE" as const)
-              : ("PREPARING" as const),
+      configured,
+      state: status,
+      status,
+      artifactAvailable,
+      installationAvailable: configured && artifactAvailable && credentialActive,
       testAdapter: mode === "TEST_ADAPTER",
       safeErrorCode: instance?.lastProviderErrorCode ?? null,
+      reason: instance?.lastProviderErrorCode ?? null,
+      updatedAt: instance?.updatedAt?.toISOString() ?? null,
     };
   }
 

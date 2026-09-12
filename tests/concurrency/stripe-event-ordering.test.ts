@@ -6,20 +6,21 @@
  * override, keeping all mock setup out of business logic.
  */
 import { createHmac, randomUUID } from "node:crypto";
-import { hashPassword } from "../../packages/auth/src/index";
+import type Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AuditService } from "../../apps/api/src/audit/audit.service";
 import {
   BillingService,
   type StripeSubscriptionProvider,
 } from "../../apps/api/src/billing/billing.service";
+import { PricingCatalogService } from "../../apps/api/src/billing/pricing-catalog.service";
+import { withInvariantLock } from "../../apps/api/src/common/organization-transaction";
 import type { WafloRequest } from "../../apps/api/src/common/request-context";
 import { EnvironmentService } from "../../apps/api/src/config/environment.service";
 import { PrismaService } from "../../apps/api/src/database/prisma.service";
 import type { NotificationService } from "../../apps/api/src/notifications/notification.service";
 import { TenantService } from "../../apps/api/src/tenancy/tenant.service";
-import type Stripe from "stripe";
-import { withInvariantLock } from "../../apps/api/src/common/organization-transaction";
+import { hashPassword } from "../../packages/auth/src/index";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -36,6 +37,11 @@ const request = {
 const PRICE_STARTER = "price_test_starter";
 const PRICE_GROWTH = "price_test_growth";
 const PRICE_SCALE = "price_test_scale";
+const priceTerms = {
+  [PRICE_STARTER]: { plan: "STARTER", amountMinor: 1900 },
+  [PRICE_GROWTH]: { plan: "GROWTH", amountMinor: 2900 },
+  [PRICE_SCALE]: { plan: "SCALE", amountMinor: 9900 },
+} as const;
 
 /** Mock provider that returns deterministic current subscription snapshots. */
 function makeProvider(
@@ -70,6 +76,7 @@ function mockSubscription(input: {
   canceledAt?: number | null;
 }): Stripe.Subscription {
   const now = Math.floor(Date.now() / 1000);
+  const terms = priceTerms[input.priceId as keyof typeof priceTerms] ?? priceTerms[PRICE_GROWTH];
   return {
     id: input.id,
     object: "subscription",
@@ -84,7 +91,11 @@ function mockSubscription(input: {
         {
           id: `si_${input.id}`,
           object: "subscription_item",
-          price: { id: input.priceId } as Stripe.Price,
+          price: {
+            id: input.priceId,
+            currency: "usd",
+            unit_amount: terms.amountMinor,
+          } as Stripe.Price,
           current_period_start: now - 60,
           current_period_end: now + 2_592_000,
         } as Stripe.SubscriptionItem,
@@ -232,6 +243,44 @@ beforeAll(async () => {
     },
   });
   orgId = org.id;
+  const global = await prisma.client.pricingMarket.upsert({
+    where: { code: "GLOBAL" },
+    update: { active: true, configuredCurrency: "USD" },
+    create: {
+      code: "GLOBAL",
+      kind: "GLOBAL",
+      configuredCurrency: "USD",
+      active: true,
+    },
+  });
+  await Promise.all(
+    Object.entries(priceTerms).map(([stripePriceId, terms]) =>
+      prisma.client.pricingVersion.upsert({
+        where: {
+          marketId_planCode_cadence_version: {
+            marketId: global.id,
+            planCode: terms.plan,
+            cadence: "MONTHLY",
+            version: 1,
+          },
+        },
+        update: { stripePriceId, amountMinor: terms.amountMinor, currency: "USD" },
+        create: {
+          marketId: global.id,
+          planCode: terms.plan,
+          cadence: "MONTHLY",
+          version: 1,
+          currency: "USD",
+          amountMinor: terms.amountMinor,
+          status: "ACTIVE_FOR_NEW_SUBSCRIPTIONS",
+          stripeProductId: `prod_ordering_${terms.plan.toLowerCase()}`,
+          stripePriceId,
+          stripeBindingKey: `ordering:${terms.plan.toLowerCase()}:monthly:v1`,
+          publishedAt: new Date(),
+        },
+      }),
+    ),
+  );
 });
 
 afterAll(async () => {
@@ -247,7 +296,14 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 
 function billingWith(subscriptions: Map<string, Stripe.Subscription>, failOnce?: { id: string }) {
-  const service = new BillingService(prisma, environment, tenant, audit, notifications);
+  const service = new BillingService(
+    prisma,
+    environment,
+    tenant,
+    audit,
+    notifications,
+    new PricingCatalogService(prisma, environment),
+  );
   service.subscriptionProvider = makeProvider(subscriptions, failOnce);
   return service;
 }

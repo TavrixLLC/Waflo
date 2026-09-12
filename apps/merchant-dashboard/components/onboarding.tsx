@@ -1,79 +1,857 @@
 "use client";
 
-import type { Locale, PlanCode } from "@waflo/contracts";
-import Image from "next/image";
 import {
-  Alert,
-  Button,
-  Card,
-  FormField,
-  LanguageSwitcher,
-  PlanCard,
-  Select,
-  TextInput,
-} from "@waflo/ui";
-import { Check, Link2 } from "lucide-react";
+  CheckoutElementsProvider,
+  PaymentElement,
+  useCheckoutElements,
+} from "@stripe/react-stripe-js/checkout";
+import { loadStripe } from "@stripe/stripe-js";
+import { formatCurrencyMinor, publishedCadenceDiscountPercent } from "@waflo/billing";
+import { type BillingCadence, countryOptions, type PlanCode } from "@waflo/contracts";
+import {
+  contentLocaleForInterface,
+  type InterfaceLocale,
+  type InterfaceMessages,
+  localeRegistry,
+  messages,
+} from "@waflo/i18n";
+import { Alert, Button, FormField, SearchableSelect, Select, TextInput } from "@waflo/ui";
+import { Check, CreditCard, Link2, LockKeyhole } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
-import { apiFetch, ApiClientError } from "../lib/api-client";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
+import { safeCheckoutElementsDiagnosticMessage } from "../lib/checkout-elements-diagnostics";
+import { merchantPublicUrl } from "../lib/merchant-public-url";
+import {
+  LocationAddressFields,
+  LocationMapPicker,
+  type LocationMapSelection,
+} from "./location-map-picker";
+import { MerchantLanguagePicker } from "./merchant-language-picker";
+import { ProgramAssetPicker } from "./program-asset-uploader";
+import type { AssetItem } from "./program-studio-types";
+
+type OnboardingStep = 1 | 2 | 3 | 4 | 5;
+
+interface BillingIdentityDraft {
+  name: string;
+  email: string;
+  countryCode: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  region: string;
+  postalCode: string;
+}
+
+interface BillingReadModel {
+  billingIdentity: {
+    name: string | null;
+    email: string | null;
+    countryCode: string | null;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    region: string | null;
+    postalCode: string | null;
+  };
+  onboardingSetup: {
+    status: "SETUP_PENDING" | "SETUP_COMPLETED";
+    checkoutSessionId: string;
+  } | null;
+}
+
+type PaymentSetupState = "idle" | "loading" | "ready" | "error";
+type StripeScriptState = "idle" | "loading" | "ready" | "error";
+type CheckoutElementsState = "idle" | "loading" | "ready" | "error";
+
+interface TrialSetupResponse {
+  completed: boolean;
+  clientSecret: string | null;
+  checkoutSessionId: string | null;
+  publishableKey: string;
+  trialDays: 15;
+  amount: number;
+  currency: string;
+  expectedTrialStart: string;
+  expectedFirstChargeAt: string;
+}
+
+interface OnboardingCatalogTerm {
+  plan: PlanCode;
+  cadence: BillingCadence;
+  amountMinor: string;
+  currency: string;
+}
+
+interface OnboardingCatalog {
+  marketCode: string;
+  terms: OnboardingCatalogTerm[];
+}
+
+interface TrialPreview {
+  plan: PlanCode;
+  cadence: BillingCadence;
+  trialDays: 15;
+  amount: number;
+  currency: string;
+  expectedTrialStart: string;
+  expectedFirstChargeAt: string;
+  paymentMethod: {
+    brand: string;
+    last4: string;
+    expMonth: number;
+    expYear: number;
+  };
+}
+
+interface TrialResult {
+  status: "trialing";
+  trialStart: string;
+  trialEnd: string;
+  firstChargeAt: string;
+  amount: number;
+  currency: string;
+  initialInvoiceAmount: 0;
+  paymentMethod: TrialPreview["paymentMethod"];
+}
+
+interface WizardDraft {
+  organizationId?: string;
+  step?: OnboardingStep;
+  plan?: PlanCode;
+  cadence?: BillingCadence;
+  billingIdentity?: BillingIdentityDraft;
+}
+
+const initialLocationSelection: LocationMapSelection = {
+  latitude: null,
+  longitude: null,
+  coordinatesConfirmed: false,
+  addressLine1: "",
+  addressLine2: "",
+  city: "",
+  region: "",
+  postalCode: "",
+  countryCode: "",
+  timezone: "",
+};
+
+const WIZARD_KEY = "waflo:onboarding-wizard";
+const ORGANIZATION_COMMAND_KEY = "waflo:onboarding-organization-command";
+const BILLING_COMMAND_KEY = "waflo:onboarding-billing-command";
+const TRIAL_RESULT_KEY = "waflo:onboarding-trial-result";
+
+function sessionCommand(key: string): string {
+  const existing = window.sessionStorage.getItem(key);
+  if (existing) return existing;
+  const created = window.crypto.randomUUID();
+  window.sessionStorage.setItem(key, created);
+  return created;
+}
+
+function readWizard(): WizardDraft {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(WIZARD_KEY) ?? "{}") as WizardDraft;
+  } catch {
+    return {};
+  }
+}
+
+function writeWizard(update: Partial<WizardDraft>) {
+  window.sessionStorage.setItem(WIZARD_KEY, JSON.stringify({ ...readWizard(), ...update }));
+}
+
+function clearWizardBillingIdentity(): void {
+  const draft = readWizard();
+  delete draft.billingIdentity;
+  window.sessionStorage.setItem(WIZARD_KEY, JSON.stringify(draft));
+}
+
+function billingIdentityFromServer(model: BillingReadModel): BillingIdentityDraft | null {
+  const identity = model.billingIdentity;
+  if (
+    !identity.name ||
+    !identity.email ||
+    !identity.countryCode ||
+    !identity.addressLine1 ||
+    !identity.city
+  )
+    return null;
+  return {
+    name: identity.name,
+    email: identity.email,
+    countryCode: identity.countryCode,
+    addressLine1: identity.addressLine1,
+    addressLine2: identity.addressLine2 ?? "",
+    city: identity.city,
+    region: identity.region ?? "",
+    postalCode: identity.postalCode ?? "",
+  };
+}
+
+type OnboardingCopy = InterfaceMessages["onboarding"];
+
+function localizedError(caught: unknown, copy: OnboardingCopy, fallback: string): string {
+  if (caught instanceof ApiClientError) {
+    if (caught.code === "BILLING_CONFIGURATION_INCOMPLETE") {
+      return copy.payment.billingConfigurationIncomplete;
+    }
+    if (caught.code === "STRIPE_PUBLISHABLE_KEY_NOT_CONFIGURED") {
+      return copy.payment.publishableKeyMissing;
+    }
+    if (caught.code === "STRIPE_PRICE_NOT_CONFIGURED") {
+      return copy.payment.priceMissing;
+    }
+    if (caught.code === "STRIPE_PRICE_CONFIGURATION_MISMATCH") {
+      return copy.payment.priceMismatch;
+    }
+    if (caught.code === "NETWORK_ERROR") {
+      return copy.payment.networkError;
+    }
+  }
+  return fallback;
+}
+
+function money(
+  amount: bigint | number | string,
+  currency: string,
+  locale: InterfaceLocale = "en",
+): string {
+  return formatCurrencyMinor(amount, currency, localeRegistry[locale].numberFormattingLocale);
+}
+
+function dateLabel(value: string, locale: InterfaceLocale): string {
+  return new Intl.DateTimeFormat(localeRegistry[locale].dateFormattingLocale, {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
+function cadenceLabel(cadence: BillingCadence, copy: OnboardingCopy): string {
+  return cadence === "monthly"
+    ? copy.plan.monthly
+    : cadence === "quarterly"
+      ? copy.plan.quarterly
+      : copy.plan.yearly;
+}
+
+function formatMessage(template: string, values: Readonly<Record<string, string>>): string {
+  return Object.entries(values).reduce(
+    (result, [key, value]) => result.replace(`{${key}}`, value),
+    template,
+  );
+}
+
+function cadenceDiscountLabel(
+  monthly: OnboardingCatalogTerm | undefined,
+  term: OnboardingCatalogTerm | undefined,
+): string | null {
+  return publishedCadenceDiscountPercent(monthly, term);
+}
+
+function planName(plan: PlanCode, copy: OnboardingCopy): string {
+  return plan === "starter"
+    ? copy.plan.starterName
+    : plan === "growth"
+      ? copy.plan.growthName
+      : copy.plan.scaleName;
+}
 
 function OnboardingShell({
   locale,
   step,
   children,
 }: {
-  locale: Locale;
-  step: 1 | 2 | 3 | 4;
-  children: React.ReactNode;
+  locale: InterfaceLocale;
+  step: OnboardingStep;
+  children: ReactNode;
 }) {
-  const ar = locale === "ar";
-  const steps = ar
-    ? ["الحساب", "النشاط", "الموقع", "الاكتمال"]
-    : ["Account", "Business", "Location", "Complete"];
+  const copy = messages[locale];
+  const steps = [
+    copy.onboarding.progress.organization,
+    copy.onboarding.progress.billing,
+    copy.onboarding.progress.plan,
+    copy.onboarding.progress.card,
+    copy.onboarding.progress.confirm,
+  ];
   return (
     <main className="onboarding-shell">
-      <header className="onboarding-header">
-        <Image src="/brand/waflo-logo-primary-horizontal.svg" alt="Waflo" width={280} height={80} />
-        <LanguageSwitcher
-          locale={locale}
-          href={`/${locale === "ar" ? "en" : "ar"}/onboarding/business`}
-        />
-      </header>
-      <div className="onboarding-main">
-        <aside className="onboarding-progress" aria-label={ar ? "تقدم الإعداد" : "Setup progress"}>
+      <aside className="onboarding-rail">
+        <header className="onboarding-header">
+          <Image
+            src="/brand/waflo-logo-white-horizontal.svg"
+            alt="Waflo"
+            width={140}
+            height={40}
+            priority
+          />
+          <MerchantLanguagePicker
+            locale={locale}
+            routePath="/onboarding/business"
+            label={copy.language.label}
+          />
+        </header>
+        <nav
+          className="onboarding-progress"
+          aria-label={copy.onboarding.progress.ariaLabel}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: The progress rail scrolls horizontally on small screens and must be keyboard-accessible.
+          tabIndex={0}
+        >
+          <span className="onboarding-progress__context" aria-hidden="true">
+            {`${step}. ${steps[step - 1]}`}
+          </span>
           {steps.map((label, index) => {
-            const number = index + 1;
+            const number = (index + 1) as OnboardingStep;
+            const complete = number < step;
             return (
               <div
                 key={label}
                 className={`onboarding-progress__item ${
                   number === step
                     ? "onboarding-progress__item--active"
-                    : number < step
+                    : complete
                       ? "onboarding-progress__item--complete"
                       : ""
                 }`}
+                aria-current={number === step ? "step" : undefined}
               >
-                <span>{number < step ? <Check size={16} /> : number}</span>
-                {label}
+                <span aria-hidden="true">{complete ? <Check size={15} /> : number}</span>
+                <small aria-hidden="true">{label}</small>
+                <span className="wf-sr-only">{`${number}. ${label}`}</span>
               </div>
             );
           })}
-        </aside>
-        <Card className="onboarding-card">{children}</Card>
-      </div>
+        </nav>
+      </aside>
+      <section className="onboarding-card">{children}</section>
     </main>
   );
 }
 
-export function BusinessOnboarding({ locale }: { locale: Locale }) {
-  const ar = locale === "ar";
-  const router = useRouter();
-  const [plan, setPlan] = useState<PlanCode>("starter");
-  const [slug, setSlug] = useState("");
-  const [availability, setAvailability] = useState<string>("");
+function PlanStep({
+  locale,
+  plan,
+  cadence,
+  catalog,
+  onPlan,
+  onCadence,
+  onContinue,
+}: {
+  locale: InterfaceLocale;
+  plan: PlanCode;
+  cadence: BillingCadence;
+  catalog: OnboardingCatalog;
+  onPlan: (value: PlanCode) => void;
+  onCadence: (value: BillingCadence) => void;
+  onContinue: () => void;
+}) {
+  const copy = messages[locale].onboarding;
+  const planBenefits: Record<PlanCode, string> = {
+    starter: copy.plan.starterBenefits,
+    growth: copy.plan.growthBenefits,
+    scale: copy.plan.scaleBenefits,
+  };
+  const planNames: Record<PlanCode, string> = {
+    starter: copy.plan.starterName,
+    growth: copy.plan.growthName,
+    scale: copy.plan.scaleName,
+  };
+  const terms = new Map(
+    catalog.terms.map((term) => [`${term.plan}:${term.cadence}`, term] as const),
+  );
+  return (
+    <div className="onboarding-plan-step">
+      <div className="onboarding-heading">
+        <span>{copy.plan.step}</span>
+        <h1>{copy.plan.title}</h1>
+        <p>{copy.plan.description}</p>
+      </div>
+      <div className="onboarding-cadence" role="radiogroup" aria-label={copy.plan.billingCadence}>
+        {(["monthly", "quarterly", "yearly"] as const).map((value) => {
+          const discount = cadenceDiscountLabel(
+            terms.get("growth:monthly"),
+            terms.get(`growth:${value}`),
+          );
+          return (
+            <label key={value} className={cadence === value ? "is-selected" : ""}>
+              <input
+                className="wf-sr-only"
+                type="radio"
+                name="billingCadence"
+                value={value}
+                checked={cadence === value}
+                onChange={() => onCadence(value)}
+              />
+              <strong>{cadenceLabel(value, copy)}</strong>
+              {discount ? (
+                <small>
+                  {copy.plan.save} <bdi dir="ltr">{discount}</bdi>
+                </small>
+              ) : null}
+            </label>
+          );
+        })}
+      </div>
+      <div className="onboarding-plan-grid" role="radiogroup" aria-label={copy.plan.planLabel}>
+        {(["starter", "growth", "scale"] as const).map((value) => {
+          const pricing = terms.get(`${value}:${cadence}`);
+          const monthly = terms.get(`${value}:monthly`);
+          if (!pricing) return null;
+          const discount = cadenceDiscountLabel(monthly, pricing);
+          return (
+            <label
+              key={value}
+              className={`onboarding-plan-option ${plan === value ? "is-selected" : ""}`}
+            >
+              <input
+                className="wf-sr-only"
+                type="radio"
+                name="plan"
+                value={value}
+                checked={plan === value}
+                onChange={() => onPlan(value)}
+              />
+              <span className="onboarding-plan-option__check" aria-hidden="true">
+                <Check size={16} />
+              </span>
+              <strong>{planNames[value]}</strong>
+              <span className="onboarding-plan-option__price">
+                <bdi dir="ltr">
+                  {formatCurrencyMinor(
+                    BigInt(pricing.amountMinor),
+                    pricing.currency,
+                    localeRegistry[locale].numberFormattingLocale,
+                  )}
+                </bdi>
+              </span>
+              <small>
+                {formatMessage(copy.plan.cadenceTotal, { cadence: cadenceLabel(cadence, copy) })}
+              </small>
+              {discount ? (
+                <small className="onboarding-plan-option__savings">
+                  {copy.plan.save} <bdi dir="ltr">{discount}</bdi>
+                </small>
+              ) : null}
+              <p>{planBenefits[value]}</p>
+            </label>
+          );
+        })}
+      </div>
+      <div className="onboarding-actions">
+        <Button onClick={onContinue}>{copy.plan.continue}</Button>
+      </div>
+    </div>
+  );
+}
+
+function SecurePaymentForm({
+  locale,
+  organizationId,
+  billingCommand,
+  onReady,
+  onCheckoutStateChange,
+  onRetry,
+}: {
+  locale: InterfaceLocale;
+  organizationId: string;
+  billingCommand: string;
+  onReady: (preview: TrialPreview) => void;
+  onCheckoutStateChange: (
+    state: CheckoutElementsState,
+    canConfirm: boolean,
+    diagnosticMessage: string | null,
+  ) => void;
+  onRetry: () => void;
+}) {
+  const copy = messages[locale].onboarding;
+  const checkoutState = useCheckoutElements();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    onCheckoutStateChange(
+      checkoutState.type === "success"
+        ? "ready"
+        : checkoutState.type === "error"
+          ? "error"
+          : "loading",
+      checkoutState.type === "success" && checkoutState.checkout.canConfirm,
+      checkoutState.type === "error"
+        ? safeCheckoutElementsDiagnosticMessage(checkoutState.error.message)
+        : null,
+    );
+  }, [checkoutState, onCheckoutStateChange]);
+
+  const loadPreview = useCallback(
+    async (checkoutSessionId: string) => {
+      const preview = await apiFetch<TrialPreview>(
+        `/v1/organizations/${organizationId}/billing/trial/preview`,
+        {
+          method: "POST",
+          headers: { "x-idempotency-key": billingCommand },
+          body: JSON.stringify({ checkoutSessionId }),
+        },
+      );
+      onReady(preview);
+    },
+    [billingCommand, onReady, organizationId],
+  );
+
+  useEffect(() => {
+    const returnedSessionId = new URLSearchParams(window.location.search).get("session_id");
+    if (!returnedSessionId) return;
+    void loadPreview(returnedSessionId).catch((caught) =>
+      setError(localizedError(caught, copy, copy.payment.reviewTrialError)),
+    );
+  }, [copy, loadPreview]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (checkoutState.type !== "success" || !checkoutState.checkout.canConfirm) return;
+    setLoading(true);
+    setError("");
+    try {
+      const outcome = await checkoutState.checkout.confirm({
+        redirect: "if_required",
+      });
+      if (outcome.type === "error") {
+        setError(outcome.error.message || copy.payment.saveCardError);
+        return;
+      }
+      await loadPreview(outcome.session.id);
+    } catch (caught) {
+      setError(localizedError(caught, copy, copy.payment.reviewTrialError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (checkoutState.type === "error") {
+    return (
+      <div className="onboarding-payment" role="alert">
+        <Alert tone="danger" title={copy.payment.providerInitializationFailed} />
+        <Button type="button" variant="secondary" onClick={onRetry}>
+          {copy.payment.retry}
+        </Button>
+      </div>
+    );
+  }
+
+  if (checkoutState.type === "loading") {
+    return (
+      <div className="onboarding-local-loading" role="status">
+        {copy.payment.initializingElements}
+      </div>
+    );
+  }
+
+  return (
+    <form className="onboarding-payment" onSubmit={submit}>
+      {error ? <Alert tone="danger" title={error} /> : null}
+      <div className="onboarding-payment__secure">
+        <LockKeyhole size={18} aria-hidden="true" />
+        <span>{copy.payment.secureDescription}</span>
+      </div>
+      <div className="onboarding-payment__element">
+        <PaymentElement options={{ layout: "tabs" }} />
+      </div>
+      <Button
+        type="submit"
+        loading={loading}
+        disabled={loading || checkoutState.type !== "success" || !checkoutState.checkout.canConfirm}
+      >
+        {copy.payment.saveAndReview}
+      </Button>
+    </form>
+  );
+}
+
+export function BusinessOnboarding({
+  locale,
+  organizationId: initialOrganizationId,
+  resumeState,
+}: {
+  locale: InterfaceLocale;
+  organizationId?: string;
+  resumeState?: string;
+}) {
+  const copy = messages[locale].onboarding;
+  const contentLocale = contentLocaleForInterface(locale);
+  const router = useRouter();
+  const [step, setStep] = useState<OnboardingStep>(1);
+  const [organizationId, setOrganizationId] = useState(initialOrganizationId ?? "");
+  const [plan, setPlan] = useState<PlanCode>("starter");
+  const [cadence, setCadence] = useState<BillingCadence>("monthly");
+  const [billingIdentity, setBillingIdentity] = useState<BillingIdentityDraft | null>(null);
+  const [catalog, setCatalog] = useState<OnboardingCatalog | null>(null);
+  const [setup, setSetup] = useState<TrialSetupResponse | null>(null);
+  const [preview, setPreview] = useState<TrialPreview | null>(null);
+  const [billingIdentityState, setBillingIdentityState] = useState<PaymentSetupState>("idle");
+  const [paymentSetupState, setPaymentSetupState] = useState<PaymentSetupState>("idle");
+  const [stripeScriptState, setStripeScriptState] = useState<StripeScriptState>("idle");
+  const [checkoutElementsState, setCheckoutElementsState] = useState<CheckoutElementsState>("idle");
+  const [checkoutElementsDiagnosticMessage, setCheckoutElementsDiagnosticMessage] = useState<
+    string | null
+  >(null);
+  const [resumableCheckoutSessionId, setResumableCheckoutSessionId] = useState<string | null>(null);
+  const [stripeAttempt, setStripeAttempt] = useState(0);
+  const [checkoutAttempt, setCheckoutAttempt] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [slug, setSlug] = useState("");
+  const [availability, setAvailability] = useState("");
+  const [logoAssets, setLogoAssets] = useState<AssetItem[]>([]);
+  const [brandLogoAssetId, setBrandLogoAssetId] = useState<string | null>(null);
+  const [logoNotice, setLogoNotice] = useState("");
+  const [logoError, setLogoError] = useState("");
+  const [firstLocation, setFirstLocation] =
+    useState<LocationMapSelection>(initialLocationSelection);
+  const resumed = useRef(false);
+  const stripePromise = useMemo(() => {
+    if (!setup?.publishableKey) return null;
+    // Start a fresh observable loading cycle for an explicit retry. Stripe.js
+    // owns script de-duplication internally, so this never exposes a key or
+    // injects duplicate scripts.
+    if (stripeAttempt > 0) {
+      return Promise.resolve().then(() => loadStripe(setup.publishableKey));
+    }
+    return loadStripe(setup.publishableKey);
+  }, [setup?.publishableKey, stripeAttempt]);
+  const countries = useMemo(
+    () =>
+      countryOptions(contentLocale).map((option) => ({ value: option.code, label: option.name })),
+    [contentLocale],
+  );
+  const showPaymentDiagnostics =
+    process.env.NODE_ENV !== "production" || apiUrl.includes("staging.waflo.app");
+  const showRawCheckoutElementsDiagnostics = process.env.NODE_ENV === "development";
+  const onCheckoutStateChange = useCallback(
+    (state: CheckoutElementsState, _canConfirm: boolean, diagnosticMessage: string | null) => {
+      setCheckoutElementsState(state);
+      setCheckoutElementsDiagnosticMessage(diagnosticMessage);
+    },
+    [],
+  );
+
+  const loadCatalog = useCallback(async (currentOrganizationId: string) => {
+    const nextCatalog = await apiFetch<OnboardingCatalog>(
+      `/v1/organizations/${currentOrganizationId}/billing/catalog`,
+    );
+    if (!nextCatalog.terms.length) {
+      throw new ApiClientError("PRICING_NOT_PUBLISHED", "Published pricing is unavailable.");
+    }
+    setCatalog(nextCatalog);
+  }, []);
+
+  const loadBillingIdentity = useCallback(async (currentOrganizationId: string) => {
+    setBillingIdentityState("loading");
+    try {
+      const model = await apiFetch<BillingReadModel>(
+        `/v1/organizations/${currentOrganizationId}/billing`,
+      );
+      const authoritativeIdentity = billingIdentityFromServer(model);
+      setBillingIdentity(authoritativeIdentity);
+      setBillingIdentityState(authoritativeIdentity ? "ready" : "error");
+      const checkoutSessionId = model.onboardingSetup?.checkoutSessionId ?? null;
+      setResumableCheckoutSessionId(checkoutSessionId);
+      return { identity: authoritativeIdentity, checkoutSessionId };
+    } catch (caught) {
+      setBillingIdentity(null);
+      setResumableCheckoutSessionId(null);
+      setBillingIdentityState("error");
+      throw caught;
+    }
+  }, []);
+
+  const finishCompletedTrial = useCallback(
+    async (currentOrganizationId: string, checkoutSessionId: string, billingCommand?: string) => {
+      const result = await apiFetch<TrialResult>(
+        `/v1/organizations/${currentOrganizationId}/billing/trial/complete`,
+        {
+          method: "POST",
+          ...(billingCommand ? { headers: { "x-idempotency-key": billingCommand } } : {}),
+          body: JSON.stringify({ checkoutSessionId }),
+        },
+      );
+      await apiFetch(`/v1/organizations/${currentOrganizationId}/complete-onboarding`, {
+        method: "POST",
+      });
+      window.sessionStorage.setItem(TRIAL_RESULT_KEY, JSON.stringify(result));
+      writeWizard({ step: 5 });
+      router.replace(`/${locale}/onboarding/complete?organization=${currentOrganizationId}`);
+    },
+    [locale, router],
+  );
+
+  const recoverCompletedTrialPreview = useCallback(
+    async (currentOrganizationId: string, checkoutSessionId: string) => {
+      const recoveredPreview = await apiFetch<TrialPreview>(
+        `/v1/organizations/${currentOrganizationId}/billing/trial/preview`,
+        {
+          method: "POST",
+          body: JSON.stringify({ checkoutSessionId }),
+        },
+      );
+      setPreview(recoveredPreview);
+      setResumableCheckoutSessionId(checkoutSessionId);
+      setStep(5);
+      writeWizard({ organizationId: currentOrganizationId, step: 5 });
+    },
+    [],
+  );
+
+  const preparePayment = useCallback(
+    async (
+      currentOrganizationId: string,
+      currentPlan: PlanCode,
+      currentCadence: BillingCadence,
+    ) => {
+      setPaymentSetupState("loading");
+      setCheckoutElementsState("idle");
+      const { identity: authoritativeIdentity } = await loadBillingIdentity(currentOrganizationId);
+      if (!authoritativeIdentity) {
+        setPaymentSetupState("error");
+        throw new ApiClientError(
+          "BILLING_IDENTITY_REQUIRED",
+          copy.payment.billingIdentityUnavailable,
+        );
+      }
+      const billingCommand = sessionCommand(BILLING_COMMAND_KEY);
+      let response: TrialSetupResponse;
+      try {
+        response = await apiFetch<TrialSetupResponse>(
+          `/v1/organizations/${currentOrganizationId}/billing/trial/setup`,
+          {
+            method: "POST",
+            headers: { "x-idempotency-key": billingCommand },
+            body: JSON.stringify({
+              plan: currentPlan,
+              cadence: currentCadence,
+            }),
+          },
+        );
+      } catch (caught) {
+        setPaymentSetupState("error");
+        throw caught;
+      }
+      if (response.completed) {
+        if (!response.checkoutSessionId) {
+          throw new ApiClientError("BILLING_SETUP_INVALID", copy.payment.setupUnavailable);
+        }
+        await finishCompletedTrial(
+          currentOrganizationId,
+          response.checkoutSessionId,
+          billingCommand,
+        );
+        return;
+      }
+      if (!response.clientSecret) {
+        setPaymentSetupState("error");
+        throw new ApiClientError("BILLING_SETUP_INVALID", copy.payment.setupUnavailable);
+      }
+      setSetup(response);
+      setPaymentSetupState("ready");
+      setStep(4);
+      writeWizard({
+        organizationId: currentOrganizationId,
+        plan: currentPlan,
+        cadence: currentCadence,
+        step: 4,
+      });
+    },
+    [
+      copy.payment.billingIdentityUnavailable,
+      copy.payment.setupUnavailable,
+      finishCompletedTrial,
+      loadBillingIdentity,
+    ],
+  );
+
+  useEffect(() => {
+    if (!stripePromise) {
+      setStripeScriptState("idle");
+      return;
+    }
+    let active = true;
+    setStripeScriptState("loading");
+    void stripePromise
+      .then((stripe) => {
+        if (!active) return;
+        setStripeScriptState(stripe ? "ready" : "error");
+      })
+      .catch(() => {
+        if (active) setStripeScriptState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [stripePromise]);
+
+  useEffect(() => {
+    if (resumed.current) return;
+    resumed.current = true;
+    const draft = readWizard();
+    const currentOrganizationId = initialOrganizationId ?? draft.organizationId ?? "";
+    const currentPlan = draft.plan ?? "starter";
+    const currentCadence = draft.cadence ?? "monthly";
+    setOrganizationId(currentOrganizationId);
+    setPlan(currentPlan);
+    setCadence(currentCadence);
+    // sessionStorage is resumable UX only. Never let its absence prevent an
+    // organization with durable billing details from recovering Checkout.
+    if (currentOrganizationId && (draft.step ?? 2) >= 4) {
+      setLoading(true);
+      void preparePayment(currentOrganizationId, currentPlan, currentCadence)
+        .catch((caught) => {
+          setStep(
+            caught instanceof ApiClientError && caught.code === "BILLING_IDENTITY_REQUIRED" ? 2 : 3,
+          );
+          setError(localizedError(caught, copy, copy.payment.resumeError));
+        })
+        .finally(() => setLoading(false));
+    } else if (currentOrganizationId) {
+      const authoritativeResumeStep =
+        resumeState === "location_required"
+          ? 1
+          : ["payment_method_required", "trial_confirmation_required"].includes(resumeState ?? "")
+            ? 3
+            : resumeState === "billing_identity_required"
+              ? 2
+              : 2;
+      setLoading(resumeState === "trial_confirmation_required");
+      void loadBillingIdentity(currentOrganizationId)
+        .then(({ checkoutSessionId }) => {
+          if (resumeState === "trial_confirmation_required" && checkoutSessionId) {
+            return recoverCompletedTrialPreview(currentOrganizationId, checkoutSessionId);
+          }
+          setStep(authoritativeResumeStep as OnboardingStep);
+          return undefined;
+        })
+        .catch((caught) => {
+          setStep(authoritativeResumeStep as OnboardingStep);
+          setError(localizedError(caught, copy, copy.payment.resumeError));
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [
+    copy,
+    initialOrganizationId,
+    loadBillingIdentity,
+    preparePayment,
+    recoverCompletedTrialPreview,
+    resumeState,
+  ]);
 
   useEffect(() => {
     if (slug.length < 3) {
@@ -81,328 +859,799 @@ export function BusinessOnboarding({ locale }: { locale: Locale }) {
       return;
     }
     const timeout = window.setTimeout(() => {
-      void apiFetch<{ available: boolean; slug: string; reason?: string }>(
+      void apiFetch<{ available: boolean }>(
         `/v1/public/merchant-slug/availability?slug=${encodeURIComponent(slug)}`,
       )
         .then((result) =>
           setAvailability(
-            result.available
-              ? ar
-                ? "الرابط متاح"
-                : "URL is available"
-              : ar
-                ? "الرابط غير متاح"
-                : "URL is unavailable",
+            result.available ? copy.organization.urlAvailable : copy.organization.urlUnavailable,
           ),
         )
         .catch(() => setAvailability(""));
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [slug, ar]);
+  }, [copy.organization.urlAvailable, copy.organization.urlUnavailable, slug]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!organizationId || step !== 3) return;
+    let active = true;
+    void Promise.all([
+      apiFetch<{ brandLogoAsset: AssetItem | null }>(`/v1/organizations/${organizationId}`),
+      apiFetch<{ items: AssetItem[] }>(
+        `/v1/organizations/${organizationId}/assets?category=LOGO&limit=30`,
+      ),
+    ])
+      .then(([organization, assets]) => {
+        if (!active) return;
+        setBrandLogoAssetId(organization.brandLogoAsset?.id ?? null);
+        setLogoAssets(assets.items);
+        setLogoError("");
+      })
+      .catch(() => {
+        if (active) setLogoError(copy.logo.loadError);
+      });
+    return () => {
+      active = false;
+    };
+  }, [copy.logo.loadError, organizationId, step]);
+
+  useEffect(() => {
+    if (!organizationId || step !== 3 || catalog) return;
+    void loadCatalog(organizationId).catch((caught) =>
+      setError(localizedError(caught, copy, copy.payment.priceMissing)),
+    );
+  }, [catalog, copy, loadCatalog, organizationId, step]);
+
+  async function updateMerchantLogo(assetId: string | null): Promise<void> {
+    if (!organizationId) return;
+    setLogoNotice("");
+    setLogoError("");
+    try {
+      await apiFetch(`/v1/organizations/${organizationId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ brandLogoAssetId: assetId }),
+      });
+      setBrandLogoAssetId(assetId);
+      if (assetId) setLogoNotice(copy.logo.saved);
+    } catch {
+      setLogoError(copy.logo.saveError);
+    }
+  }
+
+  async function createOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (
+      firstLocation.latitude === null ||
+      firstLocation.longitude === null ||
+      !firstLocation.coordinatesConfirmed ||
+      !firstLocation.countryCode ||
+      !firstLocation.timezone
+    ) {
+      setError(copy.organization.exactLocationRequired);
+      return;
+    }
     setLoading(true);
     setError("");
     const form = new FormData(event.currentTarget);
     try {
+      if (organizationId && resumeState === "location_required") {
+        await apiFetch(`/v1/organizations/${organizationId}/locations`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: String(form.get("locationName") ?? ""),
+            addressLine1: firstLocation.addressLine1 || undefined,
+            addressLine2: firstLocation.addressLine2 || undefined,
+            city: firstLocation.city || undefined,
+            region: firstLocation.region || undefined,
+            postalCode: firstLocation.postalCode || undefined,
+            countryCode: firstLocation.countryCode,
+            timezone: firstLocation.timezone,
+            latitude: firstLocation.latitude,
+            longitude: firstLocation.longitude,
+            coordinatesConfirmed: true,
+          }),
+        });
+        setStep(2);
+        writeWizard({ organizationId, step: 2, plan, cadence });
+        return;
+      }
       const organization = await apiFetch<{ id: string }>("/v1/organizations", {
         method: "POST",
         body: JSON.stringify({
           name: String(form.get("name") ?? ""),
           merchantSlug: slug,
           businessCategory: String(form.get("category") ?? "") || undefined,
-          defaultLocale: String(form.get("defaultLocale") ?? locale),
-          timezone: String(form.get("timezone") ?? "Asia/Baghdad"),
-          selectedPlan: plan,
+          defaultLocale: String(form.get("defaultLocale") ?? contentLocale),
+          timezone: firstLocation.timezone,
+          selectedPlan: "starter",
+          commandId: sessionCommand(ORGANIZATION_COMMAND_KEY),
+          firstLocation: {
+            name: String(form.get("locationName") ?? ""),
+            addressLine1: firstLocation.addressLine1 || undefined,
+            addressLine2: firstLocation.addressLine2 || undefined,
+            city: firstLocation.city || undefined,
+            region: firstLocation.region || undefined,
+            postalCode: firstLocation.postalCode || undefined,
+            countryCode: firstLocation.countryCode,
+            timezone: firstLocation.timezone,
+            latitude: firstLocation.latitude,
+            longitude: firstLocation.longitude,
+            coordinatesConfirmed: true,
+          },
         }),
       });
-      sessionStorage.setItem("waflo:onboarding-organization", organization.id);
-      router.push(`/${locale}/onboarding/location?organization=${organization.id}`);
-    } catch (caught) {
-      setError(
-        caught instanceof ApiClientError
-          ? caught.message
-          : ar
-            ? "تعذر حفظ بيانات النشاط."
-            : "Unable to save business details.",
+      setOrganizationId(organization.id);
+      setStep(2);
+      writeWizard({ organizationId: organization.id, step: 2, plan, cadence });
+      window.history.replaceState(
+        null,
+        "",
+        `/${locale}/onboarding/business?organization=${organization.id}`,
       );
+    } catch (caught) {
+      setError(localizedError(caught, copy, copy.organization.createError));
     } finally {
       setLoading(false);
     }
   }
 
-  return (
-    <OnboardingShell locale={locale} step={2}>
-      <span className="wf-eyebrow">{ar ? "الخطوة 2 من 4" : "Step 2 of 4"}</span>
-      <h1>{ar ? "عرّفنا بنشاطك" : "Tell us about your business"}</h1>
-      <p>
-        {ar
-          ? "سنستخدم هذه المعلومات لإعداد رابط التاجر وأول إعدادات مؤسستك."
-          : "We’ll use this to prepare your merchant URL and organization defaults."}
-      </p>
-      {error ? <Alert tone="danger" title={error} /> : null}
-      <form className="onboarding-form" onSubmit={submit}>
-        <FormField label={ar ? "اسم النشاط" : "Business name"} required>
-          <TextInput name="name" minLength={2} maxLength={120} required />
-        </FormField>
-        <FormField label={ar ? "رابط التاجر" : "Merchant URL"} hint={availability} required>
-          <TextInput
-            name="slug"
-            value={slug}
-            onChange={(event) =>
-              setSlug(
-                event.currentTarget.value.toLocaleLowerCase("en-US").replace(/[^a-z0-9-]/g, ""),
-              )
-            }
-            minLength={3}
-            maxLength={40}
-            dir="ltr"
-            required
-          />
-        </FormField>
-        <div className="onboarding-url" dir="ltr">
-          <Link2 size={17} aria-hidden="true" />
-          https://{slug || "your-business"}.waflo.app
-        </div>
-        <div className="dashboard-form__row">
-          <FormField label={ar ? "نوع النشاط (اختياري)" : "Business category (optional)"}>
-            <Select name="category" defaultValue="">
-              <option value="">{ar ? "اختر لاحقاً" : "Choose later"}</option>
-              <option value="Café">{ar ? "مقهى" : "Café"}</option>
-              <option value="Bakery">{ar ? "مخبز" : "Bakery"}</option>
-              <option value="Restaurant">{ar ? "مطعم" : "Restaurant"}</option>
-              <option value="Salon">{ar ? "صالون" : "Salon"}</option>
-              <option value="Retail">{ar ? "متجر" : "Retail"}</option>
-              <option value="Other">{ar ? "أخرى" : "Other"}</option>
-            </Select>
-          </FormField>
-          <FormField label={ar ? "اللغة الافتراضية" : "Default language"} required>
-            <Select name="defaultLocale" defaultValue={locale}>
-              <option value="en">English</option>
-              <option value="ar">العربية</option>
-            </Select>
-          </FormField>
-        </div>
-        <FormField label={ar ? "المنطقة الزمنية" : "Business timezone"} required>
-          <Select name="timezone" defaultValue="Asia/Baghdad">
-            <option value="Asia/Baghdad">Asia/Baghdad</option>
-            <option value="Asia/Riyadh">Asia/Riyadh</option>
-            <option value="Asia/Dubai">Asia/Dubai</option>
-            <option value="Europe/London">Europe/London</option>
-            <option value="America/New_York">America/New_York</option>
-          </Select>
-        </FormField>
-        <div>
-          <strong>{ar ? "الخطة المختارة للإعداد" : "Setup plan"}</strong>
-          <p style={{ color: "var(--waflo-muted)", marginTop: ".35rem" }}>
-            {ar
-              ? "الاختيار يحدد حدود الإعداد فقط، ولا يبدأ الدفع أو التجربة."
-              : "This controls setup limits only; it does not start payment or your trial."}
+  async function saveBilling(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!organizationId) return;
+    setLoading(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const identity: BillingIdentityDraft = {
+      name: String(form.get("billingName") ?? ""),
+      email: String(form.get("billingEmail") ?? ""),
+      countryCode: String(form.get("billingCountry") ?? "IQ"),
+      addressLine1: String(form.get("addressLine1") ?? ""),
+      addressLine2: String(form.get("addressLine2") ?? ""),
+      city: String(form.get("billingCity") ?? ""),
+      region: String(form.get("billingRegion") ?? ""),
+      postalCode: String(form.get("postalCode") ?? ""),
+    };
+    setCatalog(null);
+    try {
+      await apiFetch(`/v1/organizations/${organizationId}/billing/identity`, {
+        method: "PATCH",
+        body: JSON.stringify(identity),
+      });
+      // Billing details are part of the setup-session fingerprint. A later
+      // edit must not reuse a session prefilling a stale country or address.
+      window.sessionStorage.removeItem(BILLING_COMMAND_KEY);
+      const { identity: authoritativeIdentity } = await loadBillingIdentity(organizationId);
+      if (!authoritativeIdentity) {
+        throw new ApiClientError(
+          "BILLING_IDENTITY_REQUIRED",
+          copy.payment.billingIdentityUnavailable,
+        );
+      }
+      await loadCatalog(organizationId);
+      setStep(3);
+      clearWizardBillingIdentity();
+      writeWizard({ organizationId, plan, cadence, step: 3 });
+    } catch (caught) {
+      setError(localizedError(caught, copy, copy.billing.continue));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function startTrial() {
+    const checkoutSessionId = setup?.checkoutSessionId ?? resumableCheckoutSessionId;
+    if (!organizationId || !checkoutSessionId || !preview) return;
+    setLoading(true);
+    setError("");
+    try {
+      await finishCompletedTrial(
+        organizationId,
+        checkoutSessionId,
+        setup ? sessionCommand(BILLING_COMMAND_KEY) : undefined,
+      );
+    } catch (caught) {
+      setError(localizedError(caught, copy, copy.payment.startTrialError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (step === 1) {
+    const recoveringLocation = Boolean(organizationId && resumeState === "location_required");
+    return (
+      <OnboardingShell locale={locale} step={1}>
+        <div className="onboarding-heading">
+          <span>{copy.organization.step}</span>
+          <h1>
+            {recoveringLocation
+              ? copy.organization.finishLocationTitle
+              : copy.organization.setupTitle}
+          </h1>
+          <p>
+            {recoveringLocation
+              ? copy.organization.finishLocationDescription
+              : copy.organization.setupDescription}
           </p>
-          <div className="dashboard-section-grid dashboard-section-grid--plans">
-            {(["starter", "growth", "scale"] as const).map((code) => (
-              <PlanCard
-                key={code}
-                plan={code}
-                selected={plan === code}
-                locale={locale}
-                onSelect={setPlan}
+        </div>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        <form className="onboarding-form" onSubmit={createOrganization}>
+          {!recoveringLocation ? (
+            <div className="dashboard-form__row">
+              <FormField label={copy.organization.businessName} required>
+                <TextInput
+                  name="name"
+                  minLength={2}
+                  maxLength={120}
+                  autoComplete="organization"
+                  required
+                />
+              </FormField>
+              <FormField label={copy.organization.businessType}>
+                <Select name="category" defaultValue="">
+                  <option value="" disabled>
+                    {copy.organization.chooseType}
+                  </option>
+                  <option value="Cafe">{copy.organization.categoryCafe}</option>
+                  <option value="Restaurant">{copy.organization.categoryRestaurant}</option>
+                  <option value="Bakery">{copy.organization.categoryBakery}</option>
+                  <option value="Grocery">{copy.organization.categoryGrocery}</option>
+                  <option value="Retail">{copy.organization.categoryRetail}</option>
+                  <option value="Beauty salon">{copy.organization.categoryBeautySalon}</option>
+                  <option value="Barbershop">{copy.organization.categoryBarbershop}</option>
+                  <option value="Pharmacy">{copy.organization.categoryPharmacy}</option>
+                  <option value="Fitness">{copy.organization.categoryFitness}</option>
+                  <option value="Hotel">{copy.organization.categoryHotel}</option>
+                  <option value="Automotive">{copy.organization.categoryAutomotive}</option>
+                  <option value="Professional services">
+                    {copy.organization.categoryServices}
+                  </option>
+                  <option value="Other">{copy.organization.categoryOther}</option>
+                </Select>
+              </FormField>
+            </div>
+          ) : null}
+          {!recoveringLocation ? (
+            <FormField label={copy.organization.merchantUrl} hint={availability} required>
+              <TextInput
+                name="slug"
+                value={slug}
+                onChange={(event) =>
+                  setSlug(
+                    event.currentTarget.value.toLocaleLowerCase("en-US").replace(/[^a-z0-9-]/g, ""),
+                  )
+                }
+                minLength={3}
+                maxLength={40}
+                dir="ltr"
+                required
               />
-            ))}
+            </FormField>
+          ) : null}
+          {!recoveringLocation ? (
+            <div className="onboarding-url" dir="ltr">
+              <Link2 size={17} aria-hidden="true" />
+              {merchantPublicUrl(slug || copy.organization.urlPreviewPlaceholder)}
+            </div>
+          ) : null}
+          <div className="dashboard-form__row">
+            <FormField label={copy.organization.firstLocation} required>
+              <TextInput
+                name="locationName"
+                minLength={2}
+                placeholder={copy.organization.firstLocationPlaceholder}
+                required
+              />
+            </FormField>
+          </div>
+          <LocationMapPicker
+            locale={locale}
+            value={firstLocation}
+            onChange={setFirstLocation}
+            headingLevel={2}
+          />
+          <LocationAddressFields
+            locale={locale}
+            value={firstLocation}
+            onChange={setFirstLocation}
+          />
+          <input type="hidden" name="defaultLocale" value={contentLocale} />
+          <Button type="submit" loading={loading} disabled={!firstLocation.coordinatesConfirmed}>
+            {copy.organization.saveAndContinue}
+          </Button>
+        </form>
+      </OnboardingShell>
+    );
+  }
+
+  if (step === 3) {
+    return (
+      <OnboardingShell locale={locale} step={3}>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        <section className="onboarding-logo-panel" aria-labelledby="onboarding-logo-title">
+          <div className="onboarding-logo-panel__heading">
+            <div>
+              <h2 id="onboarding-logo-title">{copy.logo.title}</h2>
+              <span>{copy.logo.optional}</span>
+            </div>
+            <p>{copy.logo.description}</p>
+            <p className="field-help">{copy.logo.settingsHint}</p>
+          </div>
+          {logoNotice ? <Alert tone="success" title={logoNotice} /> : null}
+          {logoError ? <Alert tone="danger" title={logoError} /> : null}
+          <ProgramAssetPicker
+            organizationId={organizationId}
+            category="LOGO"
+            label={copy.logo.title}
+            assets={logoAssets}
+            selectedId={brandLogoAssetId}
+            onSelected={(assetId) => void updateMerchantLogo(assetId)}
+            onUploaded={(asset) =>
+              setLogoAssets((current) => [
+                asset,
+                ...current.filter((existing) => existing.id !== asset.id),
+              ])
+            }
+            ar={contentLocale === "ar"}
+            interfaceLocale={locale}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() =>
+              document.getElementById("onboarding-plan-section")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              })
+            }
+          >
+            {copy.logo.skip}
+          </Button>
+        </section>
+        <div id="onboarding-plan-section">
+          {catalog ? (
+            <PlanStep
+              locale={locale}
+              plan={plan}
+              cadence={cadence}
+              catalog={catalog}
+              onPlan={setPlan}
+              onCadence={setCadence}
+              onContinue={() => {
+                setLoading(true);
+                setError("");
+                void preparePayment(organizationId, plan, cadence)
+                  .catch((caught) =>
+                    setError(localizedError(caught, copy, copy.payment.startSetupError)),
+                  )
+                  .finally(() => setLoading(false));
+              }}
+            />
+          ) : (
+            <div className="onboarding-payment-recovery" role={error ? "alert" : "status"}>
+              {error ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setError("");
+                    void loadCatalog(organizationId).catch((caught) =>
+                      setError(localizedError(caught, copy, copy.payment.priceMissing)),
+                    );
+                  }}
+                >
+                  {copy.payment.retry}
+                </Button>
+              ) : (
+                copy.payment.preparingSetup
+              )}
+            </div>
+          )}
+        </div>
+      </OnboardingShell>
+    );
+  }
+
+  if (step === 2) {
+    return (
+      <OnboardingShell locale={locale} step={2}>
+        <div className="onboarding-heading">
+          <span>{copy.billing.step}</span>
+          <h1>{copy.billing.title}</h1>
+          <p>{copy.billing.description}</p>
+        </div>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        <form className="onboarding-form" onSubmit={saveBilling}>
+          <div className="dashboard-form__row">
+            <FormField label={copy.billing.customerName} required>
+              <TextInput
+                name="billingName"
+                defaultValue={billingIdentity?.name}
+                autoComplete="organization"
+                required
+              />
+            </FormField>
+            <FormField label={copy.billing.email} required>
+              <TextInput
+                name="billingEmail"
+                type="email"
+                defaultValue={billingIdentity?.email}
+                autoComplete="email"
+                required
+              />
+            </FormField>
+          </div>
+          <FormField label={copy.billing.country} required>
+            <SearchableSelect
+              name="billingCountry"
+              options={countries}
+              defaultValue={billingIdentity?.countryCode ?? "IQ"}
+              placeholder={copy.billing.searchCountries}
+              required
+            />
+          </FormField>
+          <FormField label={copy.billing.addressLine1} required>
+            <TextInput
+              name="addressLine1"
+              defaultValue={billingIdentity?.addressLine1}
+              autoComplete="address-line1"
+              required
+            />
+          </FormField>
+          <FormField label={copy.billing.addressLine2}>
+            <TextInput
+              name="addressLine2"
+              defaultValue={billingIdentity?.addressLine2}
+              autoComplete="address-line2"
+            />
+          </FormField>
+          <div className="dashboard-form__row dashboard-form__row--three">
+            <FormField label={copy.billing.city} required>
+              <TextInput
+                name="billingCity"
+                defaultValue={billingIdentity?.city}
+                autoComplete="address-level2"
+                required
+              />
+            </FormField>
+            <FormField label={copy.billing.region}>
+              <TextInput
+                name="billingRegion"
+                defaultValue={billingIdentity?.region}
+                autoComplete="address-level1"
+              />
+            </FormField>
+            <FormField label={copy.billing.postalCode}>
+              <TextInput
+                name="postalCode"
+                defaultValue={billingIdentity?.postalCode}
+                autoComplete="postal-code"
+              />
+            </FormField>
+          </div>
+          <Button type="submit" loading={loading}>
+            {copy.billing.continue}
+          </Button>
+        </form>
+      </OnboardingShell>
+    );
+  }
+
+  if (step === 4) {
+    const clientSecret = setup?.clientSecret ?? null;
+    const retryPaymentSetup = () => {
+      if (!organizationId) return;
+      setError("");
+      setLoading(true);
+      void preparePayment(organizationId, plan, cadence)
+        .catch((caught) => setError(localizedError(caught, copy, copy.payment.resumeError)))
+        .finally(() => setLoading(false));
+    };
+    return (
+      <OnboardingShell locale={locale} step={4}>
+        <div className="onboarding-heading">
+          <span>{copy.payment.step}</span>
+          <h1>{copy.payment.title}</h1>
+          <p>{copy.payment.description}</p>
+        </div>
+        {error ? <Alert tone="danger" title={error} /> : null}
+        {showPaymentDiagnostics ? (
+          <details className="onboarding-payment-diagnostics">
+            <summary>Payment diagnostics</summary>
+            <dl>
+              <div>
+                <dt>Billing identity</dt>
+                <dd>{billingIdentityState}</dd>
+              </div>
+              <div>
+                <dt>Setup request</dt>
+                <dd>{paymentSetupState}</dd>
+              </div>
+              <div>
+                <dt>Checkout Session</dt>
+                <dd>{setup?.checkoutSessionId ? "present" : "missing"}</dd>
+              </div>
+              <div>
+                <dt>Client secret</dt>
+                <dd>{clientSecret ? "present" : "missing"}</dd>
+              </div>
+              <div>
+                <dt>Publishable configuration</dt>
+                <dd>{setup?.publishableKey ? "present" : "missing"}</dd>
+              </div>
+              <div>
+                <dt>Stripe.js</dt>
+                <dd>{stripeScriptState}</dd>
+              </div>
+              <div>
+                <dt>Checkout Elements</dt>
+                <dd>{checkoutElementsState}</dd>
+              </div>
+              {showRawCheckoutElementsDiagnostics ? (
+                <div>
+                  <dt>Checkout Elements error message</dt>
+                  <dd data-testid="checkout-elements-error-message">
+                    {checkoutElementsDiagnosticMessage ?? "not reported"}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          </details>
+        ) : null}
+        {billingIdentityState === "loading" ? (
+          <div className="onboarding-local-loading" role="status">
+            {copy.payment.loadingBillingIdentity}
+          </div>
+        ) : billingIdentityState === "error" || !billingIdentity ? (
+          <div className="onboarding-payment-recovery" role="alert">
+            <Alert tone="danger" title={copy.payment.billingIdentityUnavailable} />
+            <Button type="button" variant="secondary" onClick={() => setStep(2)}>
+              {copy.payment.returnToBilling}
+            </Button>
+          </div>
+        ) : paymentSetupState === "loading" || loading ? (
+          <div className="onboarding-local-loading" role="status">
+            {copy.payment.preparingSetup}
+          </div>
+        ) : paymentSetupState === "error" || !setup || !clientSecret ? (
+          <div className="onboarding-payment-recovery" role="alert">
+            <Alert tone="danger" title={copy.payment.setupUnavailable} />
+            <Button type="button" variant="secondary" onClick={retryPaymentSetup}>
+              {copy.payment.retry}
+            </Button>
+          </div>
+        ) : stripeScriptState === "loading" || stripeScriptState === "idle" || !stripePromise ? (
+          <div className="onboarding-local-loading" role="status">
+            {copy.payment.loadingStripe}
+          </div>
+        ) : stripeScriptState === "error" ? (
+          <div className="onboarding-payment-recovery" role="alert">
+            <Alert tone="danger" title={copy.payment.stripeLoadFailed} />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setStripeAttempt((attempt) => attempt + 1)}
+            >
+              {copy.payment.retry}
+            </Button>
+          </div>
+        ) : (
+          <CheckoutElementsProvider
+            key={checkoutAttempt}
+            stripe={stripePromise}
+            options={{
+              clientSecret,
+              defaultValues: {
+                billingAddress: {
+                  name: billingIdentity.name,
+                  address: {
+                    country: billingIdentity.countryCode,
+                    line1: billingIdentity.addressLine1,
+                    ...(billingIdentity.addressLine2
+                      ? { line2: billingIdentity.addressLine2 }
+                      : {}),
+                    city: billingIdentity.city,
+                    ...(billingIdentity.region ? { state: billingIdentity.region } : {}),
+                    ...(billingIdentity.postalCode
+                      ? { postal_code: billingIdentity.postalCode }
+                      : {}),
+                  },
+                },
+              },
+              elementsOptions: {
+                appearance: {
+                  theme: "stripe",
+                  variables: {
+                    colorPrimary: "#AE3115",
+                    colorText: "#241916",
+                    colorBackground: "#FFFFFF",
+                    colorDanger: "#C93C2B",
+                    fontFamily:
+                      contentLocale === "ar"
+                        ? "Cairo, system-ui, sans-serif"
+                        : "Manrope, system-ui, sans-serif",
+                    borderRadius: "8px",
+                    spacingUnit: "4px",
+                  },
+                  rules: {
+                    ".Input": { border: "1px solid #DCCFC9", boxShadow: "none" },
+                    ".Input:focus": {
+                      border: "1px solid #AE3115",
+                      boxShadow: "0 0 0 3px rgba(174,49,21,.14)",
+                    },
+                  },
+                },
+              },
+            }}
+          >
+            <SecurePaymentForm
+              locale={locale}
+              organizationId={organizationId}
+              billingCommand={sessionCommand(BILLING_COMMAND_KEY)}
+              onCheckoutStateChange={onCheckoutStateChange}
+              onRetry={() => {
+                setCheckoutElementsState("loading");
+                setCheckoutElementsDiagnosticMessage(null);
+                setCheckoutAttempt((attempt) => attempt + 1);
+              }}
+              onReady={(value) => {
+                setPreview(value);
+                setStep(5);
+                writeWizard({ step: 5 });
+              }}
+            />
+          </CheckoutElementsProvider>
+        )}
+      </OnboardingShell>
+    );
+  }
+
+  return (
+    <OnboardingShell locale={locale} step={5}>
+      <div className="onboarding-heading">
+        <span>{copy.trial.step}</span>
+        <h1>{copy.trial.title}</h1>
+        <p>{copy.trial.description}</p>
+      </div>
+      {error ? <Alert tone="danger" title={error} /> : null}
+      {preview ? (
+        <div className="onboarding-trial-review">
+          <section className="onboarding-trial-review__summary" aria-label={copy.trial.title}>
+            <div className="onboarding-trial-review__promise">
+              <strong>{copy.trial.free}</strong>
+              <span>
+                {formatMessage(copy.trial.thenStarting, {
+                  amount: money(preview.amount, preview.currency, locale),
+                  date: dateLabel(preview.expectedFirstChargeAt, locale),
+                })}
+              </span>
+            </div>
+            <dl>
+              <div>
+                <dt>{copy.trial.plan}</dt>
+                <dd>{planName(preview.plan, copy)}</dd>
+              </div>
+              <div>
+                <dt>{copy.trial.cadence}</dt>
+                <dd>{cadenceLabel(preview.cadence, copy)}</dd>
+              </div>
+              <div>
+                <dt>{copy.trial.trialStarts}</dt>
+                <dd>
+                  <bdi dir="auto">{dateLabel(preview.expectedTrialStart, locale)}</bdi>
+                </dd>
+              </div>
+              <div>
+                <dt>{copy.trial.firstCharge}</dt>
+                <dd>
+                  <bdi dir="auto">
+                    {dateLabel(preview.expectedFirstChargeAt, locale)} ·{" "}
+                    {money(preview.amount, preview.currency, locale)}
+                  </bdi>
+                </dd>
+              </div>
+              <div>
+                <dt>{copy.trial.paymentMethod}</dt>
+                <dd className="onboarding-card-summary">
+                  <CreditCard size={17} aria-hidden="true" />
+                  <bdi dir="ltr">
+                    {preview.paymentMethod.brand.toUpperCase()} •••• {preview.paymentMethod.last4} ·{" "}
+                    {preview.paymentMethod.expMonth}/{preview.paymentMethod.expYear}
+                  </bdi>
+                </dd>
+              </div>
+            </dl>
+            <p className="onboarding-trial-review__policy">{copy.trial.policy}</p>
+            <div className="onboarding-policy-links">
+              <a
+                href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/refunds`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {copy.trial.billingRefundPolicy}
+              </a>
+              <a
+                href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/terms`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {copy.trial.terms}
+              </a>
+              <a
+                href={`${process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://waflo.app"}/${contentLocale}/privacy`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {copy.trial.privacy}
+              </a>
+            </div>
+          </section>
+          <div className="onboarding-trial-review__actions">
+            <Button onClick={() => void startTrial()} loading={loading}>
+              {copy.trial.start}
+            </Button>
           </div>
         </div>
-        <Button type="submit" loading={loading}>
-          {ar ? "حفظ ومتابعة" : "Save and continue"}
-        </Button>
-      </form>
+      ) : (
+        <Alert tone="danger" title={copy.trial.unavailable} />
+      )}
     </OnboardingShell>
   );
-}
-
-export function LocationOnboarding({
-  locale,
-  organizationId,
-}: {
-  locale: Locale;
-  organizationId?: string;
-}) {
-  const ar = locale === "ar";
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const effectiveOrganizationId =
-    organizationId ??
-    (typeof window === "undefined"
-      ? undefined
-      : (sessionStorage.getItem("waflo:onboarding-organization") ?? undefined));
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!effectiveOrganizationId) {
-      setError(
-        ar
-          ? "تعذر العثور على المؤسسة. سجّل الدخول مجدداً."
-          : "Organization context is missing. Sign in again.",
-      );
-      return;
-    }
-    setLoading(true);
-    const form = new FormData(event.currentTarget);
-    try {
-      await apiFetch(`/v1/organizations/${effectiveOrganizationId}/locations`, {
-        method: "POST",
-        body: JSON.stringify({
-          name: String(form.get("name") ?? ""),
-          addressLine1: String(form.get("address") ?? "") || undefined,
-          city: String(form.get("city") ?? "") || undefined,
-          phone: String(form.get("phone") ?? "") || undefined,
-          timezone: String(form.get("timezone") ?? "Asia/Baghdad"),
-        }),
-      });
-      await apiFetch(`/v1/organizations/${effectiveOrganizationId}/complete-onboarding`, {
-        method: "POST",
-      });
-      router.push(`/${locale}/onboarding/complete?organization=${effectiveOrganizationId}`);
-    } catch (caught) {
-      setError(
-        caught instanceof ApiClientError
-          ? caught.message
-          : ar
-            ? "تعذر حفظ الموقع."
-            : "Unable to save location.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <OnboardingShell locale={locale} step={3}>
-      <span className="wf-eyebrow">{ar ? "الخطوة 3 من 4" : "Step 3 of 4"}</span>
-      <h1>{ar ? "أضف موقعك الأول" : "Add your first location"}</h1>
-      <p>
-        {ar
-          ? "يحتاج كل نشاط إلى موقع فعّال واحد على الأقل. يمكنك إضافة المزيد حسب حدود الخطة."
-          : "Every organization needs at least one active location. Add more later within plan limits."}
-      </p>
-      {error ? <Alert tone="danger" title={error} /> : null}
-      <form className="onboarding-form" onSubmit={submit}>
-        <FormField label={ar ? "اسم الموقع" : "Location name"} required>
-          <TextInput
-            name="name"
-            placeholder={ar ? "مثلاً: فرع المنصور" : "e.g. Downtown"}
-            minLength={2}
-            required
-          />
-        </FormField>
-        <FormField label={ar ? "العنوان (اختياري)" : "Address (optional)"}>
-          <TextInput name="address" autoComplete="street-address" />
-        </FormField>
-        <div className="dashboard-form__row">
-          <FormField label={ar ? "المدينة (اختياري)" : "City (optional)"}>
-            <TextInput name="city" autoComplete="address-level2" />
-          </FormField>
-          <FormField label={ar ? "الهاتف (اختياري)" : "Phone (optional)"}>
-            <TextInput name="phone" type="tel" autoComplete="tel" />
-          </FormField>
-        </div>
-        <FormField label={ar ? "المنطقة الزمنية" : "Timezone"} required>
-          <Select name="timezone" defaultValue="Asia/Baghdad">
-            <option value="Asia/Baghdad">Asia/Baghdad</option>
-            <option value="Asia/Riyadh">Asia/Riyadh</option>
-            <option value="Asia/Dubai">Asia/Dubai</option>
-          </Select>
-        </FormField>
-        <Button type="submit" loading={loading}>
-          {ar ? "إنشاء الموقع وإكمال الإعداد" : "Create location and finish setup"}
-        </Button>
-      </form>
-    </OnboardingShell>
-  );
-}
-
-interface OrganizationSummary {
-  name: string;
-  merchantSlug: string;
-  selectedPlan: string;
-  locations: { name: string }[];
-  billingProfile: {
-    subscriptionStatus: "PENDING_ACTIVATION";
-    trialStart: null;
-    trialEnd: null;
-  };
 }
 
 export function CompletionOnboarding({
   locale,
   organizationId,
 }: {
-  locale: Locale;
+  locale: InterfaceLocale;
   organizationId?: string;
 }) {
-  const ar = locale === "ar";
-  const [organization, setOrganization] = useState<OrganizationSummary | null>(null);
-  const [error, setError] = useState("");
+  const copy = messages[locale].onboarding;
+  const [result, setResult] = useState<TrialResult | null>(null);
   useEffect(() => {
-    if (!organizationId) return;
-    void apiFetch<OrganizationSummary>(`/v1/organizations/${organizationId}`)
-      .then(setOrganization)
-      .catch((caught: unknown) =>
-        setError(caught instanceof ApiClientError ? caught.message : "Unable to load setup."),
-      );
-  }, [organizationId]);
+    try {
+      const stored = window.sessionStorage.getItem(TRIAL_RESULT_KEY);
+      if (stored) setResult(JSON.parse(stored) as TrialResult);
+    } catch {
+      setResult(null);
+    }
+  }, []);
   return (
-    <OnboardingShell locale={locale} step={4}>
-      <span className="wf-eyebrow">{ar ? "اكتمل الإعداد" : "Setup complete"}</span>
-      <h1>{ar ? "مؤسستك جاهزة للمرحلة التالية." : "Your organization foundation is ready."}</h1>
-      <p>
-        {ar
-          ? "حفظنا مؤسستك وموقعك والخطة المختارة. لم تبدأ التجربة المجانية ولم يتم تحصيل أي مبلغ."
-          : "Your organization, first location, and selected plan are saved. The trial has not started and no payment was taken."}
-      </p>
-      {error ? <Alert tone="danger" title={error} /> : null}
-      {organization ? (
-        <>
-          <div className="onboarding-summary">
-            <div>
-              <span>{ar ? "النشاط" : "Business"}</span>
-              <strong>{organization.name}</strong>
-            </div>
-            <div>
-              <span>{ar ? "رابط التاجر" : "Merchant URL"}</span>
-              <strong dir="ltr">{organization.merchantSlug}.waflo.app</strong>
-            </div>
-            <div>
-              <span>{ar ? "الخطة المختارة" : "Selected plan"}</span>
-              <strong>{organization.selectedPlan}</strong>
-            </div>
-            <div>
-              <span>{ar ? "الموقع الأول" : "First location"}</span>
-              <strong>{organization.locations[0]?.name}</strong>
-            </div>
-            <div>
-              <span>{ar ? "حالة التجربة" : "Trial status"}</span>
-              <strong>{ar ? "لم تبدأ" : "Not started"}</strong>
-            </div>
+    <OnboardingShell locale={locale} step={5}>
+      <div className="onboarding-success-mark" aria-hidden="true">
+        <Check size={30} />
+      </div>
+      <div className="onboarding-heading onboarding-heading--center">
+        <span>{copy.completion.label}</span>
+        <h1>{copy.completion.title}</h1>
+        <p>{copy.completion.description}</p>
+      </div>
+      {result ? (
+        <div className="onboarding-success-summary">
+          <div>
+            <span>{copy.completion.trialEnds}</span>
+            <strong>{dateLabel(result.trialEnd, locale)}</strong>
           </div>
-          <Alert tone="info" title={ar ? "تجربتك المجانية محفوظة" : "Your free trial is waiting"}>
-            {ar
-              ? "ستبدأ مدة 15 يوماً عند نشر أول بطاقة ولاء. هذه الوظيفة ستتوفر في المرحلة W2."
-              : "Your 15 days begin when you publish your first loyalty card. Publishing arrives in Phase W2."}
-          </Alert>
-          <a href={`/${locale}/dashboard`}>
-            <Button style={{ width: "100%", marginTop: "1.25rem" }}>
-              {ar ? "متابعة إلى لوحة التحكم" : "Continue to dashboard"}
-            </Button>
-          </a>
-          <Button variant="secondary" disabled style={{ width: "100%", marginTop: ".75rem" }}>
-            {ar ? "إنشاء أول بطاقة ولاء — قريباً" : "Create first loyalty card — coming in W2"}
-          </Button>
-        </>
-      ) : (
-        <p>{ar ? "جارٍ تحميل الملخص…" : "Loading your setup summary…"}</p>
-      )}
+          <div>
+            <span>{copy.completion.firstCharge}</span>
+            <strong>{money(result.amount, result.currency, locale)}</strong>
+          </div>
+          <div>
+            <span>{copy.completion.card}</span>
+            <strong>
+              {result.paymentMethod.brand.toUpperCase()} •••• {result.paymentMethod.last4}
+            </strong>
+          </div>
+        </div>
+      ) : null}
+      <div className="onboarding-success-actions">
+        <Link className="wf-button wf-button--primary" href={`/${locale}/dashboard`}>
+          {copy.completion.openDashboard}
+        </Link>
+        <Link className="wf-button wf-button--secondary" href={`/${locale}/dashboard/programs/new`}>
+          {copy.completion.createLoyaltyCard}
+        </Link>
+      </div>
+      {!organizationId ? <Alert tone="danger" title={copy.completion.missingOrganization} /> : null}
     </OnboardingShell>
   );
 }

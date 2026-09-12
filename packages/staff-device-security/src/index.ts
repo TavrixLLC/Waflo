@@ -9,28 +9,28 @@ import {
 
 export const DEVICE_REQUEST_ENVELOPE_VERSION = "waflo-device-request-v1" as const;
 export const DEVICE_PAIRING_TOKEN_VERSION = "waflo-pair-v1" as const;
+export const DEVICE_PAIRING_MANUAL_CODE_VERSION = "waflo-pair-manual-v1" as const;
+
+const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const MANUAL_PAIRING_CODE_LENGTH = 16;
+
+export type StaffDeviceSecurityCode =
+  | "DEVICE_PAIRING_INVALID"
+  | "STAFF_DEVICE_SIGNATURE_INVALID"
+  | "STAFF_DEVICE_CLOCK_SKEW"
+  | "STAFF_DEVICE_NONCE_REPLAYED"
+  | "STAFF_DEVICE_NOT_ACTIVE"
+  | "STAFF_DEVICE_REVOKED"
+  | "STAFF_DEVICE_COMPROMISED"
+  | "STAFF_DEVICE_SESSION_EXPIRED"
+  | "STAFF_DEVICE_MEMBER_INACTIVE"
+  | "STAFF_DEVICE_BODY_DIGEST_INVALID"
+  | "STAFF_APP_VERSION_UNSUPPORTED";
 
 export class StaffDeviceSecurityError extends Error {
-  readonly code:
-    | "DEVICE_PAIRING_INVALID"
-    | "STAFF_DEVICE_SIGNATURE_INVALID"
-    | "STAFF_DEVICE_CLOCK_SKEW"
-    | "STAFF_DEVICE_NONCE_REPLAYED"
-    | "STAFF_DEVICE_NOT_ACTIVE"
-    | "STAFF_DEVICE_BODY_DIGEST_INVALID"
-    | "STAFF_APP_VERSION_UNSUPPORTED";
+  readonly code: StaffDeviceSecurityCode;
 
-  constructor(
-    code:
-      | "DEVICE_PAIRING_INVALID"
-      | "STAFF_DEVICE_SIGNATURE_INVALID"
-      | "STAFF_DEVICE_CLOCK_SKEW"
-      | "STAFF_DEVICE_NONCE_REPLAYED"
-      | "STAFF_DEVICE_NOT_ACTIVE"
-      | "STAFF_DEVICE_BODY_DIGEST_INVALID"
-      | "STAFF_APP_VERSION_UNSUPPORTED",
-    message: string,
-  ) {
+  constructor(code: StaffDeviceSecurityCode, message: string) {
     super(message);
     this.code = code;
     this.name = "StaffDeviceSecurityError";
@@ -55,24 +55,74 @@ export function parseStaffMobileSemanticVersion(value: string): readonly [number
   return parts as unknown as readonly [number, number, number];
 }
 
+const STAFF_SEMANTIC_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+function parseComparableStaffVersion(value: string): {
+  readonly release: readonly string[];
+  readonly prerelease: readonly string[];
+} {
+  const match = STAFF_SEMANTIC_VERSION_PATTERN.exec(value);
+  if (!match?.[1] || !match[2] || !match[3]) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_APP_VERSION_UNSUPPORTED",
+      "A semantic mobile app version is required.",
+    );
+  }
+  return {
+    release: [match[1], match[2], match[3]],
+    prerelease: match[4]?.split(".") ?? [],
+  };
+}
+
+function compareNumericIdentifier(left: string, right: string): number {
+  if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+  return left === right ? 0 : left < right ? -1 : 1;
+}
+
+function compareStaffSemanticVersions(left: string, right: string): number {
+  const leftVersion = parseComparableStaffVersion(left);
+  const rightVersion = parseComparableStaffVersion(right);
+  for (let index = 0; index < 3; index += 1) {
+    const comparison = compareNumericIdentifier(
+      leftVersion.release[index] ?? "0",
+      rightVersion.release[index] ?? "0",
+    );
+    if (comparison !== 0) return comparison;
+  }
+  if (!leftVersion.prerelease.length && !rightVersion.prerelease.length) return 0;
+  if (!leftVersion.prerelease.length) return 1;
+  if (!rightVersion.prerelease.length) return -1;
+  const maximumLength = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length);
+  for (let index = 0; index < maximumLength; index += 1) {
+    const leftIdentifier = leftVersion.prerelease[index];
+    const rightIdentifier = rightVersion.prerelease[index];
+    if (leftIdentifier === undefined) return -1;
+    if (rightIdentifier === undefined) return 1;
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      const comparison = compareNumericIdentifier(leftIdentifier, rightIdentifier);
+      if (comparison !== 0) return comparison;
+      continue;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    if (leftIdentifier !== rightIdentifier) return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
+  return 0;
+}
+
 export function assertStaffMobileAppVersion(input: {
   readonly platform: "IOS" | "ANDROID" | "TEST_CLIENT";
   readonly appVersion: string;
   readonly minimumVersion: string;
 }): void {
   if (input.platform === "TEST_CLIENT") return;
-  const current = parseStaffMobileSemanticVersion(input.appVersion);
-  const minimum = parseStaffMobileSemanticVersion(input.minimumVersion);
-  for (let index = 0; index < 3; index += 1) {
-    const currentPart = current[index] ?? 0;
-    const minimumPart = minimum[index] ?? 0;
-    if (currentPart > minimumPart) return;
-    if (currentPart < minimumPart) {
-      throw new StaffDeviceSecurityError(
-        "STAFF_APP_VERSION_UNSUPPORTED",
-        "This Staff mobile app version is no longer supported.",
-      );
-    }
+  if (compareStaffSemanticVersions(input.appVersion, input.minimumVersion) < 0) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_APP_VERSION_UNSUPPORTED",
+      "This Staff mobile app version is no longer supported.",
+    );
   }
 }
 
@@ -148,6 +198,55 @@ export function parsePairingToken(token: string): PairingTokenPayload {
 
 export function hashPairingToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+export function normalizeManualPairingCode(value: string): string {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]/g, "")
+    .replace(/[O]/g, "0")
+    .replace(/[IL]/g, "1");
+  if (
+    normalized.length !== MANUAL_PAIRING_CODE_LENGTH ||
+    [...normalized].some((character) => !CROCKFORD_BASE32.includes(character))
+  ) {
+    throw new StaffDeviceSecurityError("DEVICE_PAIRING_INVALID", "Invalid manual pairing code.");
+  }
+  return normalized;
+}
+
+export function formatManualPairingCode(value: string): string {
+  const normalized = normalizeManualPairingCode(value);
+  return normalized.match(/.{1,4}/g)?.join("-") ?? normalized;
+}
+
+export function hashManualPairingCode(value: string, secret: string): string {
+  if (secret.length < 32) {
+    throw new StaffDeviceSecurityError(
+      "DEVICE_PAIRING_INVALID",
+      "Device session secret is too short.",
+    );
+  }
+  const normalized = normalizeManualPairingCode(value);
+  return createHmac("sha256", secret)
+    .update(`${DEVICE_PAIRING_MANUAL_CODE_VERSION}\n${normalized}`, "utf8")
+    .digest("hex");
+}
+
+export function createManualPairingCode(secret: string): {
+  readonly code: string;
+  readonly codeHash: string;
+} {
+  const entropy = randomBytes(10);
+  let encodedValue = BigInt(`0x${entropy.toString("hex")}`);
+  const characters = new Array<string>(MANUAL_PAIRING_CODE_LENGTH);
+  for (let index = MANUAL_PAIRING_CODE_LENGTH - 1; index >= 0; index -= 1) {
+    characters[index] = CROCKFORD_BASE32[Number(encodedValue & 31n)] ?? "0";
+    encodedValue >>= 5n;
+  }
+  const code = characters.join("");
+  return { code: formatManualPairingCode(code), codeHash: hashManualPairingCode(code, secret) };
 }
 
 export function hashOpaqueDeviceToken(token: string, secret: string): string {
@@ -372,12 +471,31 @@ export function assertDeviceOperational(input: {
   readonly memberStatus: string;
   readonly now: Date;
 }): void {
-  if (
-    input.deviceStatus !== "ACTIVE" ||
-    input.sessionRevokedAt !== null ||
-    input.sessionExpiresAt.getTime() <= input.now.getTime() ||
-    input.memberStatus !== "ACTIVE"
-  ) {
+  if (input.deviceStatus === "COMPROMISED") {
+    throw new StaffDeviceSecurityError(
+      "STAFF_DEVICE_COMPROMISED",
+      "Staff device has been marked compromised.",
+    );
+  }
+  if (input.deviceStatus === "REVOKED") {
+    throw new StaffDeviceSecurityError("STAFF_DEVICE_REVOKED", "Staff device is revoked.");
+  }
+  if (input.memberStatus !== "ACTIVE") {
+    throw new StaffDeviceSecurityError("STAFF_DEVICE_MEMBER_INACTIVE", "Staff member is inactive.");
+  }
+  if (input.sessionRevokedAt !== null) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_DEVICE_NOT_ACTIVE",
+      "Staff device session is revoked.",
+    );
+  }
+  if (input.sessionExpiresAt.getTime() <= input.now.getTime()) {
+    throw new StaffDeviceSecurityError(
+      "STAFF_DEVICE_SESSION_EXPIRED",
+      "Staff device session has expired.",
+    );
+  }
+  if (input.deviceStatus !== "ACTIVE") {
     throw new StaffDeviceSecurityError(
       "STAFF_DEVICE_NOT_ACTIVE",
       "Staff device session is not active.",

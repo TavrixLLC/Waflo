@@ -54,9 +54,9 @@ export const programPlatformCapabilities: Record<
   },
   APPLE_WALLET: {
     logo: {
-      support: "MAPPED",
+      support: "SUPPORTED",
       explanation:
-        "The generated pass uses Waflo package artwork with the organization name; a custom merchant logo is not currently mapped to Apple Wallet.",
+        "A normalized merchant logo is packaged in the Apple pass logo slot; Waflo artwork remains the fallback when no merchant logo is set.",
     },
     heroArtwork: {
       support: "UNSUPPORTED",
@@ -96,7 +96,7 @@ export const programPlatformCapabilities: Record<
     heroArtwork: {
       support: "UNSUPPORTED",
       explanation:
-        "The current Google loyalty class/object payload does not generate a hero image.",
+        "Merchant-selected hero artwork is not mapped because Google Wallet's single hero region is reserved for generated stamp progress artwork.",
     },
     backgroundArtwork: {
       support: "UNSUPPORTED",

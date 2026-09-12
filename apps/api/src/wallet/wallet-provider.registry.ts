@@ -1,13 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Injectable } from "@nestjs/common";
 import {
+  ApplePassBuilderGenerator,
+  type ApplePassSigner,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
+  parseAppleSigningKeyMap,
   TestApplePassSigner,
-  type ApplePassSigner,
 } from "@waflo/wallet-apple";
-import type { WalletProvider, WalletProviderCode } from "@waflo/wallet-core";
-import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
+import type { WalletProvider, WalletProviderCode, WalletProviderHealth } from "@waflo/wallet-core";
+import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 
@@ -42,6 +44,9 @@ function googleServiceAccount(value: string | undefined): GoogleServiceAccount |
 export class WalletProviderRegistry {
   private readonly providers: ReadonlyMap<WalletProviderCode, WalletProvider>;
   private readonly configured: Readonly<Record<WalletProviderCode, boolean>>;
+  private publicHealthCache:
+    | { expiresAt: number; value: Promise<readonly WalletProviderHealth[]> }
+    | undefined;
 
   constructor(environment: EnvironmentService, security: CustomerSecurityService) {
     const values = environment.values;
@@ -50,6 +55,7 @@ export class WalletProviderRegistry {
       appleSigner = new TestApplePassSigner();
     } else if (
       values.APPLE_WALLET_MODE === "REAL" &&
+      values.APPLE_WALLET_GENERATOR === "legacy" &&
       values.APPLE_PASS_CERTIFICATE_PATH_OR_BASE64 &&
       values.APPLE_PASS_CERTIFICATE_PASSWORD &&
       values.APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64
@@ -64,14 +70,40 @@ export class WalletProviderRegistry {
         appleSigner = undefined;
       }
     }
+    let appleGenerator: ApplePassBuilderGenerator | undefined;
+    if (
+      values.APPLE_WALLET_MODE === "REAL" &&
+      values.APPLE_WALLET_GENERATOR === "passbuilder" &&
+      values.APPLE_PASS_BUILDER_URL &&
+      values.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE
+    ) {
+      try {
+        appleGenerator = new ApplePassBuilderGenerator({
+          serviceUrl: values.APPLE_PASS_BUILDER_URL,
+          authToken: readFileSync(values.APPLE_PASS_BUILDER_AUTH_TOKEN_FILE, "utf8").trim(),
+          signingKeyId: values.APPLE_PASS_BUILDER_SIGNING_KEY_ID,
+          ...(values.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE
+            ? {
+                signingKeyIdsByMerchant: parseAppleSigningKeyMap(
+                  JSON.parse(readFileSync(values.APPLE_PASS_BUILDER_SIGNING_KEY_MAP_FILE, "utf8")),
+                ),
+              }
+            : {}),
+          templateId: values.APPLE_PASS_BUILDER_TEMPLATE_ID,
+          timeoutMs: values.APPLE_PASS_BUILDER_TIMEOUT_MS,
+        });
+      } catch {
+        appleGenerator = undefined;
+      }
+    }
     const appleReady =
       values.APPLE_WALLET_MODE === "TEST_ADAPTER" ||
       (values.APPLE_WALLET_MODE === "REAL" &&
         Boolean(
-          appleSigner &&
-            values.APPLE_PASS_TYPE_IDENTIFIER &&
+          values.APPLE_PASS_TYPE_IDENTIFIER &&
             values.APPLE_TEAM_IDENTIFIER &&
-            values.APPLE_PASS_WEB_SERVICE_URL,
+            values.APPLE_PASS_WEB_SERVICE_URL &&
+            (values.APPLE_WALLET_GENERATOR === "passbuilder" ? appleGenerator : appleSigner),
         ));
     const effectiveAppleMode = appleReady ? values.APPLE_WALLET_MODE : "DISABLED";
     const appleConfiguration =
@@ -91,7 +123,12 @@ export class WalletProviderRegistry {
     const apple = new AppleWalletProvider({
       mode: effectiveAppleMode,
       ...(appleConfiguration ? { configuration: appleConfiguration } : {}),
-      ...(appleSigner ? { signer: appleSigner } : {}),
+      ...(appleGenerator
+        ? { generator: appleGenerator }
+        : appleSigner
+          ? { signer: appleSigner }
+          : {}),
+      externallyCertified: values.APPLE_WALLET_EXTERNALLY_CERTIFIED,
       authenticationToken: (input) =>
         security.appleAuthenticationToken(input.walletPassInstanceId, input.providerIdentity),
       passDownloadUrl: `${values.API_PUBLIC_URL.replace(/\/+$/, "")}/v1/customer/wallet/apple/pass`,
@@ -134,12 +171,68 @@ export class WalletProviderRegistry {
     return this.configured[provider];
   }
 
-  publicCapabilities() {
+  healthChecks(): Promise<readonly WalletProviderHealth[]> {
+    return Promise.all(
+      this.all().map(async (provider) => this.withAvailability(await provider.healthCheck())),
+    );
+  }
+
+  /**
+   * Provider health is operational; availability has three separate meanings.
+   * Keep them on the contract so a physical-device certification result never
+   * makes a configured, artifact-capable provider look disabled.
+   */
+  private withAvailability(health: WalletProviderHealth): WalletProviderHealth {
+    const providerConfigured = this.configured[health.provider] && health.configured !== false;
+    const artifactAvailable =
+      providerConfigured &&
+      health.mode !== "DISABLED" &&
+      ["HEALTHY", "EXTERNALLY_UNCERTIFIED", "CERTIFICATE_EXPIRING"].includes(health.status);
+    const installationAvailable = artifactAvailable && health.mode === "REAL";
     return {
-      googleWalletAvailable: this.configured.GOOGLE,
-      appleWalletAvailable: this.configured.APPLE,
-      googleWallet: this.configured.GOOGLE ? "AVAILABLE" : "NOT_CONFIGURED",
-      appleWallet: this.configured.APPLE ? "AVAILABLE" : "NOT_CONFIGURED",
+      ...health,
+      providerConfigured,
+      artifactAvailable,
+      installationAvailable,
+      deviceEligibility: "UNKNOWN",
+      reason: !providerConfigured ? "CONFIGURATION" : !artifactAvailable ? "ARTIFACT" : "DEVICE",
+    };
+  }
+
+  private cachedPublicHealth(): Promise<readonly WalletProviderHealth[]> {
+    const now = Date.now();
+    if (this.publicHealthCache && this.publicHealthCache.expiresAt > now) {
+      return this.publicHealthCache.value;
+    }
+    const value = this.healthChecks().catch(() => []);
+    this.publicHealthCache = { expiresAt: now + 60_000, value };
+    return value;
+  }
+
+  async publicCapabilities() {
+    const health = await this.cachedPublicHealth();
+    const state = (provider: WalletProviderCode) => {
+      const current = health.find((item) => item.provider === provider);
+      if (!this.configured[provider] || !current || current.providerConfigured === false) {
+        return "NOT_CONFIGURED" as const;
+      }
+      if (current.mode === "TEST_ADAPTER") return "TEST_ONLY" as const;
+      if (current.artifactAvailable) return "CONNECTED" as const;
+      return "TEMPORARILY_UNAVAILABLE" as const;
+    };
+    const googleWallet = state("GOOGLE");
+    const appleWallet = state("APPLE");
+    return {
+      googleWalletAvailable: googleWallet === "CONNECTED",
+      appleWalletAvailable: appleWallet === "CONNECTED",
+      googleWalletArtifactAvailable:
+        health.find((item) => item.provider === "GOOGLE")?.artifactAvailable === true,
+      appleWalletArtifactAvailable:
+        health.find((item) => item.provider === "APPLE")?.artifactAvailable === true,
+      googleWalletConfigured: this.configured.GOOGLE,
+      appleWalletConfigured: this.configured.APPLE,
+      googleWallet,
+      appleWallet,
     } as const;
   }
 }

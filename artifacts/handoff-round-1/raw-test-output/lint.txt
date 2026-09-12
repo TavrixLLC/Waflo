@@ -1,9 +1,0 @@
-pnpm.exe : $ biome lint .
-At C:\Users\Alhamza Nazhan\AppData\Local\pnpm\bin\pnpm.ps1:14 char:3
-+   & "$basedir/../global/v11/4508-19eae16b90e/node_modules/@pnpm/exe/p ...
-+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: ($ biome lint .:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
-
-Checked 157 files in 67ms. No fixes applied.
-exit_code=0

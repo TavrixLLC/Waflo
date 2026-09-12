@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
 import type { TransferRequestInput } from "@waflo/contracts";
-import { decodeQrImage } from "@waflo/qr-core";
+import { canonicalCustomerUrl, decodeQrImage } from "@waflo/qr-core";
 import { googleLoyaltyObjectId } from "@waflo/wallet-google";
 import { walletCommandIdempotencyKey } from "@waflo/wallet-core";
 import { lockApplePassUpdateSequence, queueWalletPassStateChange } from "@waflo/database";
 import { AuditService } from "../audit/audit.service.js";
+import { AccountAccessService } from "../account/account-access.service.js";
 import { AppError } from "../common/app-error.js";
 import {
   withInvariantLock,
@@ -26,18 +27,21 @@ function sha256(value: unknown): string {
 
 function transferActionUrl(
   baseUrl: string,
+  merchantBaseDomain: string,
   merchantSlug: string,
+  locale: "en" | "ar",
   transferPublicId: string,
   token: string,
 ) {
-  const url = new URL(baseUrl);
-  url.pathname = "/transfer/confirm";
-  url.search = "";
-  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-    url.searchParams.set("tenant", merchantSlug);
-  } else {
-    url.hostname = `${merchantSlug}.${url.hostname}`;
-  }
+  const url = new URL(
+    canonicalCustomerUrl({
+      customerBaseUrl: baseUrl,
+      merchantBaseDomain,
+      merchantSlug,
+      pathname: "/transfer/confirm",
+    }),
+  );
+  url.searchParams.set("lang", locale);
   url.hash = `transfer=${encodeURIComponent(transferPublicId)}&token=${encodeURIComponent(token)}`;
   return url.toString();
 }
@@ -51,6 +55,7 @@ export class TransferService {
     private readonly environment: EnvironmentService,
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
+    private readonly accountAccess: AccountAccessService,
   ) {}
 
   async inspect(host: string, qrPayload: string, developmentOverride?: string) {
@@ -74,6 +79,7 @@ export class TransferService {
     }
     const context = await this.credentialContext(host, input.qrPayload, developmentOverride);
     const membership = context.credential.membership;
+    await this.accountAccess.requireOperationalAccess(membership.organizationId, true);
     const primaryEmail = membership.customer.contacts.find(
       (contact) => contact.type === "EMAIL" && contact.isPrimary,
     );
@@ -257,6 +263,7 @@ export class TransferService {
       },
     });
     if (!transfer) return { accepted: true };
+    await this.accountAccess.requireOperationalAccess(resolved.organization.id, true);
     const email = transfer.membership.customer.contacts.find((contact) => contact.type === "EMAIL");
     if (!email) return { accepted: true };
     const rawToken = this.security.createTransferToken();
@@ -384,6 +391,7 @@ export class TransferService {
     if (resolved.status !== "active") {
       throw new AppError("TRANSFER_NOT_FOUND", "Transfer not found.", HttpStatus.NOT_FOUND);
     }
+    await this.accountAccess.requireOperationalAccess(resolved.organization.id, true);
     const lockTarget = await this.prisma.client.membershipTransferCommand.findFirst({
       where: {
         publicTransferId: transferPublicId,
@@ -782,6 +790,8 @@ export class TransferService {
     return {
       merchant: { name: credential.membership.organization.name },
       program: { name: credential.membership.program.internalName },
+      preferredLocale:
+        credential.membership.customer.preferredLocale === "AR" ? ("ar" as const) : ("en" as const),
       maskedEmail: email?.maskedDisplayValue ?? null,
       emailConfirmationRequired: Boolean(email),
       cardStatus: "ACTIVE" as const,
@@ -872,7 +882,9 @@ export class TransferService {
         ...(command.confirmationExpiresAt ? { expiresAt: command.confirmationExpiresAt } : {}),
         actionUrl: transferActionUrl(
           this.environment.values.CUSTOMER_WEB_URL,
+          this.environment.values.MERCHANT_BASE_DOMAIN,
           merchantSlug,
+          locale,
           command.publicTransferId,
           token,
         ),

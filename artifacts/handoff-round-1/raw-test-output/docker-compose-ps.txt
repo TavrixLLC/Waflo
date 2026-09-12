@@ -1,4 +1,0 @@
-NAME               IMAGE                     COMMAND                  SERVICE    CREATED       STATUS                 PORTS
-waflo-mailpit-1    axllent/mailpit:v1.27.9   "/mailpit"               mailpit    7 hours ago   Up 7 hours (healthy)   0.0.0.0:1025->1025/tcp, [::]:1025->1025/tcp, 0.0.0.0:8025->8025/tcp, [::]:8025->8025/tcp
-waflo-postgres-1   postgres:17.6-alpine      "docker-entrypoint.s…"   postgres   7 hours ago   Up 7 hours (healthy)   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
-waflo-redis-1      redis:8.2-alpine          "docker-entrypoint.s…"   redis      7 hours ago   Up 7 hours (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp

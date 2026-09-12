@@ -1,11 +1,16 @@
 import { createHash, createSign } from "node:crypto";
+import { cardLocalePresentation, walletOpenLinkCopyForLocale } from "@waflo/contracts";
 import {
+  normalizeWalletProviderError,
+  resolveWalletLoyaltyPresentation,
   type WalletAddAction,
   type WalletInvalidateResult,
   type WalletIssueResult,
   type WalletMembershipInput,
   type WalletProgramInput,
   type WalletProgramTemplateResult,
+  type WalletPromotionalMessageInput,
+  type WalletPromotionalMessageResult,
   type WalletProvider,
   WalletProviderError,
   type WalletProviderHealth,
@@ -13,8 +18,45 @@ import {
   type WalletReconcileResult,
   type WalletUpdateReason,
   type WalletUpdateResult,
-  normalizeWalletProviderError,
 } from "@waflo/wallet-core";
+
+export const GOOGLE_WALLET_PROGRESS_ARTWORK_VERSION = "google-progress-v5";
+
+/** Input compatibility only: historical persisted values normalize to Grid. */
+type GoogleProgressLayout = "ROW" | "GRID" | "PATH" | "RING";
+
+interface GoogleProgressArtworkCompositionInput {
+  readonly goal: number;
+  readonly renderedWidth: number;
+  readonly renderedHeight: number;
+  readonly layout: GoogleProgressLayout;
+  readonly layoutConfiguration?: Readonly<{
+    columns?: number;
+    maxPerRow?: number;
+    serpentine?: boolean;
+    startAngle?: number;
+  }>;
+}
+
+/**
+ * Google renders loyalty hero artwork in a near-square 1032x812 region. The canvas may
+ * letterbox wide or tall artwork. Waflo owns the normalized Grid topology.
+ */
+export function resolveGoogleProgressArtworkComposition(
+  input: GoogleProgressArtworkCompositionInput,
+): Readonly<{
+  layout: "GRID";
+  layoutConfiguration: undefined;
+  adapted: false;
+}> {
+  // The input is deliberately ignored: obsolete persisted layout values must fail closed to Grid.
+  void input;
+  return {
+    layout: "GRID",
+    layoutConfiguration: undefined,
+    adapted: false,
+  };
+}
 
 export interface GoogleServiceAccount {
   readonly client_email: string;
@@ -44,34 +86,91 @@ export function googleLoyaltyObjectId(
   return `${issuerId}.waflo_member_v${schemaVersion}_${suffix(walletPassInstanceId)}`;
 }
 
-function translated(value: string, locale: "en" | "ar") {
+function translated(
+  value: string,
+  locale: string,
+  translatedValues: readonly { locale: string; value: string }[] = [],
+) {
+  const defaultLocale = cardLocalePresentation(locale).locale;
+  const seenLocales = new Set([defaultLocale]);
   return {
     defaultValue: {
-      language: locale === "ar" ? "ar" : "en-US",
+      language: defaultLocale,
       value,
     },
+    translatedValues: translatedValues.flatMap((translation) => {
+      const language = cardLocalePresentation(translation.locale).locale;
+      if (seenLocales.has(language) || !translation.value.trim()) return [];
+      seenLocales.add(language);
+      return [{ language, value: translation.value }];
+    }),
   };
 }
 
 export function mapGoogleLoyaltyClass(input: WalletProgramInput, classId: string) {
+  if (input.nearbyRelevance?.enabled && input.nearbyRelevance.locations.length > 10) {
+    throw new Error("Google Wallet supports at most 10 MerchantLocations per class.");
+  }
+  const defaultLocale = cardLocalePresentation(input.defaultLocale ?? input.locale).locale;
+  const localizedContent = input.localizedContent ?? [
+    {
+      locale: defaultLocale,
+      programName: input.programName,
+      description: input.description,
+      rewardSummary: input.rewardSummary,
+    },
+  ];
+  const defaultContent =
+    localizedContent.find(
+      (content) => cardLocalePresentation(content.locale).locale === defaultLocale,
+    ) ?? localizedContent[0];
+  const programName = defaultContent?.programName ?? input.programName;
   return {
     id: classId,
     issuerName: input.organizationName.slice(0, 60),
-    programName: input.programName.slice(0, 60),
+    programName: programName.slice(0, 60),
     reviewStatus: "UNDER_REVIEW",
     hexBackgroundColor: input.backgroundColor,
     ...(input.programLogoUrl
       ? {
           programLogo: {
             sourceUri: { uri: input.programLogoUrl },
-            contentDescription: translated(`${input.programName} logo`, input.locale),
+            contentDescription: translated(
+              `${programName} logo`,
+              defaultLocale,
+              localizedContent.map((content) => ({
+                locale: content.locale,
+                value: `${content.programName.slice(0, 60)} logo`,
+              })),
+            ),
           },
         }
       : {}),
-    localizedIssuerName: translated(input.organizationName.slice(0, 60), input.locale),
-    localizedProgramName: translated(input.programName.slice(0, 60), input.locale),
+    localizedIssuerName: translated(
+      input.organizationName.slice(0, 60),
+      defaultLocale,
+      localizedContent.map((content) => ({
+        locale: content.locale,
+        value: input.organizationName.slice(0, 60),
+      })),
+    ),
+    localizedProgramName: translated(
+      programName.slice(0, 60),
+      defaultLocale,
+      localizedContent.map((content) => ({
+        locale: content.locale,
+        value: content.programName.slice(0, 60),
+      })),
+    ),
+    merchantLocations: input.nearbyRelevance?.enabled
+      ? input.nearbyRelevance.locations.map((location) => ({
+          latitude: location.latitude,
+          longitude: location.longitude,
+        }))
+      : [],
+    // Reward content is personalized on the Object only for the native
+    // fallback. A class-level module would be rendered over every hero card.
     textModulesData: [
-      { id: "reward", header: "Reward", body: input.rewardSummary.slice(0, 500) },
       {
         id: "waflo",
         header: "Operator",
@@ -86,50 +185,45 @@ export function mapGoogleLoyaltyObject(
   objectId: string,
   classId: string,
 ) {
-  const inactive =
-    input.transferred ||
-    input.membershipStatus !== "ACTIVE" ||
-    input.programStatus === "ARCHIVED" ||
-    input.programStatus === "SUSPENDED";
+  const presentation = resolveWalletLoyaltyPresentation(input);
+  const heroImageUrl = input.walletArtworkUrl ?? input.publicAssetBaseUrl;
+
   return {
     id: objectId,
     classId,
-    state: inactive ? "INACTIVE" : "ACTIVE",
-    accountName: input.displayName.slice(0, 20),
-    accountId: input.publicMembershipId.slice(-20),
-    loyaltyPoints: {
-      label: "Stamps",
-      balance: { string: `${input.currentStampCount}/${input.requiredStampCount}` },
-    },
-    barcode: {
-      type: "QR_CODE",
-      value: input.credentialPayload,
-      alternateText: inactive ? "No longer valid" : input.publicMembershipId.slice(-12),
-    },
-    ...(input.publicAssetBaseUrl
+    state: presentation.inactive ? "INACTIVE" : "ACTIVE",
+    // The hero carries its own readable QR. Keep the native barcode only for
+    // the no-hero fallback so the credential remains usable there.
+    ...(!heroImageUrl
       ? {
-          imageModulesData: [
-            {
-              id: "waflo-progress",
-              mainImage: {
-                sourceUri: { uri: input.publicAssetBaseUrl },
-                contentDescription: translated("Stamp progress", input.locale),
-              },
-            },
-          ],
+          barcode: {
+            type: presentation.barcode.googleFormat,
+            value: presentation.barcode.payload,
+          },
+        }
+      : {}),
+    ...(heroImageUrl
+      ? {
+          heroImage: {
+            sourceUri: { uri: heroImageUrl },
+            contentDescription: translated(presentation.labels.stamps, input.locale),
+          },
         }
       : {}),
     textModulesData: [
+      ...(!heroImageUrl
+        ? [
+            {
+              id: "reward",
+              header: presentation.labels.reward,
+              body: presentation.rewardSummary.slice(0, 500),
+            },
+          ]
+        : []),
       {
         id: "status",
-        header: "Status",
-        body: input.transferred
-          ? "Transferred — no longer valid"
-          : input.programStatus === "PAUSED"
-            ? "Program temporarily paused"
-            : input.rewardReady
-              ? "Reward ready"
-              : "Active",
+        header: presentation.labels.status,
+        body: presentation.status,
       },
     ],
   };
@@ -232,7 +326,7 @@ export class GoogleWalletRestClient {
 
   async request<T>(
     path: string,
-    options: { method?: "GET" | "POST" | "PATCH"; body?: unknown } = {},
+    options: { method?: "GET" | "POST" | "PATCH" | "PUT"; body?: unknown } = {},
   ): Promise<{ value: T; requestId?: string }> {
     const response = await this.fetchImplementation(
       `https://walletobjects.googleapis.com/walletobjects/v1/${path.replace(/^\/+/, "")}`,
@@ -248,23 +342,29 @@ export class GoogleWalletRestClient {
     );
     const requestId = response.headers.get("x-request-id") ?? undefined;
     if (!response.ok) {
+      const safeErrorPayload = await response.text().catch(() => "");
+      const providerQuotaExceeded = /QuotaExceededException|quota.{0,30}exceed/iu.test(
+        safeErrorPayload.slice(0, 4_000),
+      );
       throw new WalletProviderError(
-        response.status === 401
-          ? "AUTHENTICATION_FAILED"
-          : response.status === 403
-            ? "PERMISSION_DENIED"
-            : response.status === 404
-              ? "NOT_FOUND"
-              : response.status === 409
-                ? "ALREADY_EXISTS"
-                : response.status === 429
-                  ? "RATE_LIMITED"
-                  : response.status >= 500
-                    ? "TEMPORARY_FAILURE"
-                    : "PERMANENT_FAILURE",
+        providerQuotaExceeded
+          ? "RATE_LIMITED"
+          : response.status === 401
+            ? "AUTHENTICATION_FAILED"
+            : response.status === 403
+              ? "PERMISSION_DENIED"
+              : response.status === 404
+                ? "NOT_FOUND"
+                : response.status === 409
+                  ? "ALREADY_EXISTS"
+                  : response.status === 429
+                    ? "RATE_LIMITED"
+                    : response.status >= 500
+                      ? "TEMPORARY_FAILURE"
+                      : "PERMANENT_FAILURE",
         "Google Wallet request failed.",
         {
-          retryable: response.status === 429 || response.status >= 500,
+          retryable: providerQuotaExceeded || response.status === 429 || response.status >= 500,
           ...(requestId ? { providerRequestId: requestId } : {}),
         },
       );
@@ -382,24 +482,43 @@ export class GoogleWalletProvider implements WalletProvider {
     };
   }
 
+  private async upsertProviderResource(
+    resourcePath: string,
+    collectionPath: string,
+    intended: unknown,
+  ): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.request(resourcePath);
+      // Use full update semantics so removed template fields (for example a retired
+      // front row) are actually cleared instead of surviving a partial patch.
+      await this.client.request(resourcePath, { method: "PUT", body: intended });
+    } catch (error) {
+      if (!(error instanceof WalletProviderError) || error.category !== "NOT_FOUND") throw error;
+      try {
+        await this.client.request(collectionPath, { method: "POST", body: intended });
+      } catch (createError) {
+        if (
+          !(createError instanceof WalletProviderError) ||
+          createError.category !== "ALREADY_EXISTS"
+        ) {
+          throw createError;
+        }
+        await this.client.request(resourcePath, { method: "PUT", body: intended });
+      }
+    }
+  }
+
   async ensureProgramTemplate(input: WalletProgramInput): Promise<WalletProgramTemplateResult> {
     const issuerId = this.requireIssuer();
     const classId = googleLoyaltyClassId(issuerId, input.programVersionId);
     const intended = mapGoogleLoyaltyClass(input, classId);
     if (this.mode === "REAL" && this.client) {
-      try {
-        await this.client.request(`loyaltyClass/${encodeURIComponent(classId)}`);
-        await this.client.request(`loyaltyClass/${encodeURIComponent(classId)}`, {
-          method: "PATCH",
-          body: intended,
-        });
-      } catch (error) {
-        if (error instanceof WalletProviderError && error.category === "NOT_FOUND") {
-          await this.client.request("loyaltyClass", { method: "POST", body: intended });
-        } else {
-          throw error;
-        }
-      }
+      await this.upsertProviderResource(
+        `loyaltyClass/${encodeURIComponent(classId)}`,
+        "loyaltyClass",
+        intended,
+      );
     }
     return {
       providerTemplateId: classId,
@@ -413,19 +532,11 @@ export class GoogleWalletProvider implements WalletProvider {
     const classId = googleLoyaltyClassId(issuerId, input.programVersionId);
     const object = mapGoogleLoyaltyObject(input, input.providerIdentity, classId);
     if (this.mode === "REAL" && this.client) {
-      try {
-        await this.client.request(`loyaltyObject/${encodeURIComponent(input.providerIdentity)}`);
-        await this.client.request(`loyaltyObject/${encodeURIComponent(input.providerIdentity)}`, {
-          method: "PATCH",
-          body: object,
-        });
-      } catch (error) {
-        if (error instanceof WalletProviderError && error.category === "NOT_FOUND") {
-          await this.client.request("loyaltyObject", { method: "POST", body: object });
-        } else {
-          throw error;
-        }
-      }
+      await this.upsertProviderResource(
+        `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
+        "loyaltyObject",
+        object,
+      );
     }
     return {
       providerObjectId: input.providerIdentity,
@@ -479,18 +590,145 @@ export class GoogleWalletProvider implements WalletProvider {
       input.providerIdentity,
       classId,
     );
+    const invalidated = inactive.barcode
+      ? { ...inactive, barcode: { ...inactive.barcode, alternateText: "No longer valid" } }
+      : inactive;
     if (this.mode === "REAL" && this.client) {
-      await this.client.request(`loyaltyObject/${encodeURIComponent(input.providerIdentity)}`, {
-        method: "PATCH",
-        body: { state: "INACTIVE", textModulesData: inactive.textModulesData },
-      });
+      await this.upsertProviderResource(
+        `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
+        "loyaltyObject",
+        invalidated,
+      );
     }
     return { state: "INACTIVE" };
   }
 
   async reconcileMembershipPass(input: WalletMembershipInput): Promise<WalletReconcileResult> {
     await this.issueMembershipPass(input);
-    return { state: "ACTIVE", changed: false };
+    // Object creation is not evidence that a customer saved the pass. Google
+    // exposes hasUsers as the supported object-level signal, so keep it as a
+    // time-stamped, safe provider-state cache for bounded audience checks.
+    if (this.mode !== "REAL" || !this.client) {
+      return {
+        state: "ACTIVE",
+        changed: false,
+        safeMetadata: {
+          mode: this.mode,
+          hasUsers: null,
+          eligibilityState: "UNKNOWN",
+          checkedAt: new Date().toISOString(),
+        },
+      };
+    }
+    const current = await this.client.request<{ hasUsers?: boolean; state?: string }>(
+      `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`,
+    );
+    const hasUsers = current.value.hasUsers;
+    return {
+      state: current.value.state === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+      changed: false,
+      ...(current.requestId ? { providerRequestId: current.requestId } : {}),
+      safeMetadata: {
+        mode: this.mode,
+        hasUsers: typeof hasUsers === "boolean" ? hasUsers : null,
+        eligibilityState:
+          hasUsers === true ? "READY" : hasUsers === false ? "NO_ACTIVE_WALLET_HOLDER" : "UNKNOWN",
+        checkedAt: new Date().toISOString(),
+        objectState: current.value.state ?? "ACTIVE",
+      },
+    };
+  }
+
+  async sendPromotionalMessage(
+    input: Pick<WalletMembershipInput, "providerIdentity">,
+    message: WalletPromotionalMessageInput,
+  ): Promise<WalletPromotionalMessageResult> {
+    this.requireIssuer();
+    const htmlEscape = (value: string) =>
+      value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    const body = message.destinationUrl
+      ? `${htmlEscape(message.body)} <a href="${htmlEscape(message.destinationUrl)}">${walletOpenLinkCopyForLocale(message.locale)}</a>`
+      : message.body;
+    const payload = {
+      message: {
+        id: message.messageId,
+        header: message.title,
+        body,
+        messageType: "TEXT_AND_NOTIFY",
+        localizedHeader: translated(message.title, message.locale),
+        localizedBody: translated(body, message.locale),
+      },
+    };
+    if (this.mode !== "REAL" || !this.client) return { state: "STORED_AND_NOTIFIED" };
+    const objectPath = `loyaltyObject/${encodeURIComponent(input.providerIdentity)}`;
+    const current = await this.client.request<{ hasUsers?: boolean; messages?: unknown[] }>(
+      objectPath,
+    );
+    if (current.value.hasUsers === false) {
+      return {
+        state: "NO_ACTIVE_WALLET_HOLDER",
+        ...(current.requestId ? { providerRequestId: current.requestId } : {}),
+      };
+    }
+    if (current.value.hasUsers !== true) {
+      throw new WalletProviderError(
+        "TEMPORARY_FAILURE",
+        "Google Wallet did not return authoritative saved-pass state.",
+        { retryable: true, ...(current.requestId ? { providerRequestId: current.requestId } : {}) },
+      );
+    }
+    const storedMessages = Array.isArray(current.value.messages) ? current.value.messages : [];
+    const messageId = (value: unknown) => {
+      if (!value || typeof value !== "object" || !("id" in value)) return null;
+      return typeof value.id === "string" ? value.id : null;
+    };
+    if (storedMessages.some((stored) => messageId(stored) === message.messageId)) {
+      return {
+        state: "STORED_AND_NOTIFIED",
+        ...(current.requestId ? { providerRequestId: current.requestId } : {}),
+      };
+    }
+    if (storedMessages.length >= 10) {
+      const explicitlyObsolete = new Set(
+        (message.obsoleteMessageIds ?? []).filter((id) => id.startsWith("wfl_")),
+      );
+      const removableIds = storedMessages
+        .map(messageId)
+        .filter((id): id is string => Boolean(id && explicitlyObsolete.has(id)))
+        .sort((left, right) => left.localeCompare(right, "en"));
+      const removalCount = storedMessages.length - 9;
+      if (removableIds.length < removalCount) {
+        throw new WalletProviderError(
+          "MESSAGE_CAPACITY_REACHED",
+          "The Google Wallet pass has no safely removable message capacity.",
+          { retryable: false },
+        );
+      }
+      if (removalCount > 0) {
+        const selectedRemovalIds = new Set(removableIds.slice(0, removalCount));
+        await this.client.request(objectPath, {
+          method: "PATCH",
+          body: {
+            messages: storedMessages.filter(
+              (stored) => !selectedRemovalIds.has(messageId(stored) ?? ""),
+            ),
+          },
+        });
+      }
+    }
+    const result = await this.client.request(`${objectPath}/addMessage`, {
+      method: "POST",
+      body: payload,
+    });
+    return {
+      state: "STORED_AND_NOTIFIED",
+      ...(result.requestId ? { providerRequestId: result.requestId } : {}),
+    };
   }
 
   private requireIssuer(): string {

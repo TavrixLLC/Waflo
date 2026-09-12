@@ -7,18 +7,26 @@ import {
   builderReadiness,
   builderReadinessWithValidation,
   builderSections,
+  cardLocaleCompleteness,
   createBuilderDraft,
   isNeutralBuilderDraft,
   languageCompleteness,
+  shouldLoadBuilderPreview,
   shouldScheduleBuilderAutosave,
   updateBuilderRewardCopy,
   updateBuilderStampGoal,
 } from "../../apps/merchant-dashboard/components/program-card-builder-state.js";
+import {
+  optimisticProgramPreviewSvg,
+  walletPreviewQrOverlay,
+  walletPreviewQrRows,
+} from "../../apps/merchant-dashboard/components/program-preview-optimistic.js";
 import type {
   LocationItem,
   TemplateItem,
 } from "../../apps/merchant-dashboard/components/program-studio-types.js";
 import { latestProgramTemplates } from "../../packages/contracts/src/index.js";
+import { createQrPreviewMarkup } from "../../packages/qr-core/src/index.js";
 
 function template(code: string): TemplateItem {
   const match = latestProgramTemplates().find((item) => item.code === code);
@@ -34,9 +42,9 @@ const locations: LocationItem[] = [
 describe("merchant loyalty-card Builder state", () => {
   it("collapses the seven-page wizard into six merchant-intent sections", () => {
     expect(builderSections).toEqual([
+      "languages",
       "basics",
       "reward",
-      "languages",
       "locations",
       "appearance",
       "review",
@@ -55,6 +63,7 @@ describe("merchant loyalty-card Builder state", () => {
     expect(draft.editingMode).toBe("quick");
     expect(draft.requiredStampCount).toBe(coffee.recommendedStampGoal);
     expect(draft.internalName).toBe(coffee.name);
+    expect(draft.translations.en.earningDescription).toBe(coffee.earningDescription);
     expect(draft.locationIds).toEqual([locations[0]?.id]);
     expect(draft.rewards).toHaveLength(1);
     expect(builderReadiness(draft)).toEqual({
@@ -137,6 +146,25 @@ describe("merchant loyalty-card Builder state", () => {
         en: { name: "Free signature drink", description: "Free signature drink" },
       },
     });
+    const missingMilestoneCopy = {
+      ...copyChanged,
+      rewards: copyChanged.rewards.map((reward) =>
+        reward.clientId === "milestone"
+          ? {
+              ...reward,
+              translations: {
+                ...reward.translations,
+                en: { name: "", description: "" },
+              },
+            }
+          : reward,
+      ),
+    };
+    expect(cardLocaleCompleteness(missingMilestoneCopy, "en")).toMatchObject({
+      complete: false,
+      missing: 2,
+      missingFields: ["rewards.1.name", "rewards.1.description"],
+    });
   });
 
   it("reports truthful English and Arabic completeness", () => {
@@ -182,14 +210,82 @@ describe("merchant loyalty-card Builder state", () => {
     });
   });
 
-  it("debounces autosave, requires explicit retry after failure, and keys previews by revision", () => {
+  it("debounces autosave, requires explicit retry after failure, and keys previews by state", () => {
+    const draft = createBuilderDraft(template("COFFEE"), locations, { locale: "en" });
     expect(BUILDER_AUTOSAVE_DELAY_MS).toBeGreaterThanOrEqual(800);
-    expect(BUILDER_PREVIEW_DELAY_MS).toBeGreaterThanOrEqual(250);
+    expect(BUILDER_PREVIEW_DELAY_MS).toBeLessThanOrEqual(150);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "saved")).toBe(true);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "saving")).toBe(false);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "failed")).toBe(false);
     expect(shouldScheduleBuilderAutosave("changed", "saved", "conflict")).toBe(false);
     expect(shouldScheduleBuilderAutosave("same", "same", "saved")).toBe(false);
-    expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4)).toBe("7:APPLE_WALLET:AR:4");
+    expect(shouldLoadBuilderPreview(null, "saved")).toBe(false);
+    expect(shouldLoadBuilderPreview(draft, "unsaved")).toBe(false);
+    expect(shouldLoadBuilderPreview(draft, "saved")).toBe(true);
+    expect(builderPreviewCacheKey(7, "APPLE_WALLET", "AR", 4, 2)).toBe("7:APPLE_WALLET:AR:4:2");
+  });
+
+  it("keeps the authoritative provider SVG intact until the canonical preview refreshes", () => {
+    const source = createBuilderDraft(template("COFFEE"), locations, { locale: "en" });
+    const next = updateBuilderRewardCopy(
+      {
+        ...source,
+        visualTheme: {
+          ...source.visualTheme,
+          backgroundColor: "#101820",
+          foregroundColor: "#F8F5EE",
+          accentColor: "#D99032",
+        },
+      },
+      "en",
+      "A free signature drink",
+    );
+    const nested = `<svg fill="${source.visualTheme.backgroundColor}"><text>${source.translations.en.rewardSummary}</text></svg>`;
+    const svg = `<svg data-provider-owned-layout="true" fill="${source.visualTheme.backgroundColor}"><text>${source.translations.en.programName}</text><image href="data:image/svg+xml;base64,${Buffer.from(nested).toString("base64")}"/></svg>`;
+
+    const optimistic = optimisticProgramPreviewSvg({
+      svg,
+      sourceDraft: source,
+      draft: next,
+      locale: "en",
+    });
+
+    expect(optimistic).toBe(svg);
+    expect(optimistic).toContain('data-provider-owned-layout="true"');
+    expect(optimistic).toContain(source.visualTheme.backgroundColor);
+    expect(optimistic).not.toContain(next.visualTheme.backgroundColor);
+  });
+
+  it("keeps the fast Wallet canvas QR aligned with the authoritative preview QR", () => {
+    const preview = createQrPreviewMarkup("waflo-wallet-preview-only");
+    expect(preview.viewSize).toBe(37);
+    expect(walletPreviewQrRows).toHaveLength(29);
+    walletPreviewQrRows.forEach((hex, row) => {
+      const bits = BigInt(`0x${hex}`);
+      const runs: string[] = [];
+      let column = 0;
+      while (column < 29) {
+        if (((bits >> BigInt(28 - column)) & 1n) === 0n) {
+          column += 1;
+          continue;
+        }
+        const start = column;
+        while (column < 29 && ((bits >> BigInt(28 - column)) & 1n) === 1n) column += 1;
+        runs.push(`M${start + 4} ${row + 4}h${column - start}v1h-${column - start}z`);
+      }
+      expect(preview.markup).toContain(`<path d="${runs.join("")}"/>`);
+    });
+    expect(walletPreviewQrOverlay("APPLE_WALLET")).toEqual({
+      left: "32.1739%",
+      top: "62.8571%",
+      width: "35.6522%",
+      height: "23.4286%",
+    });
+    expect(walletPreviewQrOverlay("GOOGLE_WALLET")).toEqual({
+      left: "32.1739%",
+      top: "68.5%",
+      width: "35.6522%",
+      height: "20.5%",
+    });
   });
 });

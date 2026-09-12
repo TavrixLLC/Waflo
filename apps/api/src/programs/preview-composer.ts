@@ -1,27 +1,47 @@
 import { createHash } from "node:crypto";
-import { programPlatformCapabilities, type ProgramTemplatePresentation } from "@waflo/contracts";
+import {
+  cardLocalePresentation,
+  type ProgramTemplatePresentation,
+  walletStructuralCopyForLocale,
+} from "@waflo/contracts";
+import { createQrPreviewMarkup } from "@waflo/qr-core";
 import type { StampOutputProfile } from "@waflo/stamp-engine";
+import {
+  dashboardWalletPreviewTextLines,
+  renderDashboardWalletPreviewShell,
+} from "@waflo/wallet-artwork/dashboard-preview";
+import type { DashboardWalletArtwork } from "./wallet-preview-artwork.js";
 
 export interface ProgramPreviewCompositionInput {
   profile: StampOutputProfile;
-  locale: "EN" | "AR";
+  locale: string;
   organizationName: string;
   programName: string;
+  /** Representative legacy Apple field value; production passes use the member record. */
+  memberName?: string;
+  /** Representative legacy Apple field value; production passes use canonical membership status. */
+  status?: string;
   shortDescription: string;
   rewardSummary: string;
   terms: string;
   progress: number;
   goal: number;
   stampSvg: string;
-  stampLayout?: "ROW" | "GRID" | "PATH" | "RING";
+  /** The dashboard exposes only Grid; legacy values are normalized upstream. */
+  stampLayout?: "GRID";
+  appleWalletVariant?: "LEGACY" | "POSTER";
   backgroundColor: string;
   foregroundColor: string;
   accentColor: string;
   secondaryColor: string;
+  /** Organization brand fallback used when a program-specific logo is absent. */
+  merchantBrandLogoDataUri?: string;
   logoDataUri?: string;
   identityDataUri?: string;
   heroDataUri?: string;
   backgroundDataUri?: string;
+  /** PNG output from the production Wallet compositor, supplied by the preview service. */
+  walletArtwork?: DashboardWalletArtwork;
   customerWebVariant: "CARD" | "MINIMAL" | "HERO";
   presentation?: ProgramTemplatePresentation;
   apple: {
@@ -61,14 +81,46 @@ function escapeXml(value: string): string {
   );
 }
 
+/** SVG text needs local bidi isolation; SVG does not inherit DOM `<bdi>` semantics. */
+function localizedTextAttributes(locale: string): string {
+  const presentation = cardLocalePresentation(locale);
+  return `direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}"`;
+}
+
+function progressTextAttributes(): string {
+  // Preserve numerator/denominator order inside an RTL surrounding context.
+  return 'direction="ltr" unicode-bidi="plaintext" xml:lang="en"';
+}
+
+function graphemeSegments(value: string): string[] {
+  return Array.from(
+    new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value),
+    ({ segment }) => segment,
+  );
+}
+
 function truncate(value: string, limit: number): string {
-  return value.length > limit ? `${value.slice(0, Math.max(1, limit - 1))}…` : value;
+  const graphemes = graphemeSegments(value);
+  return graphemes.length > limit
+    ? `${graphemes.slice(0, Math.max(1, limit - 1)).join("")}\u2026`
+    : value;
 }
 
 function safeDataImage(value: string | undefined): string {
   return value && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/i.test(value)
     ? escapeXml(value)
     : "";
+}
+
+function googleWalletSurfaceColor(hex: string): string {
+  const match = /^#([0-9a-f]{6})$/iu.exec(hex);
+  if (!match?.[1]) return hex;
+  const color = match[1];
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16));
+  const [red = 0, green = 0, blue = 0] = channels;
+  return `#${[red, green + 1, blue + 2]
+    .map((channel) => Math.min(255, Math.max(0, channel)).toString(16).padStart(2, "0"))
+    .join("")}`;
 }
 
 function imageTag(
@@ -78,25 +130,109 @@ function imageTag(
   width: number,
   height: number,
   radius = 12,
+  fit: "slice" | "meet" | "none" = "slice",
+  attributes = "",
 ): string {
   const href = safeDataImage(value);
   if (!href) return "";
   const clipId = `clip-${x}-${y}-${width}-${height}`;
-  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})"/>`;
+  const preserveAspectRatio = fit === "none" ? "none" : `xMidYMid ${fit}`;
+  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}"/></clipPath></defs><image ${attributes} href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="${preserveAspectRatio}" clip-path="url(#${clipId})"/>`;
 }
 
-function barcode(x: number, y: number, width: number, height: number): string {
-  const bars = Array.from({ length: 27 }, (_, index) => {
-    const barWidth = index % 4 === 0 ? 4 : index % 3 === 0 ? 3 : 2;
-    const offset = (index * width) / 28;
-    return `<rect x="${x + offset}" y="${y}" width="${barWidth}" height="${height}" fill="#111827"/>`;
-  }).join("");
-  return `<g aria-label="Barcode placeholder">${bars}</g>`;
+function wafloIssuerMark(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  fill = "#E4572E",
+): string {
+  const scale = Math.min(width, height) / 26;
+  const insetX = x + (width - 26 * scale) / 2;
+  const insetY = y + (height - 26 * scale) / 2;
+  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="${fill}"/><path d="M${insetX + 5.5 * scale} ${insetY + 6 * scale}l4.5 ${13 * scale} 3.6 ${-6.5 * scale} 3.6 ${6.5 * scale} 4.5 ${-13 * scale}" fill="none" stroke="#fff" stroke-width="${2.3 * scale}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function issuerBrandMark(
+  value: string | undefined,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  fallbackColor = "#E4572E",
+): string {
+  return value
+    ? imageTag(value, x, y, width, height, radius, "meet")
+    : wafloIssuerMark(x, y, width, height, radius, fallbackColor);
+}
+
+/**
+ * Google Wallet presents a supplied mark on a small white native logo plate.
+ * Keep this treatment outside the production hero: the class logo remains the
+ * semantic source, while the plate belongs to the Android card frame.
+ */
+function googleIssuerBrandMark(
+  value: string | undefined,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): string {
+  const radius = Math.min(width, height) / 2;
+  const inset = Math.max(2, radius * 0.22);
+  const clipId = `google-issuer-clip-${x}-${y}-${width}-${height}`;
+  const href = safeDataImage(value);
+  const content = href
+    ? `<image href="${href}" x="${x + inset}" y="${y + inset}" width="${width - inset * 2}" height="${height - inset * 2}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${clipId})"/>`
+    : wafloIssuerMark(
+        x + inset,
+        y + inset,
+        width - inset * 2,
+        height - inset * 2,
+        Math.max(2, radius * 0.18),
+        "#E4572E",
+      );
+  return `<defs><clipPath id="${clipId}"><circle cx="${x + width / 2}" cy="${y + height / 2}" r="${radius - inset}"/></clipPath></defs><circle cx="${x + width / 2}" cy="${y + height / 2}" r="${radius}" fill="#FFFFFF"/>${content}`;
+}
+
+function qrCode(x: number, y: number, size: number): string {
+  const previewQr = createQrPreviewMarkup("waflo-wallet-preview-only", {
+    errorCorrectionLevel: "Q",
+  });
+  const scale = size / previewQr.viewSize;
+  return `<g aria-label="QR code preview" transform="translate(${x} ${y}) scale(${scale})" shape-rendering="crispEdges">${previewQr.markup}</g>`;
 }
 
 function stampImage(stampSvg: string, x: number, y: number, width: number, height: number): string {
   const href = `data:image/svg+xml;base64,${Buffer.from(stampSvg, "utf8").toString("base64")}`;
-  return `<image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/>`;
+  const clipId = `stamp-clip-${x}-${y}-${width}-${height}`;
+  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${width}" height="${height}"/></clipPath></defs><image href="${href}" x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${clipId})"/>`;
+}
+
+function productionArtworkImage(
+  artwork: DashboardWalletArtwork | undefined,
+  target: DashboardWalletArtwork["target"],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  fit: "meet" | "none" = "meet",
+): string {
+  return artwork?.target === target
+    ? imageTag(
+        artwork.dataUri,
+        x,
+        y,
+        width,
+        height,
+        radius,
+        fit,
+        `data-production-wallet-artwork="${target}"`,
+      )
+    : "";
 }
 
 function composeLegacyCustomer(
@@ -104,11 +240,23 @@ function composeLegacyCustomer(
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 820;
   const height = input.customerWebVariant === "HERO" ? 600 : 560;
-  const direction = input.locale === "AR" ? "rtl" : "ltr";
+  const locale = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(locale.locale);
+  const rtl = locale.isRtl;
+  const direction = locale.direction;
+  const textAttributes = localizedTextAttributes(locale.locale);
   const anchor = "start";
-  const textX = input.locale === "AR" ? width - 74 : 74;
-  const motifX = input.locale === "AR" ? 62 : width - 158;
-  const brandArtwork = input.logoDataUri ?? input.identityDataUri;
+  const issuerSize = 40;
+  const issuerX = rtl ? width - 74 - issuerSize : 74;
+  const textX = rtl ? issuerX - 14 : issuerX + issuerSize + 14;
+  const motifX = rtl ? 62 : width - 158;
+  const issuerLogo = input.logoDataUri ?? input.merchantBrandLogoDataUri;
+  const issuerBrand = input.logoDataUri
+    ? "program"
+    : input.merchantBrandLogoDataUri
+      ? "organization"
+      : "default";
+  const brandArtwork = input.identityDataUri;
   const warnings: ProgramPreviewComposition["warnings"] = [];
   if (input.terms.length > 180)
     warnings.push({
@@ -122,29 +270,30 @@ function composeLegacyCustomer(
     ? `<rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" opacity=".84"/>`
     : "";
   const title = (y: number, size: number) =>
-    `<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${size}" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 48))}</text>`;
+    `<text ${textAttributes} x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${escapeXml(locale.fontStack)}" font-size="${size}" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 48))}</text>`;
   const description = (y: number) =>
-    `<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" fill="${input.foregroundColor}" opacity=".72">${escapeXml(truncate(input.shortDescription, 76))}</text>`;
+    `<text ${textAttributes} x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${escapeXml(locale.fontStack)}" font-size="16" fill="${input.foregroundColor}" opacity=".72">${escapeXml(truncate(input.shortDescription, 76))}</text>`;
   const reward = (y: number, boxed = true) =>
-    `${boxed ? `<rect x="58" y="${y - 27}" width="${width - 116}" height="68" rx="16" fill="${input.accentColor}" opacity=".12"/>` : `<path d="M58 ${y - 24}H762" stroke="${input.foregroundColor}" stroke-width="2" opacity=".14"/>`}<text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="13" font-weight="700" fill="${input.accentColor}">${input.locale === "AR" ? "المكافأة التالية" : "NEXT REWARD"}</text><text x="${textX}" y="${y + 24}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="17" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, 68))}</text>`;
-  const terms = `<text x="${textX}" y="${height - 38}" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" fill="${input.foregroundColor}" opacity=".58">${escapeXml(truncate(input.terms, 106))}</text>`;
+    `${boxed ? `<rect x="58" y="${y - 27}" width="${width - 116}" height="68" rx="16" fill="${input.accentColor}" opacity=".12"/>` : `<path d="M58 ${y - 24}H762" stroke="${input.foregroundColor}" stroke-width="2" opacity=".14"/>`}<text ${textAttributes} x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${escapeXml(locale.fontStack)}" font-size="13" font-weight="700" fill="${input.accentColor}">${copy.nextReward}</text><text ${textAttributes} x="${textX}" y="${y + 24}" text-anchor="${anchor}" font-family="${escapeXml(locale.fontStack)}" font-size="17" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, 68))}</text>`;
+  const terms = `<text ${textAttributes} x="${textX}" y="${height - 38}" text-anchor="${anchor}" font-family="${escapeXml(locale.fontStack)}" font-size="12" fill="${input.foregroundColor}" opacity=".58">${escapeXml(truncate(input.terms, 106))}</text>`;
   const motif = (x: number, y: number, size: number, opacity = 1) =>
     brandArtwork
       ? `<g opacity="${opacity}"><circle cx="${x + size / 2}" cy="${y + size / 2}" r="${size / 2}" fill="${input.secondaryColor}" opacity=".22"/>${imageTag(brandArtwork, x + 10, y + 10, size - 20, size - 20, size / 4)}</g>`
       : "";
+  const issuer = `<g data-issuer-brand="${issuerBrand}">${issuerBrandMark(issuerLogo, issuerX, 54, issuerSize, issuerSize, 11)}</g>`;
 
   let surface = "";
   if (input.customerWebVariant === "HERO") {
     const heroArtwork = imageTag(input.heroDataUri, 42, 42, width - 84, 160, 24);
     surface = `${heroArtwork}<rect x="42" y="42" width="${width - 84}" height="160" rx="24" fill="${input.accentColor}" opacity="${input.heroDataUri ? ".32" : ".14"}"/>${motif(motifX, 54, 132)}${title(103, 32)}${description(136)}${stampImage(input.stampSvg, 60, 218, width - 120, 178)}${reward(446)}${terms}`;
   } else if (input.customerWebVariant === "MINIMAL") {
-    const railX = input.locale === "AR" ? width - 36 : 24;
+    const railX = rtl ? width - 36 : 24;
     surface = `<rect x="${railX}" y="20" width="12" height="${height - 40}" rx="6" fill="${input.accentColor}"/>${motif(motifX, 42, 142, 0.22)}${title(94, 29)}${description(126)}${stampImage(input.stampSvg, 60, 160, width - 120, 184)}${reward(402, false)}${terms}`;
   } else {
     surface = `${motif(motifX, 46, 112)}${title(96, 30)}${description(128)}${stampImage(input.stampSvg, 60, 158, width - 120, 184)}${reward(400)}${terms}`;
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}"><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}${surface}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="${issuerBrand}"><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="24" y="20" width="${width - 48}" height="${height - 40}" rx="30" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}${issuer}${surface}</svg>`;
   return { svg, width, height, warnings };
 }
 
@@ -156,9 +305,13 @@ function composeCustomer(
   const presentation = input.presentation;
   const width = 820;
   const height = 580;
-  const rtl = input.locale === "AR";
-  const direction = rtl ? "rtl" : "ltr";
-  const font = "Arial,Noto Sans Arabic,sans-serif";
+  const locale = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(locale.locale);
+  const rtl = locale.isRtl;
+  const direction = locale.direction;
+  const textAttributes = localizedTextAttributes(locale.locale);
+  const font = locale.fontStack;
+  const fontAttribute = escapeXml(font);
   const card = { x: 24, y: 20, width: 772, height: 540 };
   const cornerRadius =
     presentation.cornerTreatment === "ROUND"
@@ -168,7 +321,13 @@ function composeCustomer(
         : 16;
   const logicalRectX = (x: number, rectWidth: number) => (rtl ? width - x - rectWidth : x);
   const logicalTextX = (x: number) => (rtl ? width - x : x);
-  const brandArtwork = input.logoDataUri ?? input.identityDataUri;
+  const issuerLogo = input.logoDataUri ?? input.merchantBrandLogoDataUri;
+  const issuerBrand = input.logoDataUri
+    ? "program"
+    : input.merchantBrandLogoDataUri
+      ? "organization"
+      : "default";
+  const brandArtwork = input.identityDataUri;
   const warnings: ProgramPreviewComposition["warnings"] = [];
   if (input.terms.length > 180)
     warnings.push({
@@ -193,7 +352,7 @@ function composeCustomer(
       (input.programName.length > 25 ? 4 : 0) -
       (input.programName.length > 34 ? 3 : 0),
   );
-  const rewardLabel = rtl ? "المكافأة التالية" : "NEXT REWARD";
+  const rewardLabel = copy.nextReward;
 
   const headerBlock = (
     x: number,
@@ -201,12 +360,15 @@ function composeCustomer(
     options: { centered?: boolean; descriptionWidth?: number; compact?: boolean } = {},
   ) => {
     const centered = options.centered ?? false;
-    const textX = centered ? width / 2 : logicalTextX(x);
+    const issuerSize = 40;
+    const textX = centered ? width / 2 : logicalTextX(x + issuerSize + 14);
     const anchor = centered ? "middle" : "start";
     const localTitleSize = options.compact ? Math.max(22, titleSize - 4) : titleSize;
     const descriptionLimit =
       options.descriptionWidth && options.descriptionWidth < 360 ? (rtl ? 30 : 42) : rtl ? 52 : 68;
-    return `<g data-preview-block="header" data-title-treatment="${presentation.titleTreatment}"><text x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${font}" font-size="${localTitleSize}" font-weight="800" letter-spacing="${presentation.titleTreatment === "EDITORIAL" ? "-.5" : "0"}" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 46))}</text><text x="${textX}" y="${y + 32}" text-anchor="${anchor}" font-family="${font}" font-size="${options.compact ? 13 : 15}" fill="${input.foregroundColor}" opacity=".7">${escapeXml(truncate(input.shortDescription, descriptionLimit))}</text></g>`;
+    const issuerX = centered ? width / 2 - issuerSize / 2 : logicalRectX(x, issuerSize);
+    const issuerY = centered ? y - 66 : y - 35;
+    return `<g data-preview-block="header" data-title-treatment="${presentation.titleTreatment}" data-issuer-brand="${issuerBrand}">${issuerBrandMark(issuerLogo, issuerX, issuerY, issuerSize, issuerSize, 11)}<text ${textAttributes} x="${textX}" y="${y}" text-anchor="${anchor}" font-family="${fontAttribute}" font-size="${localTitleSize}" font-weight="800" letter-spacing="${presentation.titleTreatment === "EDITORIAL" ? "-.5" : "0"}" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 46))}</text><text ${textAttributes} x="${textX}" y="${y + 32}" text-anchor="${anchor}" font-family="${fontAttribute}" font-size="${options.compact ? 13 : 15}" fill="${input.foregroundColor}" opacity=".7">${escapeXml(truncate(input.shortDescription, descriptionLimit))}</text></g>`;
   };
 
   const motif = () => {
@@ -269,11 +431,11 @@ function composeCustomer(
               ? `<path d="M${actualX} ${y}H${actualX + blockWidth}" stroke="${input.accentColor}" stroke-width="3"/>`
               : `<path d="M${rtl ? actualX + blockWidth - 34 : actualX} ${y + blockHeight / 2}H${rtl ? actualX + blockWidth : actualX + 34}" stroke="${input.accentColor}" stroke-width="5" stroke-linecap="round"/>`;
     const labelY = treatment === "RULE" ? y + 26 : y + 27;
-    return `<g data-preview-block="reward" data-reward-treatment="${treatment}">${shape}<text x="${textX}" y="${labelY}" text-anchor="start" font-family="${font}" font-size="11" font-weight="800" letter-spacing=".35" fill="${input.accentColor}">${rewardLabel}</text><text x="${textX}" y="${labelY + 25}" text-anchor="start" font-family="${font}" font-size="${blockWidth < 230 ? 14 : 16}" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, summaryLimit))}</text></g>`;
+    return `<g data-preview-block="reward" data-reward-treatment="${treatment}">${shape}<text ${textAttributes} x="${textX}" y="${labelY}" text-anchor="start" font-family="${fontAttribute}" font-size="11" font-weight="800" letter-spacing=".35" fill="${input.accentColor}">${rewardLabel}</text><text ${textAttributes} x="${textX}" y="${labelY + 25}" text-anchor="start" font-family="${fontAttribute}" font-size="${blockWidth < 230 ? 14 : 16}" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.rewardSummary, summaryLimit))}</text></g>`;
   };
 
   const footer = (x = 64) =>
-    `<g data-preview-block="footer"><text x="${logicalTextX(x)}" y="538" text-anchor="start" font-family="${font}" font-size="11" fill="${input.foregroundColor}" opacity=".54">${escapeXml(truncate(input.terms, 100))}</text></g>`;
+    `<g data-preview-block="footer"><text ${textAttributes} x="${logicalTextX(x)}" y="538" text-anchor="start" font-family="${fontAttribute}" font-size="11" fill="${input.foregroundColor}" opacity=".54">${escapeXml(truncate(input.terms, 100))}</text></g>`;
 
   const backgroundArtwork = imageTag(
     input.backgroundDataUri,
@@ -322,143 +484,189 @@ function composeCustomer(
     surface = `${motif()}${headerBlock(410, 84, { centered: true, descriptionWidth: 600 })}${stampBlock(126, 178, 568, 230)}${rewardBlock(156, 432, 508, 72)}${footer(64)}`;
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}" data-composition="${presentation.composition}" data-visual-role="${presentation.visualRole}" data-density="${presentation.density}"><defs><clipPath id="customer-card-clip"><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}"/></clipPath></defs><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}<g clip-path="url(#customer-card-clip)">${surface}</g></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Customer Web preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${direction}" data-progress="${input.progress}" data-goal="${input.goal}" data-composition="${presentation.composition}" data-visual-role="${presentation.visualRole}" data-density="${presentation.density}"><defs><clipPath id="customer-card-clip"><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}"/></clipPath></defs><rect width="100%" height="100%" fill="#ECEFF3"/><rect x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}" rx="${cornerRadius}" fill="${input.backgroundColor}" stroke="#D9DDE3" stroke-width="2"/>${backgroundArtwork}${backgroundOverlay}<g clip-path="url(#customer-card-clip)">${surface}</g></svg>`;
   return { svg, width, height, warnings };
 }
 
-function composeApple(
+function _composeAppleLegacyWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 690;
-  const rtl = input.locale === "AR";
-  const direction = rtl ? "rtl" : "ltr";
-  const anchor = "start";
-  const contentX = rtl ? 412 : 48;
-  const headerX = rtl ? 48 : 412;
-  const headerAnchor = rtl ? "start" : "end";
-  const previewBadgeX = rtl ? 24 : 316;
-  const previewBadgeCenter = previewBadgeX + 60;
-  const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
-  const stampsLabel = rtl ? "الأختام" : "STAMPS";
-  const memberLabel = rtl ? "العضو" : "MEMBER";
-  const memberValue = rtl ? "عميل تجريبي" : "Demo customer";
-  const statusLabel = rtl ? "الحالة" : "STATUS";
-  const statusValue =
-    input.progress >= input.goal
-      ? rtl
-        ? "المكافأة جاهزة"
-        : "Reward ready"
-      : rtl
-        ? "نشطة"
-        : "Active";
-  const backRewardLabel = rtl ? "خلف البطاقة · المكافأة" : "BACK OF PASS · REWARD";
-  const barcodeLabel = rtl
-    ? "رمز العضوية بعد حفظ العميل للبطاقة"
-    : "Membership QR after the customer saves the card";
-  const warnings: ProgramPreviewComposition["warnings"] = [];
-  if (input.programName.length > 32 || input.rewardSummary.length > 64)
-    warnings.push({
-      code: "APPLE_TEXT_LIMIT",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: "Some fields may truncate in an actual Apple Wallet pass.",
-    });
-  if (input.backgroundDataUri)
-    warnings.push({
-      code: "APPLE_BACKGROUND_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: programPlatformCapabilities.APPLE_WALLET.backgroundArtwork.explanation,
-    });
-  if (input.heroDataUri)
-    warnings.push({
-      code: "APPLE_HERO_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: programPlatformCapabilities.APPLE_WALLET.heroArtwork.explanation,
-    });
-  if (input.logoDataUri)
-    warnings.push({
-      code: "APPLE_CUSTOM_LOGO_NOT_MAPPED",
-      severity: "warning",
-      platform: "APPLE_WALLET",
-      message: programPlatformCapabilities.APPLE_WALLET.logo.explanation,
-    });
-  const markX = rtl ? 386 : 48;
-  const organizationX = rtl ? 376 : 84;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Wallet preview only" direction="${direction}" data-wallet-provider="APPLE" data-progress="${input.progress}" data-goal="${input.goal}" data-back-reward="${escapeXml(input.rewardSummary)}"><rect width="100%" height="100%" fill="#F1F3F6"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#111827"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="580" rx="34" fill="${input.backgroundColor}" stroke="#C9CED6" stroke-width="2"/><rect x="${markX}" y="66" width="26" height="26" rx="7" fill="#E4572E"/><path d="M${markX + 6} 74l4 12 4-7 4 7 4-12" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><text x="${organizationX}" y="85" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" font-weight="700" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 30))}</text><text x="${headerX}" y="72" text-anchor="${headerAnchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".66">${stampsLabel}</text><text x="${headerX}" y="96" text-anchor="${headerAnchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="800" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text><text x="${contentX}" y="154" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="29" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 34))}</text><text x="${contentX}" y="188" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${memberLabel}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${memberValue}</text><text x="${rtl ? 48 : 412}" y="188" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="700" fill="${input.foregroundColor}" opacity=".62">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="${input.foregroundColor}">${statusValue}</text>${stampImage(input.stampSvg, 42, 232, 376, 170)}<rect x="48" y="424" width="364" height="130" rx="18" fill="#FFFFFF" opacity=".82"/>${barcode(104, 446, 252, 58)}<text x="230" y="532" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" fill="#374151">${barcodeLabel}</text><text x="230" y="650" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${backRewardLabel}</text><text x="230" y="673" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="14" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 48))}</text></svg>`;
-  return { svg, width, height, warnings };
+  const height = 621;
+  const locale = cardLocalePresentation(input.locale);
+  const copy = walletStructuralCopyForLocale(locale.locale);
+  const rtl = locale.isRtl;
+  const textAttributes = localizedTextAttributes(locale.locale);
+  const appleFont = "-apple-system,BlinkMacSystemFont,Arial,sans-serif";
+  const textX = rtl ? 420 : 40;
+  const identityX = rtl ? 374 : 86;
+  // Apple places its native header opposite the identity group.  Keep its
+  // label and the isolated LTR progress run on the clear physical side, with
+  // their anchors chosen independently for their actual text directions.
+  const countX = rtl ? 40 : 420;
+  const progressX = countX;
+  const progressAnchor = rtl ? "start" : "end";
+  const markX = rtl ? 382 : 38;
+  const rewardLines = dashboardWalletPreviewTextLines(
+    input.rewardSummary,
+    rtl ? 32 : 42,
+    2,
+    locale.locale,
+  );
+  const strip = productionArtworkImage(
+    input.walletArtwork,
+    "APPLE_STORE_CARD_STRIP",
+    24,
+    87,
+    412,
+    158.41509433962264,
+    0,
+    // The 375 x 123 production strip fills Apple's native strip field.
+    "none",
+  );
+  const nativeQr = { x: 151, y: 425, size: 159 };
+  const issuerBrand = input.logoDataUri ? "program" : "organization";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple legacy Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="LEGACY" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="legacy-production-strip" data-provider-managed-layout="true" data-provider-owned-geometry="true" data-apple-strip-aspect="375:123"><rect width="100%" height="100%" fill="#15171B"/><rect data-apple-front-surface="true" x="24" y="20" width="412" height="581" rx="16" fill="${input.backgroundColor}"/><g data-apple-identity="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, markX, 31, 40, 40, 10, "#D2603C")}<text ${textAttributes} x="${identityX}" y="57" text-anchor="start" font-family="${appleFont}" font-size="17" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 48))}</text></g><g data-apple-header-field="stamps"><text ${textAttributes} x="${countX}" y="41" text-anchor="end" font-family="${appleFont}" font-size="11" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.stamps}</text><text ${progressTextAttributes()} x="${progressX}" y="63" text-anchor="${progressAnchor}" font-family="${appleFont}" font-size="19" font-weight="760" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g><g data-apple-progress-strip="true" data-apple-progress-artwork="production-compositor">${strip}</g><g data-apple-secondary-field="reward"><text ${textAttributes} x="${textX}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.reward}</text>${rewardLines.map((line, index) => `<text ${textAttributes} x="${textX}" y="${289 + index * 22}" text-anchor="start" font-family="${appleFont}" font-size="${index === 0 ? 18 : 16}" font-weight="720" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g><g data-apple-barcode-region="provider-managed" data-apple-barcode-source="qr-core"><rect x="${nativeQr.x}" y="${nativeQr.y}" width="${nativeQr.size}" height="${nativeQr.size}" rx="0" fill="#FFFFFF"/>${qrCode(nativeQr.x, nativeQr.y, nativeQr.size)}</g><metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;primary:empty;secondary:reward;back:member,status,program" data-reward-value="${escapeXml(input.rewardSummary)}">The strip is the exact production APPLE_LEGACY_STRIP PNG. Progress and reward use the same Apple field tiers as the issued pass; the native QR uses the shared QR renderer.</metadata></svg>`;
+  return { svg, width, height, warnings: [] };
 }
-
-function composeGoogle(
+function _composeApplePosterWithProductionArtwork(
   input: ProgramPreviewCompositionInput,
 ): Omit<ProgramPreviewComposition, "digest"> {
   const width = 460;
-  const height = 690;
-  const rtl = input.locale === "AR";
-  const direction = rtl ? "rtl" : "ltr";
-  const anchor = "start";
-  const contentX = rtl ? 412 : 48;
-  const logoX = rtl ? 350 : 48;
-  const previewBadgeX = rtl ? 24 : 316;
-  const previewBadgeCenter = previewBadgeX + 60;
-  const previewOnly = rtl ? "للمعاينة فقط" : "PREVIEW ONLY";
-  const pointsLabel = rtl ? "الأختام" : "Stamps";
-  const accountLabel = rtl ? "الحساب" : "Account";
-  const accountValue = rtl ? "عميل تجريبي" : "Demo customer";
-  const statusLabel = rtl ? "الحالة" : "Status";
-  const statusValue =
-    input.progress >= input.goal
-      ? rtl
-        ? "المكافأة جاهزة"
-        : "Reward ready"
-      : rtl
-        ? "نشطة"
-        : "Active";
-  const rewardLabel = rtl ? "المكافأة" : "Reward";
-  const barcodeLabel = rtl
-    ? "رمز العضوية بعد حفظ العميل للبطاقة"
-    : "Membership QR after the customer saves the card";
-  const warnings: ProgramPreviewComposition["warnings"] = [];
-  if (input.google.title.length > 48 || input.google.subtitle.length > 64)
-    warnings.push({
-      code: "GOOGLE_TEXT_LIMIT",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: "Some fields may truncate in an actual Google Wallet object.",
-    });
-  if (input.backgroundDataUri)
-    warnings.push({
-      code: "GOOGLE_BACKGROUND_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: programPlatformCapabilities.GOOGLE_WALLET.backgroundArtwork.explanation,
-    });
-  if (input.heroDataUri)
-    warnings.push({
-      code: "GOOGLE_HERO_ARTWORK_UNSUPPORTED",
-      severity: "warning",
-      platform: "GOOGLE_WALLET",
-      message: programPlatformCapabilities.GOOGLE_WALLET.heroArtwork.explanation,
-    });
-  const logo = imageTag(input.logoDataUri, logoX, 72, 62, 62, 15);
-  const issuerX = input.logoDataUri ? (rtl ? 338 : 120) : contentX;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview only" direction="${direction}" data-wallet-provider="GOOGLE" data-progress="${input.progress}" data-goal="${input.goal}" data-class-reward="${escapeXml(input.rewardSummary)}"><rect width="100%" height="100%" fill="#EEF3FA"/><rect x="${previewBadgeX}" y="6" width="120" height="26" rx="13" fill="#1F2937"/><text x="${previewBadgeCenter}" y="24" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="${rtl ? 10 : 11}" font-weight="700" fill="#FFFFFF">${previewOnly}</text><rect x="24" y="40" width="412" height="626" rx="28" fill="#FFFFFF" stroke="#D2DAE5" stroke-width="2"/><rect x="24" y="40" width="412" height="136" rx="28" fill="${input.backgroundColor}"/>${logo}<text x="${issuerX}" y="92" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="12" font-weight="700" fill="${input.foregroundColor}" opacity=".75">${escapeXml(truncate(input.organizationName, 34))}</text><text x="${issuerX}" y="126" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="24" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.programName, 36))}</text><text x="${contentX}" y="210" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${accountLabel}</text><text x="${contentX}" y="232" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="15" font-weight="700" fill="#1F2937">${accountValue}</text><text x="${rtl ? 48 : 412}" y="210" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${pointsLabel}</text><text x="${rtl ? 48 : 412}" y="234" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="19" font-weight="800" fill="#1F2937">${input.progress}/${input.goal}</text>${stampImage(input.stampSvg, 42, 252, 376, 158)}<text x="${contentX}" y="440" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${rewardLabel}</text><text x="${contentX}" y="464" text-anchor="${anchor}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="16" font-weight="700" fill="#1F2937">${escapeXml(truncate(input.rewardSummary, 46))}</text><text x="${rtl ? 48 : 412}" y="440" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" font-weight="800" fill="#6B7280">${statusLabel}</text><text x="${rtl ? 48 : 412}" y="464" text-anchor="${rtl ? "start" : "end"}" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="15" font-weight="700" fill="#1F2937">${statusValue}</text><rect x="62" y="492" width="336" height="130" rx="18" fill="#F7F8FA"/>${barcode(112, 512, 236, 56)}<text x="230" y="600" text-anchor="middle" font-family="Arial,Noto Sans Arabic,sans-serif" font-size="10" fill="#4B5563">${barcodeLabel}</text></svg>`;
-  return { svg, width, height, warnings };
+  const height = 532;
+  const locale = cardLocalePresentation(input.locale);
+  const textAttributes = localizedTextAttributes(locale.locale);
+  const cardX = 51;
+  const cardY = 20;
+  const cardWidth = 358;
+  const posterHeight = 448;
+  const posterY = 42;
+  const cardHeight = 492;
+  const nativeReserveHeight = cardY + cardHeight - (posterY + posterHeight);
+  const poster = productionArtworkImage(
+    input.walletArtwork,
+    "APPLE_POSTER",
+    cardX,
+    posterY,
+    cardWidth,
+    posterHeight,
+    14,
+  );
+  const logoX = locale.isRtl ? 367 : 64;
+  const merchantX = locale.isRtl ? 358 : 102;
+  // SVG start/end are logical, not physical. The mirrored coordinate is the
+  // logical start edge for either direction.
+  const merchantAnchor = "start";
+  const issuerBrand = input.logoDataUri ? "program" : "organization";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-production-artwork" data-provider-owned-geometry="true" data-apple-poster-aspect="358:448"><defs><clipPath id="apple-poster-card-clip"><rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="14"/></clipPath><linearGradient id="apple-poster-native-top-material" gradientUnits="userSpaceOnUse" x1="0" y1="${cardY}" x2="0" y2="161"><stop offset="0" stop-color="#000000" stop-opacity=".425"/><stop offset="6%" stop-color="#000000" stop-opacity=".29"/><stop offset="30%" stop-color="#000000" stop-opacity=".23"/><stop offset="90%" stop-color="#000000" stop-opacity=".07"/><stop offset="100%" stop-color="#000000" stop-opacity="0"/></linearGradient></defs><rect width="100%" height="100%" fill="#15171B"/><g clip-path="url(#apple-poster-card-clip)"><rect data-apple-poster-surface="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${input.backgroundColor}"/><g data-poster-artwork="production-compositor">${poster}</g><rect data-apple-native-top-material="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="141" fill="url(#apple-poster-native-top-material)"/><rect data-apple-native-reserve="true" x="${cardX}" y="${posterY + posterHeight}" width="${cardWidth}" height="${nativeReserveHeight}" fill="${input.backgroundColor}"/></g><g data-apple-native-primary-logo="true">${issuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, logoX, 38, 29, 29, 7)}<text ${textAttributes} x="${merchantX}" y="58" text-anchor="${merchantAnchor}" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 24))}</text></g><metadata data-apple-poster-preview="true">The complete production APPLE_POSTER PNG is displayed at its native 358 by 448 aspect ratio. The empty lower reserve is Apple-owned continuation only; no dashboard placeholder content is drawn.</metadata></svg>`;
+  return { svg, width, height, warnings: [] };
 }
-
+function _composeGoogleWithProductionArtwork(
+  input: ProgramPreviewCompositionInput,
+): Omit<ProgramPreviewComposition, "digest"> {
+  const width = 460;
+  const height = 564;
+  const locale = cardLocalePresentation(input.locale);
+  const rtl = locale.isRtl;
+  const textAttributes = localizedTextAttributes(locale.locale);
+  const logoX = rtl ? 380 : 48;
+  const textX = rtl ? 364 : 96;
+  // The coordinates below are logical-start coordinates. Do not exchange the
+  // anchor for RTL: doing that makes a mixed Arabic/Latin run grow out of the
+  // card instead of into its available text region.
+  const anchor = "start";
+  // Google Wallet displays the complete hero image below its native issuer and
+  // program fields. The compositor owns every pixel inside this image.
+  const hero = productionArtworkImage(
+    input.walletArtwork,
+    "GOOGLE_HERO",
+    25.5,
+    220,
+    409,
+    321.7286821705426,
+    0,
+  );
+  const titleTextX = rtl ? 418 : 42;
+  const nativeTitleLineGap = 46.5;
+  const title = dashboardWalletPreviewTextLines(
+    truncate(input.programName, 60),
+    rtl ? 18 : 16,
+    2,
+    locale.locale,
+  )
+    .map(
+      (line, index) =>
+        `<text ${textAttributes} x="${titleTextX}" y="${143 + index * nativeTitleLineGap}" text-anchor="${anchor}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="35" font-weight="700" fill="#202124">${escapeXml(line)}</text>`,
+    )
+    .join("");
+  const issuerBrand = input.logoDataUri ? "program" : "organization";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="GOOGLE" data-barcode-format="QR_CODE" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="${issuerBrand}" data-provider-managed-layout="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-full-production-hero" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="24" y="20" width="412" height="524" rx="32" fill="${input.backgroundColor}" stroke="#DADCE0"/><g data-google-native-identity="true">${googleIssuerBrandMark(input.logoDataUri ?? input.merchantBrandLogoDataUri, logoX, 45, 34, 34)}<text ${textAttributes} x="${textX}" y="67" text-anchor="${anchor}" font-family="Google Sans,Roboto,Arial,sans-serif" font-size="15" font-weight="600" fill="#202124">${escapeXml(truncate(input.organizationName, 60))}</text><path d="M48 98H412" stroke="#E4E7EB"/></g><g data-google-native-title="true">${title}</g><g data-google-hero-region="true" data-google-hero-artwork-composition="full-production-compositor">${hero}</g><metadata data-google-provider-payload="true">Native issuer and program fields use the Google class values. The full production GOOGLE_HERO PNG retains its 1032 by 812 aspect ratio without a dashboard crop.</metadata></svg>`;
+  return { svg, width, height, warnings: [] };
+}
 export function composeProgramPreview(
   input: ProgramPreviewCompositionInput,
 ): ProgramPreviewComposition {
+  const providerInput =
+    input.profile !== "CUSTOMER_WEB" && input.logoDataUri
+      ? { ...input, merchantBrandLogoDataUri: input.logoDataUri }
+      : input;
+  const requiredArtworkTarget =
+    input.profile === "GOOGLE_WALLET"
+      ? "GOOGLE_HERO"
+      : input.profile === "APPLE_WALLET"
+        ? input.appleWalletVariant === "POSTER"
+          ? "APPLE_POSTER"
+          : "APPLE_STORE_CARD_STRIP"
+        : undefined;
+  if (requiredArtworkTarget && input.walletArtwork?.target !== requiredArtworkTarget) {
+    throw new Error(
+      `Dashboard ${input.profile} preview requires the production ${requiredArtworkTarget} PNG.`,
+    );
+  }
+  const calibratedProviderInput =
+    providerInput.profile === "GOOGLE_WALLET"
+      ? {
+          ...providerInput,
+          // Google applies the Hero's lifted material color to the entire
+          // native card surface, not only to the generated image.
+          backgroundColor: googleWalletSurfaceColor(providerInput.backgroundColor),
+        }
+      : providerInput;
   const result =
-    input.profile === "APPLE_WALLET"
-      ? composeApple(input)
-      : input.profile === "GOOGLE_WALLET"
-        ? composeGoogle(input)
-        : composeCustomer(input);
+    input.profile === "APPLE_WALLET" || input.profile === "GOOGLE_WALLET"
+      ? renderDashboardWalletPreviewShell({
+          profile:
+            input.profile === "GOOGLE_WALLET"
+              ? "GOOGLE_WALLET"
+              : input.appleWalletVariant === "POSTER"
+                ? "APPLE_IOS27"
+                : "APPLE_LEGACY",
+          locale: calibratedProviderInput.locale,
+          organizationName: calibratedProviderInput.organizationName,
+          programName: calibratedProviderInput.programName,
+          ...(calibratedProviderInput.memberName
+            ? { memberName: calibratedProviderInput.memberName }
+            : {}),
+          ...(calibratedProviderInput.status ? { status: calibratedProviderInput.status } : {}),
+          rewardSummary: calibratedProviderInput.rewardSummary,
+          progress: calibratedProviderInput.progress,
+          goal: calibratedProviderInput.goal,
+          backgroundColor: calibratedProviderInput.backgroundColor,
+          foregroundColor: calibratedProviderInput.foregroundColor,
+          artworkDataUri: calibratedProviderInput.walletArtwork?.dataUri ?? "",
+          ...(calibratedProviderInput.logoDataUri
+            ? { logoDataUri: calibratedProviderInput.logoDataUri }
+            : {}),
+          ...(calibratedProviderInput.merchantBrandLogoDataUri
+            ? { merchantBrandLogoDataUri: calibratedProviderInput.merchantBrandLogoDataUri }
+            : {}),
+        })
+      : composeCustomer(calibratedProviderInput);
   return {
-    ...result,
+    svg: result.svg,
+    width: result.width,
+    height: result.height,
+    warnings: [...result.warnings],
     digest: createHash("sha256").update(result.svg).digest("hex"),
   };
 }

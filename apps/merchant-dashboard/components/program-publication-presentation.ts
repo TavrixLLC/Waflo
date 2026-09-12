@@ -23,6 +23,17 @@ export interface WalletSurfacePresentation {
   tone: "success" | "neutral" | "warning";
 }
 
+export type WalletDeviceEligibility = "UNKNOWN" | "ELIGIBLE" | "REQUIRES_COMPATIBLE_DEVICE";
+
+/** Browser capability is presentation-only, never an authorization decision. */
+export function walletDeviceEligibilityForBrowser(
+  provider: "APPLE" | "GOOGLE",
+): WalletDeviceEligibility {
+  if (typeof navigator === "undefined") return "UNKNOWN";
+  if (provider === "GOOGLE") return "ELIGIBLE";
+  return /iPad|iPhone|iPod/u.test(navigator.userAgent) ? "ELIGIBLE" : "REQUIRES_COMPATIBLE_DEVICE";
+}
+
 export type ProgramSharingState =
   | "enrollment_open"
   | "enrollment_disabled"
@@ -244,9 +255,23 @@ export function isLocalPreviewUrl(value: string | null | undefined): boolean {
   }
 }
 
+/** Local QA routes may be local; shareable merchant copy is always canonical. */
+export function canonicalPublicUrlForDisplay(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (!url.hostname.endsWith(".localhost") && !url.hostname.endsWith(".lvh.me")) return value;
+    const merchantSlug = url.hostname.split(".")[0];
+    return `https://${merchantSlug}.waflo.app${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return value;
+  }
+}
+
 export function walletSurfacePresentation(
   provider: WalletHealth | undefined,
   ar: boolean,
+  deviceEligibility?: WalletDeviceEligibility,
 ): WalletSurfacePresentation {
   if (!provider)
     return {
@@ -257,6 +282,7 @@ export function walletSurfacePresentation(
       tone: "neutral",
     };
 
+  const providerConfigured = provider.providerConfigured ?? provider.configured ?? false;
   if (provider.mode === "DISABLED")
     return {
       label: ar ? "غير متاحة" : "Unavailable",
@@ -266,19 +292,80 @@ export function walletSurfacePresentation(
       tone: "neutral",
     };
 
-  if (provider.status === "HEALTHY")
+  if (!providerConfigured)
     return {
-      label: ar ? "جاهزة" : "Ready",
+      label: ar ? "يلزم إعداد المؤسسة" : "Configuration required",
+      explanation: ar
+        ? "إعداد هذا المزود غير مكتمل. تبقى بطاقة العميل على الويب متاحة."
+        : "This provider is not configured. Customer Web remains available.",
+      tone: "warning",
+    };
+
+  if (provider.mode === "TEST_ADAPTER")
+    return {
+      label: ar ? "للاختبار فقط" : "Test only",
+      explanation: ar
+        ? "هذا محاكي محلي ولا ينشئ بطاقة يمكن حفظها في Wallet."
+        : "This local adapter does not create a pass that can be saved to Wallet.",
+      tone: "neutral",
+    };
+
+  if (provider.artifactAvailable === true) {
+    const eligibility = deviceEligibility ?? provider.deviceEligibility ?? "UNKNOWN";
+    if (provider.provider === "APPLE")
+      return {
+        label: ar ? "مهيأة" : "Configured",
+        explanation:
+          eligibility === "ELIGIBLE"
+            ? ar
+              ? "Apple Wallet مهيأ ويمكن إنشاء ملفات البطاقة. يدعم هذا الجهاز إكمال الإضافة إلى Wallet."
+              : "Apple Wallet is configured and pass artifacts can be generated. This device can complete the Add to Wallet action."
+            : ar
+              ? "Apple Wallet مهيأ ويمكن إنشاء ملفات البطاقة. تتطلب الإضافة النهائية إلى Wallet جهاز Apple متوافقاً."
+              : "Apple Wallet is configured and pass artifacts can be generated. Final Add to Wallet requires a compatible Apple device.",
+        tone: "success",
+      };
+    return {
+      label: ar ? "مهيأة" : "Configured",
       explanation:
-        provider.mode === "TEST_ADAPTER"
+        eligibility === "ELIGIBLE"
           ? ar
-            ? "جاهزة في وضع الاختبار؛ لا يمثل ذلك اعتماداً خارجياً للإنتاج."
-            : "Ready in test-adapter mode; this is not external production certification."
+            ? "Google Wallet مهيأ ويمكن إنشاء ملفات البطاقة. يمكن لهذا المتصفح فتح رابط الحفظ، وتتحقق Google من أهلية الإضافة النهائية."
+            : "Google Wallet is configured and pass artifacts can be generated. This browser can open the save link; Google verifies final eligibility."
           : ar
-            ? "إعداد المزود متاح حالياً."
-            : "Provider configuration is currently available.",
+            ? "Google Wallet مهيأ ويمكن إنشاء ملفات البطاقة. يحدد رابط الحفظ من Google أهلية الإضافة النهائية."
+            : "Google Wallet is configured and pass artifacts can be generated. The Google save link determines final installation eligibility.",
       tone: "success",
     };
+  }
+
+  if (provider.status === "EXTERNALLY_UNCERTIFIED")
+    return {
+      label: ar ? "يلزم اختبار على جهاز" : "Device verification required",
+      explanation: ar
+        ? "إعداد Apple والتوقيع صالحان محلياً، لكن يجب إكمال اختبار الحفظ والتحديث على iPhone فعلي قبل اعتباره جاهزاً."
+        : "Apple signing is locally valid, but save and update must pass on a physical iPhone before this is considered ready.",
+      tone: "warning",
+    };
+
+  if (provider.status === "HEALTHY") {
+    if (provider.externallyCertified !== true)
+      return {
+        label: ar ? "متصل — اختبار الجهاز معلّق" : "Connected — device test pending",
+        explanation: ar
+          ? "تم التحقق من وصول المزود، لكن يجب إكمال حفظ البطاقة وتحديثها على جهاز فعلي قبل اعتبار المسار جاهزاً للبيع."
+          : "Provider access is verified, but a physical-device save and update must pass before the path is sales-ready.",
+        tone: "warning",
+      };
+
+    return {
+      label: ar ? "جاهزة" : "Ready",
+      explanation: ar
+        ? "تم التحقق من إعداد المزود ومسار الجهاز الفعلي."
+        : "Provider configuration and the physical-device path have been verified.",
+      tone: "success",
+    };
+  }
 
   if (provider.status === "NOT_CONFIGURED" || provider.configured === false)
     return {
@@ -331,7 +418,7 @@ export function publicationFailurePresentation(
       {
         title: "Launch checks changed",
         whatHappened:
-          "The saved card changed after its latest checks or test. Review it and run the checks again.",
+          "The saved card changed after its latest checks. Review it and run the checks again.",
         actionLabel: "Run checks again",
         action: "checks",
         retrySafe: false,

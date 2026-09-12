@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -6,8 +6,79 @@ const root = resolve(import.meta.dirname, "../..");
 const deploymentRoot = resolve(root, "deploy/vps");
 const compose = readFileSync(resolve(deploymentRoot, "compose.yml"), "utf8");
 const dockerfile = readFileSync(resolve(deploymentRoot, "Dockerfile"), "utf8");
+const stagingApplication = readFileSync(
+  resolve(deploymentRoot, "templates/staging/application.env.example"),
+  "utf8",
+);
+const productionApplication = readFileSync(
+  resolve(deploymentRoot, "templates/production/application.env.example"),
+  "utf8",
+);
+const workflowRoot = resolve(root, ".github/workflows");
+const workflow = readFileSync(resolve(workflowRoot, "ci.yml"), "utf8");
+const realProviderRunbook = readFileSync(
+  resolve(root, "docs/release/real-provider-configuration.md"),
+  "utf8",
+);
+const bake = readFileSync(resolve(deploymentRoot, "docker-bake.hcl"), "utf8");
+const common = readFileSync(resolve(deploymentRoot, "scripts/common.sh"), "utf8");
+const deploy = readFileSync(resolve(deploymentRoot, "scripts/deploy.sh"), "utf8");
+const prepareHost = readFileSync(resolve(deploymentRoot, "scripts/prepare-host.sh"), "utf8");
+const minioInit = readFileSync(resolve(deploymentRoot, "scripts/minio-init.sh"), "utf8");
+const publishImages = readFileSync(resolve(deploymentRoot, "scripts/publish-images.sh"), "utf8");
+const verifyReleaseImages = readFileSync(
+  resolve(deploymentRoot, "scripts/verify-release-images.sh"),
+  "utf8",
+);
+const smokeNodeReleaseImages = readFileSync(
+  resolve(deploymentRoot, "scripts/smoke-node-release-images.sh"),
+  "utf8",
+);
+const rollback = readFileSync(resolve(deploymentRoot, "scripts/rollback.sh"), "utf8");
+const cloudflareTokenPermissionTest = readFileSync(
+  resolve(root, "tests/deployment/cloudflare-token-permissions.test.sh"),
+  "utf8",
+);
+const deployFromGitHub = readFileSync(
+  resolve(deploymentRoot, "scripts/deploy-from-github.sh"),
+  "utf8",
+);
+const releaseEntrypoint = readFileSync(
+  resolve(deploymentRoot, "scripts/release-deploy-entrypoint.sh"),
+  "utf8",
+);
+const ciObjectStorageBootstrap = resolve(deploymentRoot, "scripts/start-ci-object-storage.sh");
+const playwrightRunner = readFileSync(resolve(root, "scripts/run-playwright.mjs"), "utf8");
+const isolatedValidationAction = readFileSync(
+  resolve(root, ".github/actions/setup-isolated-validation/action.yml"),
+  "utf8",
+);
+const templateGalleryFixture = readFileSync(
+  resolve(root, "tests/e2e/template-gallery-fixtures.ts"),
+  "utf8",
+);
 const deploymentEnvironmentVariable = "$" + "{DEPLOYMENT_ENVIRONMENT}";
 const releaseShaVariable = "$" + "{RELEASE_SHA}";
+const localReleaseShaVariable = "$" + "{release_sha}";
+const postgresBindVariable = "$" + "{postgres_bind}";
+const pgdataVariable = "$" + "{pgdata}";
+const environmentVariable = "$" + "{environment}";
+const mcConfigDirectoryVariable = "$" + "{MC_CONFIG_DIR}";
+const cloudflaredContainerGidVariable = "$" + "{CLOUDFLARED_CONTAINER_GID}";
+const tokenFileVariable = "$" + "{token_file}";
+const referenceVariable = "$" + "{reference}";
+const scriptDirectoryVariable = "$" + "{script_directory}";
+const shellDollar = "$";
+const shellTargetVariable = `${shellDollar}{target}`;
+const invariantTargetsVariable = `${shellDollar}{invariant_targets[@]}`;
+const missingFrontendTargetsVariable = `${shellDollar}{missing_frontend_targets[@]}`;
+const stagingTargetReferenceForTarget = `${shellDollar}{staging_target_references[${shellTargetVariable}]}`;
+const sourceReferenceVariable = `${shellDollar}{source_reference}`;
+const productionSourceReferenceVariable = `${shellDollar}{source_reference%-staging}`;
+const sourceDigestVariable = `${shellDollar}{source_digest}`;
+const destinationReferenceVariable = `${shellDollar}{destination_reference}`;
+const destinationDigestVariable = `${shellDollar}{destination_digest}`;
+const releaseScopeVariable = `${shellDollar}{release_scope}`;
 
 function deploymentFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -17,7 +88,142 @@ function deploymentFiles(directory: string): string[] {
   });
 }
 
+function workflowJob(jobId: string): string {
+  const jobs = [...workflow.matchAll(/^  ([a-z][a-z0-9_]*):\n/gmu)];
+  const index = jobs.findIndex((job) => job[1] === jobId);
+  if (index < 0) throw new Error(`Missing workflow job: ${jobId}`);
+  return workflow.slice(jobs[index].index, jobs[index + 1]?.index);
+}
+
+function bashFunction(source: string, name: string): string {
+  const start = source.indexOf(`${name}() {`);
+  if (start < 0) throw new Error(`Missing Bash function: ${name}`);
+  const nextFunction = source.indexOf("\n}\n\n", start);
+  if (nextFunction < 0) throw new Error(`Unterminated Bash function: ${name}`);
+  return source.slice(start, nextFunction + 2);
+}
+
+type JobResult = "success" | "failure" | "cancelled" | "skipped";
+
+const releaseBranch = "refs/heads/release/production-v1";
+
+function authoritativeReleasePasses({
+  scope,
+  staticValidation,
+  unitValidation = "skipped",
+  browserValidation = "skipped",
+  accessibilityValidation = "skipped",
+  scopedValidation = "skipped",
+  scopedBrowserValidation = "skipped",
+  scopedAccessibilityValidation = "skipped",
+}: {
+  scope: "FULL" | "MARKETING" | "MERCHANT" | "API";
+  staticValidation: JobResult;
+  unitValidation?: JobResult;
+  browserValidation?: JobResult;
+  accessibilityValidation?: JobResult;
+  scopedValidation?: JobResult;
+  scopedBrowserValidation?: JobResult;
+  scopedAccessibilityValidation?: JobResult;
+}): boolean {
+  if (staticValidation !== "success") return false;
+  if (scope === "FULL") {
+    return (
+      unitValidation === "success" &&
+      browserValidation === "success" &&
+      accessibilityValidation === "success"
+    );
+  }
+  return (
+    scopedValidation === "success" &&
+    (scope === "API" ||
+      (scopedBrowserValidation === "success" && scopedAccessibilityValidation === "success"))
+  );
+}
+
+function publicationMayRun({
+  event = "push",
+  ref = releaseBranch,
+  scopeResolution = "success",
+  authoritativeValidation = "success",
+}: {
+  event?: string;
+  ref?: string;
+  scopeResolution?: JobResult;
+  authoritativeValidation?: JobResult;
+} = {}): boolean {
+  return (
+    event === "push" &&
+    ref === releaseBranch &&
+    scopeResolution === "success" &&
+    authoritativeValidation === "success"
+  );
+}
+
+function stagingDeploymentMayRun({
+  event = "push",
+  ref = releaseBranch,
+  publication = "success",
+}: {
+  event?: string;
+  ref?: string;
+  publication?: JobResult;
+} = {}): boolean {
+  return event === "push" && ref === releaseBranch && publication === "success";
+}
+
 describe("production deployment platform", () => {
+  it("builds browser-test frontends with their active API target in Next production mode", () => {
+    expect(playwrightRunner).toContain('NODE_ENV: "production"');
+    expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
+    expect(playwrightRunner).toContain("WAFLO_E2E_API_URL: process.env.NEXT_PUBLIC_API_URL");
+    expect(playwrightRunner).toContain(
+      "runCommand(frontend.command, frontend.args, browserBuildEnvironment)",
+    );
+    expect(playwrightRunner).toContain('pnpmCommand(["test:prepare"])');
+    expect(playwrightRunner).toContain('"start", "-p"');
+    expect(playwrightRunner).toContain("stable localhost origins");
+    expect(playwrightRunner).toContain("strict CSRF cookie is sent");
+    expect(playwrightRunner).toContain('WAFLO_E2E_NEXT_START: "1"');
+    expect(playwrightRunner).toContain("PORT: String(command.port)");
+    expect(playwrightRunner).not.toContain("await prepareStandaloneFrontends()");
+    expect(playwrightRunner).toContain("process.env.API_INTERNAL_URL");
+    expect(playwrightRunner).toContain("await buildBrowserFrontends()");
+    expect(playwrightRunner).toContain("prior isolated random API port");
+    expect(
+      playwrightRunner.indexOf("process.env.NEXT_PUBLIC_API_URL = `http://localhost:${apiPort}`"),
+    ).toBeLessThan(playwrightRunner.indexOf("await buildBrowserFrontends()"));
+    expect(playwrightRunner).toContain(
+      '["chromium", "accessibility", "admin", "admin-accessibility"].includes(project)',
+    );
+  });
+
+  it("prepares workspace exports exactly once inside each isolated browser harness", () => {
+    const preparation = 'pnpmCommand(["test:prepare"])';
+    expect([...playwrightRunner.matchAll(/pnpmCommand\(\["test:prepare"\]\)/gu)]).toHaveLength(1);
+    expect(playwrightRunner.indexOf("await prepareBrowserWorkspace()")).toBeLessThan(
+      playwrightRunner.indexOf("await prepareIsolatedDatabase()"),
+    );
+    expect(playwrightRunner.indexOf("await prepareBrowserWorkspace()")).toBeLessThan(
+      playwrightRunner.indexOf("await buildBrowserFrontends()"),
+    );
+    expect(playwrightRunner.indexOf(preparation)).toBeLessThan(
+      playwrightRunner.indexOf('pnpmCommand(["--filter", "@waflo/api", "build"])'),
+    );
+    expect(playwrightRunner.indexOf(preparation)).toBeLessThan(
+      playwrightRunner.indexOf("const frontendBuilds = ["),
+    );
+    expect(isolatedValidationAction).not.toContain("pnpm test:prepare");
+    for (const jobId of ["release_e2e", "release_accessibility"]) {
+      expect(workflowJob(jobId)).not.toContain("pnpm test:prepare");
+    }
+  });
+
+  it("keeps browser fixtures bound to every isolated loopback API port", () => {
+    expect(templateGalleryFixture).toContain("localhost|127\\.0\\.0\\.1");
+    expect(templateGalleryFixture).toContain("isolatedLoopbackApiRoute");
+  });
+
   it("keeps every service private at the host boundary", () => {
     expect(compose).not.toMatch(/^\s+ports:/m);
     expect(compose).toContain("internal: true");
@@ -42,8 +248,46 @@ describe("production deployment platform", () => {
     expect(dockerfile).toContain("org.opencontainers.image.revision");
   });
 
+  it("mounts provider files read-only only into Wallet-capable services", () => {
+    expect(compose.match(/target: \/run\/waflo-provider-secrets/g)).toHaveLength(3);
+    expect(compose.match(/read_only: true/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(stagingApplication).toContain(
+      "GOOGLE_WALLET_SERVICE_ACCOUNT_JSON_PATH_OR_BASE64=/run/waflo-provider-secrets/google-wallet-service-account.json",
+    );
+    expect(stagingApplication).toContain(
+      "APPLE_PASS_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wallet-pass.p12",
+    );
+    expect(productionApplication).toContain(
+      "APPLE_WWDR_CERTIFICATE_PATH_OR_BASE64=/run/waflo-provider-secrets/apple-wwdr.pem",
+    );
+    expect(stagingApplication).toContain("APPLE_WALLET_GENERATOR=passbuilder");
+    expect(stagingApplication).toContain("APPLE_PASS_BUILDER_URL=http://apple-pass-builder:8080");
+  });
+
+  it("uses real provider modes with isolated staging and production boundaries", () => {
+    expect(stagingApplication).toContain("GOOGLE_WALLET_MODE=REAL");
+    expect(stagingApplication).toContain("GOOGLE_WALLET_PUBLISHING_MODE=DEMO");
+    expect(stagingApplication).toContain("APPLE_WALLET_MODE=REAL");
+    expect(stagingApplication).toContain("APPLE_APNS_ENVIRONMENT=production");
+    expect(productionApplication).toContain("GOOGLE_WALLET_PUBLISHING_MODE=PUBLISHING");
+    expect(stagingApplication).toContain("STRIPE_PUBLISHABLE_KEY=pk_test_PUBLIC_VALUE");
+    expect(productionApplication).toContain("STRIPE_PUBLISHABLE_KEY=pk_live_PUBLIC_VALUE");
+  });
+
+  it("documents Waflo-owned catalog authority instead of static provider Price configuration", () => {
+    expect(realProviderRunbook).toContain("Pricing Catalog resolves");
+    expect(realProviderRunbook).toMatch(/Admin publication\s+creates\/verifies/u);
+    expect(realProviderRunbook).not.toMatch(
+      /STRIPE_(?:STARTER|GROWTH|SCALE)_(?:MONTHLY|QUARTERLY|YEARLY)_PRICE_ID/u,
+    );
+    expect(realProviderRunbook).not.toContain("complete nine-Price catalog");
+  });
+
   it("contains no legacy deployment root or inter-container localhost dependency", () => {
     const contents = deploymentFiles(deploymentRoot)
+      // This helper starts an ephemeral loopback-only MinIO container for CI
+      // tests. It is not a staging or production deployment input.
+      .filter((file) => file !== ciObjectStorageBootstrap)
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
     expect(contents).not.toMatch(/\/opt\/waflo(?!-platform)/);
@@ -57,5 +301,420 @@ describe("production deployment platform", () => {
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/redis`);
     expect(compose).toContain(`data/${deploymentEnvironmentVariable}/object-storage`);
     expect(compose).toContain(`secrets/${deploymentEnvironmentVariable}`);
+  });
+
+  it("prepares the PostgreSQL bind for the pinned image identity before startup", () => {
+    const preparationCall = `prepare_postgres_bind "${environmentVariable}"`;
+    expect(common).toContain("readonly POSTGRES_CONTAINER_UID=70");
+    expect(common).toContain("readonly POSTGRES_CONTAINER_GID=70");
+    expect(common).toContain("prepare_postgres_bind()");
+    expect(common).toContain(`find "${postgresBindVariable}" -xdev`);
+    expect(common).toContain("chown --no-dereference");
+    expect(common).toContain(`chmod 0700 "${pgdataVariable}"`);
+    expect(prepareHost).toContain(preparationCall);
+    expect(deploy).toContain(preparationCall);
+    expect(deploy.indexOf(preparationCall)).toBeLessThan(
+      deploy.indexOf("compose up -d --no-build postgres redis minio"),
+    );
+  });
+
+  it("repairs only the Cloudflare token for its pinned non-root container identity", () => {
+    const preparationCall = `prepare_cloudflare_tunnel_token "${environmentVariable}"`;
+    expect(compose).toContain('user: "65532:65532"');
+    expect(compose).toMatch(/cloudflare_tunnel_token\n\s+mode: 0440/u);
+    expect(common).toContain("readonly CLOUDFLARED_CONTAINER_UID=65532");
+    expect(common).toContain("readonly CLOUDFLARED_CONTAINER_GID=65532");
+    expect(common).toContain(`chown --no-dereference "0:${cloudflaredContainerGidVariable}"`);
+    expect(common).toContain(`chmod 0440 -- "${tokenFileVariable}"`);
+    expect(common).toContain("may not grant permissions to other users");
+    expect(common).toContain("! -name cloudflare_tunnel_token ! -perm 0600");
+    expect(common).not.toContain("chmod 0644");
+    expect(deploy).toContain(preparationCall);
+    expect(rollback).toContain(preparationCall);
+    expect(prepareHost).toContain(preparationCall);
+    expect(common).toContain(
+      `export CLOUDFLARE_TUNNEL_TOKEN_FILE="$(cloudflare_tunnel_token_path "${environmentVariable}")"`,
+    );
+    expect(deploy.indexOf(preparationCall)).toBeLessThan(
+      deploy.indexOf("assert_secret_permissions"),
+    );
+    expect(cloudflareTokenPermissionTest).toContain("cmp --silent");
+    expect(cloudflareTokenPermissionTest).toContain("World-readable Cloudflare token was accepted");
+    expect(cloudflareTokenPermissionTest).toContain("symlink substitution was accepted");
+    expect(cloudflareTokenPermissionTest).toContain("600:0:0");
+    expect(workflow).toContain("sudo bash tests/deployment/cloudflare-token-permissions.test.sh");
+  });
+
+  it("uses only ephemeral writable MinIO client configuration", () => {
+    expect(minioInit).toContain("MC_CONFIG_DIR=/tmp/.mc");
+    expect(minioInit).toContain("export MC_CONFIG_DIR");
+    expect(minioInit).toContain(`mkdir -p "${mcConfigDirectoryVariable}"`);
+    expect(minioInit).toContain(`rm -rf "${mcConfigDirectoryVariable}"`);
+    expect(minioInit).toContain("mc_cmd() {");
+    expect(minioInit).toContain(`mc --config-dir "${mcConfigDirectoryVariable}" "$@"`);
+    expect(minioInit.match(/^mc_cmd /gmu)).toHaveLength(7);
+    expect(minioInit.match(/^\s*mc /gmu)).toHaveLength(1);
+    expect(compose).not.toContain("target: /root/.mc");
+    expect(compose).not.toContain("target: /tmp/.mc");
+    expect(compose).not.toContain("privileged: true");
+    expect(compose).toContain("security_opt: [no-new-privileges:true]");
+  });
+
+  it("recreates only the release-bound MinIO provisioning container", () => {
+    const removeMinioInit = "compose rm --force --stop minio-init";
+    const runMinioInit = "compose up --no-build minio-init";
+    expect(deploy.match(/compose rm --force --stop minio-init/gmu)).toHaveLength(1);
+    expect(deploy).not.toContain("compose down");
+    expect(deploy).not.toContain("compose rm --volumes");
+    expect(deploy.indexOf("compose up -d --no-build postgres redis minio")).toBeLessThan(
+      deploy.indexOf(removeMinioInit),
+    );
+    expect(deploy.indexOf(removeMinioInit)).toBeLessThan(deploy.indexOf(runMinioInit));
+    expect(deploy.indexOf(runMinioInit)).toBeLessThan(deploy.indexOf("compose run --rm migrate"));
+  });
+
+  it("keeps each hardened tmpfs mount in one Compose argument", () => {
+    expect(compose).not.toMatch(/tmpfs:\s*\[/u);
+    expect(compose).not.toMatch(/^\s*-\s*(?:noexec|nosuid|nodev)\s*$/mu);
+    expect(compose.match(/^\s+- "\/[^"]+:rw,noexec,nosuid,size=\d+m"$/gmu)).toHaveLength(13);
+    expect(compose).toContain('      - "/tmp:rw,noexec,nosuid,size=64m"');
+    expect(deploy.match(/compose run --rm migrate/gmu)).toHaveLength(1);
+  });
+
+  it("uses one authoritative, immutable-action release workflow without duplicated test gates", () => {
+    expect(readdirSync(workflowRoot).filter((name) => /\.ya?ml$/u.test(name))).toEqual(["ci.yml"]);
+    expect(workflow).toContain("release/production-v1");
+    const fullValidationJobs = [
+      "release_static_verify",
+      "release_unit_verify",
+      "release_e2e",
+      "release_accessibility",
+    ];
+    expect(workflowJob("release_scope")).toContain("Classify changed workspaces");
+    for (const jobId of fullValidationJobs) {
+      const job = workflowJob(jobId);
+      expect(job).toContain("needs: release_scope");
+    }
+    for (const jobId of fullValidationJobs.slice(1)) {
+      const job = workflowJob(jobId);
+      expect(job.indexOf("actions/checkout@")).toBeLessThan(
+        job.indexOf("uses: ./.github/actions/setup-isolated-validation"),
+      );
+    }
+    const releaseVerified = workflowJob("release_verified");
+    expect(releaseVerified).toContain("always()");
+    for (const jobId of fullValidationJobs) {
+      expect(releaseVerified).toContain(`- ${jobId}`);
+      expect(releaseVerified).toContain(`needs.${jobId}.result == 'success'`);
+    }
+    const imagePublication = workflowJob("publish_release_images");
+    expect(imagePublication).toContain("- release_verified");
+    expect(imagePublication).toContain("always()");
+    expect(imagePublication).toContain("github.event_name == 'push'");
+    expect(imagePublication).toContain("github.ref == 'refs/heads/release/production-v1'");
+    expect(imagePublication).toContain("needs.release_scope.result == 'success'");
+    expect(imagePublication).toContain("needs.release_verified.result == 'success'");
+    const stagingDeployment = workflowJob("deploy_staging");
+    expect(stagingDeployment).toContain("needs: publish_release_images");
+    expect(stagingDeployment).toContain("always()");
+    expect(stagingDeployment).toContain("github.event_name == 'push'");
+    expect(stagingDeployment).toContain("github.ref == 'refs/heads/release/production-v1'");
+    expect(stagingDeployment).toContain("needs.publish_release_images.result == 'success'");
+    expect(workflow).toContain("run: pnpm test");
+    expect(workflow).not.toMatch(/run: pnpm test:(unit|integration|http|concurrency)/u);
+    expect(workflow).toContain("run: pnpm audit:production");
+    const audit = readFileSync(resolve(root, "scripts/check-production-audit.mjs"), "utf8");
+    expect(audit).toContain('const acceptedPrismaDeepmergeAdvisory = "GHSA-ggr8-5vv4-36mx"');
+    expect(audit).not.toContain("acceptedSharpAdvisory");
+    expect(workflow).toContain("run: pnpm deploy:validate");
+    expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d/u);
+    expect(workflow).not.toContain("artifacts/");
+    expect(workflow).toContain("retention-days: 3");
+  });
+
+  it("publishes only after the authoritative scope-specific validation path succeeds", () => {
+    const fullPass = authoritativeReleasePasses({
+      scope: "FULL",
+      staticValidation: "success",
+      unitValidation: "success",
+      browserValidation: "success",
+      accessibilityValidation: "success",
+      scopedValidation: "skipped",
+      scopedBrowserValidation: "skipped",
+      scopedAccessibilityValidation: "skipped",
+    });
+    expect(fullPass).toBe(true);
+    expect(publicationMayRun({ authoritativeValidation: fullPass ? "success" : "failure" })).toBe(
+      true,
+    );
+
+    const failedFull = authoritativeReleasePasses({
+      scope: "FULL",
+      staticValidation: "success",
+      unitValidation: "failure",
+      browserValidation: "success",
+      accessibilityValidation: "success",
+    });
+    expect(failedFull).toBe(false);
+    expect(publicationMayRun({ authoritativeValidation: failedFull ? "success" : "failure" })).toBe(
+      false,
+    );
+    const cancelledFull = authoritativeReleasePasses({
+      scope: "FULL",
+      staticValidation: "success",
+      unitValidation: "success",
+      browserValidation: "cancelled",
+      accessibilityValidation: "success",
+    });
+    expect(cancelledFull).toBe(false);
+    expect(
+      publicationMayRun({ authoritativeValidation: cancelledFull ? "success" : "cancelled" }),
+    ).toBe(false);
+
+    for (const scope of ["MARKETING", "MERCHANT"] as const) {
+      const scopedPass = authoritativeReleasePasses({
+        scope,
+        staticValidation: "success",
+        scopedValidation: "success",
+        scopedBrowserValidation: "success",
+        scopedAccessibilityValidation: "success",
+      });
+      expect(scopedPass).toBe(true);
+      expect(
+        publicationMayRun({ authoritativeValidation: scopedPass ? "success" : "failure" }),
+      ).toBe(true);
+    }
+    const failedScopedValidation = authoritativeReleasePasses({
+      scope: "MARKETING",
+      staticValidation: "success",
+      scopedValidation: "success",
+      scopedBrowserValidation: "failure",
+      scopedAccessibilityValidation: "success",
+    });
+    expect(failedScopedValidation).toBe(false);
+    expect(
+      publicationMayRun({
+        authoritativeValidation: failedScopedValidation ? "success" : "failure",
+      }),
+    ).toBe(false);
+    expect(publicationMayRun({ scopeResolution: "skipped" })).toBe(false);
+
+    // Missing immutable-base evidence forces FULL classification; it cannot
+    // suppress a fresh fully validated release publication.
+    const missingBaseMarkerScope = "FULL" as const;
+    expect(
+      publicationMayRun({
+        authoritativeValidation: authoritativeReleasePasses({
+          scope: missingBaseMarkerScope,
+          staticValidation: "success",
+          unitValidation: "success",
+          browserValidation: "success",
+          accessibilityValidation: "success",
+        })
+          ? "success"
+          : "failure",
+      }),
+    ).toBe(true);
+  });
+
+  it("deploys staging only after immutable image publication succeeds", () => {
+    expect(stagingDeploymentMayRun({ publication: "success" })).toBe(true);
+    expect(stagingDeploymentMayRun({ publication: "failure" })).toBe(false);
+    expect(stagingDeploymentMayRun({ publication: "cancelled" })).toBe(false);
+    expect(stagingDeploymentMayRun({ publication: "skipped" })).toBe(false);
+  });
+
+  it("builds invariant services once and preserves distinct Web environment outputs", () => {
+    for (const target of [
+      "migrate",
+      "api",
+      "apple-pass-builder",
+      "operational-worker",
+      "wallet-worker",
+    ]) {
+      const section = bake.slice(bake.indexOf(`target "${target}"`));
+      expect(section.slice(0, section.indexOf("\n}"))).toContain("-staging");
+      expect(section.slice(0, section.indexOf("\n}"))).toContain("-production");
+    }
+    expect(bake).toContain('target "merchant-staging"');
+    expect(bake).toContain('target "merchant-production"');
+    expect(bake).toContain('target "admin-staging"');
+    expect(bake).toContain('target "admin-production"');
+    expect(bake).toContain('DEPLOYMENT_ENVIRONMENT          = "staging"');
+    expect(bake).toContain('DEPLOYMENT_ENVIRONMENT          = "production"');
+    expect(bake).toContain('"type=provenance,mode=max"');
+    expect(bake).toContain('"type=sbom"');
+    expect(bake).not.toMatch(/SECRET|PASSWORD|PRIVATE_KEY|SERVICE_ACCOUNT/u);
+  });
+
+  it("promotes invariant production images by their staging OCI digest without rebuilding", () => {
+    const promotion = bashFunction(publishImages, "promote_invariant_image");
+    const productionPublication = bashFunction(publishImages, "publish_production_images");
+    const stagingPublication = bashFunction(publishImages, "publish_staging_images");
+    const invariantTargets = [
+      "migrate",
+      "api",
+      "apple-pass-builder",
+      "operational-worker",
+      "wallet-worker",
+    ];
+
+    expect(publishImages).toContain("declare -A staging_target_references");
+    expect(publishImages).toContain("declare -A production_frontend_references");
+    expect(stagingPublication).toContain(`"${invariantTargetsVariable}"`);
+    expect(stagingPublication).toContain(stagingTargetReferenceForTarget);
+    expect(stagingPublication).toContain("RELEASE_BASE_SHA");
+    expect(stagingPublication).toContain("verify-release-marker.sh");
+    expect(stagingPublication).toContain("docker buildx imagetools create");
+    expect(stagingPublication).toContain("build_missing_target");
+
+    expect(promotion).toContain(`local source_reference="${stagingTargetReferenceForTarget}"`);
+    expect(promotion).toContain(
+      `local destination_reference="${productionSourceReferenceVariable}-production"`,
+    );
+    expect(promotion).toContain(`source_digest="$(image_digest "${sourceReferenceVariable}")"`);
+    expect(promotion).toContain(`if image_exists "${destinationReferenceVariable}"; then`);
+    expect(promotion).toContain(
+      `if [[ "${destinationDigestVariable}" != "${sourceDigestVariable}" ]]; then`,
+    );
+    expect(promotion).toContain("Reusing promoted immutable image");
+    expect(promotion).toContain("docker buildx imagetools create");
+    expect(promotion).toContain(`"${sourceReferenceVariable}@${sourceDigestVariable}"`);
+    expect(promotion).toContain(
+      `destination_digest="$(image_digest "${destinationReferenceVariable}")"`,
+    );
+    expect(promotion).toContain("Conflicting immutable production image");
+    expect(promotion).toContain("Promoted immutable image digest mismatch");
+    expect(promotion).toContain("Missing immutable staging source for production promotion");
+    expect(promotion).not.toContain("docker buildx bake");
+    expect(promotion.indexOf("docker buildx imagetools create")).toBeGreaterThan(
+      promotion.indexOf(`if image_exists "${destinationReferenceVariable}"; then`),
+    );
+
+    expect(invariantTargets).toEqual([
+      "migrate",
+      "api",
+      "apple-pass-builder",
+      "operational-worker",
+      "wallet-worker",
+    ]);
+    expect(productionPublication).toContain(`for target in "${invariantTargetsVariable}"; do`);
+    expect(productionPublication).toContain(`promote_invariant_image "${shellTargetVariable}"`);
+    for (const target of [
+      "merchant-production",
+      "customer-production",
+      "admin-production",
+      "marketing-production",
+    ]) {
+      expect(productionPublication).toContain(target);
+    }
+    expect(productionPublication).toContain(
+      `for target in "${missingFrontendTargetsVariable}"; do`,
+    );
+    expect(productionPublication).toContain(`build_missing_target "${shellTargetVariable}"`);
+    expect(productionPublication).toContain("Selective image publication is staging-only.");
+    expect(publishImages).toContain(
+      `"${scriptDirectoryVariable}/verify-release-images.sh" "${releaseScopeVariable}" "${localReleaseShaVariable}"`,
+    );
+  });
+
+  it("requires the complete nine-image production set after promotion", () => {
+    expect(verifyReleaseImages).toContain(
+      "for package in migrate api apple-pass-builder merchant customer admin marketing operational-worker wallet-worker; do",
+    );
+    expect(verifyReleaseImages).toContain(`${localReleaseShaVariable}-${environmentVariable}`);
+    expect(verifyReleaseImages).toContain("Missing immutable release image:");
+    expect(verifyReleaseImages).toContain("Release image did not resolve to an OCI digest:");
+  });
+
+  it("exports the stable Apple Swift compile layer through the trusted GitHub Actions cache", () => {
+    const publishJob = workflowJob("publish_release_images");
+    const runtimeAction =
+      "crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487";
+    expect(publishJob).toContain(runtimeAction);
+    expect(publishJob.indexOf(runtimeAction)).toBeLessThan(
+      publishJob.indexOf("docker/setup-buildx-action@"),
+    );
+    const appleTarget = bake.slice(bake.indexOf('target "apple-pass-builder"'));
+    expect(appleTarget.slice(0, appleTarget.indexOf("\n}"))).toContain(
+      "type=gha,scope=waflo-release-apple-pass-builder",
+    );
+    expect(appleTarget.slice(0, appleTarget.indexOf("\n}"))).toContain("cache-to");
+    expect(appleTarget.slice(0, appleTarget.indexOf("\n}"))).toContain("mode=max");
+    expect(publishImages).toContain("apple_swift_source_fingerprint()");
+    expect(publishImages).toContain("Apple Swift source fingerprint:");
+    expect(publishImages).toContain("Apple Swift compile layer: CACHE HIT");
+    expect(publishImages).toContain("Apple Swift compile layer: BUILT");
+    expect(publishImages).toContain("awk '/^FROM node:/{exit} {print}'");
+    expect(publishImages).toContain("Package.resolved");
+    expect(publishImages).toContain("8908b955-swift-6.3-linux-pointer.patch");
+  });
+
+  it("smoke tests the exact final Node release images before staging deployment", () => {
+    expect(publishImages).toContain(
+      `"${scriptDirectoryVariable}/smoke-node-release-images.sh" staging "${localReleaseShaVariable}"`,
+    );
+    for (const service of [
+      "api",
+      "operational-worker",
+      "wallet-worker",
+      "admin",
+      "apple-pass-builder",
+    ]) {
+      expect(smokeNodeReleaseImages).toContain(service);
+    }
+    expect(smokeNodeReleaseImages).toContain("docker image inspect");
+    expect(smokeNodeReleaseImages).toContain("await import(entry)");
+    expect(smokeNodeReleaseImages).toContain("import.meta.resolve(specifier");
+    expect(smokeNodeReleaseImages).toContain("startup-reachable bare imports");
+    expect(smokeNodeReleaseImages).toContain("parseEnvironment(process.env)");
+    expect(smokeNodeReleaseImages).toContain("ERR_MODULE_NOT_FOUND|Cannot find package");
+    expect(smokeNodeReleaseImages).toContain(`docker run --rm "${referenceVariable}"`);
+    expect(smokeNodeReleaseImages).not.toContain("--privileged");
+    expect(smokeNodeReleaseImages).not.toContain("--user root");
+  });
+
+  it("keeps legal approval runtime-scoped and fails closed before production mutation", () => {
+    expect(workflow).not.toContain("NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE");
+    expect(bake).not.toContain("LEGAL_EFFECTIVE_DATE");
+    expect(publishImages).not.toContain("LEGAL_EFFECTIVE_DATE");
+    expect(stagingApplication).toContain("LEGAL_EFFECTIVE_DATE=");
+    expect(productionApplication).toContain("LEGAL_EFFECTIVE_DATE=");
+    expect(common).toContain("assert_legal_release_state");
+    expect(common).toContain("Production requires the counsel-approved LEGAL_EFFECTIVE_DATE");
+    expect(deploy.indexOf("assert_legal_release_state")).toBeLessThan(
+      deploy.indexOf("pull_release_images"),
+    );
+    expect(rollback.indexOf("assert_legal_release_state")).toBeLessThan(
+      rollback.indexOf("compose pull"),
+    );
+  });
+
+  it("serializes deployments and promotes production without rebuilding", () => {
+    expect(workflow).toContain("group: waflo-deploy-staging");
+    expect(workflow).toContain("group: waflo-deploy-production");
+    expect(workflow.match(/cancel-in-progress: false/g)).toHaveLength(2);
+    expect(workflow).toContain("verify-release-images.sh production");
+    const productionJob = workflow.slice(workflow.indexOf("  deploy_production:"));
+    expect(productionJob).not.toContain("publish-images.sh");
+    expect(productionJob).not.toContain("pnpm test");
+  });
+
+  it("uses pinned SSH identity and advances the release only after migration and health", () => {
+    expect(deployFromGitHub).toContain("StrictHostKeyChecking=yes");
+    expect(deployFromGitHub).not.toContain("StrictHostKeyChecking=no");
+    expect(deployFromGitHub).toContain("VPS_SSH_HOST_KEY");
+    expect(releaseEntrypoint).toContain('expected_sudo_user="waflo-deploy-$' + '{environment}"');
+    expect(deploy.indexOf("pull_release_images")).toBeLessThan(
+      deploy.indexOf("compose run --rm migrate"),
+    );
+    expect(deploy.indexOf("compose run --rm migrate")).toBeLessThan(
+      deploy.indexOf("compose up -d --no-build --wait"),
+    );
+    expect(deploy).toContain("node dist/readiness.js");
+    expect(deploy.indexOf("node dist/readiness.js")).toBeLessThan(
+      deploy.indexOf("assert_public_health"),
+    );
+    expect(deploy.indexOf("assert_public_health")).toBeLessThan(deploy.indexOf("ln -sfn"));
   });
 });

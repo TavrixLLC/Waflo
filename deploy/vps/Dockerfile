@@ -13,22 +13,70 @@ RUN apt-get update && \
 WORKDIR /workspace
 
 FROM toolchain AS dependencies
-COPY . .
-RUN --mount=type=cache,id=waflo-pnpm,target=/pnpm/store \
+# Keep the expensive, lockfile-resolved workspace installation independent
+# from ordinary source edits. Every workspace manifest is copied explicitly so
+# pnpm can resolve workspace links without importing application source.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.json ./
+COPY apps/admin-dashboard/package.json apps/admin-dashboard/
+COPY apps/api/package.json apps/api/
+COPY apps/apple-pass-builder-service/package.json apps/apple-pass-builder-service/
+COPY apps/customer-web/package.json apps/customer-web/
+COPY apps/marketing-web/package.json apps/marketing-web/
+COPY apps/merchant-dashboard/package.json apps/merchant-dashboard/
+COPY apps/operational-worker/package.json apps/operational-worker/
+COPY apps/wallet-worker/package.json apps/wallet-worker/
+COPY deploy/vps/migrate/package.json deploy/vps/migrate/
+COPY packages/auth/package.json packages/auth/
+COPY packages/billing/package.json packages/billing/
+COPY packages/brand/package.json packages/brand/
+COPY packages/config/package.json packages/config/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/customer-security/package.json packages/customer-security/
+COPY packages/database/package.json packages/database/
+COPY packages/external-auth-security/package.json packages/external-auth-security/
+COPY packages/i18n/package.json packages/i18n/
+COPY packages/loyalty-ledger/package.json packages/loyalty-ledger/
+COPY packages/loyalty-policy/package.json packages/loyalty-policy/
+COPY packages/operational-analytics/package.json packages/operational-analytics/
+COPY packages/permissions/package.json packages/permissions/
+COPY packages/qr-core/package.json packages/qr-core/
+COPY packages/security/package.json packages/security/
+COPY packages/staff-device-security/package.json packages/staff-device-security/
+COPY packages/stamp-engine/package.json packages/stamp-engine/
+COPY packages/ui/package.json packages/ui/
+COPY packages/wallet-apple/package.json packages/wallet-apple/
+COPY packages/wallet-artwork/package.json packages/wallet-artwork/
+COPY packages/wallet-core/package.json packages/wallet-core/
+COPY packages/wallet-google/package.json packages/wallet-google/
+RUN --mount=type=cache,id=waflo-pnpm-v11,target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
 
 FROM dependencies AS build
+# Source changes start here. The frozen dependency layer above only changes
+# when the workspace manifests, lockfile, or build configuration changes.
+COPY . .
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_DASHBOARD_URL
 ARG NEXT_PUBLIC_MARKETING_URL
-ARG NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE
+ARG NEXT_PUBLIC_CUSTOMER_URL
+ARG NEXT_PUBLIC_ADMIN_URL
+ARG NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+ARG DEPLOYMENT_ENVIRONMENT
+ARG BUILD_SCOPE=...
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_DASHBOARD_URL=${NEXT_PUBLIC_DASHBOARD_URL}
 ENV NEXT_PUBLIC_MARKETING_URL=${NEXT_PUBLIC_MARKETING_URL}
-ENV NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE=${NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE}
-RUN DATABASE_URL=postgresql://build:build@invalid.invalid:5432/build?schema=public pnpm build
+ENV NEXT_PUBLIC_CUSTOMER_URL=${NEXT_PUBLIC_CUSTOMER_URL}
+ENV NEXT_PUBLIC_ADMIN_URL=${NEXT_PUBLIC_ADMIN_URL}
+ENV NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+ENV DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT}
+# Four concurrent Next production builds exceed the bounded release-builder
+# memory envelope. Keep this explicit so image publication remains deterministic
+# on the staging runner as well as developer BuildKit instances.
+RUN DATABASE_URL=postgresql://build:build@invalid.invalid:5432/build?schema=public \
+    pnpm exec turbo run build --filter="${BUILD_SCOPE}" --concurrency=2
 
 FROM build AS api-package
 RUN pnpm --config.auto-install-peers=false --filter @waflo/api deploy --prod --legacy /output/api
@@ -54,6 +102,10 @@ RUN groupadd --system --gid 10001 waflo && \
     useradd --system --uid 10001 --gid waflo --home-dir /app --shell /usr/sbin/nologin waflo
 
 FROM runtime AS api
+USER root
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends fontconfig fonts-noto-core && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=api-package --chown=waflo:waflo /output/api /app
 WORKDIR /app
 USER waflo
@@ -68,6 +120,10 @@ STOPSIGNAL SIGTERM
 CMD ["node", "dist/main.js"]
 
 FROM runtime AS wallet-worker
+USER root
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends fontconfig fonts-noto-core && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=wallet-worker-package --chown=waflo:waflo /output/wallet-worker /app
 WORKDIR /app
 USER waflo
@@ -94,6 +150,16 @@ ENV PORT=3002
 ENV HOSTNAME=0.0.0.0
 USER waflo
 EXPOSE 3002
+CMD ["node", "server.js"]
+
+FROM runtime AS admin-web
+COPY --from=build --chown=waflo:waflo /workspace/apps/admin-dashboard/.next/standalone /app
+COPY --from=build --chown=waflo:waflo /workspace/apps/admin-dashboard/.next/static /app/apps/admin-dashboard/.next/static
+WORKDIR /app/apps/admin-dashboard
+ENV PORT=3003
+ENV HOSTNAME=0.0.0.0
+USER waflo
+EXPOSE 3003
 CMD ["node", "server.js"]
 
 FROM runtime AS marketing-web

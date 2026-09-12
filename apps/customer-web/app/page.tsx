@@ -4,7 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { fetchCustomerApi, localeForRequest, type PublicProgram } from "./server-api";
+import { CustomerMerchantIdentity } from "./customer-merchant-identity";
+import {
+  fetchCustomerApi,
+  localeForRequest,
+  type PublicMerchant,
+  type PublicProgram,
+} from "./server-api";
 
 export const dynamic = "force-dynamic";
 
@@ -16,18 +22,16 @@ export default async function MerchantProgramsPage({
   const query = await searchParams;
   const requestHeaders = await headers();
   const directHost = requestHeaders.get("host") ?? "";
-  const host =
-    directHost.includes(".localhost") || directHost.includes(".lvh.me")
-      ? directHost
-      : (requestHeaders.get("x-forwarded-host") ?? directHost);
+  const host = directHost;
   const localHost =
     directHost.includes("localhost") ||
     directHost.includes("127.0.0.1") ||
     directHost.includes(".lvh.me");
-  const tenant = localHost ? query.tenant : undefined;
+  const sharedStagingHost = directHost.split(":")[0] === "card-staging.waflo.app";
+  const tenant = localHost || sharedStagingHost ? query.tenant : undefined;
   const result = await fetchCustomerApi<{
     status: string;
-    merchant?: { name: string; slug: string; defaultLocale: "en" | "ar" };
+    merchant?: PublicMerchant;
     programs: PublicProgram[];
   }>("/v1/public/merchant-programs", host, tenant);
   const locale = localeForRequest(query.lang, result.merchant?.defaultLocale);
@@ -63,12 +67,21 @@ export default async function MerchantProgramsPage({
 
   return (
     <main className="customer-page" lang={locale} dir={ar ? "rtl" : "ltr"}>
-      <CustomerHeader locale={locale} {...(tenant ? { tenant } : {})} />
+      <CustomerHeader
+        locale={locale}
+        merchantName={result.merchant.name}
+        merchantLogoDataUri={result.merchant.brandLogoDataUri}
+        {...(tenant ? { tenant } : {})}
+      />
       <section className="customer-hero customer-hero--compact">
         <Badge tone="brand">{ar ? "مدعوم من Waflo" : "Powered by Waflo"}</Badge>
-        <span className="customer-merchant-mark" aria-hidden="true">
-          {result.merchant.name.slice(0, 1).toLocaleUpperCase(locale)}
-        </span>
+        <CustomerMerchantIdentity
+          className="customer-merchant-mark"
+          locale={locale}
+          logoDataUri={result.merchant.brandLogoDataUri}
+          name={result.merchant.name}
+          showName={false}
+        />
         <p className="customer-kicker">{result.merchant.name}</p>
         <h1>{ar ? "اختر بطاقة الولاء" : "Choose your loyalty card"}</h1>
         <p className="customer-lead">
@@ -125,7 +138,19 @@ export default async function MerchantProgramsPage({
   );
 }
 
-export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant?: string }) {
+export function CustomerHeader({
+  locale,
+  tenant,
+  languagePath = "/",
+  merchantName,
+  merchantLogoDataUri,
+}: {
+  locale: "en" | "ar";
+  tenant?: string;
+  languagePath?: string;
+  merchantName?: string;
+  merchantLogoDataUri?: string | null | undefined;
+}) {
   const nextLocale = locale === "ar" ? "en" : "ar";
   const homeParams = new URLSearchParams({ lang: locale });
   const languageParams = new URLSearchParams({ lang: nextLocale });
@@ -136,16 +161,24 @@ export function CustomerHeader({ locale, tenant }: { locale: "en" | "ar"; tenant
   return (
     <header className="customer-header">
       <Link href={`/?${homeParams.toString()}`}>
-        <Image
-          className="customer-logo"
-          src="/brand/waflo-logo-primary-horizontal.svg"
-          alt="Waflo"
-          width={280}
-          height={80}
-          priority
-        />
+        {merchantName ? (
+          <CustomerMerchantIdentity
+            locale={locale}
+            logoDataUri={merchantLogoDataUri}
+            name={merchantName}
+          />
+        ) : (
+          <Image
+            className="customer-logo"
+            src="/brand/waflo-logo-primary-horizontal.svg"
+            alt="Waflo"
+            width={280}
+            height={80}
+            priority
+          />
+        )}
       </Link>
-      <Link className="customer-language" href={`/?${languageParams.toString()}`}>
+      <Link className="customer-language" href={`${languagePath}?${languageParams.toString()}`}>
         {locale === "ar" ? "English" : "العربية"}
       </Link>
     </header>

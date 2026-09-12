@@ -29,7 +29,17 @@ test("W4 operational dashboard screens and dialogs have no serious accessibility
   page,
 }) => {
   await login(page);
-  for (const section of ["customers", "devices", "approvals", "risk", "analytics", "exports"]) {
+  for (const section of [
+    "programs",
+    "customers",
+    "locations",
+    "team",
+    "analytics",
+    "exports",
+    "billing",
+    "settings",
+    "security",
+  ]) {
     await page.goto(`/en/dashboard/${section}`);
     await expect(page.locator(".dashboard-main")).toBeVisible();
     await expectAccessible(page);
@@ -49,16 +59,20 @@ test("W4 operational dashboard screens and dialogs have no serious accessibility
   await expectAccessible(page);
   await page.getByRole("button", { name: "Close" }).click();
 
-  await page.goto("/en/dashboard/devices");
-  await page.getByRole("button", { name: "Pair device" }).click();
+  await page.goto("/en/dashboard/team");
+  await page.getByRole("button", { name: "Add staff" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Close" }).click();
 
-  await page.goto("/en/dashboard/risk");
-  await page.getByRole("button", { name: "Details" }).first().click();
-  await expect(page.getByRole("heading", { name: "Risk signal detail" })).toBeVisible();
+  await page.goto("/en/dashboard/devices");
+  await expect(page).toHaveURL(/\/en\/dashboard\/team$/);
   await expectAccessible(page);
+
+  for (const removed of ["approvals", "risk", "audit"]) {
+    const response = await page.goto(`/en/dashboard/${removed}`);
+    expect(response?.status()).toBe(404);
+  }
 });
 
 test("W4 Arabic RTL operations and Staff permission denial are accessible", async ({
@@ -66,7 +80,15 @@ test("W4 Arabic RTL operations and Staff permission denial are accessible", asyn
   page,
 }) => {
   await login(page);
-  for (const section of ["customers", "devices", "approvals", "risk", "analytics", "exports"]) {
+  for (const section of [
+    "customers",
+    "team",
+    "analytics",
+    "exports",
+    "billing",
+    "settings",
+    "security",
+  ]) {
     await page.goto(`/ar/dashboard/${section}`);
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
     await expectAccessible(page);
@@ -77,7 +99,7 @@ test("W4 Arabic RTL operations and Staff permission denial are accessible", asyn
   await login(staffPage, "staff@waflo.local");
   await staffPage.goto("/en/dashboard/customers");
   await expect(
-    staffPage.getByText("This section requires Manager or Owner permission."),
+    staffPage.getByText("You do not have permission to open this section."),
   ).toBeVisible();
   await expectAccessible(staffPage);
   await staffContext.close();

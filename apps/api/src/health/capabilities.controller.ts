@@ -13,10 +13,10 @@ export class CapabilitiesController {
   @Get()
   @Public()
   @RateLimit(120)
-  get() {
+  async get() {
     return {
       ...this.externalAuth.publicCapabilities(),
-      ...this.wallets.publicCapabilities(),
+      ...(await this.wallets.publicCapabilities()),
     };
   }
 }

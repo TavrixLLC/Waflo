@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import type { MerchantAssetUploadMetadataInput } from "@waflo/contracts";
+import { sanitizeErrorForReporting } from "@waflo/security";
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { AuditService } from "../audit/audit.service.js";
@@ -36,6 +37,43 @@ export class AssetsService {
     private readonly audit: AuditService,
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorage,
   ) {}
+
+  private async ensureStorageAvailable(request: WafloRequest): Promise<void> {
+    try {
+      await this.objectStorage.ensureReady();
+    } catch (error) {
+      request.log.error(
+        { err: sanitizeErrorForReporting(error), requestId: request.requestId },
+        "Merchant asset storage is unavailable",
+      );
+      throw new AppError(
+        "ASSET_STORAGE_UNAVAILABLE",
+        "Image storage is temporarily unavailable. Try again.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  private async storeVariant(
+    objectKey: string,
+    bytes: Buffer,
+    mimeType: string,
+    request: WafloRequest,
+  ): Promise<void> {
+    try {
+      await this.objectStorage.put(objectKey, bytes, mimeType);
+    } catch (error) {
+      request.log.error(
+        { err: sanitizeErrorForReporting(error), requestId: request.requestId },
+        "Merchant asset storage write failed",
+      );
+      throw new AppError(
+        "ASSET_STORAGE_UNAVAILABLE",
+        "Image storage is temporarily unavailable. Try again.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
 
   async list(userId: string, organizationId: string, cursor?: string, limit = 30) {
     await this.tenant.requireMembership(userId, organizationId, "programs.view");
@@ -78,7 +116,15 @@ export class AssetsService {
     file: { filename: string; mimeType: string; bytes: Buffer },
     request: WafloRequest,
   ) {
-    await this.tenant.requireMembership(userId, organizationId, "programs.edit");
+    if (metadata.category === "LOGO") {
+      await this.tenant.requireOnboardingBrandingMembership(
+        userId,
+        organizationId,
+        "programs.edit",
+      );
+    } else {
+      await this.tenant.requireMembership(userId, organizationId, "programs.edit");
+    }
     if (
       !["image/png", "image/jpeg", "image/webp"].includes(file.mimeType) ||
       file.bytes.length === 0 ||
@@ -97,6 +143,7 @@ export class AssetsService {
         file.bytes,
         file.mimeType as SupportedImageMime,
         metadata.crop,
+        { requireSquareCrop: metadata.category === "LOGO" },
       );
     } catch (error) {
       throw new AppError(
@@ -120,7 +167,7 @@ export class AssetsService {
           },
           include: { variants: true },
         });
-        await this.objectStorage.ensureReady();
+        await this.ensureStorageAvailable(request);
         const sanitizedFilename = safeFilename(file.filename);
         if (existing) {
           let valid = existing.archivedAt === null && existing.processingStatus === "READY";
@@ -158,7 +205,7 @@ export class AssetsService {
             const objectKey =
               current?.objectKey ??
               `organizations/${organizationId}/assets/${existing.id}/${variant.code.toLowerCase()}.${processedExtension(variant.mimeType)}`;
-            await this.objectStorage.put(objectKey, variant.bytes, variant.mimeType);
+            await this.storeVariant(objectKey, variant.bytes, variant.mimeType, request);
             storedKeys.set(variant.code, objectKey);
             await transaction.merchantAssetVariant.upsert({
               where: {
@@ -236,7 +283,7 @@ export class AssetsService {
         try {
           for (const variant of processed.variants) {
             const objectKey = `${prefix}/${variant.code.toLowerCase()}.${processedExtension(variant.mimeType)}`;
-            await this.objectStorage.put(objectKey, variant.bytes, variant.mimeType);
+            await this.storeVariant(objectKey, variant.bytes, variant.mimeType, request);
             storedKeys.push(objectKey);
           }
           const originalKey = storedKeys[0];

@@ -1,8 +1,0 @@
-﻿W1_W2_E2E_EXIT_CODE=0 file=w1-w2-e2e-regression-results.log
-W1_W2_ACCESSIBILITY_EXIT_CODE=0 file=w1-w2-accessibility-regression-results.log
-W3_E2E_RUN_1_EXIT_CODE=0 file=playwright-w3-2026-07-29T20-19-27.463Z-78f64b-results.log
-W3_E2E_RUN_2_EXIT_CODE=0 file=playwright-w3-2026-07-29T20-20-24.372Z-5340c1-results.log
-W3_ACCESSIBILITY_RUN_1_EXIT_CODE=0 file=playwright-w3-accessibility-2026-07-29T20-21-13.735Z-09d9c9-results.log
-W3_ACCESSIBILITY_RUN_2_EXIT_CODE=0 file=playwright-w3-accessibility-2026-07-29T20-21-37.897Z-189f7d-results.log
-W3_EXTRA_EVIDENCE_EXIT_CODE=0 file=playwright-w3-evidence-2026-07-29T20-15-18.279Z-4533e9-results.log
-W3_PROVIDER_DISABLED_EXIT_CODE=0 file=playwright-w3-provider-disabled-2026-07-29T20-15-41.144Z-7610cd-results.log

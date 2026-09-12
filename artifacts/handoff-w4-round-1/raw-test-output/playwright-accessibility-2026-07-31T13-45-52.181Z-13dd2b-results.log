@@ -1,8 +1,0 @@
-
-Running 3 tests using 1 worker
-
-  ok 1 [accessibility] › tests\e2e\accessibility.spec.ts:36:5 › public, authentication, and form-error screens have no serious accessibility violations (7.7s)
-  ok 2 [accessibility] › tests\e2e\accessibility.spec.ts:72:5 › authenticated English and Arabic dashboard screens and dialogs are accessible (10.7s)
-  ok 3 [accessibility] › tests\e2e\accessibility.spec.ts:109:5 › Loyalty Studio editor, crop, validation, Test Mode, publishing, conflicts, and RTL are accessible (26.2s)
-
-  3 passed (45.4s)

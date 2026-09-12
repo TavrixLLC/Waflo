@@ -1,0 +1,52 @@
+{
+  "membershipPublicId": "mem_1234567890abcdef1234567890abcdef",
+  "membershipStatus": "ACTIVE",
+  "customerDisplayName": "Synthetic customer",
+  "programName": "Synthetic coffee rewards",
+  "locale": "en",
+  "progress": 5,
+  "goal": 8,
+  "rewardReady": false,
+  "completedCycles": 1,
+  "projectionVersion": 15,
+  "locationEligibility": {
+    "earning": true,
+    "redemption": true
+  },
+  "operationLimits": {
+    "maximumStampsPerOperation": 5,
+    "maximumStampsPerCustomerPerDay": 10,
+    "dailyRemainingStamps": 4
+  },
+  "operationalTimezone": "Asia/Baghdad",
+  "operationalDate": "2026-08-07",
+  "purchaseRequirement": {
+    "required": true,
+    "minimumAmountMinor": 5000,
+    "currency": "IQD"
+  },
+  "stampVisuals": {
+    "filled": {
+      "state": "FILLED",
+      "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "empty": {
+      "state": "EMPTY",
+      "contentDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  "availableRewards": [
+    {
+      "publicId": "10000000-0000-4000-8000-000000000001",
+      "name": "Synthetic milestone",
+      "description": "Separate from the active stamp grid.",
+      "threshold": 4,
+      "finalReward": false,
+      "status": "AVAILABLE",
+      "redemptionCount": 0,
+      "maximumRedemptionCount": 1,
+      "expiresAt": null,
+      "requiresManagerApproval": false
+    }
+  ]
+}
