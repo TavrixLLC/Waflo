@@ -97,6 +97,19 @@ describe("environment contract", () => {
   it("accepts test-safe local defaults", () => {
     expect(parseEnvironment({ NODE_ENV: "test" }).NODE_ENV).toBe("test");
   });
+
+  it("defaults Apple external certification to false and rejects invalid boolean values", () => {
+    expect(parseEnvironment({ NODE_ENV: "test" }).APPLE_WALLET_EXTERNALLY_CERTIFIED).toBe(false);
+    expect(
+      parseEnvironment({ NODE_ENV: "test", APPLE_WALLET_EXTERNALLY_CERTIFIED: "true" })
+        .APPLE_WALLET_EXTERNALLY_CERTIFIED,
+    ).toBe(true);
+    for (const invalid of ["TRUE", "yes", "on", "1", "certified", ""]) {
+      expect(() =>
+        parseEnvironment({ NODE_ENV: "test", APPLE_WALLET_EXTERNALLY_CERTIFIED: invalid }),
+      ).toThrow("Invalid Waflo environment configuration");
+    }
+  });
 });
 
 describe("merchant slug policy", () => {

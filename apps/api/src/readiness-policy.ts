@@ -1,3 +1,5 @@
+import type { WalletProviderHealth } from "@waflo/wallet-core";
+
 export type ReleaseEnvironment = "development" | "staging" | "production";
 
 export type ReleaseReadinessStatus =
@@ -19,6 +21,14 @@ export interface ReleaseReadinessResult {
 export interface ReleaseReadinessDecision {
   blockers: string[];
   warnings: string[];
+}
+
+export function mapWalletProviderHealthToReadiness(
+  providerStatus: WalletProviderHealth["status"],
+): Extract<ReleaseReadinessStatus, "READY" | "CONFIG_READY" | "PROVIDER_ERROR"> {
+  if (providerStatus === "HEALTHY") return "READY";
+  if (providerStatus === "EXTERNALLY_UNCERTIFIED") return "CONFIG_READY";
+  return "PROVIDER_ERROR";
 }
 
 export function evaluateReleaseReadiness(

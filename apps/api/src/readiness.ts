@@ -14,7 +14,11 @@ import { ExternalAuthService } from "./auth/external-auth.service.js";
 import { CustomerSecurityService } from "./customer/customer-security.service.js";
 import { PrismaService } from "./database/prisma.service.js";
 import { NotificationService } from "./notifications/notification.service.js";
-import { evaluateReleaseReadiness, type ReleaseReadinessResult } from "./readiness-policy.js";
+import {
+  evaluateReleaseReadiness,
+  mapWalletProviderHealthToReadiness,
+  type ReleaseReadinessResult,
+} from "./readiness-policy.js";
 import { WalletProviderRegistry } from "./wallet/wallet-provider.registry.js";
 
 type ComponentResult = ReleaseReadinessResult;
@@ -101,12 +105,7 @@ async function main() {
     try {
       const health = await wallets.get(provider).healthCheck();
       return {
-        status:
-          health.status === "HEALTHY"
-            ? ("READY" as const)
-            : health.status === "EXTERNALLY_UNCERTIFIED"
-              ? ("CONFIG_READY" as const)
-              : ("PROVIDER_ERROR" as const),
+        status: mapWalletProviderHealthToReadiness(health.status),
         metadata: {
           ...safeConfiguration,
           providerStatus: health.status,

@@ -7,6 +7,7 @@ const optionalPositiveInteger = z.preprocess(
 );
 const optionalSecret = z.union([z.literal(""), z.string().min(32)]).optional();
 const walletProviderMode = z.enum(["DISABLED", "TEST_ADAPTER", "REAL"]);
+const explicitEnvironmentBoolean = z.enum(["true", "false"]).transform((value) => value === "true");
 const publicMapboxTokenPattern = /^pk\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 
 export type PublicMapboxTokenStatus = "SET" | "UNSET" | "INVALID_FORMAT";
@@ -197,6 +198,7 @@ export const environmentSchema = z
     WALLET_PUBLIC_BASE_URL: z.url().default("http://localhost:4000/v1/public/wallet-assets"),
     APPLE_WALLET_MODE: walletProviderMode.default("DISABLED"),
     APPLE_WALLET_GENERATOR: z.enum(["legacy", "passbuilder"]).default("legacy"),
+    APPLE_WALLET_EXTERNALLY_CERTIFIED: explicitEnvironmentBoolean.default(false),
     APPLE_PASS_TYPE_IDENTIFIER: z.string().optional(),
     APPLE_TEAM_IDENTIFIER: z.string().optional(),
     APPLE_ORGANIZATION_NAME: z.string().default("Waflo by Tavrix LLC"),

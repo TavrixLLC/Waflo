@@ -271,6 +271,43 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
       externallyCertified: false,
     });
 
+    const certified = new AppleWalletProvider({
+      mode: "REAL",
+      configuration: {
+        passTypeIdentifier: "pass.app.waflo",
+        teamIdentifier: "WAFLOTEAM",
+        organizationName: "Waflo",
+        webServiceUrl: "https://api.waflo.app/v1/apple-wallet",
+      },
+      signer,
+      externallyCertified: true,
+      authenticationToken: () => "a".repeat(43),
+      passDownloadUrl: "https://api.waflo.app/pass",
+    });
+    await expect(certified.healthCheck()).resolves.toMatchObject({
+      status: "HEALTHY",
+      configured: true,
+      externallyCertified: true,
+    });
+
+    const invalidConfiguration = new AppleWalletProvider({
+      mode: "REAL",
+      configuration: {
+        passTypeIdentifier: "pass.app.waflo",
+        teamIdentifier: "WAFLOTEAM",
+        organizationName: "Waflo",
+        webServiceUrl: "http://api.waflo.app/v1/apple-wallet",
+      },
+      signer,
+      externallyCertified: true,
+      authenticationToken: () => "a".repeat(43),
+      passDownloadUrl: "https://api.waflo.app/pass",
+    });
+    await expect(invalidConfiguration.healthCheck()).resolves.toMatchObject({
+      status: "DEGRADED",
+      externallyCertified: false,
+    });
+
     for (const [certificateStatus, providerStatus] of [
       ["EXPIRED", "CERTIFICATE_EXPIRED"],
       ["EXPIRING", "CERTIFICATE_EXPIRING"],
@@ -292,6 +329,7 @@ describe("W3 Repair Round 1 renderer and provider regressions", () => {
             expiresAt: "2027-07-29T00:00:00.000Z",
           }),
         },
+        externallyCertified: true,
         authenticationToken: () => "a".repeat(43),
         passDownloadUrl: "https://api.waflo.app/pass",
       });

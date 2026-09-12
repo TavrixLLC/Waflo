@@ -558,6 +558,8 @@ export interface AppleWalletProviderOptions {
   readonly configuration?: ApplePassConfiguration;
   readonly signer?: ApplePassSigner;
   readonly generator?: WalletPassGenerator;
+  /** Operator attestation after successful real-device Apple Wallet certification. */
+  readonly externallyCertified?: boolean;
   readonly authenticationToken: (input: WalletMembershipInput) => string;
   readonly passDownloadUrl: string;
 }
@@ -726,17 +728,19 @@ export class AppleWalletProvider implements WalletProvider {
       }
     }
     if (this.mode === "REAL") {
+      const externallyCertified = this.options.externallyCertified === true;
       return {
         provider: this.provider,
         mode: this.mode,
-        status: "EXTERNALLY_UNCERTIFIED",
+        status: externallyCertified ? "HEALTHY" : "EXTERNALLY_UNCERTIFIED",
         checkedAt,
-        safeMessage:
-          "Apple Wallet signing is locally valid; external device certification is still pending.",
+        safeMessage: externallyCertified
+          ? "Apple Wallet signing and external device certification are confirmed."
+          : "Apple Wallet signing is locally valid; external device certification is still pending.",
         demo: false,
         configured: true,
         providerReachable: false,
-        externallyCertified: false,
+        externallyCertified,
       };
     }
     return {

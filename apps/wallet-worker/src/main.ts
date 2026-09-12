@@ -270,6 +270,7 @@ function providers(environment: Environment): ReadonlyMap<WalletProviderCode, Wa
           },
         }),
     ...(appleGenerator ? { generator: appleGenerator } : signer ? { signer } : {}),
+    externallyCertified: environment.APPLE_WALLET_EXTERNALLY_CERTIFIED,
     authenticationToken: (input) =>
       deriveAppleAuthenticationToken(
         input.walletPassInstanceId,

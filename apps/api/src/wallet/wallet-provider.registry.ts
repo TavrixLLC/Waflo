@@ -2,14 +2,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { Injectable } from "@nestjs/common";
 import {
   ApplePassBuilderGenerator,
+  type ApplePassSigner,
   AppleWalletProvider,
   Pkcs7ApplePassSigner,
   parseAppleSigningKeyMap,
   TestApplePassSigner,
-  type ApplePassSigner,
 } from "@waflo/wallet-apple";
 import type { WalletProvider, WalletProviderCode, WalletProviderHealth } from "@waflo/wallet-core";
-import { GoogleWalletProvider, type GoogleServiceAccount } from "@waflo/wallet-google";
+import { type GoogleServiceAccount, GoogleWalletProvider } from "@waflo/wallet-google";
 import { EnvironmentService } from "../config/environment.service.js";
 import { CustomerSecurityService } from "../customer/customer-security.service.js";
 
@@ -128,6 +128,7 @@ export class WalletProviderRegistry {
         : appleSigner
           ? { signer: appleSigner }
           : {}),
+      externallyCertified: values.APPLE_WALLET_EXTERNALLY_CERTIFIED,
       authenticationToken: (input) =>
         security.appleAuthenticationToken(input.walletPassInstanceId, input.providerIdentity),
       passDownloadUrl: `${values.API_PUBLIC_URL.replace(/\/+$/, "")}/v1/customer/wallet/apple/pass`,

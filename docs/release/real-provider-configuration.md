@@ -93,6 +93,7 @@ unless the operator intentionally rotates them.
 | Name | Class | Exact value or format |
 | --- | --- | --- |
 | `APPLE_WALLET_MODE` | NON_SECRET_CONFIG | `REAL` for signed installable passes; `DISABLED` turns it off. `TEST_ADAPTER` is rejected in deployed environments. |
+| `APPLE_WALLET_EXTERNALLY_CERTIFIED` | NON_SECRET_CONFIG | `false` by default. Set exactly `true` only after a real-device signed-pass save, registration, and update verification have succeeded. It is an operator attestation, not a substitute for local signing validation. |
 | `APPLE_PASS_TYPE_IDENTIFIER` | NON_SECRET_CONFIG | Existing Apple Pass Type ID, normally `pass.<reverse-domain>`. It must match the signing certificate UID/CN. |
 | `APPLE_TEAM_IDENTIFIER` | NON_SECRET_CONFIG | Ten-character Apple Team ID; it must match the signing certificate OU. |
 | `APPLE_ORGANIZATION_NAME` | NON_SECRET_CONFIG | Display organization, currently `Waflo by Tavrix LLC`. |
@@ -182,7 +183,11 @@ have pass/update-sequence idempotency keys, conditional leases, and safe multi-i
 9. Remove the pass and verify unregister behavior. Exercise an explicitly invalid test push token
    and confirm only that registration is cleaned up.
 
-Only completion of this procedure may mark Apple Wallet externally verified.
+Only completion of this procedure may mark Apple Wallet externally verified. After it succeeds,
+set `APPLE_WALLET_EXTERNALLY_CERTIFIED=true` in the production application configuration. Until
+then, leave it unset or `false`; REAL mode reports `EXTERNALLY_UNCERTIFIED`. Invalid boolean
+values fail environment validation. The attestation is evaluated only after the certificate,
+signing identity, Pass Type ID, Team ID, HTTPS update URL, and generator health checks succeed.
 
 ## Stripe
 

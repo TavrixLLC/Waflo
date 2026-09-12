@@ -144,8 +144,11 @@ WWDR intermediate, and APNs-capable provider material. Set
 `APPLE_PASS_AUTH_ACTIVE_SECRET_VERSION`. Real Wallet pass updates require the
 production APNs host in staging and production. Verify a signed
 `.pkpass`, device registration, progress update, and invalidation on a physical
-iPhone. Never commit certificates containing private material, private keys,
-passwords, or pass authentication secrets.
+iPhone. Only after that external certification, set
+`APPLE_WALLET_EXTERNALLY_CERTIFIED=true`; leave it unset or `false` until then.
+This non-secret attestation does not bypass signing or certificate validation.
+Never commit certificates containing private material, private keys, passwords,
+or pass authentication secrets.
 
 ## Multi-version secrets — REQUIRED_FOR_PRODUCTION
 

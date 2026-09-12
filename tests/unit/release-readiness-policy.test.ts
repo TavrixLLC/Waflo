@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { evaluateReleaseReadiness } from "../../apps/api/src/readiness-policy.js";
+import {
+  evaluateReleaseReadiness,
+  mapWalletProviderHealthToReadiness,
+} from "../../apps/api/src/readiness-policy.js";
 
 describe("release readiness policy", () => {
   const readyJourney = {
@@ -22,6 +25,11 @@ describe("release readiness policy", () => {
       blockers: [],
       warnings: [],
     });
+  });
+
+  it("maps Apple provider health without treating uncertified configuration as ready", () => {
+    expect(mapWalletProviderHealthToReadiness("HEALTHY")).toBe("READY");
+    expect(mapWalletProviderHealthToReadiness("EXTERNALLY_UNCERTIFIED")).toBe("CONFIG_READY");
   });
 
   it("blocks catalog drift, unavailable workers, and deployed demo Wallets", () => {
