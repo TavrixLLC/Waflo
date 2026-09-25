@@ -189,7 +189,7 @@ test("shows the CTA when Wallet becomes ready during adaptive revalidation", asy
     hasTouch: true,
   });
   const page = await context.newPage();
-  await installFrozenClock(page);
+  await page.clock.install();
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads < 8 ? "PREPARING" : "READY", apple: "READY" }));
   try {
@@ -216,7 +216,7 @@ test("continues adaptive readiness verification without a manual refresh control
     hasTouch: true,
   });
   const page = await context.newPage();
-  await installFrozenClock(page);
+  await page.clock.install();
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads === 9 ? "READY" : "PREPARING", apple: "READY" }));
   try {
@@ -241,7 +241,7 @@ test("keeps the Wallet action surface hidden while readiness is unresolved", asy
     hasTouch: true,
   });
   const page = await context.newPage();
-  await installFrozenClock(page);
+  await page.clock.install();
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads === 3 ? "READY" : "PREPARING", apple: "READY" }));
   try {
@@ -276,7 +276,7 @@ test("shows staged, full-space Wallet preparation and captures its transition to
     hasTouch: true,
   });
   const page = await context.newPage();
-  await installFrozenClock(page);
+  await page.clock.install();
   let reads = 0;
   let allowReady = false;
   await routeCard(page, () => ({
@@ -398,7 +398,7 @@ test("stops polling when a readiness check returns a terminal Wallet state", asy
     hasTouch: true,
   });
   const page = await context.newPage();
-  await installFrozenClock(page);
+  await page.clock.install();
   let reads = 0;
   await routeCard(page, () => ({
     google: ++reads === 2 ? "UNAVAILABLE" : "PREPARING",
@@ -427,7 +427,7 @@ test("continues low-frequency verification while Wallet remains preparing withou
     hasTouch: true,
   });
   const page = await context.newPage();
-  await installFrozenClock(page);
+  await page.clock.install();
   let reads = 0;
   await routeCard(page, () => {
     reads += 1;
