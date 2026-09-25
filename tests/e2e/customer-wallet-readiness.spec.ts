@@ -126,6 +126,14 @@ async function routeCard(
   });
 }
 
+async function installFrozenClock(
+  page: Page,
+  now = new Date("2026-09-11T12:00:00.000Z"),
+): Promise<void> {
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(now);
+}
+
 async function exhaustWalletRetries(page: Page, reads: () => number): Promise<void> {
   await expect.poll(reads).toBe(1);
   for (const [index, delay] of [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000].entries()) {
@@ -181,7 +189,7 @@ test("shows the CTA when Wallet becomes ready during adaptive revalidation", asy
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads < 8 ? "PREPARING" : "READY", apple: "READY" }));
   try {
@@ -208,7 +216,7 @@ test("continues adaptive readiness verification without a manual refresh control
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads === 9 ? "READY" : "PREPARING", apple: "READY" }));
   try {
@@ -233,7 +241,7 @@ test("keeps the Wallet action surface hidden while readiness is unresolved", asy
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads === 3 ? "READY" : "PREPARING", apple: "READY" }));
   try {
@@ -268,7 +276,7 @@ test("shows staged, full-space Wallet preparation and captures its transition to
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   let allowReady = false;
   await routeCard(page, () => ({
@@ -360,12 +368,13 @@ test("uses the adaptive cadence without excessive concurrent readiness reads", a
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   await routeCard(page, () => ({ google: ++reads ? "PREPARING" : "PREPARING", apple: "READY" }));
   try {
     await page.goto("http://localhost:3002/card/wallet-readiness-member");
     await expect.poll(() => reads).toBe(1);
+    await expect(page.getByTestId("wallet-preparation")).toBeVisible();
     await page.clock.fastForward(249);
     expect(reads).toBe(1);
     await page.clock.fastForward(1);
@@ -389,7 +398,7 @@ test("stops polling when a readiness check returns a terminal Wallet state", asy
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   await routeCard(page, () => ({
     google: ++reads === 2 ? "UNAVAILABLE" : "PREPARING",
@@ -418,7 +427,7 @@ test("continues low-frequency verification while Wallet remains preparing withou
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.clock.install();
+  await installFrozenClock(page);
   let reads = 0;
   await routeCard(page, () => {
     reads += 1;
