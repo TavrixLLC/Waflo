@@ -2575,8 +2575,8 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
 
 .marketing-footer__grid {
   display: grid;
-  grid-template-columns: minmax(14rem, 1.5fr) repeat(4, minmax(7rem, 0.72fr));
-  gap: clamp(2rem, 4vw, 4rem);
+  grid-template-columns: minmax(13rem, 1.4fr) repeat(4, minmax(6rem, 0.7fr)) minmax(9rem, 0.9fr);
+  gap: clamp(1.5rem, 3vw, 3rem);
 }
 
 .marketing-footer__brand {
@@ -2618,6 +2618,44 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
   font-size: 0.8rem;
   font-weight: 650;
   text-decoration: none;
+}
+
+.marketing-footer__staff-desc {
+  color: var(--waflo-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.marketing-footer__store-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.25rem;
+}
+
+.marketing-store-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: #554743;
+  background: white;
+  border: 1px solid var(--waflo-border);
+  border-radius: var(--waflo-radius-md, 12px);
+  text-decoration: none;
+  transition:
+    border-color var(--waflo-motion-quick) var(--waflo-ease),
+    color var(--waflo-motion-quick) var(--waflo-ease),
+    box-shadow var(--waflo-motion-quick) var(--waflo-ease);
+}
+
+.marketing-store-badge:hover {
+  color: var(--waflo-brick);
+  border-color: var(--waflo-brick);
+  box-shadow: 0 2px 8px -2px rgb(36 25 22 / 12%);
 }
 
 .marketing-footer__legal {
@@ -3460,3 +3498,133 @@ body[data-interface-locale^="ku-"] .landing-hero h1 {
     flex-direction: column;
   }
 }
+
+/* Plan Comparison Section */
+.marketing-plan-comparison {
+  margin-top: 4rem;
+  padding-block-start: 3rem;
+  border-block-start: 1px solid var(--waflo-border);
+}
+
+.marketing-plan-comparison__title {
+  margin-bottom: 2rem;
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--waflo-ink);
+}
+
+.marketing-plan-comparison__table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: white;
+  border: 1px solid var(--waflo-border);
+  border-radius: 24px;
+  box-shadow: var(--waflo-shadow-card);
+}
+
+.marketing-plan-comparison__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.marketing-plan-comparison__header th {
+  background: var(--waflo-soft);
+  border-block-end: 1px solid var(--waflo-border);
+  font-weight: 800;
+  color: var(--waflo-ink);
+  padding: 1.1rem 1.25rem;
+}
+
+.marketing-plan-comparison__plan-header {
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.marketing-plan-comparison__row {
+  border-block-end: 1px solid var(--waflo-border);
+  transition: background var(--waflo-motion-quick) var(--waflo-ease);
+}
+
+.marketing-plan-comparison__row:last-child {
+  border-block-end: none;
+}
+
+.marketing-plan-comparison__row:hover {
+  background: color-mix(in srgb, var(--waflo-soft) 50%, white);
+}
+
+.marketing-plan-comparison__feature-label {
+  text-align: start;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--waflo-ink);
+  padding: 0.9rem 1.25rem;
+}
+
+.marketing-plan-comparison__cell {
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--waflo-ink);
+  padding: 0.9rem 1rem;
+}
+
+.marketing-comparison__check {
+  color: var(--waflo-brick);
+}
+
+.marketing-comparison__dash {
+  color: var(--waflo-muted);
+}
+
+.marketing-plan-comparison__common {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: var(--waflo-soft);
+  border: 1px solid var(--waflo-border);
+  border-radius: 16px;
+}
+
+.marketing-plan-comparison__common strong {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  color: var(--waflo-ink);
+}
+
+.marketing-plan-comparison__common ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.marketing-plan-comparison__common li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--waflo-muted);
+}
+
+.marketing-plan-comparison__common li svg {
+  color: var(--waflo-brick);
+  flex-shrink: 0;
+}
+
+@media (max-width: 48rem) {
+  .marketing-plan-comparison__header,
+  .marketing-plan-comparison__row {
+    grid-template-columns: minmax(7.5rem, 1.2fr) repeat(3, minmax(4rem, 1fr));
+    padding: 0.85rem 0.75rem;
+  }
+  .marketing-plan-comparison__feature-label {
+    font-size: 0.82rem;
+  }
+  .marketing-plan-comparison__cell {
+    font-size: 0.78rem;
+  }
+}
+

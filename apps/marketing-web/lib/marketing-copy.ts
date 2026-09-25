@@ -103,6 +103,12 @@ interface MarketingCopy {
     readonly primary: string;
     readonly secondary: string;
   };
+  readonly staffApp: {
+    readonly heading: string;
+    readonly description: string;
+    readonly googlePlay: string;
+    readonly appStore: string;
+  };
   readonly pricing: {
     readonly kicker: string;
     readonly title: string;
@@ -121,6 +127,27 @@ interface MarketingCopy {
     readonly trialTitle: string;
     readonly trialBody: string;
     readonly startTrial: string;
+    readonly comparisonTitle: string;
+    readonly commonFeatures: string;
+    readonly locations: string;
+    readonly teamSeats: string;
+    readonly programs: string;
+    readonly unlimited: string;
+    readonly upTo: string;
+    readonly walletPasses: string;
+    readonly appleWallet: string;
+    readonly googleWallet: string;
+    readonly customization: string;
+    readonly analytics: string;
+    readonly milestoneRewards: string;
+    readonly advancedExports: string;
+    readonly allPlansInclude: string;
+    readonly loyaltyCards: string;
+    readonly qrStamping: string;
+    readonly customerWeb: string;
+    readonly included: string;
+    readonly basic: string;
+    readonly advanced: string;
   };
   readonly footer: {
     readonly tagline: string;
@@ -321,6 +348,12 @@ const en: MarketingCopy = {
       },
     ],
   },
+  staffApp: {
+    heading: "Waflo Staff",
+    description: "Your team records visits from their phone.",
+    googlePlay: "Google Play",
+    appStore: "App Store",
+  },
   cta: {
     eyebrow: "Bring the next visit closer",
     title: "Give them a reason to come back.",
@@ -346,6 +379,27 @@ const en: MarketingCopy = {
     trialTitle: "15 days free",
     trialBody: "Add billing details and a card securely. Nothing is charged today.",
     startTrial: "Start your trial",
+    comparisonTitle: "What each plan includes",
+    commonFeatures: "Included in every plan",
+    locations: "Locations",
+    teamSeats: "Team seats",
+    programs: "Loyalty cards",
+    unlimited: "Unlimited",
+    upTo: "Up to",
+    walletPasses: "Wallet passes",
+    appleWallet: "Apple Wallet",
+    googleWallet: "Google Wallet",
+    customization: "Customization",
+    analytics: "Analytics",
+    milestoneRewards: "Milestone rewards",
+    advancedExports: "Advanced exports",
+    allPlansInclude: "All plans include",
+    loyaltyCards: "Digital loyalty cards",
+    qrStamping: "QR-based stamping",
+    customerWeb: "Customer web experience",
+    included: "Included",
+    basic: "Basic",
+    advanced: "Advanced",
   },
   footer: {
     tagline: "A digital loyalty platform for businesses people come back to.",
@@ -510,6 +564,12 @@ const ar: MarketingCopy = {
       },
     ],
   },
+  staffApp: {
+    heading: "Waflo Staff",
+    description: "يسجل فريقك الزيارات من هاتفه.",
+    googlePlay: "Google Play",
+    appStore: "App Store",
+  },
   cta: {
     eyebrow: "قرّب الزيارة القادمة",
     title: "امنحهم سببًا آخر للعودة.",
@@ -535,6 +595,27 @@ const ar: MarketingCopy = {
     trialTitle: "15 يوماً مجاناً",
     trialBody: "أضف بيانات الفوترة والبطاقة بأمان. لن يتم تحصيل أي مبلغ اليوم.",
     startTrial: "ابدأ تجربتك",
+    comparisonTitle: "ما تتضمنه كل باقة",
+    commonFeatures: "متاحة في كل الباقات",
+    locations: "الفروع",
+    teamSeats: "مقاعد الفريق",
+    programs: "بطاقات الولاء",
+    unlimited: "غير محدود",
+    upTo: "حتى",
+    walletPasses: "بطاقات المحفظة",
+    appleWallet: "Apple Wallet",
+    googleWallet: "Google Wallet",
+    customization: "التخصيص",
+    analytics: "التحليلات",
+    milestoneRewards: "مكافآت المراحل",
+    advancedExports: "التصدير المتقدم",
+    allPlansInclude: "جميع الباقات تشمل",
+    loyaltyCards: "بطاقات ولاء رقمية",
+    qrStamping: "ختم عبر QR",
+    customerWeb: "تجربة العميل على الويب",
+    included: "مشمول",
+    basic: "أساسي",
+    advanced: "متقدم",
   },
   footer: {
     tagline: "منصة ولاء رقمية للأعمال التي يعود إليها الناس.",
@@ -707,6 +788,12 @@ const kuBadini: MarketingCopy = {
       },
     ],
   },
+  staffApp: {
+    heading: "Waflo Staff",
+    description: "تیما تە سەرەدانان ژ تەلەفۆنێ تۆمار دکەت.",
+    googlePlay: "Google Play",
+    appStore: "App Store",
+  },
   cta: {
     eyebrow: "سەرەدانا دی نێزیک بکە",
     title: "ئەگەرەک بدەیە وان بۆ ڤەگەڕانێ.",
@@ -732,6 +819,27 @@ const kuBadini: MarketingCopy = {
     trialTitle: "15 رۆژ ب خۆرایی",
     trialBody: "زانیاریێن فۆتیرە و کارتێ ب پاراستنێ زیاد بکە. ئێرو پارە ناهێتە وەرگرتن.",
     startTrial: "دەست ب تاقیکرنێ بکە",
+    comparisonTitle: "هەر پلانەک چ دهێنە ناڤ",
+    commonFeatures: "د هەمی پلانان دا هەنە",
+    locations: "شاخەکان",
+    teamSeats: "جهێن تیمی",
+    programs: "کارتێن دلسۆزی",
+    unlimited: "بێ سنور",
+    upTo: "هەتا",
+    walletPasses: "کارتێن جزدانێ",
+    appleWallet: "Apple Wallet",
+    googleWallet: "Google Wallet",
+    customization: "خاسکرن",
+    analytics: "شیکارکرن",
+    milestoneRewards: "خەلاتێن قۆناخان",
+    advancedExports: "ھناردەیا پێشکەفتی",
+    allPlansInclude: "هەمی پلانان دهێنە ناڤ",
+    loyaltyCards: "کارتێن دلسۆزیا دیجیتاڵ",
+    qrStamping: "مۆرکرنا QR",
+    customerWeb: "ئەزموونا کریارێ لسەر وێبێ",
+    included: "دهێتە ناڤ",
+    basic: "سەرەتایی",
+    advanced: "پێشکەفتی",
   },
   footer: {
     tagline: "پلاتفۆرما دلسۆزییا دیجیتاڵ بۆ وان بزنسان کو خەلک ڤەدگەڕنێ.",
@@ -910,6 +1018,12 @@ const kuSorani: MarketingCopy = {
       },
     ],
   },
+  staffApp: {
+    heading: "Waflo Staff",
+    description: "ستافەکەت سەردانەکان لە مۆبایلەوە تۆمار دەکات.",
+    googlePlay: "Google Play",
+    appStore: "App Store",
+  },
   cta: {
     eyebrow: "سەردانی داهاتوو نزیک بکەوە",
     title: "هۆکارێکیان بدەرێ بۆ گەڕانەوە.",
@@ -935,6 +1049,27 @@ const kuSorani: MarketingCopy = {
     trialTitle: "15 ڕۆژ بەخۆڕایی",
     trialBody: "زانیارییەکانی بەپارەدان و کارت بە ئاسایش زیاد بکە. ئەمڕۆ هیچ بڕێک وەرناگیرێت.",
     startTrial: "دەست بە تاقیکردنەوەکەت بکە",
+    comparisonTitle: "هەر پلانێک چی لەخۆ دەگرێت",
+    commonFeatures: "لە هەموو پلاناندا هەیە",
+    locations: "شوێنەکان",
+    teamSeats: "شوێنی تیم",
+    programs: "کارتی دڵسۆزی",
+    unlimited: "بەبێ سنوور",
+    upTo: "تا",
+    walletPasses: "کارتی جزدان",
+    appleWallet: "Apple Wallet",
+    googleWallet: "Google Wallet",
+    customization: "خاسکردنەوە",
+    analytics: "شیکاری",
+    milestoneRewards: "خەڵاتی قۆناغ",
+    advancedExports: "هەناردەی پێشکەوتوو",
+    allPlansInclude: "هەموو پلانەکان لەخۆ دەگرن",
+    loyaltyCards: "کارتی دڵسۆزیی دیجیتاڵ",
+    qrStamping: "مۆرکردنی QR",
+    customerWeb: "ئەزموونی کڕیار لە وێب",
+    included: "لەخۆ دەگرێت",
+    basic: "بنەڕەتی",
+    advanced: "پێشکەوتوو",
   },
   footer: {
     tagline: "پلاتفۆرمی دڵسۆزیی دیجیتاڵی بۆ ئەو بزنسانەی خەڵک دەگەڕێنەوە بۆیان.",

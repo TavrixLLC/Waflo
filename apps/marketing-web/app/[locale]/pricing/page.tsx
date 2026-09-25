@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { MarketingShell } from "../../../components/marketing-shell";
+import { PlanComparison } from "../../../components/plan-comparison";
 import { PricingExplorer } from "../../../components/pricing-explorer";
 import { marketingCopy } from "../../../lib/marketing-copy";
 import { fetchMarketingPricing, trustedCloudflareCountry } from "../../../lib/public-pricing";
@@ -37,6 +38,7 @@ export default async function PricingPage({ params }: { params: Promise<{ locale
         <h1>{copy.title}</h1>
         <p className="marketing-content__lead">{copy.lede}</p>
         <PricingExplorer locale={locale} dashboardUrl={dashboardUrl} pricing={pricing} />
+        <PlanComparison locale={locale} />
       </section>
     </MarketingShell>
   );

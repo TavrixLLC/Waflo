@@ -10370,6 +10370,65 @@ html[lang="ckb-Arab-IQ"] body [dir="rtl"] {
     width: 100%;
   }
 }
+
+.dashboard-pairing-app-download {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--waflo-border);
+  border-radius: 1rem;
+  background: white;
+}
+
+.dashboard-pairing-app-download > span {
+  color: var(--waflo-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.dashboard-pairing-app-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dashboard-store-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dashboard-staff-app-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  margin-block: 1rem;
+  background: var(--waflo-soft);
+  border: 1px solid var(--waflo-border);
+  border-radius: 1rem;
+}
+
+.dashboard-staff-app-banner strong {
+  display: block;
+  font-size: 0.95rem;
+  color: var(--waflo-ink);
+  margin-bottom: 0.25rem;
+}
+
+.dashboard-staff-app-banner p {
+  margin: 0;
+  color: var(--waflo-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .security-layout {
   grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
 }

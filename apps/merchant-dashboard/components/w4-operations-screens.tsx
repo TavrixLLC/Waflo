@@ -19,7 +19,7 @@ import {
   TextArea,
   TextInput,
 } from "@waflo/ui";
-import { Activity, Copy, Download, MonitorSmartphone, Search, UserRound } from "lucide-react";
+import { Activity, Copy, Download, MonitorSmartphone, Search, Smartphone, UserRound } from "lucide-react";
 import Image from "next/image";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
@@ -936,6 +936,36 @@ export function DevicesOperationsScreen({
           </Button>
         }
       />
+      <div className="dashboard-staff-app-banner">
+        <div>
+          <strong>{ar ? "تطبيق Waflo Staff للموظفين" : "Waflo Staff mobile app"}</strong>
+          <p>
+            {ar
+              ? "يقوم فريق العمل بتنزيل التطبيق على هواتفهم لمسح بطاقات العملاء وتسجيل الزيارات."
+              : "Staff members download the mobile app on their phones to scan member cards and record visits."}
+          </p>
+        </div>
+        <div className="dashboard-pairing-app-links">
+          <a
+            className="wf-button wf-button--secondary dashboard-store-link"
+            href="https://play.google.com/store/apps/details?id=app.waflo.staff"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Smartphone size={16} aria-hidden="true" />
+            Google Play
+          </a>
+          <a
+            className="wf-button wf-button--secondary dashboard-store-link"
+            href="https://apps.apple.com/app/waflo-staff/id6804266111"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Smartphone size={16} aria-hidden="true" />
+            App Store
+          </a>
+        </div>
+      </div>
       {error ? <Alert tone="danger" title={error} /> : null}
       {!devices ? (
         <Skeleton height="18rem" />
@@ -1039,6 +1069,29 @@ export function DevicesOperationsScreen({
               <span className="wf-sr-only" role="status" aria-live="polite">
                 {pairingCodeCopied ? (ar ? "تم نسخ الرمز." : "Code copied.") : ""}
               </span>
+            </div>
+            <div className="dashboard-pairing-app-download">
+              <span>{ar ? "تطبيق Waflo Staff للموظفين:" : "Waflo Staff app for team members:"}</span>
+              <div className="dashboard-pairing-app-links">
+                <a
+                  className="wf-button wf-button--secondary dashboard-store-link"
+                  href="https://play.google.com/store/apps/details?id=app.waflo.staff"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Smartphone size={16} aria-hidden="true" />
+                  Google Play
+                </a>
+                <a
+                  className="wf-button wf-button--secondary dashboard-store-link"
+                  href="https://apps.apple.com/app/waflo-staff/id6804266111"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Smartphone size={16} aria-hidden="true" />
+                  App Store
+                </a>
+              </div>
             </div>
             <p>
               {pairing.staffDisplayName} · {formattedDate(pairing.expiresAt, ar)}

@@ -53,6 +53,7 @@ import {
   Plus,
   QrCode,
   RefreshCcw,
+  Smartphone,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -1209,6 +1210,29 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
               <span className="wf-sr-only" role="status" aria-live="polite">
                 {pairingCodeCopied ? (ar ? "تم نسخ الرمز." : "Code copied.") : ""}
               </span>
+            </div>
+            <div className="dashboard-pairing-app-download">
+              <span>{ar ? "تطبيق Waflo Staff للموظفين:" : "Waflo Staff app for team members:"}</span>
+              <div className="dashboard-pairing-app-links">
+                <a
+                  className="wf-button wf-button--secondary dashboard-store-link"
+                  href="https://play.google.com/store/apps/details?id=app.waflo.staff"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Smartphone size={16} aria-hidden="true" />
+                  Google Play
+                </a>
+                <a
+                  className="wf-button wf-button--secondary dashboard-store-link"
+                  href="https://apps.apple.com/app/waflo-staff/id6804266111"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Smartphone size={16} aria-hidden="true" />
+                  App Store
+                </a>
+              </div>
             </div>
             <div className="dashboard-pairing-meta">
               <strong>{pairing.staffDisplayName}</strong>

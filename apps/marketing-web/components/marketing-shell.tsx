@@ -2,7 +2,7 @@
 
 import { interfaceLanguageGroups, interfaceLocales, type InterfaceLocale } from "@waflo/i18n";
 import { InterfaceLanguagePicker } from "@waflo/ui";
-import { ArrowRight, Menu, X } from "lucide-react";
+import { ArrowRight, Menu, Smartphone, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -257,6 +257,30 @@ export function MarketingShell({
               [copy.footer.refunds, localizedDocument("/refunds")],
             ]}
           />
+          <div className="marketing-footer__column marketing-footer__staff">
+            <h2>{copy.staffApp.heading}</h2>
+            <p className="marketing-footer__staff-desc">{copy.staffApp.description}</p>
+            <div className="marketing-footer__store-links">
+              <a
+                className="marketing-store-badge"
+                href="https://play.google.com/store/apps/details?id=app.waflo.staff"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Smartphone size={15} aria-hidden="true" />
+                <span>{copy.staffApp.googlePlay}</span>
+              </a>
+              <a
+                className="marketing-store-badge"
+                href="https://apps.apple.com/app/waflo-staff/id6804266111"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Smartphone size={15} aria-hidden="true" />
+                <span>{copy.staffApp.appStore}</span>
+              </a>
+            </div>
+          </div>
         </div>
         <div className="marketing-container marketing-footer__legal">
           <span>© 2026 Tavrix LLC. {copy.footer.rights}</span>
