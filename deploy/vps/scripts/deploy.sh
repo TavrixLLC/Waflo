@@ -15,6 +15,7 @@ exec 9>"${PLATFORM_ROOT}/deploy-${environment}.lock"
 flock -n 9 || { printf 'Another %s deployment is active.\n' "${environment}" >&2; exit 3; }
 
 prepare_postgres_bind "${environment}"
+prepare_object_storage_bind "${environment}"
 
 deployment_failed() {
   local status=$?

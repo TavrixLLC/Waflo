@@ -71,6 +71,27 @@ prepare_postgres_bind() {
     "${POSTGRES_CONTAINER_UID}" "${POSTGRES_CONTAINER_GID}" "${postgres_bind}"
 }
 
+prepare_object_storage_bind() {
+  local environment="${1:-}"
+  local storage_bind
+
+  require_environment "${environment}"
+  if [[ "${EUID}" -ne 0 ]]; then
+    printf 'Object storage bind preparation must run as root.\n' >&2
+    return 2
+  fi
+
+  storage_bind="${PLATFORM_ROOT}/data/${environment}/object-storage"
+  if [[ -L "${storage_bind}" ]]; then
+    printf 'Object storage bind path may not be a symbolic link: %s\n' "${storage_bind}" >&2
+    return 2
+  fi
+
+  install -d -o 0 -g 0 -m 0750 "${storage_bind}"
+  chmod 0750 "${storage_bind}"
+  printf 'Object storage bind is prepared at %s.\n' "${storage_bind}"
+}
+
 cloudflare_tunnel_token_path() {
   local environment="${1:-}"
   require_environment "${environment}"
@@ -233,7 +254,7 @@ capture_deployment_logs() {
   local release_sha="$2"
   local log_directory="${PLATFORM_ROOT}/deploy-logs/${environment}"
   local log_file="${log_directory}/${release_sha}.log"
-  local -a logged_services=("${APPLICATION_SERVICES[@]}")
+  local -a logged_services=("${INFRASTRUCTURE_SERVICES[@]}" "${APPLICATION_SERVICES[@]}")
   if pass_builder_enabled; then
     logged_services+=(apple-pass-builder)
   fi
@@ -245,6 +266,9 @@ capture_deployment_logs() {
   } >"${log_file}" 2>&1 || true
   chmod 0600 "${log_file}"
   printf 'Failure diagnostics were preserved on the VPS at %s.\n' "${log_file}" >&2
+  printf '--- Deployment Failure Diagnostics ---\n' >&2
+  tail -n 120 "${log_file}" >&2 || true
+  printf '--------------------------------------\n' >&2
 }
 
 wait_for_public_url() {

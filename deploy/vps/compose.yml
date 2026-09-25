@@ -118,6 +118,7 @@ services:
     image: cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba
     restart: unless-stopped
     stop_grace_period: 30s
+    user: "0:0"
     entrypoint: [/bin/sh, -ec]
     command:
       - |
@@ -153,6 +154,7 @@ services:
     environment:
       DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT}"
       OBJECT_STORAGE_BUCKET: "${OBJECT_STORAGE_BUCKET:?OBJECT_STORAGE_BUCKET is required}"
+    user: "0:0"
     entrypoint: [/bin/sh, /opt/waflo-platform/minio-init.sh]
     secrets:
       - source: minio_root_user
