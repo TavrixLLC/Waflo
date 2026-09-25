@@ -5,9 +5,9 @@ import { join, resolve } from "node:path";
 
 const repository = resolve(import.meta.dirname, "../..");
 const mcImage =
-  "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
+  "cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba";
 const minioImage =
-  "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
+  "cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba";
 const identifier = `waflo-minio-runtime-${process.pid}-${Date.now()}`;
 const network = `${identifier}-network`;
 const server = `${identifier}-server`;
@@ -131,9 +131,9 @@ try {
     const health = docker([
       "exec",
       server,
-      "curl",
-      "--fail",
-      "--silent",
+      "wget",
+      "-q",
+      "--spider",
       "http://127.0.0.1:9000/minio/health/ready",
     ]);
     if (health.status === 0) {

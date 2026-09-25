@@ -19,7 +19,15 @@ import {
   TextArea,
   TextInput,
 } from "@waflo/ui";
-import { Activity, Copy, Download, MonitorSmartphone, Search, Smartphone, UserRound } from "lucide-react";
+import {
+  Activity,
+  Copy,
+  Download,
+  MonitorSmartphone,
+  Search,
+  Smartphone,
+  UserRound,
+} from "lucide-react";
 import Image from "next/image";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ApiClientError, apiFetch, apiUrl } from "../lib/api-client";
@@ -1071,7 +1079,9 @@ export function DevicesOperationsScreen({
               </span>
             </div>
             <div className="dashboard-pairing-app-download">
-              <span>{ar ? "تطبيق Waflo Staff للموظفين:" : "Waflo Staff app for team members:"}</span>
+              <span>
+                {ar ? "تطبيق Waflo Staff للموظفين:" : "Waflo Staff app for team members:"}
+              </span>
               <div className="dashboard-pairing-app-links">
                 <a
                   className="wf-button wf-button--secondary dashboard-store-link"

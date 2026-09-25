@@ -6,25 +6,20 @@ set -euo pipefail
 : "${OBJECT_STORAGE_SECRET_ACCESS_KEY:?OBJECT_STORAGE_SECRET_ACCESS_KEY is required}"
 : "${OBJECT_STORAGE_BUCKET:?OBJECT_STORAGE_BUCKET is required}"
 
-# Docker Hub archived the community MinIO images. Keep the server and client
-# on the same immutable official Quay image instead of pulling minio/mc.
-minio_server_image="quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+# Use Chainguard's immutable official MinIO image containing both minio and mc.
+minio_server_image="cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba"
 
 docker run --detach \
   --name waflo-ci-wallet-storage \
   --publish 127.0.0.1:9000:9000 \
   --env MINIO_ROOT_USER="${OBJECT_STORAGE_ACCESS_KEY_ID}" \
   --env MINIO_ROOT_PASSWORD="${OBJECT_STORAGE_SECRET_ACCESS_KEY}" \
-  --health-cmd "curl --fail http://localhost:9000/minio/health/live" \
-  --health-interval 2s \
-  --health-timeout 2s \
-  --health-retries 30 \
+  --entrypoint /bin/sh \
   "${minio_server_image}" \
-  server /data --address ":9000"
+  -ec 'exec minio server /data --address ":9000"'
 
 for attempt in {1..30}; do
-  storage_status="$(docker inspect --format '{{.State.Health.Status}}' waflo-ci-wallet-storage)"
-  if [[ "${storage_status}" == "healthy" ]]; then
+  if curl --silent --fail http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; then
     break
   fi
   if [[ "${attempt}" -eq 30 ]]; then

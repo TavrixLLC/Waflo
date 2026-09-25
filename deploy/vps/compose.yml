@@ -115,7 +115,7 @@ services:
     logging: *bounded-logging
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba
     restart: unless-stopped
     stop_grace_period: 30s
     entrypoint: [/bin/sh, -ec]
@@ -135,7 +135,7 @@ services:
         target: /data
     networks: [backend]
     healthcheck:
-      test: [CMD-SHELL, "curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null"]
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:9000/minio/health/ready >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -145,7 +145,7 @@ services:
     logging: *bounded-logging
 
   minio-init:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba
     restart: "no"
     depends_on:
       minio:

@@ -48,7 +48,7 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: "1"
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: waflo_local
@@ -59,7 +59,7 @@ services:
     volumes:
       - waflo_minio:/data
   minio-init:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: cgr.dev/chainguard/minio:latest-dev@sha256:d7c906993247627c19f37fc1fa302c34cf2d209ae0e7dc7d52fb0be6ac2849ba
     depends_on:
       minio:
         condition: service_started

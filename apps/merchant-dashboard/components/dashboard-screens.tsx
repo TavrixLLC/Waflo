@@ -1212,7 +1212,9 @@ export function TeamScreen({ locale, membership }: { locale: Locale; membership:
               </span>
             </div>
             <div className="dashboard-pairing-app-download">
-              <span>{ar ? "تطبيق Waflo Staff للموظفين:" : "Waflo Staff app for team members:"}</span>
+              <span>
+                {ar ? "تطبيق Waflo Staff للموظفين:" : "Waflo Staff app for team members:"}
+              </span>
               <div className="dashboard-pairing-app-links">
                 <a
                   className="wf-button wf-button--secondary dashboard-store-link"

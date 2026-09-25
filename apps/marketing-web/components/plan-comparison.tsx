@@ -8,10 +8,7 @@ import { marketingCopy, type MarketingCopy } from "../lib/marketing-copy";
 
 const plans: readonly PlanCode[] = ["starter", "growth", "scale"];
 
-function limitLabel(
-  value: number | null,
-  copy: MarketingCopy["pricing"],
-): string {
+function limitLabel(value: number | null, copy: MarketingCopy["pricing"]): string {
   return value === null ? copy.unlimited : `${copy.upTo} ${value}`;
 }
 
@@ -23,17 +20,11 @@ function featureIcon(enabled: boolean) {
   );
 }
 
-function featureLabel(
-  enabled: boolean,
-  copy: MarketingCopy["pricing"],
-): string {
+function featureLabel(enabled: boolean, copy: MarketingCopy["pricing"]): string {
   return enabled ? copy.included : "—";
 }
 
-function tierLabel(
-  plan: PlanCode,
-  copy: MarketingCopy["pricing"],
-): string {
+function tierLabel(plan: PlanCode, copy: MarketingCopy["pricing"]): string {
   const catalog = planCatalog[plan];
   if (catalog.features.advancedAnalytics) return copy.advanced;
   return copy.basic;
@@ -133,10 +124,7 @@ export function PlanComparison({ locale }: { locale: InterfaceLocale }) {
   const commonFeatures = [copy.loyaltyCards, copy.qrStamping, copy.customerWeb];
 
   return (
-    <section
-      className="marketing-plan-comparison"
-      aria-labelledby="plan-comparison-heading"
-    >
+    <section className="marketing-plan-comparison" aria-labelledby="plan-comparison-heading">
       <h3 id="plan-comparison-heading" className="marketing-plan-comparison__title">
         {copy.comparisonTitle}
       </h3>

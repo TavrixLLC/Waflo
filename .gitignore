@@ -21,3 +21,4 @@ packages/database/prisma/dev.db
 *.pkpass
 /scripts/generate-legacy-apple-redesign-diagnostic.ts
 /scripts/generate-wallet-preview-proofs.ts
+.tmp-local-verification-logs/
