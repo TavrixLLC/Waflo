@@ -653,6 +653,9 @@ export function composeProgramPreview(
           goal: calibratedProviderInput.goal,
           backgroundColor: calibratedProviderInput.backgroundColor,
           foregroundColor: calibratedProviderInput.foregroundColor,
+          ...(calibratedProviderInput.accentColor
+            ? { accentColor: calibratedProviderInput.accentColor }
+            : {}),
           artworkDataUri: calibratedProviderInput.walletArtwork?.dataUri ?? "",
           ...(calibratedProviderInput.logoDataUri
             ? { logoDataUri: calibratedProviderInput.logoDataUri }

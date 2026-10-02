@@ -306,7 +306,7 @@ describe("P3 Builder preview fidelity", () => {
     expect(composition.svg).toContain('data-apple-preview-variant="POSTER"');
     expect(composition.svg).toContain('data-apple-poster-aspect="358:448"');
     expect(composition.svg).toContain('data-production-wallet-artwork="APPLE_POSTER"');
-    expect(composition.svg).toContain('x="51" y="42" width="358" height="448"');
+    expect(composition.svg).toContain('x="51" y="20" width="358" height="448"');
     expect(composition.svg).not.toContain("data-poster-native-reserve");
     expect(composition.svg).not.toContain('data-apple-barcode-region="provider-managed"');
   });

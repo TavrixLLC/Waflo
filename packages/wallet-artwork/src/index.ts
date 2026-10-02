@@ -631,40 +631,48 @@ function identitySvg(
     availableWidth,
     presentation.locale,
   );
-  const titleSize = isGoogle
-    ? Math.min(
-        ...titleLines.map((line) =>
-          fittedFontSize(
-            line,
-            (approvedGoogleHero ? 35 : 27) * headerScale,
-            16 * headerScale,
-            availableWidth,
-            presentation.locale,
-          ),
-        ),
-      )
-    : Math.min(
-        ...titleLines.map((line) =>
-          fittedFontSize(
-            line,
-            15 * headerScale,
-            9 * headerScale,
-            availableWidth,
-            presentation.locale,
-          ),
-        ),
-      );
+  const isBilingual = titleLines.length > 1;
+  const titleMaxInitial = isGoogle
+    ? (approvedGoogleHero ? 35 : 27) * headerScale
+    : 15 * headerScale;
+  const titleMax = isBilingual
+    ? Math.min(titleMaxInitial, (isGoogle ? (approvedGoogleHero ? 24 : 21) : 11) * headerScale)
+    : titleMaxInitial;
+  const titleMin = (isGoogle ? (isBilingual ? 13 : 16) : isBilingual ? 8 : 9) * headerScale;
+  const titleSize = Math.min(
+    ...titleLines.map((line) =>
+      fittedFontSize(line, titleMax, titleMin, availableWidth, presentation.locale),
+    ),
+  );
+  const memberMax = isBilingual
+    ? (isGoogle ? (approvedGoogleHero ? 19 : 17) : 9.5) * headerScale
+    : (isGoogle ? (approvedGoogleHero ? 22 : 21) : 10.5) * headerScale;
+  const memberMin = (isGoogle ? 14 : 7.5) * headerScale;
   const memberSize = fittedFontSize(
     member,
-    (isGoogle ? (approvedGoogleHero ? 22 : 21) : 10.5) * headerScale,
-    (isGoogle ? 14 : 7.5) * headerScale,
+    memberMax,
+    memberMin,
     availableWidth,
     presentation.locale,
   );
   const organizationY = region.top + (isGoogle ? (approvedGoogleHero ? 17 : 18) : 11);
-  const titleY = region.top + (isGoogle ? (approvedGoogleHero ? 59 : 52) : 33);
-  const titleLineGap = isGoogle ? 28 : 18;
-  const memberY = region.top + (isGoogle ? (approvedGoogleHero ? 97 : 103) : 70);
+  const titleY =
+    region.top +
+    (isGoogle
+      ? isBilingual
+        ? approvedGoogleHero
+          ? 48
+          : 45
+        : approvedGoogleHero
+          ? 59
+          : 52
+      : isBilingual
+        ? 28
+        : 33);
+  const titleLineGap = Math.max(Math.round(titleSize * 1.3), isGoogle ? 28 : 16);
+  const memberY = isBilingual
+    ? titleY + (titleLines.length - 1) * titleLineGap + Math.round(memberSize * 1.25)
+    : region.top + (isGoogle ? (approvedGoogleHero ? 97 : 103) : 70);
   const markerX = isRtl
     ? region.left + region.width - 4
     : region.left - (approvedGoogleHero ? 4 : 0);
@@ -1514,8 +1522,6 @@ async function composeApplePosterFromGoogleMaster(
   const transformedLowerGroup = (placement: WalletArtworkPlacement) =>
     transformed({ ...placement, top: placement.top + posterLowerGroupOffsetY });
   const qrFrameRegion = transformedLowerGroup(masterRegions.qrRegion);
-  // Return the complete visible QR affordance, including the scaled plate
-  // edge/shadow and a small quiet-zone surround used by independent decoders.
   const qrRegion = {
     left: qrFrameRegion.left - 4 * scale,
     top: qrFrameRegion.top - 4 * scale,

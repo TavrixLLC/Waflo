@@ -246,7 +246,10 @@ export function createGoogleSaveJwt(input: {
     aud: "google",
     typ: "savetowallet",
     iat,
-    origins: [...input.allowedOrigins],
+    origins:
+      input.allowedOrigins.includes("*") || input.allowedOrigins.length === 0
+        ? []
+        : [...input.allowedOrigins],
     payload: { loyaltyObjects: [{ id: input.objectId }] },
   };
   const unsigned = `${encodeJson(header)}.${encodeJson(claims)}`;

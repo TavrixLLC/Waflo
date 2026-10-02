@@ -61,7 +61,7 @@ export interface AppleStoreCardPosterPassDocument {
   readonly webServiceURL: string;
   readonly authenticationToken: string;
   readonly voided: boolean;
-  readonly barcodes: readonly [
+  readonly barcodes?: readonly [
     {
       readonly format: "PKBarcodeFormatQR";
       readonly message: string;
@@ -588,8 +588,8 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
         voided: pass.voided,
         barcode: {
           format: "QR",
-          message: pass.barcodes[0].message,
-          messageEncoding: pass.barcodes[0].messageEncoding,
+          message: pass.barcodes?.[0]?.message ?? input.membership.credentialPayload,
+          messageEncoding: pass.barcodes?.[0]?.messageEncoding ?? "iso-8859-1",
         },
         fieldValues: {
           progress: field(pass.storeCard, "progress"),

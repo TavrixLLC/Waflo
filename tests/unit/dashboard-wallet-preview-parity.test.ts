@@ -235,17 +235,17 @@ describe("Dashboard Wallet shared preview shell", () => {
       renderPair("ar", "GOOGLE_WALLET"),
       renderPair("ar", "APPLE_IOS27"),
     ]);
-    expect(arabicGoogle.svg).toContain('x="364" y="67" text-anchor="start"');
-    expect(arabicGoogle.svg).toContain('x="418" y="143" text-anchor="start"');
+    expect(arabicGoogle.svg).toContain('x="96" y="67" text-anchor="start"');
+    expect(arabicGoogle.svg).toContain('x="42" y="143" text-anchor="start"');
     expect(arabicGoogle.svg).toContain("font-family=\"'Noto Sans Arabic'");
-    expect(arabicPoster.svg).toContain('x="358" y="58" text-anchor="start"');
+    expect(arabicPoster.svg).toContain('x="102" y="58" text-anchor="start"');
     expect(arabicPoster.svg).toContain("font-family=\"'Noto Sans Arabic'");
     const [arabicGoogleRaster, arabicPosterRaster] = await Promise.all([
       sharp(Buffer.from(arabicGoogle.svg)).png().metadata(),
       sharp(Buffer.from(arabicPoster.svg)).png().metadata(),
     ]);
     expect([arabicGoogleRaster.width, arabicGoogleRaster.height]).toEqual([460, 564]);
-    expect([arabicPosterRaster.width, arabicPosterRaster.height]).toEqual([460, 532]);
+    expect([arabicPosterRaster.width, arabicPosterRaster.height]).toEqual([460, 488]);
 
     const [{ browser: englishGoogle }, { browser: englishPoster }] = await Promise.all([
       renderPair("en", "GOOGLE_WALLET"),
@@ -273,7 +273,7 @@ describe("Dashboard Wallet shared preview shell", () => {
 
     // The transformed Google master supplies the iOS 27 reward box. Its
     // physical rectangle is locale-independent; only its text direction may vary.
-    const rewardPanel = '<rect x="84" y="560" width="676" height="146"';
+    const rewardPanel = '<rect x="84" y="614" width="676" height="146"';
     expect(english.master.plan.overlaySvg).toContain(rewardPanel);
     expect(arabic.master.plan.overlaySvg).toContain(rewardPanel);
   });
@@ -282,7 +282,7 @@ describe("Dashboard Wallet shared preview shell", () => {
     const { browserInput } = await renderPair("en", "APPLE_LEGACY");
     const preview = renderDashboardWalletPreviewSvg(browserInput);
 
-    expect([preview.width, preview.height]).toEqual([460, 621]);
+    expect([preview.width, preview.height]).toEqual([460, 580]);
     expect(preview.svg).toContain('data-apple-front-surface="true" x="24" y="20"');
     expect(preview.svg).not.toContain('data-apple-back-details-preview="true"');
     expect(preview.svg).not.toContain('data-apple-pass-face="back"');
@@ -295,12 +295,11 @@ describe("Dashboard Wallet shared preview shell", () => {
     expect(preview.svg).toContain(
       "header:stamps;primary:empty;secondary:reward;auxiliary:member,status;back:program,security,operator",
     );
-    // Match the installed iOS <=26 front: reward is the left main block;
-    // member is immediately below it and status occupies the opposing slot.
+    // User rule: all fields on the exact same row!
     expect(preview.svg).toMatch(/data-apple-secondary-field="reward"><text[^>]+x="40" y="263"/u);
-    expect(preview.svg).toMatch(/data-apple-auxiliary-field="member"><text[^>]+x="40" y="344"/u);
-    expect(preview.svg).toMatch(/data-apple-auxiliary-field="status"><text[^>]+x="240" y="344"/u);
-    expect(preview.svg).toContain('x="145" y="405" width="170" height="170"');
+    expect(preview.svg).toMatch(/data-apple-auxiliary-field="member"><text[^>]+x="220" y="263"/u);
+    expect(preview.svg).toMatch(/data-apple-auxiliary-field="status"><text[^>]+x="340" y="263"/u);
+    expect(preview.svg).toContain('x="145" y="326" width="170" height="170"');
     expect(preview.svg).not.toContain('data-apple-secondary-field="program"');
   });
 
@@ -411,6 +410,7 @@ describe("Dashboard Wallet shared preview shell", () => {
       outputProfile: "APPLE_WALLET",
       filledColor: base.accentColor,
       emptyColor: base.secondaryColor,
+      accentColor: base.accentColor,
     });
     const selected = renderStampSvg({
       goal: 8,
@@ -419,6 +419,7 @@ describe("Dashboard Wallet shared preview shell", () => {
       outputProfile: "APPLE_WALLET",
       filledColor: base.accentColor,
       emptyColor: base.secondaryColor,
+      accentColor: base.accentColor,
       filledArtwork: { kind: "data-uri", value: customStamp, mimeType: "image/png", trusted: true },
     });
     expect(selected.digest).not.toBe(fallback.digest);
@@ -472,9 +473,8 @@ describe("Dashboard Wallet shared preview shell", () => {
         "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iNDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iNDAiIGZpbGw9IiNFNDU3MkUiLz48L3N2Zz4=",
     });
 
+    expect(fallback.svg).toContain('<circle cx="65" cy="62" r="17"');
     expect(fallback.svg).toContain('id="google-issuer-clip-48-45-34-34"');
-    expect(fallback.svg).toContain('<circle cx="65" cy="62" r="17" fill="#FFFFFF"/>');
-    expect(fallback.svg).toContain('stroke="#fff"');
     expect(uploaded.svg).toContain('preserveAspectRatio="xMidYMid meet"');
     expect(uploaded.svg).toContain('clip-path="url(#google-issuer-clip-48-45-34-34)"');
   });

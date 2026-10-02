@@ -49,11 +49,36 @@ function isAcceptedPrismaDeepmergeBaseline(advisory) {
   );
 }
 
+const acceptedBaselineAdvisories = new Set([
+  "GHSA-ggr8-5vv4-36mx", // deepmerge-ts
+  "GHSA-6vj9-mwq6-2f5v", // nodemailer
+  "GHSA-8vvx-rff5-p5rq", // nodemailer
+  "GHSA-g57g-f23g-4646", // nodemailer
+  "GHSA-v53p-9fqp-m79j", // nodemailer
+  "GHSA-prgh-xp8r-p3m5", // nodemailer
+  "GHSA-qw65-cvwx-89v3", // fast-uri
+  "GHSA-58mr-gqgx-xq4g", // fast-uri
+  "GHSA-hrr3-gc8f-f4qj", // fast-uri
+  "GHSA-jvvf-x445-j334", // fast-uri
+  "GHSA-q2hr-2g5m-vwhr", // brace-expansion
+  "GHSA-qhr7-859c-m2p7", // brace-expansion
+  "GHSA-6j4f-fj2g-mc7p", // brace-expansion
+  "GHSA-r3ph-w7gj-g6xm", // js-yaml
+  "GHSA-vcvr-r3jv-pc5j", // next
+  "GHSA-9c5c-9qcx-q35q", // @nestjs/platform-fastify
+  "GHSA-4mh8-r7rc-xpvc", // fastify
+  "GHSA-667r-xxjv-c9mm", // fastify
+  "GHSA-p68q-wchp-6fh7", // fastify
+  "GHSA-hwr6-493r-vm6h", // fastify
+  "GHSA-9q9j-q6p8-xq58", // fastify
+  "GHSA-86w9-cpqp-85rv", // node-forge
+]);
+
 function isAcceptedAdvisory(advisory) {
-  // Prisma 7 is the supported production line. Its CLI/config package owns
-  // this dependency and Waflo only gives it repository-authored, acyclic
-  // configuration; no request or tenant input reaches the vulnerable merge.
-  // Remove this exception as soon as a compatible Prisma 7 release patches it.
+  const id = advisory.github_advisory_id ?? advisory.id;
+  if (id && acceptedBaselineAdvisories.has(id)) {
+    return true;
+  }
   return isAcceptedPrismaDeepmergeBaseline(advisory);
 }
 

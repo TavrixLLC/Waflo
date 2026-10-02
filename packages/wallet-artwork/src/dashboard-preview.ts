@@ -143,6 +143,7 @@ export interface DashboardWalletPreviewShellInput {
   readonly goal: number;
   readonly backgroundColor: string;
   readonly foregroundColor: string;
+  readonly accentColor?: string;
   /** Server previews retain their approved PNG; Dashboard previews pass raw plan SVG. */
   readonly artworkDataUri?: string;
   readonly artworkSvg?: string;
@@ -401,11 +402,6 @@ function googleIssuerMark(
   return `<defs><clipPath id="${clipId}"><circle cx="${x + width / 2}" cy="${y + height / 2}" r="${radius - inset}"/></clipPath></defs><circle cx="${x + width / 2}" cy="${y + height / 2}" r="${radius}" fill="#FFFFFF"/>${content}`;
 }
 
-function textAttributes(locale: string): string {
-  const presentation = cardLocalePresentation(locale);
-  return `direction="${presentation.direction}" unicode-bidi="plaintext" xml:lang="${presentation.locale}"`;
-}
-
 /**
  * Provider chrome normally uses the platform typeface. Arabic-script content
  * needs the same shaping-capable family as the canonical artwork plan,
@@ -484,26 +480,61 @@ export function renderDashboardWalletPreviewShell(
   input: DashboardWalletPreviewShellInput,
 ): DashboardWalletPreviewComposition {
   const locale = cardLocalePresentation(input.locale);
-  const rtl = locale.isRtl;
-  const text = textAttributes(locale.locale);
   const logo = input.logoDataUri ?? input.merchantBrandLogoDataUri;
   const issuerBrand = input.logoDataUri ? "program" : "organization";
 
   if (input.profile === "APPLE_LEGACY") {
     const width = 460;
-    const height = 621;
     const copy = walletStructuralCopyForLocale(locale.locale);
-    const textX = rtl ? 420 : 40;
-    const identityX = rtl ? 374 : 86;
-    const countX = rtl ? 40 : 420;
-    const progressAnchor = rtl ? "start" : "end";
-    const markX = rtl ? 382 : 38;
-    const rewardLines = dashboardWalletPreviewTextLines(
-      input.rewardSummary,
-      rtl ? 32 : 42,
-      2,
-      locale.locale,
+    const appleFont = nativeWalletPreviewTypeface(
+      locale,
+      "-apple-system,BlinkMacSystemFont,Arial,sans-serif",
     );
+    // User rule: Logo and Name ALWAYS on the left in all cards!
+    const markX = 38;
+    const identityX = 86;
+    const countX = 412;
+
+    const memberName = truncate(input.memberName ?? "Preview member", 22);
+    const status = truncate(input.status ?? copy.active, 18);
+    const fitsInSingleRow =
+      input.rewardSummary.length <= 22 && (input.memberName?.length ?? 0) <= 20;
+
+    let legacyFields: string;
+    let nativeQr: { x: number; y: number; size: number };
+    let cardHeight: number;
+    let height: number;
+
+    if (fitsInSingleRow) {
+      const col1X = 40;
+      const col2X = 220;
+      const col3X = 340;
+      const rewardText = truncate(input.rewardSummary, 20);
+      cardHeight = 536;
+      height = 580;
+      nativeQr = { x: 145, y: 326, size: 170 };
+      legacyFields = [
+        `<g data-apple-secondary-field="reward"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col1X}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.reward}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col1X}" y="286" text-anchor="start" font-family="${appleFont}" font-size="14.5" font-weight="700" fill="${input.foregroundColor}">${escapeXml(rewardText)}</text></g>`,
+        `<g data-apple-auxiliary-fields="true"><g data-apple-auxiliary-field="member"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col2X}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.member}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col2X}" y="286" text-anchor="start" font-family="${appleFont}" font-size="14.5" font-weight="700" fill="${input.foregroundColor}">${escapeXml(memberName)}</text></g><g data-apple-auxiliary-field="status"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col3X}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.status}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col3X}" y="286" text-anchor="start" font-family="${appleFont}" font-size="14.5" font-weight="700" fill="${input.foregroundColor}">${escapeXml(status)}</text></g></g>`,
+      ].join("");
+    } else {
+      const rewardLines = dashboardWalletPreviewTextLines(
+        input.rewardSummary,
+        34,
+        2,
+        locale.locale,
+      );
+      cardHeight = 581;
+      height = 621;
+      nativeQr = { x: 145, y: 405, size: 170 };
+      const col1X = 40;
+      const col2X = 240;
+      legacyFields = [
+        `<g data-apple-secondary-field="reward"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col1X}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.reward}</text>${rewardLines.map((line, idx) => `<text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col1X}" y="${286 + idx * 20}" text-anchor="start" font-family="${appleFont}" font-size="${idx === 0 ? 16 : 14}" font-weight="700" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g>`,
+        `<g data-apple-auxiliary-fields="true"><g data-apple-auxiliary-field="member"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col1X}" y="344" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.member}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col1X}" y="367" text-anchor="start" font-family="${appleFont}" font-size="15" font-weight="700" fill="${input.foregroundColor}">${escapeXml(memberName)}</text></g><g data-apple-auxiliary-field="status"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col2X}" y="344" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.status}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${col2X}" y="367" text-anchor="start" font-family="${appleFont}" font-size="15" font-weight="700" fill="${input.foregroundColor}">${escapeXml(status)}</text></g></g>`,
+      ].join("");
+    }
+
     const strip = shellArtwork(
       input,
       "APPLE_STORE_CARD_STRIP",
@@ -514,71 +545,55 @@ export function renderDashboardWalletPreviewShell(
       0,
       "none",
     );
-    const nativeQr = { x: 145, y: 405, size: 170 };
-    const appleFont = nativeWalletPreviewTypeface(
-      locale,
-      "-apple-system,BlinkMacSystemFont,Arial,sans-serif",
-    );
-    const memberName = truncate(input.memberName ?? "Preview member", 28);
-    const status = truncate(input.status ?? copy.active, 24);
-    const auxiliaryMemberX = textX;
-    const auxiliaryStatusX = rtl ? 220 : 240;
-    const legacyFields = [
-      `<g data-apple-secondary-field="reward"><text ${text} x="${textX}" y="263" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.reward}</text>${rewardLines.map((line, index) => `<text ${text} x="${textX}" y="${289 + index * 22}" text-anchor="start" font-family="${appleFont}" font-size="${index === 0 ? 18 : 16}" font-weight="720" fill="${input.foregroundColor}">${escapeXml(line)}</text>`).join("")}</g>`,
-      `<g data-apple-auxiliary-fields="true"><g data-apple-auxiliary-field="member"><text ${text} x="${auxiliaryMemberX}" y="344" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.member}</text><text ${text} x="${auxiliaryMemberX}" y="367" text-anchor="start" font-family="${appleFont}" font-size="15" font-weight="700" fill="${input.foregroundColor}">${escapeXml(memberName)}</text></g><g data-apple-auxiliary-field="status"><text ${text} x="${auxiliaryStatusX}" y="344" text-anchor="start" font-family="${appleFont}" font-size="10" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.status}</text><text ${text} x="${auxiliaryStatusX}" y="367" text-anchor="start" font-family="${appleFont}" font-size="15" font-weight="700" fill="${input.foregroundColor}">${escapeXml(status)}</text></g></g>`,
-    ].join("");
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Store Card preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="STORE_CARD" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="store-card-native-fields" data-provider-managed-layout="true" data-provider-owned-geometry="true" data-apple-strip-aspect="375:144"><rect width="100%" height="100%" fill="#15171B"/><rect data-apple-front-surface="true" x="24" y="20" width="412" height="581" rx="16" fill="${input.backgroundColor}"/><g data-apple-identity="true">${issuerMark(logo, markX, 31, 40, 40, 10, "#D2603C")}<text ${text} x="${identityX}" y="57" text-anchor="start" font-family="${appleFont}" font-size="17" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 48))}</text></g><g data-apple-header-field="stamps"><text ${text} x="${countX}" y="41" text-anchor="end" font-family="${appleFont}" font-size="11" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.stamps}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="en" x="${countX}" y="63" text-anchor="${progressAnchor}" font-family="${appleFont}" font-size="19" font-weight="760" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g><g data-apple-progress-strip="true" data-apple-progress-artwork="production-compositor">${strip}</g>${legacyFields}<g data-apple-barcode-region="provider-managed" data-apple-barcode-source="qr-core"><rect x="${nativeQr.x}" y="${nativeQr.y}" width="${nativeQr.size}" height="${nativeQr.size}" rx="0" fill="#FFFFFF"/>${shellQr(nativeQr.x, nativeQr.y, nativeQr.size)}</g><metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;primary:empty;secondary:reward;auxiliary:member,status;back:program,security,operator" data-reward-value="${escapeXml(input.rewardSummary)}">The card is one native iOS 26-and-earlier Store Card face: its strip uses the selected theme artwork; reward, member, and status use native Store Card field tiers; program remains on the provider-owned back face and the native QR uses the shared QR renderer.</metadata></svg>`;
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple Store Card preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="STORE_CARD" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="store-card-native-fields" data-provider-managed-layout="true" data-provider-owned-geometry="true" data-apple-strip-aspect="375:144"><rect width="100%" height="100%" fill="#15171B"/><rect data-apple-front-surface="true" x="24" y="20" width="412" height="${cardHeight}" rx="16" fill="${input.backgroundColor}"/><g data-apple-identity="true">${issuerMark(logo, markX, 31, 40, 40, 10, "#D2603C")}<text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${identityX}" y="57" text-anchor="start" font-family="${appleFont}" font-size="17" font-weight="750" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 48))}</text></g><g data-apple-header-field="stamps"><text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${countX}" y="41" text-anchor="end" font-family="${appleFont}" font-size="11" font-weight="750" letter-spacing=".72" fill="${input.foregroundColor}" opacity=".62">${copy.stamps}</text><text direction="ltr" unicode-bidi="plaintext" xml:lang="en" x="${countX}" y="63" text-anchor="end" font-family="${appleFont}" font-size="19" font-weight="760" fill="${input.foregroundColor}">${input.progress}/${input.goal}</text></g><g data-apple-progress-strip="true" data-apple-progress-artwork="production-compositor">${strip}</g>${legacyFields}<g data-apple-barcode-region="provider-managed" data-apple-barcode-source="qr-core"><rect x="${nativeQr.x}" y="${nativeQr.y}" width="${nativeQr.size}" height="${nativeQr.size}" rx="0" fill="#FFFFFF"/>${shellQr(nativeQr.x, nativeQr.y, nativeQr.size)}</g><metadata data-apple-native-fields="true" data-apple-field-groups="header:stamps;primary:empty;secondary:reward;auxiliary:member,status;back:program,security,operator" data-reward-value="${escapeXml(input.rewardSummary)}">The card is one native iOS 26-and-earlier Store Card face: its strip uses the selected theme artwork; reward, member, and status use native Store Card field tiers; program remains on the provider-owned back face and the native QR uses the shared QR renderer.</metadata></svg>`;
     return { svg, width, height, warnings: [] };
   }
 
   if (input.profile === "APPLE_IOS27") {
     const width = 460;
-    const height = 532;
+    const height = 488;
     const cardX = 51;
     const cardY = 20;
     const cardWidth = 358;
-    const posterHeight = 448;
-    const posterY = 42;
-    const cardHeight = 492;
-    const nativeReserveHeight = cardY + cardHeight - (posterY + posterHeight);
-    const poster = shellArtwork(input, "APPLE_POSTER", cardX, posterY, cardWidth, posterHeight, 14);
-    const logoX = rtl ? 367 : 64;
-    const merchantX = rtl ? 358 : 102;
+    const cardHeight = 448;
+    const poster = shellArtwork(input, "APPLE_POSTER", cardX, cardY, cardWidth, cardHeight, 14);
+    // User rule: Logo and Name ALWAYS on the left in all cards!
+    const logoX = 64;
+    const merchantX = 102;
     const appleFont = nativeWalletPreviewTypeface(
       locale,
       "-apple-system,BlinkMacSystemFont,Arial,sans-serif",
     );
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-production-artwork" data-provider-owned-geometry="true" data-apple-poster-aspect="358:448"><defs><clipPath id="apple-poster-card-clip"><rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="14"/></clipPath><linearGradient id="apple-poster-native-top-material" gradientUnits="userSpaceOnUse" x1="0" y1="${cardY}" x2="0" y2="161"><stop offset="0" stop-color="#000000" stop-opacity=".425"/><stop offset="6%" stop-color="#000000" stop-opacity=".29"/><stop offset="30%" stop-color="#000000" stop-opacity=".23"/><stop offset="90%" stop-color="#000000" stop-opacity=".07"/><stop offset="100%" stop-color="#000000" stop-opacity="0"/></linearGradient></defs><rect width="100%" height="100%" fill="#15171B"/><g clip-path="url(#apple-poster-card-clip)"><rect data-apple-poster-surface="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${input.backgroundColor}"/><g data-poster-artwork="production-compositor">${poster}</g><rect data-apple-native-top-material="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="141" fill="url(#apple-poster-native-top-material)"/><rect data-apple-native-reserve="true" x="${cardX}" y="${posterY + posterHeight}" width="${cardWidth}" height="${nativeReserveHeight}" fill="${input.backgroundColor}"/></g><g data-apple-native-primary-logo="true">${issuerMark(logo, logoX, 38, 29, 29, 7)}<text ${text} x="${merchantX}" y="58" text-anchor="start" font-family="${appleFont}" font-size="14" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 24))}</text></g><metadata data-apple-poster-preview="true">The complete shared APPLE_POSTER composition is displayed at its native 358 by 448 aspect ratio.</metadata></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Apple iOS 27 Wallet poster preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="APPLE" data-barcode-format="QR" data-issuer-brand="${issuerBrand}" data-apple-preview-variant="POSTER" data-progress="${input.progress}" data-goal="${input.goal}" data-preview-fidelity="poster-production-artwork" data-provider-owned-geometry="true" data-apple-poster-aspect="358:448"><defs><clipPath id="apple-poster-card-clip"><rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="14"/></clipPath><linearGradient id="apple-poster-native-top-material" gradientUnits="userSpaceOnUse" x1="0" y1="${cardY}" x2="0" y2="${cardY + 141}"><stop offset="0" stop-color="#000000" stop-opacity=".425"/><stop offset="6%" stop-color="#000000" stop-opacity=".29"/><stop offset="30%" stop-color="#000000" stop-opacity=".23"/><stop offset="90%" stop-color="#000000" stop-opacity=".07"/><stop offset="100%" stop-color="#000000" stop-opacity="0"/></linearGradient></defs><rect width="100%" height="100%" fill="#15171B"/><g clip-path="url(#apple-poster-card-clip)"><rect data-apple-poster-surface="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" fill="${input.backgroundColor}"/><g data-poster-artwork="production-compositor">${poster}</g><rect data-apple-native-top-material="true" x="${cardX}" y="${cardY}" width="${cardWidth}" height="141" fill="url(#apple-poster-native-top-material)"/></g><g data-apple-native-primary-logo="true">${issuerMark(logo, logoX, 38, 29, 29, 7)}<text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${merchantX}" y="58" text-anchor="start" font-family="${appleFont}" font-size="14" font-weight="800" fill="${input.foregroundColor}">${escapeXml(truncate(input.organizationName, 24))}</text></g><metadata data-apple-poster-preview="true">The complete shared APPLE_POSTER composition is displayed at its native 358 by 448 aspect ratio.</metadata></svg>`;
     return { svg, width, height, warnings: [] };
   }
 
   const width = 460;
   const height = 564;
-  // Native Google fields sit on the same lifted Hero surface as the canonical
-  // artwork plan. Derive their foreground from that effective surface instead
-  // of keeping the old always-dark Google default.
   const googleSurfaceColor = walletArtworkGoogleSurfaceColor(input.backgroundColor);
   const googleForegroundColor = walletArtworkReadableTextColor(
     input.foregroundColor,
     googleSurfaceColor,
   );
-  const logoX = rtl ? 380 : 48;
-  const textX = rtl ? 364 : 96;
-  const titleTextX = rtl ? 418 : 42;
+  // Universal rule requested by user: Logo, Name, and Title remain on the LEFT in ALL cards!
+  const logoX = 48;
+  const textX = 96;
+  const titleTextX = 42;
+  const googleFont = nativeWalletPreviewTypeface(locale, "Google Sans,Roboto,Arial,sans-serif");
   const title = dashboardWalletPreviewTextLines(
     truncate(input.programName, 60),
-    rtl ? 18 : 16,
+    16,
     2,
     locale.locale,
   )
     .map(
       (line, index) =>
-        `<text ${text} x="${titleTextX}" y="${143 + index * 46.5}" text-anchor="start" font-family="${nativeWalletPreviewTypeface(locale, "Google Sans,Roboto,Arial,sans-serif")}" font-size="35" font-weight="700" fill="${googleForegroundColor}">${escapeXml(line)}</text>`,
+        `<text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${titleTextX}" y="${143 + index * 46.5}" text-anchor="start" font-family="${googleFont}" font-size="35" font-weight="700" fill="${googleForegroundColor}">${escapeXml(line)}</text>`,
     )
     .join("");
   const hero = shellArtwork(input, "GOOGLE_HERO", 25.5, 220, 409, 321.7286821705426, 0);
-  const googleFont = nativeWalletPreviewTypeface(locale, "Google Sans,Roboto,Arial,sans-serif");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="GOOGLE" data-barcode-format="QR_CODE" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="${issuerBrand}" data-provider-managed-layout="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-full-production-hero" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="24" y="20" width="412" height="524" rx="32" fill="${googleSurfaceColor}" stroke="#DADCE0"/><g data-google-native-identity="true">${googleIssuerMark(logo, logoX, 45, 34, 34)}<text ${text} x="${textX}" y="67" text-anchor="start" font-family="${googleFont}" font-size="15" font-weight="600" fill="${googleForegroundColor}">${escapeXml(truncate(input.organizationName, 60))}</text><path d="M48 98H412" stroke="${googleForegroundColor}" stroke-opacity=".18"/></g><g data-google-native-title="true">${title}</g><g data-google-hero-region="true" data-google-hero-artwork-composition="full-production-compositor">${hero}</g><metadata data-google-provider-payload="true">Native issuer and program fields use the Google class values. The full production GOOGLE_HERO PNG retains its 1032 by 812 aspect ratio without a dashboard crop.</metadata></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Google Wallet preview" lang="${locale.locale}" xml:lang="${locale.locale}" direction="${locale.direction}" data-wallet-provider="GOOGLE" data-barcode-format="QR_CODE" data-progress="${input.progress}" data-goal="${input.goal}" data-issuer-brand="${issuerBrand}" data-provider-managed-layout="true" data-google-hero-aspect="1032:812" data-preview-fidelity="google-wallet-full-production-hero" data-provider-owned-geometry="true"><rect width="100%" height="100%" fill="#F1F3F4"/><rect x="24" y="20" width="412" height="524" rx="32" fill="${googleSurfaceColor}" stroke="#DADCE0"/><g data-google-native-identity="true">${googleIssuerMark(logo, logoX, 45, 34, 34)}<text direction="ltr" unicode-bidi="plaintext" xml:lang="${locale.locale}" x="${textX}" y="67" text-anchor="start" font-family="${googleFont}" font-size="15" font-weight="600" fill="${googleForegroundColor}">${escapeXml(truncate(input.organizationName, 60))}</text><path d="M48 98H412" stroke="${googleForegroundColor}" stroke-opacity=".18"/></g><g data-google-native-title="true">${title}</g><g data-google-hero-region="true" data-google-hero-artwork-composition="full-production-compositor">${hero}</g><metadata data-google-provider-payload="true">Native issuer and program fields use the Google class values. The full production GOOGLE_HERO PNG retains its 1032 by 812 aspect ratio without a dashboard crop.</metadata></svg>`;
   return { svg, width, height, warnings: [] };
 }
 
@@ -614,6 +629,7 @@ export function renderDashboardWalletPreviewSvg(
     goal: input.goal,
     backgroundColor: input.backgroundColor,
     foregroundColor: input.foregroundColor,
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     artworkSvg,
     ...(input.logoDataUri ? { logoDataUri: input.logoDataUri } : {}),
     ...(input.merchantBrandLogoDataUri

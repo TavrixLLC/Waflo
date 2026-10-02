@@ -634,15 +634,28 @@ export const environmentSchema = z
     const googleWalletOrigins = value.GOOGLE_WALLET_ALLOWED_ORIGINS.split(",")
       .map((origin) => origin.trim())
       .filter(Boolean);
+    const customerWebOrigin = new URL(publicAuthority.CUSTOMER_WEB_URL).origin;
+    const isAllowedGoogleWalletOrigin = (origin: string) => {
+      if (origin === "*" || origin === customerWebOrigin) return true;
+      try {
+        const parsed = new URL(origin);
+        return (
+          parsed.protocol === "https:" &&
+          parsed.hostname.endsWith(`.${new URL(customerWebOrigin).hostname}`)
+        );
+      } catch {
+        return false;
+      }
+    };
     if (
-      googleWalletOrigins.length !== 1 ||
-      googleWalletOrigins[0] !== new URL(publicAuthority.CUSTOMER_WEB_URL).origin
+      googleWalletOrigins.length === 0 ||
+      !googleWalletOrigins.every(isAllowedGoogleWalletOrigin)
     ) {
       context.addIssue({
         code: "custom",
         path: ["GOOGLE_WALLET_ALLOWED_ORIGINS"],
         message:
-          "Google Wallet Save origins must contain only the authoritative Customer Web origin.",
+          "Google Wallet Save origins must contain only the authoritative Customer Web origin or wildcard.",
       });
     }
     if (
