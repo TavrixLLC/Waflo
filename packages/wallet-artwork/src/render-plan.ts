@@ -335,16 +335,17 @@ export function walletArtworkPlanIdentityTitleLines(
     .slice(0, maxLines);
 }
 
-function calibratedGoogleHeroCounterRegion(
+export function calibratedGoogleHeroCounterRegion(
   input: WalletArtworkRenderPlanInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
-  return region.width > 150 && !input.applePosterRefinement
-    ? { ...region, left: region.left + 2, top: region.top - 1 }
-    : region;
+  if (input.applePosterRefinement) {
+    return { ...region, left: region.left - 37 };
+  }
+  return region.width > 150 ? { ...region, left: region.left + 2, top: region.top - 1 } : region;
 }
 
-function calibratedGoogleHeroStampPanelRegion(
+export function calibratedGoogleHeroStampPanelRegion(
   input: WalletArtworkRenderPlanInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
@@ -353,27 +354,28 @@ function calibratedGoogleHeroStampPanelRegion(
     : region;
 }
 
-function calibratedGoogleHeroRewardRegion(
+export function calibratedGoogleHeroRewardRegion(
   input: WalletArtworkRenderPlanInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
-  // APPLE_POSTER is a calibrated crop of the Google master. The transformed
-  // reward rectangle is shared by every locale; text direction must not alter
-  // its physical width or its safe relationship with the QR region.
-  // These coordinates are the inverse projection of Apple Poster’s canonical
-  // lower-left reward region into the shared master coordinate system.
-  return region.width > 500 && !input.applePosterRefinement
-    ? { ...region, top: region.top + 2 }
-    : region;
+  if (input.applePosterRefinement) {
+    // Inset to align with the 59px-inset stamp panel (left = 32 + 59 = 91),
+    // creating a balanced 24pt safe margin and safe gap before the QR frame.
+    return { ...region, left: 91, width: 632 };
+  }
+  return region.width > 500 ? { ...region, top: region.top + 2 } : region;
 }
 
-function calibratedGoogleHeroQrRegion(
+export function calibratedGoogleHeroQrRegion(
   input: WalletArtworkRenderPlanInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
-  return region.width > 150 && !input.applePosterRefinement
-    ? { ...region, left: region.left + 2, top: region.top + 1 }
-    : region;
+  if (input.applePosterRefinement) {
+    // Align right edge with the 59px-inset stamp panel (right = 749 + 192 = 941),
+    // ensuring the QR box has 24pt side margin and does not touch or clip Apple Wallet's rounded card corners.
+    return { ...region, left: 749, width: 192 };
+  }
+  return region.width > 150 ? { ...region, left: region.left + 2, top: region.top + 1 } : region;
 }
 
 function counterBadgeSvg(

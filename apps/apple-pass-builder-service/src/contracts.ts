@@ -40,6 +40,7 @@ export interface PassBuilderRequest {
     readonly webServiceURL: string;
     readonly authenticationToken: string;
     readonly voided: boolean;
+    readonly suppressNativeBarcode?: boolean;
     readonly barcode: {
       readonly format:
         | "QR"
@@ -176,6 +177,8 @@ export function parsePassBuilderRequest(value: unknown): PassBuilderRequest {
       webServiceURL,
       authenticationToken: text("pass.authenticationToken", pass.authenticationToken, 256, 24),
       voided: pass.voided,
+      suppressNativeBarcode:
+        typeof pass.suppressNativeBarcode === "boolean" ? pass.suppressNativeBarcode : true,
       barcode: {
         format: barcodeFormat as PassBuilderRequest["pass"]["barcode"]["format"],
         message: text("pass.barcode.message", barcode.message, 2048, 1),

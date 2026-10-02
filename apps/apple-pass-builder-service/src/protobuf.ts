@@ -108,13 +108,15 @@ export async function createPersonalizationProtobuf(input: {
           ),
         },
       },
-      barcodes: [
-        {
-          format: barcodeFormats[input.request.pass.barcode.format],
-          message: input.request.pass.barcode.message,
-          messageEncoding: input.request.pass.barcode.messageEncoding,
-        },
-      ],
+      barcodes: input.request.pass.suppressNativeBarcode
+        ? []
+        : [
+            {
+              format: barcodeFormats[input.request.pass.barcode.format],
+              message: input.request.pass.barcode.message,
+              messageEncoding: input.request.pass.barcode.messageEncoding,
+            },
+          ],
       backgroundColor: rgb(input.request.pass.backgroundColor),
       foregroundColor: rgb(input.request.pass.foregroundColor),
       labelColor: rgb(input.request.pass.labelColor),

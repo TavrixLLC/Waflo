@@ -30,6 +30,9 @@ import {
   applePosterTopAmbientSvg as renderPlanApplePosterTopAmbientSvg,
   applePosterGoogleMasterTransform as sharedApplePosterGoogleMasterTransform,
   googleMasterContentBounds as sharedGoogleMasterContentBounds,
+  calibratedGoogleHeroCounterRegion as sharedCalibratedGoogleHeroCounterRegion,
+  calibratedGoogleHeroRewardRegion as sharedCalibratedGoogleHeroRewardRegion,
+  calibratedGoogleHeroQrRegion as sharedCalibratedGoogleHeroQrRegion,
   type WalletArtworkRenderPlanInput,
   walletArtworkLegacySurfaceSvg,
 } from "./render-plan.js";
@@ -1521,7 +1524,19 @@ async function composeApplePosterFromGoogleMaster(
     transformGoogleMasterPlacement(placement, scale);
   const transformedLowerGroup = (placement: WalletArtworkPlacement) =>
     transformed({ ...placement, top: placement.top + posterLowerGroupOffsetY });
-  const qrFrameRegion = transformedLowerGroup(masterRegions.qrRegion);
+  const calibratedQr = sharedCalibratedGoogleHeroQrRegion(
+    sharedPosterPlan.master.input,
+    masterRegions.qrRegion,
+  );
+  const calibratedReward = sharedCalibratedGoogleHeroRewardRegion(
+    sharedPosterPlan.master.input,
+    masterRegions.rewardRegion,
+  );
+  const calibratedCounter = sharedCalibratedGoogleHeroCounterRegion(
+    sharedPosterPlan.master.input,
+    masterRegions.counterBadgeRegion,
+  );
+  const qrFrameRegion = transformedLowerGroup(calibratedQr);
   const qrRegion = {
     left: qrFrameRegion.left - 4 * scale,
     top: qrFrameRegion.top - 4 * scale,
@@ -1542,8 +1557,8 @@ async function composeApplePosterFromGoogleMaster(
     stampPanelRegion: transformed(masterLayout.stampPanelRegion),
     stampRegion: transformed(masterLayout.stampRegion),
     identityRegion: transformed(masterRegions.identityRegion),
-    counterBadgeRegion: transformed(masterRegions.counterBadgeRegion),
-    rewardRegion: transformedLowerGroup(masterRegions.rewardRegion),
+    counterBadgeRegion: transformed(calibratedCounter),
+    rewardRegion: transformedLowerGroup(calibratedReward),
     qrRegion,
     ...(master.qrCenterLogoApplied ? { qrCenterLogoApplied: true } : {}),
   };

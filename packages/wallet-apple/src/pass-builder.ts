@@ -304,6 +304,7 @@ interface PassBuilderServiceRequest {
     readonly webServiceURL: string;
     readonly authenticationToken: string;
     readonly voided: boolean;
+    readonly suppressNativeBarcode?: boolean;
     readonly barcode: {
       readonly format: "QR";
       readonly message: string;
@@ -579,13 +580,14 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
         serialNumber: pass.serialNumber,
         organizationName: pass.organizationName,
         description: pass.description,
-        logoText: pass.logoText,
+        logoText: "",
         foregroundColor: hexFromRgb(pass.foregroundColor),
         backgroundColor: hexFromRgb(pass.backgroundColor),
         labelColor: hexFromRgb(pass.labelColor),
         webServiceURL: pass.webServiceURL,
         authenticationToken: pass.authenticationToken,
         voided: pass.voided,
+        suppressNativeBarcode: true,
         barcode: {
           format: "QR",
           message: pass.barcodes?.[0]?.message ?? input.membership.credentialPayload,

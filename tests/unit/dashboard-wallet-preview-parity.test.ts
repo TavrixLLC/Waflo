@@ -273,7 +273,7 @@ describe("Dashboard Wallet shared preview shell", () => {
 
     // The transformed Google master supplies the iOS 27 reward box. Its
     // physical rectangle is locale-independent; only its text direction may vary.
-    const rewardPanel = '<rect x="84" y="614" width="676" height="146"';
+    const rewardPanel = '<rect x="91" y="614" width="632" height="146"';
     expect(english.master.plan.overlaySvg).toContain(rewardPanel);
     expect(arabic.master.plan.overlaySvg).toContain(rewardPanel);
   });
