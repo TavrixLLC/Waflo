@@ -559,6 +559,9 @@ function calibratedGoogleHeroCounterRegion(
   input: WalletArtworkCompositionInput,
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
+  if (input.applePosterRefinement) {
+    return { ...region, left: region.left - 16 };
+  }
   return region.width > 150 && !input.applePosterRefinement
     ? { ...region, left: region.left + 2, top: region.top - 1 }
     : region;

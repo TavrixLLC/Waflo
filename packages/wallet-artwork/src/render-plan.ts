@@ -340,7 +340,7 @@ export function calibratedGoogleHeroCounterRegion(
   region: WalletArtworkPlacement,
 ): WalletArtworkPlacement {
   if (input.applePosterRefinement) {
-    return region;
+    return { ...region, left: region.left - 16 };
   }
   return region.width > 150 ? { ...region, left: region.left + 2, top: region.top - 1 } : region;
 }
@@ -406,8 +406,8 @@ function identitySvg(input: WalletArtworkRenderPlanInput, region: WalletArtworkP
   const applePosterRtlTrailingReserve = input.applePosterRefinement && isRtl ? 48 : 0;
   const textInset = inset + applePosterRtlTrailingReserve;
   const isPoster = Boolean(input.applePosterRefinement);
-  const markerX = isPoster ? 744 : region.left - (approvedGoogleHero ? 4 : 0);
-  const textX = isPoster ? 728 : region.left + textInset;
+  const markerX = isPoster ? 750 : region.left - (approvedGoogleHero ? 4 : 0);
+  const textX = isPoster ? 722 : region.left + textInset;
   const anchor = isPoster ? (isRtl ? "start" : "end") : "start";
   const elemDirection = isPoster && isRtl ? "rtl" : "ltr";
   const headerScale = input.headerScale ?? 1;
