@@ -67,6 +67,15 @@ async function writeApplePassStrings(path: string, locale: string): Promise<void
   );
 }
 
+function toAppleRgb(hexOrRgb: string): string {
+  if (hexOrRgb.startsWith("rgb(")) return hexOrRgb;
+  const hex = hexOrRgb.trim().replace(/^#/, "");
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  return `rgb(${r},${g},${b})`;
+}
+
 /** Apple requires non-ASCII pass.strings in the produced pass to be UTF-16. */
 async function materializeAppleLocalizedTemplate(
   source: string,
@@ -205,6 +214,21 @@ export class ApplePassBuilder {
       }
       const localizedTemplatePath = join(workDirectory, "localized-template.pkpasstemplate");
       await materializeAppleLocalizedTemplate(realTemplatePath, localizedTemplatePath);
+      const templatePassJsonPath = join(localizedTemplatePath, "pass.json");
+      try {
+        const templatePassJson = JSON.parse(await readFile(templatePassJsonPath, "utf8")) as Record<
+          string,
+          unknown
+        >;
+        const bg = toAppleRgb(request.pass.backgroundColor);
+        templatePassJson.backgroundColor = bg;
+        templatePassJson.footerBackgroundColor = request.pass.footerBackgroundColor
+          ? toAppleRgb(request.pass.footerBackgroundColor)
+          : bg;
+        await writeFile(templatePassJsonPath, JSON.stringify(templatePassJson, null, 2), "utf8");
+      } catch {
+        // preserve template pass.json if unreadable
+      }
       const protobufPath = await createPersonalizationProtobuf({
         request,
         protobufRoot: this.configuration.protobufRoot,
@@ -226,6 +250,23 @@ export class ApplePassBuilder {
         });
       } catch (cause) {
         throw new Error("PASS_PERSONALIZATION_FAILED", { cause });
+      }
+      const personalizedPassJsonPath = join(personalizedPath, "pass.json");
+      try {
+        const personalizedPassJson = JSON.parse(
+          await readFile(personalizedPassJsonPath, "utf8"),
+        ) as Record<string, unknown>;
+        const bg = toAppleRgb(request.pass.backgroundColor);
+        personalizedPassJson.footerBackgroundColor = request.pass.footerBackgroundColor
+          ? toAppleRgb(request.pass.footerBackgroundColor)
+          : bg;
+        await writeFile(
+          personalizedPassJsonPath,
+          JSON.stringify(personalizedPassJson, null, 2),
+          "utf8",
+        );
+      } catch {
+        // preserve personalized pass.json if unreadable
       }
       return await operation({ workDirectory, personalizedPath });
     } finally {

@@ -37,6 +37,7 @@ export interface PassBuilderRequest {
     readonly foregroundColor: string;
     readonly backgroundColor: string;
     readonly labelColor: string;
+    readonly footerBackgroundColor?: string;
     readonly webServiceURL: string;
     readonly authenticationToken: string;
     readonly voided: boolean;
@@ -174,6 +175,11 @@ export function parsePassBuilderRequest(value: unknown): PassBuilderRequest {
       foregroundColor: color("pass.foregroundColor", pass.foregroundColor),
       backgroundColor: color("pass.backgroundColor", pass.backgroundColor),
       labelColor: color("pass.labelColor", pass.labelColor),
+      ...(pass.footerBackgroundColor
+        ? {
+            footerBackgroundColor: color("pass.footerBackgroundColor", pass.footerBackgroundColor),
+          }
+        : {}),
       webServiceURL,
       authenticationToken: text("pass.authenticationToken", pass.authenticationToken, 256, 24),
       voided: pass.voided,

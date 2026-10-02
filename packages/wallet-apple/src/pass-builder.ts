@@ -58,6 +58,7 @@ export interface AppleStoreCardPosterPassDocument {
   readonly foregroundColor: string;
   readonly backgroundColor: string;
   readonly labelColor: string;
+  readonly footerBackgroundColor?: string;
   readonly webServiceURL: string;
   readonly authenticationToken: string;
   readonly voided: boolean;
@@ -251,6 +252,7 @@ export function mapAppleStoreCardPosterPass(
     foregroundColor: appleRgb(input.foregroundColor),
     backgroundColor: appleRgb(input.backgroundColor),
     labelColor: appleRgb(input.foregroundColor),
+    footerBackgroundColor: appleRgb(input.backgroundColor),
     webServiceURL: configuration.webServiceUrl.replace(/\/+$/, ""),
     authenticationToken,
     voided: inactive,
@@ -301,6 +303,7 @@ interface PassBuilderServiceRequest {
     readonly foregroundColor: string;
     readonly backgroundColor: string;
     readonly labelColor: string;
+    readonly footerBackgroundColor?: string;
     readonly webServiceURL: string;
     readonly authenticationToken: string;
     readonly voided: boolean;
@@ -584,6 +587,7 @@ export class ApplePassBuilderGenerator implements WalletPassGenerator {
         foregroundColor: hexFromRgb(pass.foregroundColor),
         backgroundColor: hexFromRgb(pass.backgroundColor),
         labelColor: hexFromRgb(pass.labelColor),
+        footerBackgroundColor: hexFromRgb(pass.backgroundColor),
         webServiceURL: pass.webServiceURL,
         authenticationToken: pass.authenticationToken,
         voided: pass.voided,
