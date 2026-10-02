@@ -1067,7 +1067,12 @@ test("keeps deliberately long Arabic iOS 27+ content inside its canonical artwor
         left.top < right.bottom &&
         left.bottom > right.top;
       const textBounds = [...root.querySelectorAll<SVGTextElement>("text")]
-        .filter((text) => !text.closest('[data-wallet-plan-layer="stamp"]'))
+        .filter(
+          (text) =>
+            !text.closest('[data-wallet-plan-layer="stamp"]') &&
+            !text.closest('[data-wallet-plan-layer="qr-label"]') &&
+            text.getAttribute("data-wallet-plan-layer") !== "qr-label",
+        )
         .map((text) => ({
           content: text.textContent ?? "",
           anchor: text.getAttribute("text-anchor"),
