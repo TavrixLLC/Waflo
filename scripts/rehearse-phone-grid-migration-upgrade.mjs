@@ -64,8 +64,7 @@ function databaseUrls(name) {
 }
 
 function pnpmCommand(arguments_) {
-  if (process.platform !== "win32")
-    return { command: "corepack", arguments: ["pnpm", ...arguments_] };
+  if (process.platform !== "win32") return { command: "pnpm", arguments: arguments_ };
   return {
     command: process.execPath,
     arguments: [

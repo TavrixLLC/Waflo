@@ -84,7 +84,7 @@ function isolatedTestEnvironment(overrides = {}) {
 
 function corepackCommand(arguments_) {
   if (process.platform !== "win32") {
-    return { command: "corepack", arguments: arguments_ };
+    return { command: arguments_[0], arguments: arguments_.slice(1) };
   }
   return {
     command: process.execPath,

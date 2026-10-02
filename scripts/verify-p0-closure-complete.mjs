@@ -48,7 +48,7 @@ function freePort() {
 }
 
 function pnpmCommand(args) {
-  if (process.platform !== "win32") return { command: "corepack", args: ["pnpm", ...args] };
+  if (process.platform !== "win32") return { command: "pnpm", args };
   return {
     command: process.execPath,
     args: [
